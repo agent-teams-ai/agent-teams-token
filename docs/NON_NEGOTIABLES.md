@@ -57,8 +57,11 @@ Status: обязательные product/security invariants. Ослаблени
   Обязательны 30/90-day overhang и worst-case sell-pressure budgets.
 - Никогда не запускать peg, APY, staking emissions, own-token insurance или
   rewards, не покрытые внешним проверяемым бюджетом/revenue.
-- Никогда не создавать официальный mainnet pool на `$50-100`. Это Devnet-only
-  fake liquidity и не price discovery.
+- Никогда не выдавать mainnet pool на `$100` за устойчивый рынок, справедливое
+  price discovery или valuation. Такой experimental pool требует малого
+  token-side cap, публичного предупреждения и отдельного total-cost approval.
+- Никогда не собирать community liquidity на проектный кошелёк: участники вносят
+  её прямо в pool и сохраняют собственные LP-позиции.
 - Никогда не путать SDK `priceImpact`, realized slippage tolerance и post-trade
   marginal spot move: gates рассчитываются отдельно по exact fee config.
 - Никогда не выбирать LP ratio из желаемого FDV и не использовать tiny-pool spot

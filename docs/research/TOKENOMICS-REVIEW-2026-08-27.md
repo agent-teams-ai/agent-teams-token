@@ -60,17 +60,17 @@ LP deposits are not proof of useful contribution. A split identity must never
 receive more than the unsplit identity. Measure useful product retention after
 30/90/180 days, not only claims.
 
-Raydium's CPMM is the likely first venue because a new token has no reliable
-price range. A `50-100` fake-USDC quote reserve costs `$0` and is only a Devnet
-demonstration. Test tokens are obtained from faucets or minted locally, never
-purchased. Under
-the current Raydium SDK semantics and a 25 bps CPMM, a `$100` swap needs roughly
-`$13.2k` quote reserve for at most 1% SDK `priceImpact`. Plan at least `$15k`
-and prefer `$20k` headroom. Realized user slippage is a separate guard; the final
-gate simulates both directions with the live fee config and vault balances.
+Raydium CPMM and Orca Splash are standard full-range candidates because a new
+token has no reliable price range. A `50-100` fake-USDC quote reserve costs `$0`
+on Devnet. On mainnet an experimental pool may fit a `$100` total founder budget,
+but it is highly volatile and receives at most 0.01% supply initially. Under the
+current Raydium SDK semantics and a 25 bps CPMM, a mature pool needs roughly
+`$13.2k` quote reserve for a `$100` swap at no more than 1% SDK `priceImpact`;
+plan at least `$15k` and prefer `$20k` if community-owned positions eventually
+provide it. Realized slippage remains separate, and final gates simulate exact
+transactions, costs, both directions, fee config and vault balances.
 Sources: [Raydium CPMM
-math](https://docs.raydium.io/algorithms/constant-product.md), [CLMM
-overview](https://docs.raydium.io/products/clmm/overview.md), and [Optimism
+math](https://docs.raydium.io/algorithms/constant-product), [Raydium pool creation](https://docs.raydium.io/user-flows/create-cpmm-pool), [Orca Splash](https://docs.orca.so/create/pools/splash), and [Optimism
 launch postmortem](https://github.com/ethereum-optimism/optimism/blob/develop/docs/postmortems/2022-05-31-drop-1.md).
 
 ## Treasury and vesting conclusions

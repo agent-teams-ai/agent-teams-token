@@ -5,6 +5,11 @@ Last updated: 2026-08-27.
 Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
 clearance remains required.
 
+Liquidity direction: trading is required, founder total cash contribution is
+capped at `$100`, and community liquidity must be added directly by its owners.
+The first pool is explicitly experimental and highly volatile, not depth or
+valuation evidence.
+
 ## Proven locally
 
 - Monorepo dependency installation is reproducible from the lockfile.

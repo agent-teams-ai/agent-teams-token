@@ -51,16 +51,21 @@ allocations:
   liquidity:
     allocationBps: 500
     publicBetaBpsOfTotalSupply: 0
-    initialTokenSideMaximumBpsOfTotalSupply: 25
-    cumulativeBetaTokenSideMaximumBpsOfTotalSupply: 50
+    initialExperimentalPoolTokenSideMaximumBpsOfTotalSupply: 1
+    cumulativeExperimentalBetaTokenSideMaximumBpsOfTotalSupply: 10
     devnetRealMoneyBudgetUsd: 0
     devnetFakeUsdcUnits: 100
+    founderMainnetLiquidityTotalCashBudgetUsdMaximum: 100
+    poolCreationRentFeesAndQuoteCapitalShareOneBudget: true
+    communityLiquidityMustBeAddedDirectlyToPool: true
+    centrallyCollectedCommunityLiquidityFunds: false
+    experimentalPoolIsDepthOrValuationEvidence: false
     publicDepthProbeUsd: 100
     publicDepthMaximumSdkPriceImpactBps: 100
     secondaryPublicDepthProbeUsd: 500
     secondaryPublicDepthMaximumSdkPriceImpactBps: 500
-    planningQuoteReserveUsdMinimum: 15000
-    preferredQuoteReserveUsdWithHeadroom: 20000
+    maturePoolPlanningQuoteReserveUsdMinimum: 15000
+    maturePoolPreferredQuoteReserveUsdWithHeadroom: 20000
     listingCommitment: false
 governance:
   bridgeAdminSafeThreshold: 3

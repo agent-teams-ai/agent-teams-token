@@ -17,7 +17,7 @@ excluding CCIP and the web application.**
 | Team and future contributors | 13% | Grant by grant; 12 months at zero, then linear to month 48 without cliff catch-up; unassigned reserve cannot transfer directly to an EOA |
 | Founder | 5% | Irrevocable grant; 18 months at zero, then linear to month 60 without cliff catch-up |
 | Community distributions and rewards | 20% | Maximum reserve, not promised issuance; up to six independently approved waves over 48-60 months |
-| Liquidity reserve | 5% | Undeployed and non-circulating by default; cumulative beta deployment capped at 0.5%; no public pool until the legal and measurable market-depth gates pass |
+| Liquidity reserve | 5% | Undeployed and non-circulating by default; first experimental pool capped at 0.01%, cumulative experimental beta at 0.1%; the remaining reserve stays locked |
 
 This makes 65% community-designated without mislabelling liquidity as a
 community allocation. At genesis, proven binding community control is 0%:
@@ -146,20 +146,29 @@ pause that public-testnet step and continue local tests instead of spending real
 funds. A `50-100` quote reserve is not a viable public mainnet market and must
 never be used to imply FDV or project valuation.
 
-- Keep Raydium CPMM as the likely first venue for an unknown price range. CLMM
-  requires active range management and is not the default for launch.
-- Do not create an official public pool until the exact current Raydium SDK and
-  fee configuration report at most 1% `priceImpact` for a `$100` swap and at
-  most 5% for `$500`. With a 25 bps CPMM, `$100 <= 1%` needs roughly `$13.2k`
-  quote reserve; use at least `$15k` planning floor and prefer `$20k` headroom.
-  Realized user slippage tolerance is a separate execution guard.
-- If that capital is not justified, launch utility/community beta without an
-  official market pool.
-- Initial deployed token-side liquidity is at most 0.25% of total supply and is
-  determined only after the quote reserve and ratio are approved. This is not a
-  listing commitment.
-- Cumulative deployed token-side liquidity during beta is at most 0.5% of total
-  supply. The unused balance stays in its own timelocked Liquidity Vault.
+- Compare Raydium CPMM and Orca Splash as standard full-range candidates. CLMM
+  requires active range management and is not the default for a tiny launch.
+- An official experimental pool may use at most `$100` of founder cash in total,
+  including pool-creation rent/fees and quote capital. It is explicitly described
+  as thin and highly volatile, never as price discovery, valuation or adequate
+  depth.
+- The first pool may contain at most 0.01% of total supply; cumulative token-side
+  deployment during experimental beta is at most 0.1%. This bounds how much an
+  early buyer can acquire even if the quote side is drained.
+- Select Raydium CPMM, Orca Splash or another standard permissionless venue only
+  after current mainnet simulation proves the complete creation cost fits the
+  same `$100` hard cap. Raydium's current documented creation cost is about 0.2
+  SOL, so it may not fit.
+- Community members add liquidity directly to the pool and retain their own LP
+  positions. The project does not centrally collect community liquidity money.
+- Publish mint addresses, initial ratio, exact balances, opening time, LP owner,
+  withdrawal powers and a prominent volatility warning at least seven days
+  before opening. Treasury/community-reserve market sales remain prohibited.
+- A later mature-pool target remains exact SDK `priceImpact` of at most 1% for a
+  `$100` swap and 5% for `$500`. With a 25 bps CPMM, the first target needs
+  roughly `$13.2k` quote reserve; plan at least `$15k` and prefer `$20k` if the
+  community eventually provides it directly. Realized slippage is separate.
+- The unused liquidity reserve stays in its own timelocked Liquidity Vault.
 - LP custody stays in a disclosed Squads vault. It is not called "locked" while
   Squads can withdraw. Publish the withdrawal delay, notice policy, fee
   destination, controller and conflicts.

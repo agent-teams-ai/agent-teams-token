@@ -110,9 +110,9 @@
 | Token-level pause | Нет |
 | Solana freeze authority | None |
 | Ethereum trading pool на старте | Нет |
-| Solana trading pool | Raydium CPMM TOKEN/USDC только после отдельного depth/legal gate |
+| Solana trading pool | Один experimental TOKEN/USDC pool; venue выбирается по полной стоимости и безопасности |
 | Devnet liquidity | $0 real money; 50–100 units of fake USDC + faucet test tokens |
-| Mainnet cash liquidity | Не зафиксирована; отдельный depth/legal approval |
+| Mainnet founder cash | Не более $100 total, включая создание pool и quote liquidity |
 | LP custody | LP-токены держит Squads, не сжигаются в beta |
 | Ethereum governance | Отдельные Bridge, Treasury и Emergency Safe за timelocks/policy vaults |
 | Solana governance | Отдельные Bridge/Treasury Squads; strict Pool Signer PDA для public mainnet |
@@ -548,11 +548,11 @@ Tokenomics является отдельным product/security workstream, а �
 | D-11 | Solana signer sets | Bridge/Treasury Squads 3-of-5 с 7-day timelock, без spending-limit bypass | Не путать Squads и SPL mint authority |
 | D-12 | Solana authority model | Recoverable только test/bounded beta; Pool Signer PDA до широкой public distribution/liquidity | Строгий mainnet supply invariant важнее удобства recovery |
 | D-13 | Metadata authority | Squads на beta | Можно исправить URI/logo, затем заморозить |
-| D-14 | Public liquidity depth | Raydium SDK `priceImpact`: `$100` ≤1%, `$500` ≤5%; exact current fee config | При 25 bps baseline `$100` требует ≈$13.2k quote; plan ≥$15k, prefer $20k headroom, иначе без official pool |
+| D-14 | Public liquidity depth | Experimental pool разрешён при total founder cash ≤$100 и token side ≤0.01%; mature target: `$100` ≤1%, `$500` ≤5% | Малый pool даёт trading, но маркируется как highly volatile и не valuation |
 | D-15 | Initial pool ratio/token amount | UNSET до отдельного proposal | Tiny pool не является valuation или price discovery |
-| D-16 | Raydium fee tier | Сравнить доступные current configs | Не хардкодить устаревший tier |
+| D-16 | Venue и fee tier | Сравнить Raydium CPMM, Orca Splash и current configs/costs | Не хардкодить venue или устаревший tier |
 | D-17 | LP custody | Squads, не burn | Сохраняет recovery на beta |
-| D-18 | Launch access | Utility/community beta без official pool | Permissionless pool не становится private от слова friends |
+| D-18 | Launch access | Utility/community beta + один highly volatile experimental pool | Permissionless pool доступен всем; первые buyers ограничены token-side cap |
 | D-19 | Initial bridge allocation | Только LP + небольшой treasury buffer | Не переносить лишний supply |
 | D-20 | Rate-limit risk budget | Пользователь задаёт максимальный ущерб | Limits должны исходить из tolerable loss |
 | D-20A | 30/90-day liquid-supply shock | Утвердить числовой budget | Fixed supply не ограничивает dump pressure |
@@ -564,12 +564,18 @@ Tokenomics является отдельным product/security workstream, а �
 
 ## Как одобрять liquidity
 
-Не выбирать token amount через желаемый FDV. Перед public pool воспроизводимая
-симуляция фиксирует quote reserve, ratio, fee tier и SDK `priceImpact` для `$100`
-и `$500` swaps. Baseline gate: `$100 <=1%`, `$500 <=5%`. При 25 bps CPMM первый
-gate требует примерно `$13.2k` quote reserve; planning floor `$15k`, предпочтён
-`$20k` с запасом. Realized slippage tolerance остаётся отдельным user execution
-guard. При недостаточной глубине официальный market pool не создаётся.
+Не выбирать token amount через желаемый FDV. Для первого experimental pool весь
+личный денежный вклад, включая rent/creation fees и quote capital, не превышает
+`$100`, а token side не превышает 0.01% supply. Exact venue выбирается только
+после mainnet simulation полной стоимости; Raydium документирует около 0.2 SOL
+на создание CPMM, поэтому более дешёвый стандартный venue может быть разумнее.
+
+Малый pool не проходит mature depth gate и не выдаётся за стабильный рынок.
+Перед ним публикуются ratio, balances, opening time, LP owner и предупреждение о
+сильном движении цены. Community добавляет liquidity прямо в pool и сохраняет
+собственные LP-позиции; проект не собирает их деньги. Mature target остаётся:
+`$100 <=1%`, `$500 <=5%` по exact SDK simulation. При 25 bps CPMM это требует
+примерно `$13.2k` quote reserve; planning target `$15k`, предпочтён `$20k`.
 
 Frontend обязан показывать:
 
@@ -1206,16 +1212,17 @@ Frontend не должен:
 - скрывать admin authorities;
 - разрешать mainnet при compile-time/runtime flag `ENABLE_MAINNET=false`.
 
-## Phase 8 — Raydium Devnet
+## Phase 8 — liquidity venue Devnet и cost comparison
 
 Только после successful CCIP round-trip:
 
 1. Создать fake testnet USDC с 6 decimals.
 2. Использовать bridged SPL token.
-3. Использовать Raydium SDK V2.
-4. Использовать актуальные Devnet program IDs.
-5. Не считать `cluster="devnet"` достаточной настройкой.
-6. Создать CPMM.
+3. Сравнить Raydium CPMM и Orca Splash по current program IDs, complete account
+   rent, creation fee, transaction fees, permission model и Jupiter routing.
+4. Не считать `cluster="devnet"` достаточной настройкой.
+5. Выбрать один стандартный venue по безопасности и total `$100` mainnet cap.
+6. Создать выбранный pool.
 7. Добавить liquidity.
 8. Swap TOKEN→fake USDC.
 9. Swap fake USDC→TOKEN.
@@ -1223,7 +1230,11 @@ Frontend не должен:
 11. Сохранить pool ID, LP mint, vaults, reserves.
 12. Проверить dashboard.
 
-Raydium называет CPMM рекомендуемым default для большинства permissionless new pools; типичная mainnet creation cost сейчас около `0.19 SOL`.
+Raydium называет CPMM рекомендуемым default для большинства permissionless new
+pools, но документирует mainnet creation cost около `0.19-0.2 SOL`. Orca
+описывает Splash как более дешёвый full-range вариант и разрешает любому
+участнику добавлять liquidity. Финальный выбор требует exact transaction
+simulation непосредственно перед proposal.
 
 ## Phase 9 — monitoring
 
@@ -1360,11 +1371,11 @@ Mainnet последовательность:
 16. Wait for clean monitoring window; после legal/public-communications scrub
     publish signed official address manifest.
 17. Start utility/community beta only после applicable offer/onboarding gates,
-    без treasury sales или official pool.
+    без treasury sales.
 18. Separately approve airdrop consideration/Sybil gate before any wave.
 19. Separately approve venue/CASP/admission, market-conduct, restricted-list,
     trading-window, depth, LP conflict policy and exact ratio before announcing
-    a ratio, bridging LP allocation or creating Raydium pool.
+    a ratio, bridging LP allocation or creating the selected standard pool.
 
 ---
 
@@ -1419,13 +1430,19 @@ Chainlink production tutorial рекомендует conservative limits и пр
 
 # 15. Trading и Jupiter visibility
 
-На старте создаётся только один pool:
+На старте создаётся не более одного pool:
 
 ```text
 TOKEN / USDC
-Raydium CPMM
+Raydium CPMM, Orca Splash или другой стандартный permissionless venue
 Solana
 ```
+
+Venue не фиксируется заранее: mainnet simulation должна показать полную
+стоимость создания и начального deposit внутри общего `$100` founder cap. У
+Raydium CPMM текущая документированная стоимость создания около 0.19-0.2 SOL;
+Orca Splash заявляет lower setup cost и допускает добавление liquidity любым
+участником. Решение принимается по exact current transactions, а не по бренду.
 
 Не создавать Ethereum pool, поскольку это:
 
@@ -1434,7 +1451,7 @@ Solana
 - ухудшит общий UX;
 - создаст два рынка при отсутствии market maker.
 
-После создания Raydium pool проверить:
+После создания выбранного pool проверить:
 
 - доступность прямого swap;
 - обнаружение mint через Jupiter Tokens API;
@@ -1595,8 +1612,9 @@ Deterministic economic scenarios:
 - human-approved mainnet deployment;
 - round-trip successful;
 - monitoring clean;
-- official pool is optional and absent until its separate depth/legal gate;
-- if created, LP ratio is approved and LP is held by disclosed Squads;
+- one experimental pool is optional until its separate legal/total-cost gate;
+- if created, its token side is at most 0.01%, ratio is approved, extreme
+  volatility is disclosed and project LP is held by disclosed Squads;
 - official addresses published;
 - liquidity depth and withdrawal powers are visible;
 - no investment-return marketing.
@@ -1652,9 +1670,10 @@ Deterministic economic scenarios:
 - крупная продажа может забрать значительную часть USDC;
 - spot price нельзя использовать как oracle.
 
-Это нормально только для Devnet demo. Публичный mainnet pool не создаётся, пока
-отдельные SDK `priceImpact` и realized-slippage gates не докажут достаточную глубину; utility beta может
-работать без official pool.
+На Devnet это только demo. На mainnet такой же малый pool допускается только как
+explicitly experimental: максимум 0.01% token side, founder total cash `$100`,
+без valuation claims и с предупреждением о сильном движении цены. Это не
+достаточная depth; mature gate оценивается отдельно.
 
 ### 4. Card → custom token не гарантирован
 

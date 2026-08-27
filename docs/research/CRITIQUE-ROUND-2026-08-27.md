@@ -45,11 +45,12 @@ Solana architecture.
 7. **Distribution.** Airdrop lanes are separated into gratuitous retrospective,
    earned grants and usage/loyalty rewards. Work, referrals, promotion or PII
    consideration are never relabelled as a free airdrop.
-8. **Liquidity.** Devnet may use 50-100 fake USDC units. A public pool requires
-   exact current Raydium simulation. With a 25 bps CPMM the planning baseline is
-   about `$13.2k` quote for `$100 <=1%` SDK price impact; use at least `$15k`,
-   preferably `$20k`, or launch without an official pool. User slippage remains
-   a separate guard.
+8. **Liquidity.** Devnet may use 50-100 fake USDC units. A mature pool requires
+   exact simulation: with a 25 bps CPMM about `$13.2k` quote is needed for
+   `$100 <=1%` SDK price impact; use at least `$15k`, preferably `$20k`. The
+   later owner decision permits a separate experimental pool within `$100` total
+   founder cash and 0.01% initial token-side cap. It is disclosed as highly
+   volatile and never treated as valuation/depth evidence.
 9. **Legal sequence.** Local/test-only neutral work may continue. Rights/ABI and
    mainnet genesis wait for entity, jurisdictions and classification. Public
    addresses, claims, distribution, marketing and pools wait for their specific
