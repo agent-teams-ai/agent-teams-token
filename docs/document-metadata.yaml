@@ -1,0 +1,54 @@
+contract: foundation.document-metadata-sidecar/v1
+documents:
+  docs/ARCHITECTURE.md:
+    id: token.architecture.baseline
+    type: architecture
+    status: active
+    owner: architecture
+    summary: Defines the working cross-chain product architecture and its implementation boundaries.
+  docs/NAMING.md:
+    id: token.research.naming
+    type: research
+    status: decision-required
+    owner: product
+    summary: Records token naming research and the unresolved product naming decision.
+  docs/OPEN_QUESTIONS.md:
+    id: token.open-decisions.register
+    type: open-decision-register
+    status: active
+    owner: product
+    summary: Tracks unresolved product decisions that materially change implementation or launch scope.
+  docs/PLAN.md:
+    id: token.plan.delivery
+    type: plan
+    status: active
+    owner: product
+    summary: Defines the living delivery plan from product decisions through cross-chain launch readiness.
+  docs/STATUS.md:
+    id: token.status.project
+    type: status-report
+    status: active
+    owner: product
+    summary: Separates locally proven behavior, designed work, and capabilities that remain unproven.
+  docs/TOKENOMICS.md:
+    id: token.proposal.tokenomics
+    type: proposal
+    status: proposed
+    owner: tokenomics
+    summary: Proposes community-first token allocation, vesting, transparency, and legal launch gates.
+  docs/decisions/ADR-001-hybrid-toolchain.md:
+    id: ADR-001
+    type: adr
+    status: accepted
+    owner: architecture
+    summary: Selects pinned native macOS tooling with digest-pinned Linux CI parity.
+    supersedes: []
+    superseded_by: []
+  docs/decisions/ADR-002-script-first-ccip.md:
+    id: ADR-002
+    type: adr
+    status: accepted
+    owner: architecture
+    summary: Makes deterministic repository scripts and manifests authoritative for CCIP integration.
+    supersedes: []
+    superseded_by: []

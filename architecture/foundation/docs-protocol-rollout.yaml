@@ -1,0 +1,23 @@
+schemaVersion: 1
+consumer: agent-teams-ai/agent-teams-token
+status: stable3-current-v2-staged
+current:
+  integrationProfilePath: architecture/foundation/docs-consumer-integration.json
+  managedStatePath: architecture/foundation/docs-protocol-managed-state.json
+  protocolProfilePath: architecture/foundation/docs-protocol.yaml
+target:
+  integrationSchemaVersion: 2
+  protocolProfileSchemaVersion: 2
+  documentAuthoringProfileSchemaVersion: 3
+  stagedProtocolProfilePath: architecture/foundation/rollouts/docs-protocol-v2/docs-protocol.yaml
+  stagedDocumentAuthoringProfilePath: architecture/foundation/rollouts/docs-protocol-v2/document-authoring.yaml
+  qualificationContractPath: architecture/foundation/docs-protocol-qualification.json
+  qualificationContractSchemaVersion: 2
+activation:
+  requires:
+    - published Docs Protocol and Foundation packages from one qualified v2 Cohort
+    - promotion of the reviewed staged profiles to their canonical consumer-owned paths
+    - controller-generated managed integration and lockfile projection
+    - cohort-admissible qualification receipt verified by governance
+  forbids:
+    - manual edits to managed integration, package pins, Skill, caller workflow, or managed state

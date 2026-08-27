@@ -1,0 +1,10 @@
+version: 1
+owners:
+  architecture:
+    kind: architecture
+  product:
+    kind: product
+  security:
+    kind: security
+  tokenomics:
+    kind: product

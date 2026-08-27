@@ -38,4 +38,5 @@ remain disabled until their explicit gates are implemented.
 - [Token naming research](docs/NAMING.md)
 - [Open product decisions](docs/OPEN_QUESTIONS.md)
 - [Current status](docs/STATUS.md)
-
+- [Documentation index](docs/README.md)
+- [Architecture decisions](docs/decisions/README.md)

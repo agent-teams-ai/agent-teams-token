@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "scenarios": [
+    {
+      "id": "adr",
+      "type": "adr",
+      "intent": {
+        "id": "ADR-9001",
+        "title": "Qualification decision",
+        "owner": "architecture",
+        "summary": "Proves the disposable ADR authoring roundtrip."
+      },
+      "expected": {
+        "documentPath": "docs/decisions/9001-qualification-decision.md",
+        "metadataStorage": "frontmatter",
+        "reachability": {
+          "state": "manual-required",
+          "indexPath": "docs/decisions/README.md",
+          "markdownLink": "[ADR-9001: Qualification decision](9001-qualification-decision.md)"
+        }
+      }
+    },
+    {
+      "id": "architecture",
+      "type": "architecture",
+      "intent": {
+        "id": "token.architecture.qualification",
+        "title": "Qualification architecture",
+        "owner": "architecture",
+        "summary": "Proves the disposable architecture authoring roundtrip."
+      },
+      "expected": {
+        "documentPath": "docs/architecture/qualification-architecture.md",
+        "metadataStorage": "frontmatter",
+        "reachability": {
+          "state": "manual-required",
+          "indexPath": "docs/README.md",
+          "markdownLink": "[Qualification architecture](architecture/qualification-architecture.md)"
+        }
+      }
+    },
+    {
+      "id": "open-decision",
+      "type": "open-decision",
+      "intent": {
+        "id": "OD-901",
+        "title": "Qualification open decision",
+        "owner": "product",
+        "summary": "Proves the disposable open-decision authoring roundtrip."
+      },
+      "expected": {
+        "documentPath": "docs/open-decisions/OD-901-qualification-open-decision.md",
+        "metadataStorage": "frontmatter",
+        "reachability": {
+          "state": "manual-required",
+          "indexPath": "docs/README.md",
+          "markdownLink": "[OD-901: Qualification open decision](open-decisions/OD-901-qualification-open-decision.md)"
+        }
+      }
+    }
+  ]
+}

@@ -18,10 +18,10 @@
 1. Сначала прочитай весь handoff.
 2. Проверь актуальность официальной документации, версий, chain selectors, program IDs и ограничений сервисов.
 3. Создай:
-   - `docs/DECISIONS.md`;
+   - `docs/decisions/README.md`;
    - `docs/OPEN_QUESTIONS.md`;
    - `docs/STATUS.md`;
-   - каталог `docs/adr/` для Architecture Decision Records.
+   - каталог `docs/decisions/` для Architecture Decision Records.
 4. Задай пользователю **одним сообщением один пакет продуктовых вопросов уровня P0**, перечисленных ниже.
 5. Пока пользователь отвечает, не простаивай:
    - исследуй актуальные версии;
@@ -821,12 +821,12 @@ Kora — готовый Solana gasless relayer/paymaster, позволяющий
    - bytecode/program owner;
    - version.
 6. Создать ADR:
-   - `ADR-001-ethereum-canonical.md`;
-   - `ADR-002-chainlink-ccip.md`;
-   - `ADR-003-lock-mint.md`;
-   - `ADR-004-solana-trading.md`;
-   - `ADR-005-fixed-supply.md`;
-   - `ADR-006-no-custom-bridge.md`.
+   - `ADR-0003-ethereum-canonical.md`;
+   - `ADR-0004-chainlink-ccip.md`;
+   - `ADR-0005-lock-mint.md`;
+   - `ADR-0006-solana-trading.md`;
+   - `ADR-0007-fixed-supply.md`;
+   - `ADR-0008-no-custom-bridge.md`.
 7. Отправить пользователю один пакет P0 вопросов.
 
 ## Phase 1 — Hybrid native macOS arm64 + Linux CI environment
@@ -1595,7 +1595,7 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 │   ├── prometheus/
 │   └── grafana/
 ├── docs/
-│   ├── DECISIONS.md
+│   ├── README.md
 │   ├── OPEN_QUESTIONS.md
 │   ├── STATUS.md
 │   ├── ARCHITECTURE.md
@@ -1606,7 +1606,7 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 │   ├── MAINNET_RUNBOOK.md
 │   ├── INCIDENT_RUNBOOK.md
 │   ├── USER_RISK_DISCLOSURE.md
-│   └── adr/
+│   └── decisions/
 ├── reports/
 └── secrets/
     └── testnet/        # gitignored
