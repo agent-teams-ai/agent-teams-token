@@ -12,8 +12,13 @@
 проверять этот список как acceptance contract.
 
 Проект release/vesting contracts, их role graph, onchain limits и честные
-границы гарантий ведутся в [`CONTRACTS.md`](CONTRACTS.md). До его продуктового
-обсуждения контрактная реализация не начинается.
+границы гарантий ведутся в [`CONTRACTS.md`](CONTRACTS.md). Спорные policy vaults,
+governance activation и production genesis wiring не реализуются до отдельных
+продуктовых решений. Переиспользуемое local-only ядро - strict manifest,
+immutable ERC-20, самостоятельный no-catch-up vesting primitive, verifier и
+тесты - выполняется по
+[`GENESIS_CORE_LOCAL_PLAN.md`](GENESIS_CORE_LOCAL_PLAN.md) без фиксации
+токеномики или mainnet ABI.
 
 ---
 
@@ -969,10 +974,13 @@ Public API compatibility, executable specifications, publishing security и
 schema evolution включаются после появления соответствующего артефакта, а не с
 фиктивным пустым evidence.
 
-После принятия ADR-0004 и добавления mechanical topology gates перенести текущий
-bootstrap
+До принятия ADR-0004 accepted ADR-0003 остаётся source of truth. Первый local
+Genesis Core slice атомарно переносит текущий bootstrap
 `packages/domain/src/supply.ts` с тестами в
-`packages/contexts/cross-chain-accounting/src/features/supply-reconciliation/`.
+`packages/contexts/supply/src/features/supply-reconciliation/` и создаёт рядом
+`genesis-manifest`. После принятия ADR-0004 эти feature slices механически
+переезжают в `Cross-chain Accounting` и `Token Control` без изменения domain
+contracts.
 Не создавать заранее generic `packages/chainlink-adapter` и
 `packages/solana-adapter`: provider-specific code остаётся в outbound adapter
 владельца use case до второго доказанного consumer.
@@ -993,56 +1001,53 @@ Docker requirements:
 - native macOS arm64 bootstrap;
 - no mainnet keys.
 
-## Phase 2 — accepted config → manifest → local Ethereum vertical slice
+## Phase 2 — local Genesis Core без спорных policy vaults
 
 🚨 Local/test-only neutral implementation разрешена. Не freeze-ить holder
-rights/ABI и не готовить mainnet genesis до D-01/D-02/D-05/D-06,
+rights/ABI и не готовить mainnet genesis до D-05/D-06,
 entity/jurisdiction classification memo и holder-rights matrix. Код до этого
 момента остаётся явно test-only и не является offer/launch artifact.
 
-Сначала реализовать fail-closed schema и compiler proposal → canonical genesis
-manifest. Production compilation разрешена только при `status: accepted`.
-Amounts/caps кодируются только integer base units/bps; exact schedules только UTC
-seconds. Canonical JSON и hash имеют golden vectors в TypeScript и Solidity.
+Исполнимый scope, архитектура, failure modes, тесты и acceptance criteria
+зафиксированы в
+[`GENESIS_CORE_LOCAL_PLAN.md`](GENESIS_CORE_LOCAL_PLAN.md).
 
-Затем реализовать и протестировать один полный vertical slice. Governance
-activation contracts не входят в slice до принятия D-20F:
+Первый vertical slice содержит только:
 
 ```text
-ProjectToken.sol
+strict proposal/local-fixture schemas
+test-only local fixture -> canonical manifest + allocation/manifest commitments
+AGTMAIToken.sol
 NoCatchUpVesting.sol
-ContributorGrantReserveVault.sol
-CommunityGovernanceReserveVault.sol
-CommunityDistributionVault.sol
-OperationsBudgetVault.sol
-EcosystemGrantVault.sol
-LiquidityVault.sol
-immutable-minimum-delay Timelock bootstrap with operation expiry
-local deploy + independent read-only verifier report
+local Anvil deployment
+independent read-only verifier
+local SPL mint fixture with supply 0
+mock cross-chain accounting, explicitly not real CCIP
+native macOS loop + Linux CI parity
 ```
 
-Это не один универсальный treasury contract. Каждый vault имеет отдельный
-purpose и не содержит generic `execute`, generic `transfer`, arbitrary
-`approve`, proxy upgrade или controller replacement. Commitment списывает
-rolling capacity в момент создания обязательства, а не claim. Базовый rolling
-cap использует append-only cumulative checkpoints за точные `365 days`, без
-calendar-boundary burst и rollover. Отдельный global liquidization cap
-списывается по earliest possible release и не даёт разным vaults накопить
-синхронный unlock. Детали и обязательные adversarial tests описаны в
-[`CONTRACTS.md`](CONTRACTS.md).
+Сложные Community, Distribution, Contributor, Operations, Ecosystem и Liquidity
+policy vaults, Timelock bootstrap и governance activation переходят в отдельный
+следующий этап. Их нельзя писать до утверждения соответствующих product rules.
+Такой порядок уменьшает attack surface и не выбрасывает работу: strict manifest,
+hash contract, ERC-20, vesting math, verifier и тесты являются общими primitives
+для будущей схемы.
 
-🚨 До кода нужно отдельно принять activation gate для 45% Community Governance
-Reserve. Project Safe не может сам выбрать любой адрес и назвать его community
-governance. До активации у project roles нет transfer/approve/bridge/delegate
-пути; после активации 45% не уходят в unrestricted treasury, а остаются под
-неизменяемым 2% rolling commitment cap.
+Production compilation разрешена только при `purpose: production` и
+`status: accepted`. Proposal не может создать deployable artifact. Local tests
+используют отдельный `purpose: local-fixture`, `status: test-only` и chain ID
+`31337`; он не меняет статус реальной tokenomics proposal.
 
-Properties:
+Amounts/caps кодируются только integer base units/bps, exact schedules только
+UTC seconds. Token сам пересчитывает allocation commitment из chain ID, supply
+и constructor allocations; отдельный full-manifest commitment связывает
+schedules/code expectations. Оба имеют golden vectors TypeScript/Solidity.
+Human-readable artifact integrity SHA-256 является третьим, явно отличимым hash.
+
+Token properties:
 
 - immutable deployment;
-- fixed supply;
-- constructor mints exact base-unit allocations directly to the predeclared
-  vesting/reserve/timelock recipients;
+- constructor mints exact base-unit allocations directly to test recipients;
 - 9 decimals;
 - no post-deployment mint;
 - no owner-only transfer controls;
@@ -1050,26 +1055,13 @@ Properties:
 - no proxy;
 - no pause;
 - no blacklist;
-- immutable `getCCIPAdmin()` bootstrap hook для self-service регистрации без `Ownable`.
+- CCIP registration hook не добавляется до protocol-line ADR и mainnet ABI
+  freeze.
 
-Tests:
-
-- name/symbol;
-- decimals;
-- total supply;
-- treasury balance;
-- transfers;
-- approvals;
-- `transferFrom`;
-- zero address;
-- constructor validation;
-- fuzz transfers;
-- invariant: total supply never increases;
-- interface/ABI snapshot;
-- gas report;
-- Slither.
-
-До финального mainnet contract не использовать test name/symbol.
+Policy-vault этап после продуктового approval сохраняет требования из
+[`CONTRACTS.md`](CONTRACTS.md): purpose-specific contracts без generic execute,
+transfer/approve bypass, proxy или controller replacement; commitment и global
+liquidization limits доказываются stateful tests.
 
 ## Phase 3 — Ethereum CCIP pool
 

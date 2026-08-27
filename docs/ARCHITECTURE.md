@@ -39,9 +39,13 @@ Broad `domain`, `shared`, `common`, `utils`, `services` and `infrastructure`
 packages or directories are prohibited.
 
 The current bootstrap `packages/domain/src/supply.ts` predates this adoption and
-is intentionally not treated as the target architecture. Its exact destination
-depends on proposed ADR-0004; no package migration or contract implementation
-starts on the old generic topology before that decision.
+is not a valid target package. Until proposed ADR-0004 is accepted, the accepted
+ADR-0003 remains authoritative: the first local Genesis Core slice atomically
+moves the bootstrap into
+`packages/contexts/supply/src/features/supply-reconciliation/` and places the
+manifest compiler in the sibling `genesis-manifest` feature. If ADR-0004 is
+accepted later, those feature slices move mechanically to `Token Control` and
+`Cross-chain Accounting`; their domain contracts do not change.
 
 ## Proposed bounded-context topology
 

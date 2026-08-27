@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-27.
+Last updated: 2026-08-28.
 
 Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
 clearance remains required.
@@ -44,10 +44,17 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 ## Designed, not implemented
 
+- Detailed local-only Genesis Core implementation plan: strict proposal/test
+  fixture separation, constructor-verified allocation commitment, full manifest
+  commitment, immutable ERC-20, no-catch-up vesting, independent Anvil verifier,
+  local SPL fixture and explicitly mocked accounting round-trip. Hosted critic
+  execution is pending subscription-runtime account reconnection; the plan has
+  completed an internal architecture/security pass.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
-  two-context topology is recorded in ADR-0004 and awaits explicit acceptance;
-  the existing generic bootstrap package is not migrated before that decision
-  and mechanical topology gates.
+  two-context topology is recorded in ADR-0004 and awaits explicit acceptance.
+  The local Genesis Core plan uses accepted ADR-0003 meanwhile: it will move the
+  generic bootstrap atomically into the `Supply` context after mechanical
+  topology gates, with a later mechanical move if ADR-0004 is accepted.
 - Purpose-specific release/vesting vault proposal, rolling commitments and global
   liquidization budget; governance-reserve activation remains an explicit open
   decision and ABI blocker.
