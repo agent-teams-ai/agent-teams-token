@@ -2,7 +2,8 @@
 
 **Дата:** 28 августа 2026 года
 **Статус:** исправлен после пяти независимых hosted-review на commit
-`853a14a54832908f1f73fbc0f923592ab86c6247`; реализация ещё не начата
+`853a14a54832908f1f73fbc0f923592ab86c6247` и дополнен обязательной hosted
+worker/review orchestration; реализация ещё не начата
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,
 mainnet-ключей, публичных транзакций и необратимого утверждения спорной
@@ -482,7 +483,217 @@ atomic схема.
 
 # 7. Пошаговая реализация
 
-## Phase A - безопасный baseline
+## 7.1 Модель исполнения
+
+Кодирование и критика выполняются production-hosted subscription-runtime
+воркерами. Это не локальные сабагенты и не проверка самого runtime на проекте.
+Основной агент остаётся интегратором: фиксирует интерфейсы, распределяет
+непересекающееся владение, проверяет каждый commit, объединяет изменения и
+принимает или отклоняет замечания критиков.
+
+Model split обязателен:
+
+- планирование, threat review и финальная критика: `gpt-5.6-sol`, reasoning
+  `xhigh`, service tier `fast`;
+- implementation workers: `gpt-5.6-sol`, reasoning `medium`, service tier
+  `fast`;
+- каждый worker имеет отдельный job и isolated worktree на точном base SHA;
+- одна и та же директория никогда не используется двумя активными workers;
+- public-network broadcast, реальные ключи и платные assets запрещены всем
+  jobs.
+
+Runtime capacity проверяется перед каждой волной. Недоступный account не
+является причиной смешивать worktrees или запускать дублирующую задачу: основной
+агент продолжает интеграцию готовых результатов, а недостающий job ставится на
+другой доступный slot. Локальный fallback для worker-задачи без нового явного
+разрешения владельца не используется.
+
+## 7.2 Integration contract до первого worker
+
+До параллельного кодирования основной агент создаёт один baseline commit и
+фиксирует в worker briefs:
+
+1. exact base SHA и разрешённую branch name без `codex/` prefix;
+2. обязательные документы: этот план, ADR-0003, proposed ADR-0004,
+   `NON_NEGOTIABLES.md` и итог hosted-критики;
+3. normative allocation ABI: domain bytes, ID grammar/padding, ordering, types,
+   address rules и fixture source без заранее «подогнанного» expected hash;
+4. local manifest schema version, commands и diagnostic contract;
+5. file ownership, read-only dependencies и явно запрещённые paths;
+6. acceptance tests, команды проверки и non-goals;
+7. handoff format: status, commit SHA, changed paths, проверки с exit status,
+   ограничения, dependency requests и оставшиеся риски.
+
+Минимальный machine-readable brief/result contract:
+
+```text
+brief:
+  jobId, role, model, reasoning, serviceTier
+  baseSha, branch, ownedPaths[], forbiddenPaths[]
+  requiredDocs[], deliverables[], acceptance[], commands[], nonGoals[]
+
+result:
+  status = completed | blocked | failed
+  baseSha, commitSha, changedPaths[]
+  checks[{command, exitCode, evidence}]
+  dependencyRequests[], limitations[], residualRisks[]
+```
+
+Job ID, account slot, timestamps, base/final SHA, model settings и result digest
+попадают в финальный evidence report. Auth material и worker-local paths в
+репозиторий не копируются.
+
+Worker не расширяет scope и не меняет общий контракт молча. Если normative
+interface недостаточен или противоречив, job возвращает blocker с минимальным
+вариантом решения; основной агент исправляет integration contract и только затем
+перезапускает зависимые jobs от нового base SHA.
+
+## 7.3 Непересекающееся владение implementation workers
+
+| Worker | Волна | Владеет | Не трогает | Результат |
+| --- | --- | --- | --- | --- |
+| W1 Manifest/Foundation | 1 | `packages/contexts/supply/**`, `config/genesis/**`, нужные root pnpm/TS/Foundation files | `contracts/evm/**`, local-EVM tooling, CI workflow | strict compiler, schemas, diagnostics, normalized artifact, TypeScript ABI bytes/tests |
+| W2 Solidity token | 1 | `contracts/evm/**` | TypeScript/config, root manifests, verifier, CI | minimal token, independent ABI/hash implementation, Foundry unit/fuzz/invariants |
+| W3 Local EVM verifier | 2 | `tooling/local-evm/**`, `scripts/genesis/**`, local report schemas | token/compiler internals, CI/toolchain bootstrap | isolated Anvil lifecycle, deploy, adversarial read-only verifier, failure reports |
+| W4 Linux parity | 2 | `.github/workflows/ci.yml`, `tooling/toolchain.lock.json`, bootstrap/doctor/env, `compose.yaml` | domain/token/verifier semantics | platform pins, offline fail-closed install, exact-SHA Linux jobs |
+| Integrator | все | global docs, root command wiring, conflict resolution, acceptance ledger | не переписывает рабочий feature без подтверждённого дефекта | единая ветка, cross-language proof, final evidence |
+
+W1 временно является единственным worker, которому разрешено менять root
+dependency/workspace files в первой волне. После barrier эти paths снова
+принадлежат только интегратору. W3 и W4 стартуют от integrated barrier SHA, а не
+от первоначального research commit. Global docs редактирует только интегратор,
+чтобы workers не создавали несколько несовместимых описаний истины.
+
+Каждый worker создаёт один или несколько conventional commits только в своей
+ветке (`feat/genesis-manifest`, `feat/agtmai-token`,
+`test/local-evm-verifier`, `ci/genesis-parity`) и push-ит её только после своих
+scope checks. Worker не merge-ит себя в integration branch. Интегратор перед
+cherry-pick проверяет base SHA, diff, отсутствие чужих paths/secrets/generated
+artifacts и повторяет минимальный относящийся gate.
+
+## 7.4 Волны, барьеры и cross-language proof
+
+```text
+Baseline/spec freeze
+  ├─ W1 manifest/compiler ─┐
+  ├─ W2 Solidity/token ────┼─ Barrier 1: integrate + raw ABI equality
+  └─ integrator pin discovery┘
+                             ├─ W3 deploy/verifier ─┐
+                             └─ W4 Linux parity ────┼─ Barrier 2: full candidate
+                                                    └─ hosted critics
+                                                         └─ fixes + exact-head review
+```
+
+### Barrier 1
+
+1. Cherry-pick W1 и W2 в чистую integration branch.
+2. Regenerate lockfile только package manager и проверить Foundation boundary.
+3. Сравнить TypeScript и Solidity raw `abi.encode` bytes, а не только final hash.
+4. Принять golden vector только после независимого совпадения обеих реализаций;
+   expected bytes/hash не генерируются тестом во время его выполнения.
+5. Запустить targeted TS/Foundry tests и negative permutation/encoding cases.
+6. Зафиксировать новый barrier SHA. Только он является base для W3/W4.
+
+Если bytes расходятся, W3/W4 не стартуют. Интегратор локализует различие до
+конкретного field/offset; W1 и W2 получают один и тот же defect brief. Нельзя
+выбрать одну реализацию «правильной» только потому, что она первой прошла свои
+собственные тесты.
+
+### Barrier 2
+
+1. Cherry-pick W3/W4 и выполнить root command wiring.
+2. Проверить interrupted/parallel Anvil lifecycle и forged verifier inputs.
+3. Получить одинаковые normalized artifacts/commitments на macOS arm64 и Linux
+   x86_64.
+4. Выполнить `check:changed`, `check:fast`, полный `pnpm check` и Foundry gates.
+5. Push candidate SHA и получить green remote CI именно на этом SHA.
+6. Заморозить candidate: до окончания критики никакой worker его не меняет.
+
+## 7.5 Процесс hosted-критики реализации
+
+Критики являются отдельными read-only subscription-runtime workers. Все читают
+один exact candidate SHA в разных clean worktrees и не получают ветки
+implementation workers как источник истины.
+
+Им разрешены только локальные zero-cost проверки без public RPC/broadcast.
+Игнорируемые test artifacts очищаются после запуска; tracked dirty state делает
+review evidence недействительным.
+
+Пять специализаций запускаются параллельно:
+
+1. Solidity/asset security: supply, constructor, ABI, runtime bytecode, gas и
+   adversarial call paths.
+2. Manifest/canonicalization: parser, numeric boundaries, raw ABI vectors,
+   atomic output и approval-vs-integrity wording.
+3. Verifier/local runtime: forged artifacts, race/interrupt/cleanup, stale state
+   и независимость evidence.
+4. Architecture/Foundation: DDD ownership, dependency direction, exports,
+   package/ADR lifecycle и отсутствие лишней платформы.
+5. CI/MVP: platform pins, offline behavior, exact-SHA evidence, scope completeness
+   и честность claims.
+
+Каждый prompt требует:
+
+- verdict `ACCEPT`, `AMEND` или `REJECT`;
+- severity `P0/P1/P2` для каждой находки;
+- точный `file:line`, воспроизводимый failure/attack scenario и нарушенный
+  invariant;
+- минимальное исправление и тест, который до исправления падает;
+- отдельный список предпочтений, которые не являются дефектами;
+- подтверждение exact HEAD, clean worktree и отсутствия tracked edits.
+
+Severity contract:
+
+- `P0`: возможна потеря/создание supply, обход прав, secret/public-network
+  exposure или доказательство относится не к тому artifact;
+- `P1`: неверный protocol/manifest/evidence contract либо обязательный failure
+  path не проверен;
+- `P2`: ограниченный maintainability/observability gap без нарушения текущего
+  локального инварианта.
+
+Решение не принимается голосованием. Интегратор воспроизводит и проверяет каждую
+находку, затем записывает `accepted`, `rejected` или `deferred` с причиной в
+`docs/research/GENESIS-CORE-CODE-REVIEW-<date>.md`. Для accepted finding
+фиксируются owner, fix commit и regression test. `P0/P1` блокируют завершение;
+`P2` можно отложить только с явным ограничением и безопасной точкой расширения.
+
+Исправления возвращаются worker, который владеет затронутым path. Если finding
+пересекает несколько owners, интегратор сначала фиксирует единый interface
+change, затем выдаёт непересекающиеся repair briefs. После fix повторно
+запускается затронутый специализированный critic и один финальный holistic
+`xhigh` critic на новом exact HEAD. Старый review не переиспользуется как
+доказательство для изменившегося SHA.
+
+## 7.6 Сбои workers и правила восстановления
+
+- Нет progress/result, процесс умер: job не считается выполненным; проверить
+  последнюю чистую commit boundary и перезапустить в новом isolated worktree.
+- Worker оставил dirty/untracked state: не интегрировать; принять только
+  осмотренный scoped commit либо перезапустить задачу.
+- Worker изменил чужой path: cherry-pick запрещён до разделения commit; чужие
+  изменения не «подчищаются» интегратором вслепую.
+- Base SHA устарел после interface fix: результат не merge-ится; worker получает
+  новый brief и новый base.
+- Временный registry/network failure: bounded retry только failed fetch phase,
+  затем checksum/readback; уже доказанные тесты не перезапускаются без причины.
+- Неопределённый push/CI result: сначала прочитать remote state через `git`/`gh`,
+  не повторять mutation до подтверждения.
+- Любой намёк на public RPC, реальный secret или transaction broadcast:
+  немедленно остановить job, не публиковать ветку и провести secret/state audit.
+
+Handoff считается готовым, когда integration worktree чистый, все accepted
+`P0/P1` закрыты regression tests, affected critics подтвердили исправления,
+holistic review относится к final SHA, remote CI green на том же SHA, а отчёт
+разделяет proven, simulated, deferred и not-proven claims.
+
+Метрики model-split эксперимента записываются в final report: время до первого
+рабочего patch, доля тестов, прошедших с первого раза, defects каждого critic,
+число repair iterations, total worker time и wall-clock time. Они используются
+для настройки следующего slice, но не ослабляют acceptance criteria.
+
+## 7.7 Детальные технические фазы
+
+### Phase A - безопасный baseline
 
 1. Создать ветку по правилам проекта от текущего research baseline.
 2. Зафиксировать начальный commit SHA и убедиться, что нет чужих изменений.
@@ -496,7 +707,7 @@ atomic схема.
 Stop condition: baseline red по причине существующего проекта документируется;
 новые изменения не маскируют его.
 
-## Phase B - mechanical architecture gates
+### Phase B - mechanical architecture gates
 
 1. Не перемещать и не переписывать существующий `packages/domain` до решения по
    ADR-0004.
@@ -517,7 +728,7 @@ Stop condition: baseline red по причине существующего пр
 Rollback: весь structural gate находится в отдельном commit и может быть
 отменён без изменения contract semantics.
 
-## Phase C - strict manifest vertical slice
+### Phase C - strict manifest vertical slice
 
 1. Добавить обязательный `purpose: proposal` в текущий proposal и независимые
    proposal/local-source/local-manifest JSON Schemas без defaults/coercion.
@@ -533,7 +744,7 @@ Rollback: весь structural gate находится в отдельном comm
    content-addressed gitignored directory с `READY` marker.
 10. Проверить, что proposal не создаёт deployable artifact.
 
-## Phase D - Solidity token primitive
+### Phase D - Solidity token primitive
 
 1. Инициализировать Foundry project внутри `contracts/evm`.
 2. Pin OpenZeppelin по точному release commit.
@@ -546,7 +757,7 @@ Rollback: весь structural gate находится в отдельном comm
    identity в local artifacts. Простой hash unlinked bytecode не выдавать за
    hash кода с embedded immutables.
 
-## Phase E - tests and adversarial properties
+### Phase E - tests and adversarial properties
 
 Token tests:
 
@@ -606,7 +817,7 @@ Security tools:
 Slither переносится в расширенный security slice, если его exact Python/solc
 environment не удаётся воспроизводимо зафиксировать в обязательном окне.
 
-## Phase F - local deployment and independent verifier
+### Phase F - local deployment and independent verifier
 
 1. Запустить ephemeral Anvil chain ID `31337`.
 2. Создать unique run directory с mode `0700`, ephemeral signing key, unique
@@ -642,7 +853,7 @@ environment не удаётся воспроизводимо зафиксиро�
     directory; parallel worktree test доказывает отсутствие убийства соседнего
     Anvil.
 
-## Следующий slice G - local Solana fixture
+### Следующий slice G - local Solana fixture
 
 1. Запустить native `solana-test-validator`/Agave `4.2.1`.
 2. Создать одноразовый test-only payer вне Git.
@@ -662,7 +873,7 @@ ADR не добавляются одновременно несовместим�
 `@solana/web3.js` transaction models. Если CLI достаточно для fixture, новая
 runtime library не ставится.
 
-## Следующий slice H - mock cross-chain accounting
+### Следующий slice H - mock cross-chain accounting
 
 Использовать deterministic local events:
 
@@ -690,7 +901,7 @@ Ethereum allocation balance
 Не создаётся самописный relayer. Test harness вызывает adapters напрямую как
 детерминированную симуляцию accounting transitions.
 
-## Phase I - Linux CI parity обязательного блока
+### Phase I - Linux CI parity обязательного блока
 
 В `Core-12h` добавляется минимальная parity matrix:
 
@@ -717,7 +928,7 @@ parity: одинаковые golden bytes, commitments и normalized reports. Л
 остаётся финальным gate; `check:changed`, `check:fast` и глобальный `tsc7`
 являются только быстрыми preflight.
 
-## Phase J - final handoff
+### Phase J - final handoff
 
 1. Выполнить весь required gate list из `AGENTS.md`.
 2. Повторно проверить diff на secrets, public RPC URLs, private keys и
@@ -750,18 +961,22 @@ tests или ложным Definition of Done.
 
 ## Ориентир на 12 часов
 
-| Работа | Окно |
-| --- | ---: |
-| Baseline, pins и ветка | 0.5 ч |
-| Минимальная feature boundary и Foundation gates | 1.0 ч |
-| Strict local schemas/compiler/allocation commitment | 3.0 ч |
-| ERC-20 и Foundry unit/fuzz tests | 2.5 ч |
-| Изолированный Anvil deploy и adversarial verifier | 2.5 ч |
-| Linux parity, полный gate и handoff | 2.5 ч |
+| Wall-clock окно | Параллельная работа | Barrier/result |
+| --- | --- | --- |
+| 0-1 ч | интегратор: baseline, pins, interface/ownership freeze | worker briefs + clean base SHA |
+| 1-4 ч | W1 manifest и W2 token; интегратор параллельно проверяет CI pins | два scoped commits |
+| 4-5 ч | интегратор + targeted W1/W2 repair | Barrier 1, raw ABI equality |
+| 5-8 ч | W3 verifier и W4 Linux parity параллельно | scoped E2E/CI commits |
+| 8-9 ч | интеграция, local full gates, remote exact-SHA CI | frozen candidate SHA |
+| 9-10 ч | пять read-only hosted critics параллельно | evidence-based findings ledger |
+| 10-11.5 ч | только owners затронутых paths + affected re-review | закрытые P0/P1 |
+| 11.5-12 ч | holistic exact-head review, final CI/report/handoff | clean final SHA |
 
-Это milestone, а не обещание закончить небезопасный код к таймеру. Если время
-вышло, сдаётся только последний полностью green пункт с честным evidence; scope
-не расширяется vesting/Solana/mock задачами.
+Окна являются wall-clock ориентиром при доступной hosted capacity, а не суммой
+worker-hours и не обещанием закончить небезопасный код к таймеру. Если barrier
+не пройден, зависимая волна не стартует. Если время вышло, сдаётся только
+последний полностью green пункт с честным evidence; scope не расширяется
+vesting/Solana/mock задачами.
 
 ---
 

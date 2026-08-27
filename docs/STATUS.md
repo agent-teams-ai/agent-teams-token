@@ -52,7 +52,9 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   fixture separation, constructor-computed allocation commitment, immutable
   ERC-20, adversarial Anvil verifier and exact-SHA Linux parity. Vesting, local
   SPL and mocked accounting are later independent slices. Production manifest
-  approval is intentionally not simulated by a self-declared status/hash.
+  approval is intentionally not simulated by a self-declared status/hash. The
+  plan includes two hosted implementation waves, non-overlapping file ownership,
+  integration barriers, five parallel read-only critics and exact-head re-review.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
   two-context topology is recorded in ADR-0004 and awaits explicit acceptance.
   The local Genesis Core plan uses accepted ADR-0003 for the new manifest

@@ -1027,6 +1027,14 @@ native macOS loop + exact-SHA Linux CI parity
 security/CI matrix являются следующими independently-green slices, а не частью
 12-часового Definition of Done.
 
+Исполнение `Core-12h` использует production-hosted subscription-runtime:
+W1 manifest и W2 Solidity идут параллельно до cross-language barrier, затем W3
+verifier и W4 Linux parity идут от нового integrated SHA. Candidate проверяют
+пять параллельных read-only критиков; accepted P0/P1 исправляет owner
+затронутого path, после чего affected review и holistic exact-head review
+повторяются. Exact ownership, recovery и evidence protocol находятся в §7
+[`GENESIS_CORE_LOCAL_PLAN.md`](GENESIS_CORE_LOCAL_PLAN.md).
+
 Сложные Community, Distribution, Contributor, Operations, Ecosystem и Liquidity
 policy vaults, Timelock bootstrap и governance activation переходят в отдельный
 следующий этап. Их нельзя писать до утверждения соответствующих product rules.
