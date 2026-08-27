@@ -40,12 +40,12 @@ packages or directories are prohibited.
 
 The current bootstrap `packages/domain/src/supply.ts` predates this adoption and
 is not a valid target package. Until proposed ADR-0004 is accepted, the accepted
-ADR-0003 remains authoritative: the first local Genesis Core slice atomically
-moves the bootstrap into
-`packages/contexts/supply/src/features/supply-reconciliation/` and places the
-manifest compiler in the sibling `genesis-manifest` feature. If ADR-0004 is
-accepted later, those feature slices move mechanically to `Token Control` and
-`Cross-chain Accounting`; their domain contracts do not change.
+ADR-0003 remains authoritative. The first local Genesis Core slice adds only the
+new `packages/contexts/supply/src/features/genesis-manifest/` feature and leaves
+the legacy bootstrap unchanged. Before any package migration, ADR-0004 must be
+accepted or rejected: acceptance causes one move into `Token Control` and
+`Cross-chain Accounting`; rejection causes one move into ADR-0003 `Supply`.
+A temporary double migration is prohibited.
 
 ## Proposed bounded-context topology
 

@@ -38,23 +38,26 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - Four contract designers and five independent critics reviewed the release,
   governance, liquidity, security, economics and architecture proposal. The
   synthesis is recorded in
-  `docs/research/CONTRACT-DESIGN-REVIEW-2026-08-27.md`; no contract code started.
-- The requested hosted review runtime was unavailable. The nine reviews used a
-  disclosed local read-only fallback and are not represented as hosted jobs.
+  `docs/research/CONTRACT-DESIGN-REVIEW-2026-08-27.md`; those earlier reviews
+  used the disclosed local read-only fallback, and no contract code started.
+- Five additional independent read-only reviews ran on production hosted
+  subscription runtime against exact commit `853a14a` using `gpt-5.6-sol`,
+  `xhigh` reasoning and fast service tier. Their accepted findings narrowed the
+  executable first slice and are recorded in
+  [`GENESIS-CORE-PLAN-CRITIQUE-2026-08-28.md`](research/GENESIS-CORE-PLAN-CRITIQUE-2026-08-28.md).
 
 ## Designed, not implemented
 
 - Detailed local-only Genesis Core implementation plan: strict proposal/test
-  fixture separation, constructor-verified allocation commitment, full manifest
-  commitment, immutable ERC-20, no-catch-up vesting, independent Anvil verifier,
-  local SPL fixture and explicitly mocked accounting round-trip. Hosted critic
-  execution is pending subscription-runtime account reconnection; the plan has
-  completed an internal architecture/security pass.
+  fixture separation, constructor-computed allocation commitment, immutable
+  ERC-20, adversarial Anvil verifier and exact-SHA Linux parity. Vesting, local
+  SPL and mocked accounting are later independent slices. Production manifest
+  approval is intentionally not simulated by a self-declared status/hash.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
   two-context topology is recorded in ADR-0004 and awaits explicit acceptance.
-  The local Genesis Core plan uses accepted ADR-0003 meanwhile: it will move the
-  generic bootstrap atomically into the `Supply` context after mechanical
-  topology gates, with a later mechanical move if ADR-0004 is accepted.
+  The local Genesis Core plan uses accepted ADR-0003 for the new manifest
+  feature but leaves the generic bootstrap unchanged until ADR-0004 is accepted
+  or rejected, avoiding a temporary double migration.
 - Purpose-specific release/vesting vault proposal, rolling commitments and global
   liquidization budget; governance-reserve activation remains an explicit open
   decision and ABI blocker.

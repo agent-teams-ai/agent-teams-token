@@ -209,8 +209,10 @@ CCIP официально описывает такую комбинацию к�
 - constructor mint каждого allocation bucket напрямую в его конечный
   vesting/reserve/timelock contract; deployer и Treasury Safe не получают
   промежуточную custody над `100%` supply;
-- `GENESIS_MANIFEST_HASH` связывает token deployment с точными allocation IDs,
-  base-unit amounts, beneficiaries, UTC timestamps и revocability rules;
+- будущие `GENESIS_MANIFEST_HASH` и approval envelope вместе связывают token
+  deployment с точными allocation IDs, base-unit amounts, beneficiaries, UTC
+  timestamps, revocability rules, Facts Pack и утверждёнными approvers; один
+  hash без envelope доказывает целостность, но не человеческое одобрение;
 - минимальный механизм регистрации CCIP admin, если его требует актуальный выбранный registration flow.
 
 Не добавлять без отдельного решения:
@@ -975,12 +977,10 @@ schema evolution включаются после появления соотве
 фиктивным пустым evidence.
 
 До принятия ADR-0004 accepted ADR-0003 остаётся source of truth. Первый local
-Genesis Core slice атомарно переносит текущий bootstrap
-`packages/domain/src/supply.ts` с тестами в
-`packages/contexts/supply/src/features/supply-reconciliation/` и создаёт рядом
-`genesis-manifest`. После принятия ADR-0004 эти feature slices механически
-переезжают в `Cross-chain Accounting` и `Token Control` без изменения domain
-contracts.
+Genesis Core slice создаёт только новую `genesis-manifest` feature в ADR-0003
+`Supply` и не переносит существующий `packages/domain`. Package migration
+начинается один раз только после решения по ADR-0004: в два целевых context при
+принятии либо в ADR-0003 `Supply` при отклонении.
 Не создавать заранее generic `packages/chainlink-adapter` и
 `packages/solana-adapter`: provider-specific code остаётся в outbound adapter
 владельца use case до второго доказанного consumer.
@@ -1016,33 +1016,37 @@ entity/jurisdiction classification memo и holder-rights matrix. Код до э�
 
 ```text
 strict proposal/local-fixture schemas
-test-only local fixture -> canonical manifest + allocation/manifest commitments
+test-only local fixture -> canonical manifest + allocation commitment
 AGTMAIToken.sol
-NoCatchUpVesting.sol
 local Anvil deployment
-independent read-only verifier
-local SPL mint fixture with supply 0
-mock cross-chain accounting, explicitly not real CCIP
-native macOS loop + Linux CI parity
+adversarial read-only verifier
+native macOS loop + exact-SHA Linux CI parity
 ```
+
+`NoCatchUpVesting`, local Agave/SPL fixture, mock accounting и расширенная
+security/CI matrix являются следующими independently-green slices, а не частью
+12-часового Definition of Done.
 
 Сложные Community, Distribution, Contributor, Operations, Ecosystem и Liquidity
 policy vaults, Timelock bootstrap и governance activation переходят в отдельный
 следующий этап. Их нельзя писать до утверждения соответствующих product rules.
-Такой порядок уменьшает attack surface и не выбрасывает работу: strict manifest,
-hash contract, ERC-20, vesting math, verifier и тесты являются общими primitives
-для будущей схемы.
+Такой порядок уменьшает attack surface и не выбрасывает работу: strict local
+manifest, allocation commitment, ERC-20, verifier и тесты являются общими
+primitives для будущей схемы.
 
-Production compilation разрешена только при `purpose: production` и
-`status: accepted`. Proposal не может создать deployable artifact. Local tests
-используют отдельный `purpose: local-fixture`, `status: test-only` и chain ID
-`31337`; он не меняет статус реальной tokenomics proposal.
+Production schema и production compilation в этом slice отсутствуют: значение
+`status: accepted` само по себе не доказывает approval. Будущий production path
+потребует проверяемый approval envelope. Proposal не может создать deployable
+artifact. Local tests используют отдельный `purpose: local-fixture`,
+`status: test-only` и chain ID `31337`; он не меняет статус реальной tokenomics
+proposal.
 
-Amounts/caps кодируются только integer base units/bps, exact schedules только
-UTC seconds. Token сам пересчитывает allocation commitment из chain ID, supply
-и constructor allocations; отдельный full-manifest commitment связывает
-schedules/code expectations. Оба имеют golden vectors TypeScript/Solidity.
-Human-readable artifact integrity SHA-256 является третьим, явно отличимым hash.
+Amounts/caps кодируются только integer base units/bps. Token сам вычисляет
+allocation commitment из chain ID, supply и фактически mint-нутых constructor
+allocations; TypeScript/Solidity имеют общий committed golden vector с raw ABI
+bytes. Отдельный RFC 8785 artifact SHA-256 явно не считается onchain approval.
+Production full-manifest/approval commitment проектируется после утверждения
+полного набора полей и approvers.
 
 Token properties:
 
@@ -1398,8 +1402,8 @@ Mainnet последовательность:
    contracts; проверить role graph и отсутствие bootstrap-admin residue.
 6. Создать/подтвердить отдельные Bridge и Treasury Squads.
 7. Deploy Ethereum token с прямым genesis allocation.
-8. Проверить source, `GENESIS_MANIFEST_HASH`, bucket balances и нулевые
-   необъяснимые balances deployer/factory/Safe.
+8. Проверить source, approval envelope, `GENESIS_MANIFEST_HASH`, bucket balances
+   и нулевые необъяснимые balances deployer/factory/Safe.
 9. Deploy/configure LockRelease pool only behind the protocol-line-specific
    admin policy controller; verify every privileged selector, immutable minimum
    delay, operation expiry and backing-withdrawal prohibition.

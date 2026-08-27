@@ -74,8 +74,11 @@ are accepted.
 - Mint every bucket exactly once and directly to its final allocation contract
   on Ethereum. The deployer, factory and Treasury Safe hold zero unexplained
   tokens after genesis.
-- Bind the deployment to `GENESIS_MANIFEST_HASH`, covering allocation IDs,
-  base-unit amounts, beneficiaries, UTC timestamps, revocability and code hashes.
+- Bind the deployment to a future `GENESIS_MANIFEST_HASH` plus independently
+  verified approval envelope, covering allocation IDs, base-unit amounts,
+  beneficiaries, UTC timestamps, revocability, code hashes, Facts Pack and
+  approvers. The hash proves integrity; the envelope proves which artifact was
+  actually approved.
 - No owner mint, proxy upgrade, transfer tax, blacklist, freeze, rebase, hidden
   role, token-funded yield, token-funded insurance or price-support mechanism.
 - Publish every bucket address, controller, signer affiliations, schedule and

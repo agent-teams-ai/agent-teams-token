@@ -24,6 +24,13 @@ packages. Editing the accepted ADR would destroy its audit trail.
 
 ## Proposed decision
 
+If accepted, this ADR preserves ADR-0003 decisions 1 and 3-7 unchanged:
+dependency direction, no ambient domain effects, explicit EVM/Solana adapters,
+value objects and integer amounts, semantic DRY after a second consumer, and
+Engineering Foundation as dev-only enforcement. It replaces only ADR-0003
+decision 2, the bounded-context topology. Superseding ADR-0003 therefore means
+consolidating its surviving constraints here, not silently discarding them.
+
 Adopt two bounded contexts:
 
 1. `Token Control`: genesis manifest, allocation and release policy, governance

@@ -1,12 +1,12 @@
 # AGTMAI Genesis Core: подробный план локальной реализации
 
 **Дата:** 28 августа 2026 года
-**Статус:** готов к реализации после внутренней архитектурной проверки;
-hosted-критика ожидает восстановления subscription runtime; реализация ещё не
-начата
-**Цель первого блока:** за один автономный рабочий цикл получить проверяемое
-локальное ядро токена AGTMAI без газа, mainnet-ключей, публичных транзакций и
-необратимого утверждения спорной токеномики.
+**Статус:** исправлен после пяти независимых hosted-review на commit
+`853a14a54832908f1f73fbc0f923592ab86c6247`; реализация ещё не начата
+**Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
+узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,
+mainnet-ключей, публичных транзакций и необратимого утверждения спорной
+токеномики.
 
 Этот документ конкретизирует первый технический блок из
 [`PLAN.md`](PLAN.md). Общий план проекта остаётся источником долгосрочного
@@ -17,30 +17,41 @@ Genesis Core.
 
 # 1. Результат блока
 
-После завершения должны существовать и проходить проверки:
+## 1.1 Обязательный `Core-12h`
+
+После завершения обязательного блока должны существовать и проходить проверки:
 
 1. Строгий TypeScript-компилятор конфигурации токена в канонический локальный
    genesis manifest.
 2. Неизменяемый Ethereum ERC-20 `Agent Teams AI / AGTMAI` с 9 decimals и одним
    выпуском фиксированного supply в constructor.
-3. Самостоятельный `NoCatchUpVesting`, который до cliff выдаёт ноль, а после
-   cliff начинает линейное начисление с нуля без разовой большой разблокировки.
-4. Локальный deployment на Anvil с синтетическими, не имеющими ценности
+3. Локальный deployment на Anvil с синтетическими, не имеющими ценности
    адресами и отдельным read-only verifier.
-5. Золотой вектор manifest commitment, одинаково вычисляемый TypeScript и
+4. Золотой вектор allocation commitment, одинаково вычисляемый TypeScript и
    Solidity.
-6. Локальный SPL Token fixture на Agave: 9 decimals, initial supply 0, freeze
-   authority отсутствует.
-7. Детерминированная симуляция Ethereum -> Solana -> Ethereum accounting,
-   явно помеченная как mock, а не настоящий Chainlink CCIP E2E.
-8. Native macOS arm64 feedback loop и воспроизводимые Linux CI jobs.
-9. Отчёт, в котором разделены реально выполненные проверки, симуляции, mocks,
+5. Native macOS arm64 feedback loop и один воспроизводимый Linux parity job для
+   этого exact vertical slice.
+6. Отчёт, в котором разделены реально выполненные проверки, прототипные
    ограничения и следующие решения владельца.
 
-Обязательный Ethereum/manifest vertical slice оценивается в `2 200-3 500` строк.
-Local Solana fixture и mock accounting добавят примерно `900-1 500`. Ожидаемый
-итог: `3 100-5 000` строк production-кода, тестов, fixtures, CI и документации.
-Это ориентир, а не цель по количеству строк: ненужные абстракции ради объёма
+`NoCatchUpVesting` является stretch goal: он добавляется только после полного
+green обязательного блока и остаётся самостоятельным primitive, не частью
+genesis E2E. Его funding/wiring будет отдельным решением.
+
+## 1.2 Следующие independently-green slices
+
+Они сохраняются в плане, но не входят в обещание одного 12-часового цикла:
+
+1. `NoCatchUpVesting` и adversarial ERC-20 tests.
+2. Изолированный Agave/SPL fixture: 9 decimals, initial supply 0, точная
+   test-only mint authority, freeze authority `None`, mint -> burn -> final 0.
+3. Детерминированная Ethereum -> Solana -> Ethereum accounting simulation,
+   явно помеченная как mock, а не настоящий Chainlink CCIP E2E.
+4. Расширенная Linux matrix, Slither и consolidated evidence reports.
+
+Обязательный `Core-12h` оценивается в `1 600-2 800` строк production-кода,
+тестов, fixtures, CI и документации. Следующие slices добавят ориентировочно
+`1 500-2 500`. Это не цель по количеству строк: ненужные абстракции ради объёма
 запрещены.
 
 ---
@@ -129,17 +140,23 @@ runtime framework. Его опубликованный scaffolding в `0.19.0` �
 
 ```text
 contracts/evm/src/features/token-genesis/
-contracts/evm/src/features/no-catch-up-vesting/
-
 packages/contexts/supply/src/features/genesis-manifest/
-packages/contexts/supply/src/features/supply-reconciliation/
 ```
 
 Почему TypeScript временно находится в `Supply`: ADR-0003 принят и остаётся
 архитектурным источником истины. ADR-0004 с `Token Control` и `Cross-chain
 Accounting` предложен, но не утверждён владельцем. Первый блок не имеет права
-молча принять его. Если ADR-0004 будет принят позже, эти две feature slices
-переносятся без изменения публичных contracts и domain semantics.
+молча принять его. Поэтому `Core-12h` создаёт только новую
+`genesis-manifest` feature и не переносит существующий `packages/domain`.
+Решение принять либо отклонить ADR-0004 обязательно до package migration:
+
+- при принятии ADR-0004 код один раз переносится в два целевых context;
+- при отклонении код один раз переносится в принятый ADR-0003 `Supply`;
+- временный двойной перенос запрещён.
+
+Перед возможным принятием ADR-0004 он должен явно сохранить решения ADR-0003
+об explicit ports, отсутствии ambient effects, value objects, chain adapters и
+semantic DRY, заменив только bounded-context topology.
 
 Запрещено создавать пустые `domain/application/adapters/composition` директории.
 Слой появляется только с первым реальным артефактом.
@@ -168,14 +185,10 @@ contracts/evm/
   src/features/token-genesis/
     AGTMAIToken.sol
     README.md
-  src/features/no-catch-up-vesting/
-    NoCatchUpVesting.sol
-    README.md
   script/features/local-genesis/
     DeployLocalGenesis.s.sol
   test/features/token-genesis/
-  test/features/no-catch-up-vesting/
-  test/features/manifest-commitment/
+  test/integration/genesis-manifest/
 
 packages/contexts/supply/
   package.json
@@ -186,18 +199,14 @@ packages/contexts/supply/
     adapters/
     composition/
     README.md
-  src/features/supply-reconciliation/
-  src/index.ts
+  src/features/genesis-manifest/index.ts
   tests/features/genesis-manifest/
   tests/package/
 
-tooling/local-solana/
-  fixtures/
-  scripts/
-
 config/genesis/
   proposal.schema.json
-  manifest.schema.json
+  local-source.schema.json
+  local-manifest.schema.json
   local.fixture.yaml
 
 reports/local/
@@ -207,35 +216,44 @@ reports/local/
 
 Точные поддиректории создаются только при наличии файлов. Если use case не
 требует отдельного application layer, он не создаётся ради картинки.
+Публичный TypeScript API экспортируется отдельным subpath
+`./genesis-manifest`; общий barrel двух будущих features не создаётся. Build
+config не включает тесты в публикуемый `dist`.
 
 ---
 
 # 5. Manifest contract
 
-## 5.1 Два разных типа входа
+## 5.1 Разные типы входа без production shortcut
 
-Нельзя использовать один флаг для превращения proposal в production input.
-Нужны разные discriminated schemas:
+Нельзя превращать proposal в deployable input сменой одного поля. В `Core-12h`
+существуют три разные schemas:
 
 ```text
 TokenomicsProposal
   purpose = proposal
   status = proposal
-  human-readable percentages and unresolved decisions allowed
+  percentages and unresolved decisions allowed
   deployable output forbidden
 
-GenesisManifestSource
-  purpose = local-fixture, status = test-only
-  или purpose = production, status = accepted
-  integer base units, bps and UTC seconds only
-  every required field resolved
+LocalGenesisSource
+  purpose = local-fixture
+  status = test-only
+  chainId = "31337"
+  exact base-unit amounts and allowlisted test addresses
+
+LocalGenesisManifest
+  generated output only
+  source digest + allocation commitment + tool identity
 ```
 
-Production-команда принимает только `purpose=production`, `status=accepted`,
-целевую сеть Ethereum mainnet и полный набор обязательных decision references.
-Local-команда принимает только `purpose=local-fixture`, `status=test-only`,
-chain ID `31337` и явные test-only addresses. Подмена target, status или purpose
-приводит к ошибке до создания deployment artifact.
+Production source schema, production compile command и значение
+`status=accepted` в этом блоке отсутствуют. Само слово `accepted` не доказывает
+человеческое одобрение. Будущий production artifact потребует отдельный
+проверяемый approval envelope, который свяжет source digest, manifest hash,
+schema/compiler versions, repository commit, chain ID, nonce/expiry, Facts Pack
+digest и утверждённых approvers. Compiler и deployer должны проверять envelope
+независимо; `--force` или status override запрещены.
 
 ## 5.2 Числовая модель
 
@@ -244,12 +262,17 @@ chain ID `31337` и явные test-only addresses. Подмена target, statu
 - Percentages/caps: только integer basis points.
 - Chain ID и CCIP selectors: decimal strings или `bigint`, никогда JavaScript
   `number`.
-- Timestamps: целые UTC seconds.
+- Timestamps в будущих schedule sources: canonical decimal strings на границе и
+  `bigint` внутри. Их нельзя пропускать через `Number` или `Date`.
 - Calendar months допустимы только в proposal/reporting layer. Перед accepted
   manifest они компилируются в точные timestamps с явно проверенным правилом
   month-end clamping.
-- YAML floats, scientific notation, negative zero, whitespace-dependent числа,
-  duplicate YAML keys и неизвестные fields отклоняются.
+- YAML parsing: только YAML 1.2, ровно один document, string keys; anchors,
+  aliases, merge keys, custom tags, duplicate keys и non-string keys запрещены
+  до преобразования в object.
+- JSON duplicate members также отклоняются до `JSON.parse`-подобной last-wins
+  обработки. Validator не применяет coercion/default/remove-additional;
+  неизвестные fields запрещены на каждом уровне.
 
 ## 5.3 Семантическая валидация
 
@@ -257,80 +280,80 @@ chain ID `31337` и явные test-only addresses. Подмена target, statu
 
 - schema version поддерживается;
 - name/symbol/decimals совпадают с ожидаемым profile;
-- total supply положительный и не превышает выбранные integer limits;
+- total supply положительный, помещается в EVM `uint256` и в отдельно выбранный
+  SPL-compatible profile;
 - сумма allocations равна total supply точно в base units;
-- allocation ID не пуст, уникален и стабильно отсортирован;
-- recipient не zero address и уникален для genesis bucket;
+- bps, если присутствуют для сверки, суммируются ровно в `10 000`; base-unit
+  amounts являются авторитетными, скрытого округления bps -> amount нет;
+- allocation ID соответствует ASCII grammar, уникален после bytes32 encoding и
+  отсортирован по unsigned bytes;
+- local recipient имеет lowercase `0x` + 40 hex digits, не zero и уникален как
+  20-byte value;
 - amount каждого bucket больше нуля;
-- schedule либо отсутствует, либо `end > cliff >= start` согласно типу;
 - local fixture содержит только allowlisted test addresses;
-- production input не содержит placeholders, unresolved decisions или test IDs;
-- hash/code references имеют правильную длину и encoding;
-- output path не может перезаписать source config.
+- hash references имеют правильную длину и encoding;
+- source/output не являются одним inode, symlink или hardlink.
 
 Validation собирает все независимые diagnostics, но compiler fail-closed: при
-одной ошибке deployable manifest и hash не создаются.
+одной ошибке manifest, hash и deployable path не возвращаются. Diagnostic имеет
+стабильные `code`, `severity`, JSON Pointer, source span и deterministic order;
+validation, I/O и internal failure имеют разные exit codes.
 
-## 5.4 Два канонических commitments
+## 5.4 Единственный onchain commitment первого блока
 
-Один opaque manifest hash недостаточен: deployment script мог бы передать hash
-одного файла, а токену - allocations из другого. Поэтому определяются два
-разных typed commitments.
+`Core-12h` фиксирует только данные, которые token действительно способен
+проверить: свои genesis allocations. Неполный hash не называется full manifest
+hash и не выдаётся за человеческое одобрение токеномики.
 
-`GENESIS_ALLOCATION_HASH` вычисляет сам token constructor и сравнивает с
-ожидаемым значением до первого mint:
+`GENESIS_ALLOCATION_HASH` вычисляет token constructor до первого mint:
 
 ```text
 keccak256(abi.encode(
-  bytes32("AGTMAI_ALLOCATION_V1"),
+  AGTMAI_ALLOCATION_V1_DOMAIN,
   uint256(block.chainid),
   bytes32(keccak256("Agent Teams AI")),
   bytes32(keccak256("AGTMAI")),
   uint8(9),
   uint256(initialSupply),
-  tuple(bytes32 id,address recipient,uint256 amount)[] allocations
+  tuple(bytes32 id,address recipient,uint256 amount)[] sortedAllocations
 ))
 ```
 
-Это связывает chain, identity, supply и реально переданный constructor array.
-Wrong-chain deployment или подмена bucket вызывает constructor revert.
+Нормативное кодирование:
 
-`GENESIS_MANIFEST_HASH` связывает полный внешний manifest:
+- `AGTMAI_ALLOCATION_V1_DOMAIN` - зафиксированный в golden vector `bytes32`, не
+  вычисляемая во время deploy строка;
+- allocation ID - 1-31 ASCII символов `[a-z0-9-]`, первый и последний символ
+  буквенно-цифровые, NUL запрещён; байты копируются слева в `bytes32`, остаток
+  справа заполняется нулями;
+- uniqueness проверяется после encoding;
+- allocations строго возрастают по числовому значению `bytes32`; constructor
+  сам отклоняет любую перестановку или duplicate;
+- address сравнивается как ровно 20 bytes;
+- используется только `abi.encode`, никогда `abi.encodePacked`.
 
-```text
-keccak256(abi.encode(
-  bytes32("AGTMAI_MANIFEST_V1"),
-  bytes32 environmentId,
-  uint256 chainId,
-  bytes32 tokenNameHash,
-  bytes32 tokenSymbolHash,
-  uint8 decimals,
-  uint256 totalSupplyBaseUnits,
-  tuple(
-    bytes32 id,
-    address recipient,
-    uint256 amountBaseUnits,
-    uint8 releaseKind,
-    uint64 cliffUtc,
-    uint64 endUtc,
-    address beneficiary,
-    bytes32 expectedCodeHash
-  )[] allocations
-))
-```
+Hash связывает chain, identity, supply и фактически mint-нутые allocations, но
+не выбирает «официальный» deployment. Если deployer передаст другой взаимно
+согласованный набор, constructor вычислит другой корректный hash. Поэтому
+официальность адреса и соответствие утверждённой конфигурации позже доказываются
+независимо опубликованным approval envelope и deployment descriptor либо
+generated one-shot assembler с зафиксированным approved hash.
 
-Token хранит full manifest hash, но не делает вид, что способен проверить
-schedule или code hash внешнего recipient. Verifier проецирует manifest в token
-allocations, сравнивает оба hashes и независимо читает recipient code/state.
+TypeScript использует exact-pinned ABI library; Solidity независимо вычисляет
+тот же payload. Committed golden vectors содержат source, normalized records,
+raw ABI bytes и expected hash и не регенерируются внутри теста.
 
-TypeScript использует проверенную ABI-библиотеку с exact pin. Solidity tests
-вычисляют оба payload независимо. Golden vectors содержат вход, encoded bytes и
-expected hashes. Любое изменение field order, type width, sorting или encoding
-ломает тест до deployment.
+Human-readable artifact получает отдельный
+`LOCAL_FIXTURE_ARTIFACT_SHA256`: SHA-256 от domain prefix + UTF-8 RFC 8785 bytes
+без BOM, trailing newline и самого digest field. JSON числа, способные выйти за
+safe integer, хранятся строками. Hash allocation и SHA-256 artifact никогда не
+смешиваются в UI или документации.
 
-Human-readable JSON получает фиксированный formatter и собственный SHA-256 для
-artifact integrity. `GENESIS_ALLOCATION_HASH`, `GENESIS_MANIFEST_HASH` и artifact
-SHA-256 имеют разные имена и никогда не смешиваются в UI или документации.
+Успешный output пишется в новый content-addressed directory: temporary file в
+том же filesystem -> flush/fsync -> atomic rename -> `READY` marker с source и
+artifact digests. Failed run не обновляет `READY`; deployer принимает только
+явно переданный artifact digest текущего успешного run и не подхватывает старый
+файл по фиксированному пути.
 
 ---
 
@@ -350,12 +373,12 @@ name() = Agent Teams AI
 symbol() = AGTMAI
 decimals() = 9
 INITIAL_SUPPLY = immutable constructor/profile supply
-GENESIS_ALLOCATION_HASH = constructor-verified commitment
-GENESIS_MANIFEST_HASH = immutable commitment
+GENESIS_ALLOCATION_HASH = constructor-computed integrity commitment
 ```
 
-Constructor принимает `initialSupply`, оба expected commitments и список с
-максимумом `MAX_GENESIS_ALLOCATIONS = 32`:
+Constructor принимает `initialSupply` и отсортированный список с максимумом
+`MAX_GENESIS_ALLOCATIONS = 32`. Лимит `32` является local-candidate choice и
+перед production ABI freeze получает отдельное gas/rationale подтверждение:
 
 ```text
 Allocation {
@@ -365,18 +388,16 @@ Allocation {
 }
 ```
 
-Constructor обязан:
+Constructor обязан до первого mint:
 
-- отклонить zero manifest hash;
-- отклонить zero allocation hash;
 - отклонить пустой список и список длиннее `32`;
-- отклонить zero/duplicate allocation ID;
+- отклонить zero ID и любой ID, который не строго больше предыдущего;
 - отклонить zero/duplicate recipient;
 - отклонить zero amount;
 - проверить сумму без потери точности;
 - требовать точного равенства суммы `initialSupply`;
-- пересчитать allocation commitment с `block.chainid` и отклонить mismatch до
-  первого mint;
+- самостоятельно вычислить и сохранить allocation commitment с
+  `block.chainid`;
 - mint каждый bucket сразу его final recipient;
 - emit отдельное `GenesisAllocation(id, recipient, amount)`;
 - завершиться без баланса у deployer/factory, если они не являются явно
@@ -386,7 +407,8 @@ Constructor обязан:
 
 - `mint`, `burnFrom`, owner/admin role;
 - pause/blacklist/tax/fee/rebase;
-- arbitrary call/approve;
+- privileged arbitrary call или forced approval; стандартный ERC-20 `approve`
+  остаётся частью обычного token ABI;
 - proxy initializer или upgrade hook;
 - CCIP-specific inheritance.
 
@@ -394,7 +416,12 @@ Constructor обязан:
 registration flow и будет решён protocol-line ADR до CCIP adapter. Это означает,
 что локальный контракт является candidate core, а не замороженным mainnet ABI.
 
-## 6.2 `NoCatchUpVesting`
+## 6.2 Stretch slice: `NoCatchUpVesting`
+
+Этот контракт не входит в обязательный `Core-12h`. Он реализуется только после
+green token vertical slice и не считается связанным с genesis, пока отдельный
+fixture bucket фактически не направлен в его адрес и verifier не доказал
+funding, code identity и schedule.
 
 Immutable constructor parameters:
 
@@ -423,6 +450,10 @@ endUtc
 - вызвать release может любой адрес, но получателем всегда является immutable
   beneficiary;
 - state обновляется до ERC-20 transfer;
+- transfer выполняется через `SafeERC20.safeTransfer`; production instance
+  допускает только canonical AGTMAI с обычной non-fee/non-rebase семантикой;
+- beneficiary balance до/после transfer обязан увеличиться ровно на release
+  amount, иначе вся transaction откатывается;
 - release при нулевом releasable отклоняется custom error
   `NothingToRelease()`.
 
@@ -437,8 +468,8 @@ feature с другим trust model. Founder/local non-revocable primitive ос�
 
 ## 6.3 Почему wiring allocations не финализируется ночью
 
-Token и vesting реализуются и тестируются как самостоятельные primitives.
-Local token deploy использует детерминированные test recipients. Полная atomic
+В обязательном блоке реализуется token, а vesting остаётся самостоятельным
+следующим slice. Local token deploy использует детерминированные test recipients. Полная atomic
 схема `GenesisAssembler`, CREATE2 адреса и binding всех будущих vaults не
 утверждается, пока не определены сами vaults и activation rules.
 
@@ -467,53 +498,51 @@ Stop condition: baseline red по причине существующего пр
 
 ## Phase B - mechanical architecture gates
 
-1. Материализовать только принятый ADR-0003 `Supply` package и первые реальные
-   feature files.
-2. Атомарно перенести существующий `packages/domain/src/supply.ts` с тестом в
-   `packages/contexts/supply/src/features/supply-reconciliation/`, доказать
-   parity и удалить старый generic package в том же structural commit. Два
-   источника одной supply semantics одновременно не сохраняются.
-3. Расширить pnpm workspace pattern для `packages/contexts/*`.
-4. Добавить package catalog и token-local topology validator, если текущей
-   Foundation capability недостаточно для `src/features/*` правила.
-5. Default-deny source policy разрешает только фактические edges.
-6. Запретить production imports из adapters в domain и deep imports между
-   features.
-7. Запретить broad shared/common/utils/services/infrastructure paths.
-8. Добавить negative fixtures: misplaced source, deep import, cycle, empty
-   ceremonial layer, missing feature README.
-9. Package exports публикуют только curated entrypoint.
-10. Добавить declaration и packed-consumer tests при первом публичном export.
+1. Не перемещать и не переписывать существующий `packages/domain` до решения по
+   ADR-0004.
+2. Добавить только новую `genesis-manifest` feature в принятую ADR-0003
+   capability `Supply` и расширить pnpm workspace pattern.
+3. Экспортировать только subpath `./genesis-manifest`; запретить deep imports и
+   проверить его одним black-box consumer test.
+4. Для реально появившихся слоёв задать default-deny matrix: domain не имеет
+   runtime imports; application -> domain; adapters -> application/domain;
+   composition -> существующие слои. `node:test` разрешён только test paths,
+   Foundation запрещён production code.
+5. Использовать существующие Foundation gates. Локальный topology validator и
+   negative fixtures добавлять только для правил, которых Foundation реально не
+   умеет проверить, а не строить платформу заранее.
+6. Root/nested manifests, workspace и topology config должны запускать full
+   scan в `check:changed`.
 
 Rollback: весь structural gate находится в отдельном commit и может быть
 отменён без изменения contract semantics.
 
 ## Phase C - strict manifest vertical slice
 
-1. Добавить proposal/local-source/manifest JSON Schemas.
-2. Реализовать strict YAML adapter с duplicate-key rejection.
+1. Добавить обязательный `purpose: proposal` в текущий proposal и независимые
+   proposal/local-source/local-manifest JSON Schemas без defaults/coercion.
+2. Реализовать lexical/CST strict YAML/JSON adapter по правилам §5.2.
 3. Реализовать domain value objects для base units, bps, UTC seconds,
    allocation ID и EVM address.
 4. Реализовать semantic validator и diagnostic codes.
 5. Реализовать deterministic ordering.
 6. Реализовать ABI commitment builder.
-7. Реализовать commands `validate`, `compile-local`, `inspect`.
-8. Production command либо отсутствует, либо всегда fail-closed до появления
-   accepted production config и отдельного release gate.
-9. Сгенерировать local artifact только из `status=test-only` в gitignored build
-   directory.
+7. Реализовать commands `validate:proposal`, `compile:local`, `inspect:local`.
+8. Production command и production source schema отсутствуют.
+9. Сгенерировать local artifact только из `status=test-only` в новом
+   content-addressed gitignored directory с `READY` marker.
 10. Проверить, что proposal не создаёт deployable artifact.
 
-## Phase D - Solidity primitives
+## Phase D - Solidity token primitive
 
 1. Инициализировать Foundry project внутри `contracts/evm`.
 2. Pin OpenZeppelin по точному release commit.
 3. Реализовать `AGTMAIToken` с минимальным ABI.
-4. Реализовать `NoCatchUpVesting`.
-5. Добавить custom errors и events без строковых revert reasons, где это
+4. Добавить custom errors и events без строковых revert reasons, где это
    уменьшает bytecode и не ухудшает ясность.
-6. Не создавать base vault hierarchy и generic treasury abstraction.
-7. Сохранить ABI snapshots, compiler settings и compiler-aware deployed-code
+5. Не создавать vesting, base vault hierarchy и generic treasury abstraction в
+   обязательном block.
+6. Сохранить ABI snapshots, compiler settings и compiler-aware deployed-code
    identity в local artifacts. Простой hash unlinked bytecode не выдавать за
    hash кода с embedded immutables.
 
@@ -521,20 +550,21 @@ Rollback: весь structural gate находится в отдельном comm
 
 Token tests:
 
-- exact name/symbol/decimals/supply и оба hashes;
-- constructor recomputes allocation hash and rejects wrong chain/hash;
+- exact name/symbol/decimals/supply и allocation hash;
+- constructor независимо вычисляет hash из фактических sorted allocations;
 - каждый constructor rejection path;
-- unique IDs/recipients;
+- strictly increasing IDs и unique recipients;
 - exact allocation events and balances;
 - ordinary transfer/approve/transferFrom semantics;
 - fuzz allocation sums and boundaries;
 - invariant totalSupply never changes;
 - deployer/factory unexplained balance zero;
-- ABI denylist и отсутствие dangerous selectors;
+- arbitrary-calldata fuzz, ABI review и отсутствие fallback/privileged
+  dispatch; один denylist сам по себе не считается доказательством;
 - compiler metadata/settings reproducibility и exact deployed-code verification
   с корректной обработкой embedded immutables.
 
-Vesting tests:
+Stretch vesting tests после обязательного green:
 
 - one second before, at and after cliff;
 - one second before, at and after end;
@@ -546,71 +576,93 @@ Vesting tests:
 - beneficiary cannot change;
 - no catch-up at cliff;
 - full amount becomes releasable by end.
+- `SafeERC20` mocks: returns false, returns true without transfer,
+  fee-on-transfer и reentrant token; неподдерживаемая семантика должна
+  отклоняться либо быть явно исключена canonical-token binding.
 
 Manifest tests:
 
-- golden allocation/manifest ABI/hash vectors TypeScript vs Solidity;
-- YAML float/scientific notation/duplicate key/unknown field rejection;
-- proposal-to-production rejection;
+- committed golden allocation ABI/hash vectors TypeScript vs Solidity;
+- YAML float/scientific notation/duplicate key/alias/merge/tag/multi-document и
+  unknown field rejection;
+- proposal-to-local-artifact rejection и отсутствие production command;
 - allocation sum off by one base unit;
 - duplicate ID/address and zero address;
-- unstable ordering produces same normalized artifact;
+- permutation normalizes deterministically, но constructor отклоняет
+  несортированный raw array;
 - purpose/network mismatch;
-- placeholder/test address in production;
-- malformed hash, timestamp and decimal strings;
-- partial output is never left after failure.
+- non-allowlisted address in local fixture;
+- malformed hash, decimal strings, `2^53±1`, `uint64/uint256` boundaries;
+- ID Unicode/NUL/length/encoding collision и address case duplicates;
+- crash/stale artifact/symlink/hardlink не обновляют `READY`.
 
 Security tools:
 
-- Foundry unit, fuzz and stateful invariants;
-- Slither pinned and scoped to project contracts;
+- Foundry unit, fuzz and scoped invariant handlers;
 - gas report, contract size and local block-limit check;
 - dependency/secret/license scan through reproducible CI;
 - no claim of audit from automated tools.
 
+Slither переносится в расширенный security slice, если его exact Python/solc
+environment не удаётся воспроизводимо зафиксировать в обязательном окне.
+
 ## Phase F - local deployment and independent verifier
 
 1. Запустить ephemeral Anvil chain ID `31337`.
-2. Использовать только стандартные documented Anvil test accounts.
-3. Compile local fixture and record both commitments.
-4. Deploy token and optional independently tested vesting fixtures.
+2. Создать unique run directory с mode `0700`, ephemeral signing key, unique
+   process ownership и dynamic RPC port либо fail-fast port lock.
+3. Compile local fixture and record allocation commitment + artifact SHA-256.
+4. Deploy только token; vesting не является optional скрытой частью этого gate.
 5. Deployment script жёстко проверяет chain ID и local environment.
 6. Отдельный verifier заново читает state через RPC и не доверяет deployment
-   success output.
+   success output. Approved local artifact, build-info digest и target address
+   передаются ему явно, не считываются неявно из `latest` report.
 7. Verifier проверяет:
    - chain ID;
    - address code presence и compiler-aware deployed bytecode identity с учётом
      immutable references;
    - name, symbol, decimals, totalSupply;
-   - allocation и manifest commitments;
+   - allocation commitment против independently encoded golden/raw vector;
    - каждый allocation balance;
    - сумму balances;
    - zero unexplained deployer/factory balance;
-   - vesting immutable config and released state;
    - ABI/runtime identity expected build artifact без сравнения с unlinked
      bytecode как будто это deployed code.
-8. Создать machine-readable JSON report и короткий Markdown summary.
-9. Повторный deploy на чистой chain должен дать те же commitments и
+8. Runtime bytecode реконструируется из pinned build-info с ожидаемыми
+   immutable/link values и сравнивается побайтно/по `keccak256`; mutation test
+   меняет каждое immutable/constructor input и требует отказ verifier.
+9. Verifier имеет negative tests для подменённых address, ABI, build artifact,
+   constructor args и deployment report.
+10. Создать versioned machine-readable JSON report и короткий Markdown summary
+    с tool versions, exit status, chain identity, artifact digests и redaction.
+11. Повторный deploy на чистой chain должен дать те же commitments и
    те же проверки; адрес может зависеть от выбранной deterministic strategy и
    не объявляется стабильным без CREATE2 ADR.
+12. `trap` на `EXIT/INT/TERM` удаляет только owned PID/process, temp key и run
+    directory; parallel worktree test доказывает отсутствие убийства соседнего
+    Anvil.
 
-## Phase G - local Solana fixture
+## Следующий slice G - local Solana fixture
 
 1. Запустить native `solana-test-validator`/Agave `4.2.1`.
 2. Создать одноразовый test-only payer вне Git.
 3. Создать обычный SPL Token mint с decimals `9` и supply `0`.
-4. Создать test ATA только при необходимости проверки transfer path.
-5. Установить freeze authority в `None` и прочитать state обратно.
-6. Не развёртывать Chainlink SVM program и не имитировать его program ID.
-7. Сохранить fixture state без private key material.
-8. Stop validator и удалить ephemeral key material после теста.
+4. Зафиксировать exact test-only mint authority и
+   `productionAuthorityProven: false`.
+5. Создать test ATA, выполнить реальный SPL mint -> burn и проверить final
+   supply `0`.
+6. Установить freeze authority в `None` и прочитать Token Program owner, mint и
+   freeze authorities обратно.
+7. Не развёртывать Chainlink SVM program и не имитировать его program ID.
+8. Сохранить fixture state без private key material.
+9. Stop validator и удалить только owned ledger/key material после теста.
 
 Solana fixture остаётся test tooling, а не production adapter. До protocol-line
 ADR не добавляются одновременно несовместимые `@solana/kit` и
 `@solana/web3.js` transaction models. Если CLI достаточно для fixture, новая
 runtime library не ставится.
 
-## Phase H - mock cross-chain accounting
+## Следующий slice H - mock cross-chain accounting
 
 Использовать deterministic local events:
 
@@ -638,23 +690,32 @@ Ethereum allocation balance
 Не создаётся самописный relayer. Test harness вызывает adapters напрямую как
 детерминированную симуляцию accounting transitions.
 
-## Phase I - Linux CI parity
+## Phase I - Linux CI parity обязательного блока
 
-Минимальные jobs:
+В `Core-12h` добавляется минимальная parity matrix:
 
 1. `foundation-and-typescript` - install from lockfile, Foundation gates,
    lint, typecheck, unit/property/package tests.
-2. `solidity` - exact Foundry, build, unit, fuzz, invariant, gas and Slither.
+2. `solidity` - exact Foundry/solc, build, unit, fuzz, scoped invariants и gas.
 3. `local-evm-e2e` - fresh Anvil, compile fixture, deploy, independent verify.
-4. `local-solana-fixture` - exact Agave artifact, create/readback/cleanup mint.
-5. `security-metadata` - secret scan, dependency declarations, pinned action and
-   image policy.
+
+Agave/SPL, Slither и consolidated security metadata jobs добавляются вместе с
+соответствующими следующими slices, а не пустыми placeholders.
 
 GitHub Actions используются только по immutable commit SHA. Docker images
-фиксируются digest. macOS остаётся быстрым native loop, Linux CI -
-воспроизводимым доказательством parity. Полный `pnpm check` остаётся финальным
-gate; `check:changed`, `check:fast` и глобальный `tsc7` являются только быстрыми
-preflight.
+фиксируются digest; binary artifacts имеют platform-specific URL + SHA-256 в
+едином lock-файле для `darwin-arm64` и `linux-x64`. Lock включает Node,
+Foundry, solc и все реально используемые CLI. Bootstrap скачивает в `.part`,
+проверяет checksum, атомарно переименовывает/распаковывает и поддерживает
+отдельные `fetch` и `verify/install --offline` режимы без fallback на
+system/latest.
+
+macOS остаётся быстрым native loop, Linux CI - воспроизводимым доказательством
+parity: одинаковые golden bytes, commitments и normalized reports. Локальная
+проверка workflow доказывает только корректность config; green remote run на
+точном commit SHA является отдельным обязательным evidence. Полный `pnpm check`
+остаётся финальным gate; `check:changed`, `check:fast` и глобальный `tsc7`
+являются только быстрыми preflight.
 
 ## Phase J - final handoff
 
@@ -673,15 +734,15 @@ preflight.
 
 # 8. Порядок при ограничении времени
 
-Если полный блок не помещается в окно, нельзя оставлять широкий полуготовый
-слой. Приоритет vertical slices:
+Если обязательный блок не помещается в окно, нельзя оставлять широкий
+полуготовый слой. Приоритет внутри `Core-12h`:
 
 1. Schema/semantic validation -> canonical commitment -> golden vectors.
 2. `AGTMAIToken` -> Foundry tests -> local deploy -> independent verifier.
-3. `NoCatchUpVesting` -> boundary/fuzz tests.
-4. Architecture/Foundation gates and Linux CI for сделанных slices.
-5. Local Solana fixture.
-6. Mock cross-chain accounting.
+3. Architecture/Foundation gates and Linux parity для сделанных slices.
+
+Vesting, Solana и mock accounting не являются fallback-незавершённостью: это
+заранее отдельные следующие slices со своими Definition of Done.
 
 Каждый завершённый пункт должен быть green и отдельно полезен. Незавершённый
 следующий пункт документируется, но не маскируется пустыми каталогами, skipped
@@ -692,16 +753,15 @@ tests или ложным Definition of Done.
 | Работа | Окно |
 | --- | ---: |
 | Baseline, pins и ветка | 0.5 ч |
-| Feature topology и Foundation gates | 1.5 ч |
-| Manifest schemas/compiler/two commitments | 2.0 ч |
-| ERC-20 и Foundry tests | 2.0 ч |
-| Vesting и boundary/fuzz tests | 1.5 ч |
-| Anvil deploy и independent verifier | 1.5 ч |
-| Solana fixture и mock accounting | 1.0 ч |
-| Linux CI, полный gate и handoff | 1.5 ч |
+| Минимальная feature boundary и Foundation gates | 1.0 ч |
+| Strict local schemas/compiler/allocation commitment | 3.0 ч |
+| ERC-20 и Foundry unit/fuzz tests | 2.5 ч |
+| Изолированный Anvil deploy и adversarial verifier | 2.5 ч |
+| Linux parity, полный gate и handoff | 2.5 ч |
 
-Это порядок планирования, не обещание закончить небезопасный код к таймеру.
-При отклонении применяется приоритет vertical slices выше.
+Это milestone, а не обещание закончить небезопасный код к таймеру. Если время
+вышло, сдаётся только последний полностью green пункт с честным evidence; scope
+не расширяется vesting/Solana/mock задачами.
 
 ---
 
@@ -709,20 +769,20 @@ tests или ложным Definition of Done.
 
 | Риск | Защита |
 | --- | --- |
-| Proposal случайно становится deployable | Разные schema discriminators, команды и negative tests |
+| Proposal случайно становится deployable | Production schema/command отсутствуют; разные local schemas и negative tests |
+| `accepted` сам выдаёт себя за approval | В будущем отдельный подписанный/verifiable approval envelope; status не является доверием |
 | Ошибка decimals/supply | Integer base units, exact sum, Solidity/TS golden vectors |
-| Hash не соответствует constructor allocations | Token сам пересчитывает allocation hash; verifier связывает его с full manifest |
-| Скрытая admin-функция | Минимальное наследование, ABI denylist, bytecode hash, review |
-| Catch-up dump в cliff | Формула с нулём при `t <= cliff`, boundary/fuzz tests |
-| Donation меняет vesting | Immutable allocationAmount, entitlement cap |
+| Hash ошибочно назван approval | Token hash доказывает только целостность фактических allocations; официальный адрес требует отдельного descriptor/envelope |
+| Подан согласованный, но неверный набор | Verifier сравнивает deployment с отдельно выбранным artifact; negative coherent-wrong-config test |
+| Старый artifact пережил failed compile | Content-addressed run + atomic `READY`; deployer принимает exact current digest |
+| Скрытая admin-функция | Минимальное наследование, source/runtime review, arbitrary-calldata fuzz, ABI snapshot |
 | Локальный ключ попал в Git | Ephemeral paths, ignore rules, secret scan, cleanup |
+| Cleanup убил соседний процесс | Unique run ownership, dynamic port/lock, exact PID cleanup, parallel-worktree test |
 | Public network запущена случайно | Chain ID allowlist, public flags false, отсутствуют public deploy commands |
-| Mock назван настоящим CCIP | Machine-readable evidence flag и явная документация |
 | Foundation стал runtime dependency | assert-dev-only, source dependency gate |
-| Архитектура стала церемониальной | feature-first, no empty layer, negative topology fixtures |
-| Разные EVM/Solana модели спрятали ошибки | Явные adapters, без universal ChainClient |
-| Dependency drift | exact pins, lockfile, release/checksum evidence |
-| Один deploy script подтверждает сам себя | независимый RPC verifier и fresh-chain повтор |
+| Архитектура стала церемониальной | feature-first, no empty layer; новые gates только для реального пробела |
+| Dependency/cache drift | platform pins, `.part` + checksum + atomic install, offline fail-closed |
+| Один deploy script подтверждает сам себя | Отдельные trusted inputs, independent vectors, adversarial verifier и fresh-chain повтор |
 | Сложность выросла раньше продукта | нет policy vaults/governance/CCIP adapter в первом блоке |
 
 ---
@@ -740,14 +800,13 @@ pnpm check
 pnpm genesis:validate:proposal
 pnpm genesis:compile:local
 pnpm genesis:verify:local
-pnpm test:local-solana
-pnpm test:mock-roundtrip
 pnpm test:linux-parity
 ```
 
 Если `test:linux-parity` фактически является CI-only job, локальный alias
 валидирует Compose/build definition и документирует команду запуска, но не
-выдаёт это за завершённый удалённый CI run.
+выдаёт это за завершённый удалённый CI run. Acceptance требует отдельно
+зафиксированный green GitHub Actions run на exact commit SHA.
 
 ---
 
@@ -756,19 +815,23 @@ pnpm test:linux-parity
 Блок считается выполненным только если:
 
 - текущая proposal config остаётся `proposal`;
+- proposal имеет обязательный `purpose: proposal`;
 - proposal не создаёт deployable manifest;
-- local `test-only` fixture создаёт deterministic manifest и commitments;
-- TypeScript и Solidity дают одинаковые allocation/manifest commitments;
-- token constructor сам отклоняет wrong-chain/allocation commitment mismatch;
+- production schema и production compile command отсутствуют;
+- local `test-only` fixture создаёт deterministic manifest, allocation
+  commitment и artifact SHA-256;
+- TypeScript и Solidity дают одинаковые raw ABI bytes и allocation commitment;
+- token constructor вычисляет commitment только из фактически mint-нутого
+  строго отсортированного массива;
+- документация не называет integrity hash человеческим approval;
 - token supply выпущен один раз и точная сумма находится у fixture recipients;
 - отсутствуют post-genesis mint/admin/proxy/pause/blacklist/tax paths;
-- vesting до cliff выдаёт 0 и после cliff линейно растёт с 0;
-- donation не увеличивает vesting entitlement;
 - local deploy проходит на чистом Anvil;
-- независимый verifier подтверждает code/state/balances/hash;
-- local SPL mint имеет decimals 9, supply 0 и freeze authority None;
-- mock round-trip сохраняет accounting invariant и честно помечен mock;
-- Foundation, lint, TypeScript, Foundry, security и полный project gate green;
+- adversarial verifier с отдельными inputs подтверждает
+  code/state/balances/hash и отклоняет подменённые artifacts/reports;
+- два parallel runs не конфликтуют, а interrupt cleanup не трогает соседа;
+- Foundation, lint, TypeScript, Foundry и полный project gate green;
+- Linux parity green на exact commit SHA, не только локально провалидирован;
 - ни одна public-network transaction не создана и не отправлена;
 - ни один реальный secret или платный asset не использован;
 - документация перечисляет ограничения и открытые mainnet решения;
@@ -782,16 +845,19 @@ pnpm test:linux-parity
 
 1. Принять или отклонить ADR-0004 и окончательную package topology.
 2. Утвердить supply/allocation/vesting tokenomics.
-3. Утвердить минимальный набор policy vaults вместо всей сложной системы сразу.
-4. Выбрать atomic genesis wiring и deployment address strategy.
-5. Выполнить EVM CCIP `1.6.4` vs `2.0.0` compatibility spike и принять
+3. Утвердить production manifest fields и approval envelope, включая Facts
+   Pack/decision digests, approvers, nonce/expiry и versioning.
+4. Утвердить минимальный набор policy vaults вместо всей сложной системы сразу.
+5. Выбрать atomic genesis wiring и deployment address strategy.
+6. Выполнить EVM CCIP `1.6.4` vs `2.0.0` compatibility spike и принять
    protocol-line ADR.
-6. Определить signers и recovery model без передачи private keys.
-7. Только затем готовить Sepolia/Devnet unsigned plan и запрашивать разрешение
+7. Определить signers и recovery model без передачи private keys.
+8. Только затем готовить Sepolia/Devnet unsigned plan и запрашивать разрешение
    на public-network test.
 
-До этих решений локальное ядро остаётся полезным: schema, hash contract, ERC-20,
-vesting math, verifier, tests и CI не зависят от будущего governance UI или DEX.
+До этих решений локальное ядро остаётся полезным: local schema, allocation
+commitment, ERC-20, verifier, tests и CI не зависят от будущего governance UI
+или DEX.
 
 ---
 
@@ -802,13 +868,12 @@ vesting math, verifier, tests и CI не зависят от будущего go
 1. `chore: enforce genesis core architecture boundaries`
 2. `feat: compile canonical local genesis manifests`
 3. `feat: add immutable agtmai token core`
-4. `feat: add no-catch-up vesting primitive`
-5. `test: verify local ethereum and solana genesis fixtures`
-6. `ci: add genesis core linux parity gates`
-7. `docs: record genesis core evidence and limitations`
+4. `test: verify local ethereum genesis fixture`
+5. `ci: add genesis core linux parity gates`
+6. `docs: record genesis core evidence and limitations`
 
 Это пример семантических границ, а не обязательное число commits. Каждый commit
-должен проходить относящиеся к нему проверки. Откат Solana fixture не затрагивает
-Ethereum contracts; откат mock accounting не меняет manifest; спорная будущая
-tokenomics не требует переписывать базовый token ABI, кроме отдельно
-зафиксированного mainnet freeze decision.
+должен проходить относящиеся к нему проверки. Vesting, Solana fixture и mock
+accounting позже получают отдельные commits и не влияют на rollback обязательного
+Ethereum slice. Спорная будущая tokenomics не требует переписывать базовый token
+ABI, кроме отдельно зафиксированного mainnet freeze decision.

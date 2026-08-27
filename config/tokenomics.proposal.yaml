@@ -1,7 +1,9 @@
 schemaVersion: 1
+purpose: proposal
 status: proposal
 compilation:
   productionManifestRequiresStatus: accepted
+  productionManifestRequiresApprovalEnvelope: true
   numericEncoding: integer-bps-and-base-units-only
   canonicalSerialization: RFC8785-JSON
   manifestRequiresExactUtcSeconds: true
