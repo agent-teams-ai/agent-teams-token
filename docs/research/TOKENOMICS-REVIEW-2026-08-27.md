@@ -113,7 +113,8 @@ and [FINMA ICO guidance](https://www.finma.ch/en/news/2018/02/20180216-mm-ico-we
 
 ## Recommendation
 
-Adopt the `45 / 12 / 13 / 5 / 20 / 5` proposal only after product-owner review.
-The percentages alone are insufficient: the liquid-supply budget, timelocks,
-no-catch-up vesting, no-market-sale beta, airdrop wave gates and public reporting
-are part of the same tokenomics contract with the community.
+Use the provisional `45 / 25 / 15 / 8 / 6 / 1` model as the working baseline,
+not a final launch commitment. The percentages alone are insufficient: the
+project-inaccessible 45% governance reserve, liquid-supply budget, no-catch-up
+vesting, no-market-sale beta, distribution gates and public reporting are part
+of the same contract with the community.

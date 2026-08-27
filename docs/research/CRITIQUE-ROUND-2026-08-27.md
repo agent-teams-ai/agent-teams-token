@@ -28,13 +28,13 @@ Solana architecture.
 2. **Test cost.** Local, Sepolia and Solana Devnet use `$0` real-value assets.
    Fake USDC and faucet assets are never purchased. Faucet failure pauses only
    that public-testnet step.
-3. **Allocation.** The recommended proposal is `45/12/13/5/20/5`: community
-   treasury, operations, contributors, founder, distributions, liquidity. It
-   reduces the market-control reserve without pretending that token inventory
-   supplies the external USDC side of a pool.
-4. **Truthful control.** 65% is community-designated, while binding community
-   control is 0% at genesis. Project-administered control is disclosed as 82%,
-   or 95% while the unassigned contributor reserve is included.
+3. **Allocation.** The critic-round recommendation `45/12/13/5/20/5` was later
+   superseded by the owner's provisional `45/25/15/8/6/1` direction. Founder is
+   capped at 3% inside the 15% shared contributor allocation; the model remains
+   explicitly under discussion.
+4. **Truthful control.** 70% is community-designated, while binding community
+   control is 0% at genesis. Project-administered control is capped at 55%; the
+   45% governance reserve has no project transfer path before activation.
 5. **Enforcement.** Budget caps require purpose-specific vaults without generic
    `execute` or `approve`, not only a Timelock and a promise. Bridge admin is
    behind its own Timelock. Emergency powers expire and can only cancel or reduce
@@ -67,9 +67,8 @@ Solana architecture.
 
 ## Deliberately unresolved
 
-- One critic preferred team `12→60` and founder `18→72`; others considered the
-  current no-catch-up `12→48` and `18→60` fair. Keep the current schedule as a
-  proposal until the owner explicitly chooses.
+- Team `12→60` and founder `18→72` are now the provisional no-catch-up schedules.
+  They remain open until the complete allocation is finally approved.
 - An 18-month external cash runway is a strong launch-risk control but not a
   reasonable hidden prerequisite for local MVP work. Before public distribution,
   publish the actual stablecoin/fiat operating plan and never count treasury

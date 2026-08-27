@@ -460,7 +460,7 @@ Mint authority передаётся непосредственно Pool Signer P
 | Solana token/CCIP/Squads/Raydium reserve | около 0.5–0.8 SOL |
 | CCIP mainnet round-trip tests | около $10–25 |
 | Raydium Devnet liquidity | $0 real money; 50–100 units of mintable fake USDC |
-| Public Raydium liquidity | Не определена; отдельный depth/legal approval |
+| Experimental mainnet pool | Founder total cash ≤$100; community adds directly |
 | Непредвиденный резерв | $50–100 |
 | Общий технический бюджет без public LP | примерно $250–350, уточняется по live gas/SOL |
 
@@ -513,11 +513,13 @@ Tokenomics является отдельным product/security workstream, а �
 - `100%` fixed supply распределяется между публично именованными allocation buckets;
 - сумма buckets и их onchain balances всегда проверяема;
 - founder/team allocations не попадают в обычные wallets до vesting release;
-- project/community treasury не является личным резервом founder: это два
-  отдельных Timelock address с публичным budget accounting;
-- 65% на genesis называются community-designated, не community-directed:
-  binding community control отсутствует, а project-administered control graph
-  раскрывается полностью;
+- 45% Community Governance Reserve не имеет project transfer path до отдельно
+  одобренного community-governance activation;
+- 70% называются community-designated, не community-controlled: binding
+  community control на genesis равен 0%, а project-administered control не выше
+  55% и раскрывается полностью;
+- founder входит в общий contributor allocation: максимум 3%; другие initial
+  contributors суммарно максимум 3%; минимум 9% остаётся для future grants;
 - неиспользованные contributor grants остаются в locked reserve, который может
   создавать только публичные grants и не может переводить резерв напрямую EOA;
 - undeployed liquidity reserve не равен circulating supply, но TOKEN внутри
@@ -540,8 +542,8 @@ Tokenomics является отдельным product/security workstream, а �
 | D-03 | Total supply | `100,000,000` | Стоимость deployment от supply не зависит |
 | D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
 | D-05 | Utility на старте | Минимум одна live consumptive function до public distribution | Не проектировать публичный запуск только вокруг будущего roadmap |
-| D-06 | Allocations | Предложение `45/12/13/5/20/5` | Treasury, operations, contributors, founder, distributions, liquidity |
-| D-07 | Vesting | Team: 12→48; founder: 18→60; оба без cliff catch-up; future grants revocable только в unvested части | Не смешивать assigned grants и свободный reserve и не создавать общий unlock cliff |
+| D-06 | Allocations | Рабочее предложение `45/25/15/8/6/1`, ещё обсуждается | Governance reserve, distributions, all contributors, operations, ecosystem grants, liquidity |
+| D-07 | Vesting | Team: 12→60; founder: 18→72; оба без cliff catch-up; founder ≤3% внутри contributors | Не создавать отдельный свободный founder reserve и общий unlock cliff |
 | D-08 | Public sale | Нет на первом beta | Снижает legal и operational scope |
 | D-09 | Entity и target jurisdictions | Решить до rights/ABI freeze, mainnet genesis и public communications | Local/test-only neutral implementation разрешена раньше |
 | D-10 | Ethereum signer sets | Bridge/Treasury 3-of-5, Emergency 2-of-3; `|B∩T|≤1`, `E∩(B∪T)=0` | Изолировать custody, configuration и bounded cancellation |
@@ -2022,7 +2024,8 @@ https://www.sec.gov/newsroom/press-releases/2026-30-sec-clarifies-application-fe
 >
 > `Agent Teams AI / AGTMAI` уже утверждено. Остались вопросы:
 >
-> 1. Подтверждаем предложение `45/12/13/5/20/5`, `100,000,000` supply и 9 decimals?
+> 1. Оставляем рабочее предложение `45/25/15/8/6/1`, founder ≤3% внутри
+>    contributors, `100,000,000` supply и 9 decimals, или меняем перед freeze?
 > 2. Какая live consumptive utility будет доступна до public distribution?
 > 3. Какая entity выпускает token и какие страны входят в launch scope?
 > 4. Кто входит в изолированные Bridge/Treasury/Emergency Safe и два Solana Squads?

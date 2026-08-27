@@ -13,32 +13,17 @@ token:
   fixedSupply: "100000000"
   decimals: 9
 allocations:
-  communityTreasury:
+  communityGovernanceReserve:
     allocationBps: 4500
-    rollingTwelveMonthCommitmentCeilingBpsOfTotalSupply: 200
+    projectMayTransferBeforeGovernanceActivation: false
+    activationRequiresIndependentCommunityApproval: true
+    activationEarliestTimestamp: unset
+    postActivationRollingTwelveMonthCommitmentCeilingBpsOfTotalSupply: 200
     unusedCapRollover: false
-    custody: community-timelock
-  protocolOperations:
-    allocationBps: 1200
-    rollingTwelveMonthTokenOutflowCeilingBpsOfTotalSupply: 50
-    unusedCapRollover: false
-    custody: project-timelock
-  teamAndContributors:
-    allocationBps: 1300
-    cliffMonths: 12
-    fullyVestedAtMonth: 48
-    cliffCatchUp: false
-    grantStartsAreStaggered: true
-    futureGrantUnvestedRevocable: true
-  founder:
-    allocationBps: 500
-    cliffMonths: 18
-    fullyVestedAtMonth: 60
-    cliffCatchUp: false
-    revocable: false
+    custody: governance-activation-vault
   communityDistributions:
-    allocationBps: 2000
-    plannedMaximumWaves: 6
+    allocationBps: 2500
+    initialProgramMaximumWaves: 6
     targetDurationMonths: 60
     pilotMaximumBpsOfTotalSupply: 25
     perWaveMaximumBpsOfTotalSupply: 50
@@ -48,8 +33,37 @@ allocations:
     appealPreviewDays: 14
     claimWindowDays: 180
     unclaimedDestination: community-distribution-reserve
+  teamAndContributors:
+    allocationBps: 1500
+    founderMaximumBpsOfTotalSupply: 300
+    initiallyAssignedNonFounderMaximumBpsOfTotalSupply: 300
+    futureGrantReserveMinimumBpsOfTotalSupply: 900
+    futureGrantCreationRollingTwelveMonthMaximumBpsOfTotalSupply: 200
+    individualFutureGrantMaximumBpsOfTotalSupply: 50
+    unusedCapRollover: false
+    teamCliffMonths: 12
+    teamFullyVestedAtMonth: 60
+    founderCliffMonths: 18
+    founderFullyVestedAtMonth: 72
+    cliffCatchUp: false
+    grantStartsAreStaggered: true
+    futureGrantUnvestedRevocable: true
+    founderGrantRevocable: false
+    founderIsSeparateTopLevelAllocation: false
+  protocolOperations:
+    allocationBps: 800
+    rollingTwelveMonthTokenOutflowCeilingBpsOfTotalSupply: 50
+    unusedCapRollover: false
+    custody: project-timelock
+  ecosystemAndPublicGrants:
+    allocationBps: 600
+    rollingTwelveMonthCommitmentCeilingBpsOfTotalSupply: 100
+    unusedCapRollover: false
+    milestoneEvidenceRequired: true
+    relatedPartyRequiresIndependentApproval: true
+    directUnreviewedTransferToEoa: false
   liquidity:
-    allocationBps: 500
+    allocationBps: 100
     publicBetaBpsOfTotalSupply: 0
     initialExperimentalPoolTokenSideMaximumBpsOfTotalSupply: 1
     cumulativeExperimentalBetaTokenSideMaximumBpsOfTotalSupply: 10
@@ -102,8 +116,9 @@ consideration:
   promotionReferralWorkOrPersonalDataAllowedForFreeAirdrop: false
 transparency:
   communityControlAtGenesisBps: 0
-  projectAdministeredControlBpsExcludingUnassignedTeamReserve: 8200
-  projectAdministeredControlBpsIncludingUnassignedTeamReserve: 9500
+  communityDesignatedBps: 7000
+  projectInaccessibleCommunityGovernanceReserveBps: 4500
+  projectAdministeredControlAtGenesisBps: 5500
   controlledWalletsPublished: true
   signerAffiliationsPublished: true
   beneficialOwnersAggregated: true

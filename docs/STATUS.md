@@ -10,6 +10,10 @@ capped at `$100`, and community liquidity must be added directly by its owners.
 The first pool is explicitly experimental and highly volatile, not depth or
 valuation evidence.
 
+Tokenomics working baseline, still under discussion: `45/25/15/8/6/1` for the
+community-governance reserve, distributions, all contributors, operations,
+ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
+
 ## Proven locally
 
 - Monorepo dependency installation is reproducible from the lockfile.

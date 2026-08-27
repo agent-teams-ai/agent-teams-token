@@ -8,8 +8,9 @@ Only decisions that materially change the implementation are listed here.
 release gate, not an open naming choice.
 
 1. Confirm or replace the `100,000,000` fixed-supply default; keep `9` decimals.
-2. Approve or amend the recommended `45/12/13/5/20/5` model, including founder
-   18→60 and team 12→48 no-catch-up schedules.
+2. Keep or amend the provisional `45/25/15/8/6/1` model. Founder is capped at 3%
+   inside the 15% contributor allocation; proposed schedules are founder 18→72
+   and team 12→60 without cliff catch-up. This is recorded but not final.
 3. Define initial utility that exists at launch without promising investment
    return or project ownership.
 4. Choose legal entity and launch jurisdictions and approve the exact holder

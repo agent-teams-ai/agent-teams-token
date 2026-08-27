@@ -6,26 +6,25 @@ approved and executed onchain.
 
 ## Recommended model
 
-**Progressive community treasury. 🎯 9/10 🛡️ 9/10 🧠 7/10, roughly
-2,600-4,200 LOC of tokenomics contracts, deployment checks and dashboard rules,
+**Split-control community model. 🎯 9/10 🛡️ 9/10 🧠 7/10, roughly
+3,200-5,200 LOC of tokenomics contracts, deployment checks and dashboard rules,
 excluding CCIP and the web application.**
 
 | Allocation | Share | Enforceable public rule |
 | --- | ---: | --- |
-| Community treasury and grants | 45% | Genesis Community Timelock and non-generic policy vault; new commitments capped at 2% of total supply per rolling 12 months, without rollover |
-| Protocol operations | 12% | Separate Project Timelock; token outflow capped at 0.5% of total supply per rolling 12 months, without rollover; stablecoin or fiat runway is separate |
-| Team and future contributors | 13% | Grant by grant; 12 months at zero, then linear to month 48 without cliff catch-up; unassigned reserve cannot transfer directly to an EOA |
-| Founder | 5% | Irrevocable grant; 18 months at zero, then linear to month 60 without cliff catch-up |
-| Community distributions and rewards | 20% | Maximum reserve, not promised issuance; up to six independently approved waves over 48-60 months |
-| Liquidity reserve | 5% | Undeployed and non-circulating by default; first experimental pool capped at 0.01%, cumulative experimental beta at 0.1%; the remaining reserve stays locked |
+| Community governance reserve | 45% | Project cannot transfer it before independently approved community governance is activated; later commitments capped at 2% per rolling 12 months without rollover |
+| Community distributions and rewards | 25% | Maximum reserve, not promised issuance; bounded independently reviewed waves |
+| Founder, team and future contributors | 15% | Founder max 3%; other initial team max 3%; at least 9% remains for future grants; future grant creation capped at 2% per rolling 12 months and 0.5% per grant |
+| Protocol operations | 8% | Separate Project Timelock; token outflow capped at 0.5% per rolling 12 months; stablecoin/fiat runway is separate |
+| Ecosystem and public grants | 6% | Commitments capped at 1% per rolling 12 months; milestone evidence and independent approval for related parties |
+| Liquidity reserve | 1% | First experimental pool capped at 0.01%, cumulative experimental beta at 0.1%; the remainder stays locked |
 
-This makes 65% community-designated without mislabelling liquidity as a
-community allocation. At genesis, proven binding community control is 0%:
-project-controlled roles can administer 82% across community treasury,
-operations, distributions and unused liquidity, or up to 95% while unassigned
-team reserve is included. Until independent governance is safely activated, the
-45% bucket is described truthfully as a **project-controlled community
-treasury** and the complete beneficial-control graph is disclosed.
+This makes 70% community-designated. At genesis, proven binding community
+control is still 0%, but project roles can administer at most 55%; the 45%
+governance reserve has no project transfer path before independently approved
+community governance is activated. Of the 15% contributor allocation, no more
+than 3% is the disclosed founder grant, no more than 3% may be assigned to other
+initial contributors, and at least 9% remains locked for future work.
 
 The working fixed-supply default is `100,000,000` units with `9` decimals. Nine
 decimals match Solana and avoid irreversible precision loss or `u64` overflow
@@ -38,16 +37,24 @@ directly to the Pool Signer PDA and that target-chain state is verified.
 
 ## Other viable allocations
 
-1. **More liquidity flexibility: `42 / 12 / 13 / 5 / 20 / 8`. 🎯 7/10 🛡️ 8/10 🧠 6/10,
-   roughly 2,600-4,200 LOC.** Keeps a larger locked LP ceiling, but worsens
-   market-control optics without adding the external quote capital a pool needs.
-2. **Operations-heavy: `40 / 15 / 15 / 5 / 20 / 5`. 🎯 7/10 🛡️ 8/10 🧠 5/10,
-   roughly 1,100-1,900 LOC.** Easier contributor and operating support, but the
-   project-controlled share is harder to defend publicly.
+1. **Prior project-stewarded model: `45 / 12 / 13 / 5 / 20 / 5`. 🎯 6/10 🛡️
+   7/10 🧠 6/10, roughly 2,600-4,200 LOC.** Simpler, but project roles initially
+   administer too much supply and the separate 5% founder line has worse optics.
+2. **No predefined founder grant. 🎯 6/10 🛡️ 8/10 🧠 5/10, roughly
+   2,800-4,600 LOC.** Looks equal at genesis, but risks less transparent founder
+   compensation through later discretionary grants.
 
 The prior `35 / 18 / 14 / 8 / 15 / 10` draft is rejected: founder, team and
 operations totalled 40%, while a 10% liquidity reserve created unnecessary
 control and dump optics.
+
+Comparable projects show that the contributor share is conservative, not an
+attempt to hide an unusually large insider allocation. Uniswap disclosed 21.266%
+for team/future employees and 18.044% for investors, both with four-year vesting.
+Arbitrum disclosed 26.94% for team/contributors/advisers and 17.53% for investors,
+also with four-year locks. These are references, not targets to copy:
+[Uniswap](https://blog.uniswap.org/uni) and
+[Arbitrum](https://docs.arbitrum.foundation/airdrop-eligibility-distribution).
 
 ## Genesis and onchain transparency
 
@@ -60,7 +67,10 @@ control and dump optics.
   role, token-funded yield, token-funded insurance or price-support mechanism.
 - Publish every bucket address, controller, signer affiliations, schedule and
   transaction in a versioned Token Facts Pack and supply dashboard.
-- Community, operations and bridge administration use separate timelocks and
+- The Community Governance Reserve contract has no generic transfer, approval or
+  grant path for project roles. Activation requires a separately reviewed
+  community-governance design and independent approval.
+- Distributions, operations, grants and bridge administration use separate timelocks and
   purpose-specific policy vaults. A Safe 3-of-5 may propose but cannot bypass a
   seven-day delay or execute arbitrary token transfers from a capped vault.
 - An independent Emergency Safe 2-of-3 acts only through an expiring canceller
@@ -74,10 +84,11 @@ control and dump optics.
 `T0` is the publicly declared utility launch timestamp, not merely contract
 deployment. Every schedule uses exact UTC seconds in the genesis manifest.
 
-- Founder: claimable is zero until `T0 + 18 months`; the stream then starts from
-  zero and reaches 100% at `T0 + 60 months`. The grant cannot be cancelled.
+- Founder: part of the shared contributor allocation, capped at 3%; claimable is
+  zero until `T0 + 18 months`, then reaches 100% at `T0 + 72 months`. The grant
+  cannot be cancelled.
 - Team: claimable is zero until its grant-specific `start + 12 months`; the
-  stream then starts from zero and reaches 100% at `start + 48 months`.
+  stream then starts from zero and reaches 100% at `start + 60 months`.
 - Existing contributor grants declare revocability. Future grants may cancel
   only the unvested portion through the Project Timelock. Vested but unclaimed
   value remains owed; returned unvested value goes to its original reserve.
@@ -109,7 +120,7 @@ deployment. Every schedule uses exact UTC seconds in the genesis manifest.
 
 ## Community distributions
 
-The 20% allocation is a ceiling, not a promise to distribute all tokens.
+The 25% allocation is a ceiling, not a promise to distribute all tokens.
 
 - Use one explicitly classified lane per wave:
   - gratuitous retrospective: no eligibility terms before cutoff and no task,
