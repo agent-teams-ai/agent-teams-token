@@ -5,7 +5,7 @@ instead of editing the accepted decision.
 
 ## Proposed
 
-No proposed decisions.
+- [ADR-0004: Feature-module topology and bounded contexts](0004-feature-module-topology.md)
 
 ## Accepted
 

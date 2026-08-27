@@ -11,6 +11,9 @@ Status: обязательные product/security invariants. Ослаблени
 - Никогда не mint-ить 100% supply во временный deployer или Treasury Safe.
   Genesis идёт напрямую в проверенные allocation contracts.
 - Никогда не называть recoverable Solana mint authority абсолютным hard cap.
+- Никогда не называть direct Pool Signer PDA абсолютным bridge-only supply:
+  remote configuration, pool owner, router/offramp и Chainlink program governance
+  остаются trust dependencies.
 - Никогда не писать просто `fixed global supply` в beta: точная формулировка
   `fixed Ethereum issuance with governed Solana recovery authority`.
 - Никогда не оставлять recoverable Solana mint authority перед широкой public
@@ -34,9 +37,18 @@ Status: обязательные product/security invariants. Ослаблени
   audit, infra и legal требуют отдельного stablecoin/fiat budget.
 - Никогда не разрешать treasury sales, buybacks или price support в beta.
 - Никогда не давать Emergency Safe право propose, execute, mint или transfer.
-  Cancellation только expiring, не self-renewable; bridge brake только down-only.
+  Cancellation только expiring, не self-renewable; CCIP EVM v2 brake только
+  pause-to-zero.
 - Никогда не оставлять bridge admin, pool/LockBox owner или rate-limit increase
   под direct Safe: все такие изменения проходят Bridge Timelock.
+- Никогда не считать vanilla `TimelockController` доказательством постоянных 7
+  дней: minimum delay должен быть immutable, а operation иметь expiry и expected
+  state hash.
+- Никогда не использовать положительное partial rate reduction как emergency
+  brake CCIP EVM v2: обновление может refill-нуть bucket; emergency только
+  pause-to-zero.
+- Никогда не разрешать EVM pool/LockBox owner arbitrary router, rebalancer, hook,
+  fee-admin или backing-withdrawal path без protocol-line-specific policy.
 - Никогда не оставлять bootstrap admin, случайный proposer/canceller role,
   неизвестный Safe module, guard или fallback handler.
 - Никогда не принимать изоляцию Safe только потому, что адреса разные. Signer,
@@ -50,6 +62,11 @@ Status: обязательные product/security invariants. Ослаблени
 - Никогда не давать unreleased treasury/vesting/reserve balances voting power.
 - Никогда не включать public Governor до flash-borrow, capture и cross-chain
   participation tests.
+- Никогда не использовать обычный OpenZeppelin `VestingWallet` для founder/team:
+  cliff catch-up, transferable beneficiary ownership и отсутствие нужной revoke
+  semantics противоречат правилам проекта.
+- Никогда не считать rolling commitment cap защитой от synchronized unlock.
+  Отдельный global liquidization budget списывается по earliest possible release.
 
 ## Tokenomics и market
 
@@ -70,6 +87,8 @@ Status: обязательные product/security invariants. Ослаблени
 - Никогда не считать undeployed liquidity reserve community allocation. TOKEN,
   внесённый в permissionless AMM, всегда circulating.
 - Никогда не запускать liquidity mining или volume rewards в beta.
+- Никогда не считать `0.01%` micro-pool способным поглотить `0.25%` distribution
+  pilot без exact whole-allocation sell simulation и genuine-float gate.
 
 ## Community distributions
 
@@ -86,6 +105,9 @@ Status: обязательные product/security invariants. Ослаблени
   claim address и amount всё равно явно раскрываются как публичные onchain data.
 - Никогда не мерить успех только claim rate. Нужны product retention 30/90/180
   дней, immediate sells, cluster share и appeal error rate.
+- Никогда не скрывать Merkle recipient/amount set до funding за одним root. Нужен
+  reproducible public manifest либо independent full-set audit с concentration
+  aggregates, если публикацию запрещает privacy gate.
 
 ## Legal, disclosure и коммуникация
 

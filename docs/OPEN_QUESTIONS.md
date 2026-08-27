@@ -20,9 +20,27 @@ release gate, not an open naming choice.
    share at most one natural person; Emergency has no overlap. Different wallet
    addresses under one employer/custodian/recovery domain are not independent.
 6. Approve the one-way activation rule for the 45% Community Governance Reserve:
-   minimum distributed community supply, earliest time, voting/capture defense
-   and the independent activation group. Until then those tokens are inaccessible
-   to both the project and the community.
+   recommended Ethereum-only aged vote escrow, Constitutional/Operational
+   governor split, earliest time, quorum/floors, 5-of-7 independent attestors and
+   controller migration. Until then those tokens are inaccessible to both the
+   project and the community.
+7. Approve or reject proposed ADR-0004: replace the six package-level contexts in
+   ADR-0003 with `Token Control` and `Cross-chain Accounting`, while retaining
+   Supply, Distribution, Treasury and Launch Liquidity as features.
+8. Set the global 30/90-day liquidization ceiling and outstanding committed-but-
+   unreleased ceiling. Per-vault commitment caps do not prevent synchronized
+   future unlocks.
+9. Decide whether initial-team unvested grants are revocable. Recommended:
+   service grants may return only unvested value after a timelocked cancellation;
+   vested value remains owed. Founder vesting stays non-revocable.
+10. Approve or reject splitting the 1% liquidity allocation into a physically
+    beta-bounded `0.1%` experimental vault and a `0.9%` future reserve with no beta
+    release path.
+11. Choose the Solana emergency model: a small custom pause-only PDA, a broadly
+    privileged emergency Squads with explicit trust, or no fast pause. The first
+    is safest but revisits the current no-custom-Rust MVP rule.
+12. Set rolling commitment-count caps, grant minimum cliff/full-duration and
+    maximum start delay; choose reviewer silence/rejection and appeal behavior.
 
 ## P0 before public liquidity or airdrop
 
@@ -34,6 +52,8 @@ release gate, not an open naming choice.
 3. Public pool venue/CASP/admission, market-conduct, depth, ratio, custody,
    conflicts, restricted-list, trading-window and LP withdrawal policy.
 4. Independent smart-contract audit and public incident response contacts.
+5. Minimum genuine non-affiliate float, whole-pilot sell-impact limit and exact
+   venue simulation. The current `0.01%` micro-pool cannot absorb a `0.25%` pilot.
 
 ## P1 after the first vertical slice
 

@@ -339,7 +339,7 @@ Treasury Safe 3-of-5
 
 Emergency Safe 2-of-3
 ├── ExpiringCanceller, 30-day epoch; cannot self-renew
-└── down-only rate-limit brake; cannot increase limits
+└── EVM v2 one-way pause-to-zero; no positive partial reconfiguration
 
 Community / Project Timelock
 ├── sole DEFAULT_ADMIN_ROLE после атомарного bootstrap
@@ -357,8 +357,9 @@ wallet address. Ключи, устройства и recovery channels не пе�
 временные admin roles: в актуальном `TimelockController` proposer из constructor
 также получает `CANCELLER_ROLE`. Permanent cancel-only authority запрещена:
 скомпрометированный canceller может бесконечно отменять собственное удаление.
-Emergency lane остаётся быстрее обычных changes, но bounded по времени,
-down-only и не получает custody.
+Emergency lane остаётся быстрее обычных changes, но bounded по времени, не
+получает custody и для CCIP EVM v2 может только выставить все buckets в ноль:
+partial reduction способна заново наполнить исчерпанный bucket.
 
 Обычный `TimelockController`, владеющий ERC-20, не обеспечивает budget cap:
 он способен вызвать произвольный `transfer`. Community, Distribution,
@@ -430,14 +431,14 @@ Governance сохраняет возможность recovery/migration чере
 - это нужно публично раскрыть и мониторить.
 - SPL multisig реализует по смыслу `Pool PDA OR governance`, а не обязательную совместную подпись двух слоёв.
 
-### Strict public-mainnet model — рекомендуемый конечный invariant
+### Direct Pool Signer public-mainnet model - recommended baseline
 
 Mint authority передаётся непосредственно Pool Signer PDA без governance recovery path.
 
 Плюсы:
 
-- люди не могут отдельно напечатать Solana supply;
-- более сильное публичное supply-обещание.
+- project key не может отдельно вызвать raw SPL `MintTo`;
+- меньше прямых recovery-authority путей.
 
 Минусы:
 
@@ -445,8 +446,14 @@ Mint authority передаётся непосредственно Pool Signer P
 - выше vendor lock-in;
 - тяжелее emergency recovery;
 - ошибка authority может стать необратимой.
+- supply всё ещё зависит от remote token/pool configuration, CCIP
+  router/offramp и upgradeable Chainlink program governance;
+- Bridge governance может косвенно направить штатный mint через вредоносную
+  remote configuration, если её surface не ограничена policy controller.
 
-На beta по умолчанию используется **recoverable model**, но mainnet не запускается, пока пользователь явно не подтвердит этот выбор.
+Ни одна модель не называется абсолютно `bridge-only`. Mainnet не запускается,
+пока пользователь явно не подтвердит authority model, а protocol-line ADR не
+перечислит все privileged selectors и допустимые state transitions.
 
 ---
 
@@ -519,9 +526,11 @@ Tokenomics является отдельным product/security workstream, а �
 - founder/team allocations не попадают в обычные wallets до vesting release;
 - 45% Community Governance Reserve не имеет project transfer path до отдельно
   одобренного community-governance activation;
-- 70% называются community-designated, не community-controlled: binding
-  community control на genesis равен 0%, а project-administered control не выше
-  55% и раскрывается полностью;
+- primary control view на genesis: `0%` community-controlled, `45%` никем не
+  управляются и закрыты до активации, `25%` project-administered distribution
+  reserve, `30%` другие purpose-specific project/insider allocations;
+- `70% community-designated` разрешено только как вторичная строка рядом с этой
+  разбивкой, а не как обещание контроля или скорой раздачи;
 - founder входит в общий contributor allocation: максимум 3%; другие initial
   contributors суммарно максимум 3%; минимум 9% остаётся для future grants;
 - неиспользованные contributor grants остаются в locked reserve, который может
@@ -559,14 +568,15 @@ Tokenomics является отдельным product/security workstream, а �
 | D-16 | Venue и fee tier | Сравнить Raydium CPMM, Orca Splash и current configs/costs | Не хардкодить venue или устаревший tier |
 | D-17 | LP custody | Squads, не burn | Сохраняет recovery на beta |
 | D-18 | Launch access | Utility/community beta + один highly volatile experimental pool | Permissionless pool доступен всем; первые buyers ограничены token-side cap |
-| D-19 | Initial bridge allocation | Только LP + небольшой treasury buffer | Не переносить лишний supply |
+| D-19 | Initial bridge allocation | Только exact final commitment; generic treasury buffer = 0 | Обычный Squads ATA обходит EVM policy и считается liquid overhang |
 | D-20 | Rate-limit risk budget | Пользователь задаёт максимальный ущерб | Limits должны исходить из tolerable loss |
 | D-20A | 30/90-day liquid-supply shock | Утвердить числовой budget | Fixed supply не ограничивает dump pressure |
 | D-20B | Treasury sale/buyback policy | Zero в beta | Не допустить скрытого price support или treasury dump |
 | D-20C | Airdrop pilot/Sybil budget | ≤ min(0.25% supply, price-impact budget) | Первая wave должна быть обратимо малой |
 | D-20D | Cliff semantics | Zero до cliff, затем linear с нуля | Исключить catch-up dump в один день |
 | D-20E | Circulating/liquid-overhang formula | Machine-readable и dashboarded | Пользователь должен видеть будущий sell pressure |
-| D-20F | Governance activation gate | После flash-borrow/capture tests | Governor на genesis преждевременен |
+| D-20F | Governance activation gate | Ethereum-only aged vote escrow + Constitutional/Operational split; точные параметры ещё утвердить | Governor на genesis и dual-chain vote преждевременны |
+| D-20G | Global liquidization cap | Отдельно от commitment caps, списывается по earliest possible release и охватывает все vaults/Solana accounts | Иначе старые schedules могут разблокироваться одновременно |
 
 ## Как одобрять liquidity
 
@@ -622,7 +632,7 @@ Raydium отдельно предупреждает, что low-TVL CPMM pools �
 | D-35 | Jupiter visibility | Не обещать мгновенную verification |
 | D-36 | Incident communication | Публичная status page и runbook |
 | D-37 | Bridge UI minimum amount | UI warning, не custom onchain rule |
-| D-38 | Timelock delay/cancel policy | Timelock 7 дней; Emergency только expiring canceller + down-only brake |
+| D-38 | Timelock delay/cancel policy | Immutable minimum 7 дней + operation expiry; Emergency expiring canceller и EVM v2 pause-to-zero only |
 | D-39 | Independent code review | Хотя бы один технический reviewer до mainnet |
 | D-40 | Token Facts Pack и legal classification | Freeze/sign до genesis, bind hash; signed address addendum до первого offer/airdrop/marketing |
 | D-41 | EU/public-offer path | Documented exemption либо выполненные white-paper/notification/publication/marketing gates | Facts Pack не заменяет MiCA white paper |
@@ -947,10 +957,9 @@ Docker/Compose используется для Linux CI parity, web, monitor и 
 - feature-module topology из принятого стандарта Agent Teams Orchestrator:
   каждый production artifact принадлежит `src/features/<feature>/`, пустые
   ceremonial layers и broad `domain/shared/common/utils` запрещены;
-- начальные bounded contexts `Token Control` и `Cross-chain Accounting`;
-  Supply, Distribution, Treasury и Launch Liquidity остаются feature
-  capabilities, пока реальная независимость языка/lifecycle не оправдает
-  отдельный package;
+- предлагаемые в ADR-0004 bounded contexts `Token Control` и `Cross-chain
+  Accounting`; до явного принятия ADR-0004 accepted ADR-0003 остаётся source of
+  truth и package migration не начинается;
 - Rust/Anchor не устанавливать для MVP: собственная Solana program запрещена и не нужна.
 
 Foundation capabilities применяются только там, где есть реальный consumer:
@@ -960,7 +969,8 @@ Public API compatibility, executable specifications, publishing security и
 schema evolution включаются после появления соответствующего артефакта, а не с
 фиктивным пустым evidence.
 
-До следующего production slice перенести текущий bootstrap
+После принятия ADR-0004 и добавления mechanical topology gates перенести текущий
+bootstrap
 `packages/domain/src/supply.ts` с тестами в
 `packages/contexts/cross-chain-accounting/src/features/supply-reconciliation/`.
 Не создавать заранее generic `packages/chainlink-adapter` и
@@ -995,7 +1005,8 @@ manifest. Production compilation разрешена только при `status:
 Amounts/caps кодируются только integer base units/bps; exact schedules только UTC
 seconds. Canonical JSON и hash имеют golden vectors в TypeScript и Solidity.
 
-Затем реализовать и протестировать один полный vertical slice:
+Затем реализовать и протестировать один полный vertical slice. Governance
+activation contracts не входят в slice до принятия D-20F:
 
 ```text
 ProjectToken.sol
@@ -1006,17 +1017,19 @@ CommunityDistributionVault.sol
 OperationsBudgetVault.sol
 EcosystemGrantVault.sol
 LiquidityVault.sol
-Community/Project Timelock bootstrap
+immutable-minimum-delay Timelock bootstrap with operation expiry
 local deploy + independent read-only verifier report
 ```
 
 Это не один универсальный treasury contract. Каждый vault имеет отдельный
 purpose и не содержит generic `execute`, generic `transfer`, arbitrary
 `approve`, proxy upgrade или controller replacement. Commitment списывает
-rolling capacity в момент создания обязательства, а не claim. Базовый вариант
-rolling cap использует append-only cumulative checkpoints за точные `365 days`,
-без calendar-boundary burst и rollover. Детали и обязательные adversarial tests
-описаны в [`CONTRACTS.md`](CONTRACTS.md).
+rolling capacity в момент создания обязательства, а не claim. Базовый rolling
+cap использует append-only cumulative checkpoints за точные `365 days`, без
+calendar-boundary burst и rollover. Отдельный global liquidization cap
+списывается по earliest possible release и не даёт разным vaults накопить
+синхронный unlock. Детали и обязательные adversarial tests описаны в
+[`CONTRACTS.md`](CONTRACTS.md).
 
 🚨 До кода нужно отдельно принять activation gate для 45% Community Governance
 Reserve. Project Safe не может сам выбрать любой адрес и назвать его community
@@ -1395,10 +1408,13 @@ Mainnet последовательность:
 7. Deploy Ethereum token с прямым genesis allocation.
 8. Проверить source, `GENESIS_MANIFEST_HASH`, bucket balances и нулевые
    необъяснимые balances deployer/factory/Safe.
-9. Deploy/configure LockRelease pool.
+9. Deploy/configure LockRelease pool only behind the protocol-line-specific
+   admin policy controller; verify every privileged selector, immutable minimum
+   delay, operation expiry and backing-withdrawal prohibition.
 10. Register CCIP admin.
 11. Create Solana mint and metadata; remove freeze authority.
-12. Initialize BurnMint pool and configure authority model/remotes/rate limits.
+12. Initialize BurnMint pool and configure authority model/remotes/rate limits;
+    verify exact remote token/pool, program hash, upgrade authority and owner.
 13. Run verifier.
 14. Small Ethereum→Solana canary and target-chain state verification.
 15. Small Solana→Ethereum canary and target-chain state verification.
@@ -1782,7 +1798,7 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 │   └── evm/
 │       ├── src/features/
 │       ├── test/features/
-│       ├── script/
+│       ├── script/features/
 │       └── foundry.toml
 ├── packages/
 │   └── contexts/
@@ -1811,6 +1827,11 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 └── secrets/
     └── testnet/        # gitignored
 ```
+
+Эта topology является proposed target из ADR-0004. Не создавать пустые каталоги
+и не мигрировать `packages/domain`, пока ADR-0004 не принят и package catalog,
+default-deny source policy, topology validator и consumer tests не включены в
+root `check`.
 
 Make targets:
 

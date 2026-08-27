@@ -19,21 +19,28 @@ excluding CCIP and the web application.**
 | Ecosystem and public grants | 6% | Commitments capped at 1% per rolling 12 months; milestone evidence and independent approval for related parties |
 | Liquidity reserve | 1% | First experimental pool capped at 0.01%, cumulative experimental beta at 0.1%; the remainder stays locked |
 
-This makes 70% community-designated. At genesis, proven binding community
-control is still 0%, but project roles can administer at most 55%; the 45%
-governance reserve has no project transfer path before independently approved
-community governance is activated. Of the 15% contributor allocation, no more
-than 3% is the disclosed founder grant, no more than 3% may be assigned to other
-initial contributors, and at least 9% remains locked for future work.
+The primary control disclosure at genesis is:
+
+- `0%` controlled by community governance;
+- `45%` activation-locked and controlled by nobody;
+- `25%` project-administered long-term distribution reserve;
+- `30%` other project/insider-administered purpose-specific allocations.
+
+The secondary label `70% community-designated` is allowed only next to that
+breakdown. It does not mean `70% community-controlled` or `70% promised for near-
+term distribution`. Of the 15% contributor allocation, no more than 3% is the
+disclosed founder grant, no more than 3% may be assigned to other initial
+contributors, and at least 9% remains locked for future work.
 
 The working fixed-supply default is `100,000,000` units with `9` decimals. Nine
 decimals match Solana and avoid irreversible precision loss or `u64` overflow
 from an 18-decimal representation. Supply size does not establish value.
 
-The truthful beta claim is: **fixed Ethereum issuance with a disclosed,
-governed Solana recovery authority and continuous reconciliation**. Solana is
-not described as cryptographically bridge-only until mint authority is moved
-directly to the Pool Signer PDA and that target-chain state is verified.
+The truthful beta claim is: **fixed Ethereum issuance with disclosed CCIP and
+Solana governance dependencies plus continuous reconciliation**. Direct Pool
+Signer PDA blocks raw project `MintTo`, but supply still depends on remote-pool
+configuration, router/offramp verification and Chainlink program governance. It
+is never described as absolutely bridge-only.
 
 ## Other viable allocations
 
@@ -48,8 +55,9 @@ The prior `35 / 18 / 14 / 8 / 15 / 10` draft is rejected: founder, team and
 operations totalled 40%, while a 10% liquidity reserve created unnecessary
 control and dump optics.
 
-Comparable projects show that the contributor share is conservative, not an
-attempt to hide an unusually large insider allocation. Uniswap disclosed 21.266%
+Comparable allocations establish a market range, not trust or intent. Trust is
+established by current control, exact beneficiaries, enforceable release paths
+and live reporting. Uniswap disclosed 21.266%
 for team/future employees and 18.044% for investors, both with four-year vesting.
 Arbitrum disclosed 26.94% for team/contributors/advisers and 17.53% for investors,
 also with four-year locks. These are references, not targets to copy:
@@ -79,8 +87,9 @@ are accepted.
   purpose-specific policy vaults. A Safe 3-of-5 may propose but cannot bypass a
   seven-day delay or execute arbitrary token transfers from a capped vault.
 - An independent Emergency Safe 2-of-3 acts only through an expiring canceller
-  and a down-only bridge brake. It cannot renew its own authority, propose,
-  execute, shorten delays, mint, transfer assets or increase rate limits.
+  and, for CCIP EVM v2, a one-way pause-to-zero. It cannot renew its own
+  authority, propose, execute, shorten delays, mint, transfer assets or increase
+  rate limits.
 - No Safe modules or guards at genesis. Any later activation requires a separate
   review, timelock and public state diff.
 
@@ -94,6 +103,8 @@ deployment. Every schedule uses exact UTC seconds in the genesis manifest.
   cannot be cancelled.
 - Team: claimable is zero until its grant-specific `start + 12 months`; the
   stream then starts from zero and reaches 100% at `start + 60 months`.
+- Pre-launch service does not create a launch-day catch-up. The token-liquidity
+  schedule starts no earlier than its declared post-`T0` schedule.
 - Existing contributor grants declare revocability. Future grants may cancel
   only the unvested portion through the Project Timelock. Vested but unclaimed
   value remains owed; returned unvested value goes to its original reserve.
@@ -106,26 +117,32 @@ deployment. Every schedule uses exact UTC seconds in the genesis manifest.
 
 ## Treasury market policy
 
-- Beta has zero treasury token sales, buybacks, price support, liquidity mining,
-  volume rewards, staking emissions or APY promises.
+- The issuer executes zero treasury market sales in beta. Contributors, vendors
+  and grantees may sell received tokens, so every claimable payment is counted as
+  fully sellable liquid overhang. Beta also has zero buybacks, price support,
+  liquidity mining, volume rewards, staking emissions or APY promises.
 - Project payroll, audits, infrastructure and legal costs require a separately
   disclosed stablecoin or fiat budget. Spot value of treasury tokens is never
   presented as operating runway.
 - Any later token sale or LP funding requires advance public notice, destination
   disclosure, legal review, a rolling volume/depth cap, conflict recusals and a
   timelocked proposal.
-- Across discretionary treasury, operations, distributions and LP expansion,
+- Across governance reserve, distributions, contributor grants, operations,
+  ecosystem grants, LP expansion and project-controlled Solana accounts,
   new 90-day liquid supply is capped by the minimum of `0.5%` total supply,
   `10%` trailing 90-day average liquid supply and the approved executable
   sell-depth budget. Cap excess pauses new discretionary actions, never already
   vested beneficiary rights.
-- Treasury tokens bridged to Solana must arrive at a named Squads-controlled ATA
-  with equivalent budget policy. Bridging never changes allocation ownership or
-  circulation classification.
+- No generic Solana treasury buffer is bridged. A transfer is tied to an exact
+  final commitment; any ordinary Squads-controlled ATA balance is counted as
+  fully liquid overhang even if its allocation label is preserved.
 
 ## Community distributions
 
-The 25% allocation is a ceiling, not a promise to distribute all tokens.
+The 25% allocation is a ceiling, not a promise to distribute all tokens. The
+current six-wave program authorizes at most `3%` of total supply. At least `22%`
+remains unprogrammed: it creates no current entitlement, voting power or expected
+distribution.
 
 - Use one explicitly classified lane per wave:
   - gratuitous retrospective: no eligibility terms before cutoff and no task,
@@ -171,6 +188,9 @@ never be used to imply FDV or project valuation.
 - The first pool may contain at most 0.01% of total supply; cumulative token-side
   deployment during experimental beta is at most 0.1%. This bounds how much an
   early buyer can acquire even if the quote side is drained.
+- This micro-pool cannot absorb the current `0.25%` pilot. Before either action,
+  an exact full-allocation sell simulation and a global 30/90-day liquidization
+  budget must pass. Until then neither action authorizes the other.
 - Select Raydium CPMM, Orca Splash or another standard permissionless venue only
   after current mainnet simulation proves the complete creation cost fits the
   same `$100` hard cap. Raydium's current documented creation cost is about 0.2
@@ -184,7 +204,8 @@ never be used to imply FDV or project valuation.
   `$100` swap and 5% for `$500`. With a 25 bps CPMM, the first target needs
   roughly `$13.2k` quote reserve; plan at least `$15k` and prefer `$20k` if the
   community eventually provides it directly. Realized slippage is separate.
-- The unused liquidity reserve stays in its own timelocked Liquidity Vault.
+- Recommended, still open: place only `0.1%` in an experimental vault and keep
+  `0.9%` in a separate future reserve with no beta release path.
 - LP custody stays in a disclosed Squads vault. It is not called "locked" while
   Squads can withdraw. Publish the withdrawal delay, notice policy, fee
   destination, controller and conflicts.

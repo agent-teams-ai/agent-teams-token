@@ -35,13 +35,22 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - Six independent critics returned `AMEND`, not `REJECT`; accepted amendments
   and deliberately unresolved choices are recorded in
   `docs/research/CRITIQUE-ROUND-2026-08-27.md`.
+- Four contract designers and five independent critics reviewed the release,
+  governance, liquidity, security, economics and architecture proposal. The
+  synthesis is recorded in
+  `docs/research/CONTRACT-DESIGN-REVIEW-2026-08-27.md`; no contract code started.
+- The requested hosted review runtime was unavailable. The nine reviews used a
+  disclosed local read-only fallback and are not represented as hosted jobs.
 
 ## Designed, not implemented
 
-- Feature-owned repository topology from the Agent Teams Orchestrator standard;
-  the existing generic bootstrap domain package still needs its first-slice move.
-- Purpose-specific release/vesting vault proposal and rolling commitment model;
-  governance-reserve activation remains an explicit open decision.
+- Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
+  two-context topology is recorded in ADR-0004 and awaits explicit acceptance;
+  the existing generic bootstrap package is not migrated before that decision
+  and mechanical topology gates.
+- Purpose-specific release/vesting vault proposal, rolling commitments and global
+  liquidization budget; governance-reserve activation remains an explicit open
+  decision and ABI blocker.
 - Ethereum fixed-supply token, vesting and treasury contracts.
 - Chainlink CCIP Ethereum and Solana pool configuration.
 - CCIP EVM `1.6.4` versus `2.0.0` compatibility ADR and canonical backing-holder

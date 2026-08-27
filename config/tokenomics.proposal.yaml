@@ -10,7 +10,7 @@ token:
   workingName: Agent Teams AI
   workingSymbol: AGTMAI
   namingStatus: owner-approved-pending-formal-clearance
-  fixedSupply: "100000000"
+  fixedSupplyBaseUnits: "100000000000000000"
   decimals: 9
 allocations:
   communityGovernanceReserve:
@@ -21,11 +21,17 @@ allocations:
     postActivationRollingTwelveMonthCommitmentCeilingBpsOfTotalSupply: 200
     unusedCapRollover: false
     custody: governance-activation-vault
+    activationModel: unset
+    activationParametersStatus: unset
   communityDistributions:
     allocationBps: 2500
     initialProgramMaximumWaves: 6
     targetDurationMonths: 60
     pilotMaximumBpsOfTotalSupply: 25
+    pilotRequiresWholeAllocationSellSimulation: true
+    pilotMaximumPriceImpactBps: unset
+    pilotMinimumGenuineNonAffiliateFloatBps: unset
+    publicPilotAuthorized: false
     perWaveMaximumBpsOfTotalSupply: 50
     yearOneMaximumBpsOfTotalSupply: 100
     rollingTwelveMonthMaximumBpsOfTotalSupplyAfterYearOne: 200
@@ -33,6 +39,8 @@ allocations:
     appealPreviewDays: 14
     claimWindowDays: 180
     unclaimedDestination: community-distribution-reserve
+    currentProgramMaximumAuthorizedBpsOfTotalSupply: 300
+    currentProgramMinimumUnprogrammedBpsOfTotalSupply: 2200
   teamAndContributors:
     allocationBps: 1500
     founderMaximumBpsOfTotalSupply: 300
@@ -49,6 +57,7 @@ allocations:
     grantStartsAreStaggered: true
     futureGrantUnvestedRevocable: true
     founderGrantRevocable: false
+    initialTeamGrantRevocability: unset
     founderIsSeparateTopLevelAllocation: false
   protocolOperations:
     allocationBps: 800
@@ -81,6 +90,9 @@ allocations:
     maturePoolPlanningQuoteReserveUsdMinimum: 15000
     maturePoolPreferredQuoteReserveUsdWithHeadroom: 20000
     listingCommitment: false
+    proposedExperimentalVaultBpsOfTotalSupply: 10
+    proposedFutureReserveBpsOfTotalSupply: 90
+    physicalVaultSplitStatus: unset
 governance:
   bridgeAdminSafeThreshold: 3
   bridgeAdminSafeOwners: 5
@@ -88,10 +100,12 @@ governance:
   treasurySafeOwners: 5
   emergencySafeThreshold: 2
   emergencySafeOwners: 3
-  emergencyRole: expiring-canceller-and-down-only-bridge-brake
+  emergencyRole: expiring-canceller-and-evm-v2-pause-to-zero
   emergencyEpochDays: 30
   emergencyMayRenewOwnAuthority: false
   timelockDays: 7
+  timelockMinimumIsImmutable: true
+  timelockOperationExpirySeconds: unset
   bridgeAdministrationBehindTimelock: true
   policyVaultsRejectGenericExecute: true
 rights:
@@ -117,11 +131,15 @@ consideration:
 transparency:
   communityControlAtGenesisBps: 0
   communityDesignatedBps: 7000
+  communityDesignatedIsSecondaryLabelOnly: true
   projectInaccessibleCommunityGovernanceReserveBps: 4500
   projectAdministeredControlAtGenesisBps: 5500
+  projectAdministeredDistributionReserveBps: 2500
+  otherProjectOrInsiderAdministeredPurposeSpecificBps: 3000
   controlledWalletsPublished: true
   signerAffiliationsPublished: true
-  beneficialOwnersAggregated: true
+  projectAffiliatesDisclosedPerWalletAndBeneficialOwner: true
+  independentCommunityBeneficialOwnersMayBeAggregated: true
   perWalletUnlockCalendarPublished: true
   lpWithdrawalPowersPublished: true
   tokenFactsPackRequired: true
@@ -130,6 +148,9 @@ transparency:
   signedPostDeployAddressAddendumBeforeDistribution: true
 marketPolicy:
   treasurySalesInBeta: false
+  issuerExecutesMarketSalesInBeta: false
+  contributorVendorAndGranteeSalesRemainPossible: true
+  claimablePaymentsCountAsFullySellableLiquidOverhang: true
   issuerPriceSupport: false
   buybacksInBeta: false
   liquidityMiningInBeta: false
@@ -138,6 +159,20 @@ marketPolicy:
   discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfTotalSupply: 50
   discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfLiquidSupply: 1000
   discretionaryLiquidSupplyAlsoBoundedByExecutableSellDepth: true
+  globalLiquidizationBudgetIncludesAllAllocationVaultsAndProjectSolanaAccounts: true
+  liquidizationCapacityChargedAtEarliestPossibleRelease: true
+  projectControlledSolanaTreasuryBufferBaseUnits: "0"
+  betaOperationsLiquidTokenOutflowBaseUnits: "0"
+releasePolicy:
+  rollingWindowSeconds: 31536000
+  rollingWindowInterval: "(now-window,now]"
+  returnsRestoreCommitmentCapacity: false
+  rollingCommitmentCountCapsRequired: true
+  globalOutstandingCommittedButUnreleasedCeilingBps: unset
+  globalRollingNinetyDayLiquidizationCeilingBps: unset
+  futureGrantMinimumCliffSeconds: unset
+  futureGrantMinimumFullVestingDurationSeconds: unset
+  maximumCommitmentStartDelaySeconds: unset
 invariants:
   mintOnceOnEthereum: true
   deployerBalanceAfterGenesis: "0"

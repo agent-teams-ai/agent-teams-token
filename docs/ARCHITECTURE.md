@@ -30,16 +30,25 @@ accepted config -> canonical manifest/hash -> Ethereum ERC-20 + policy vaults
 ## Adopted feature-module standard
 
 The repository adopts the accepted Agent Teams Orchestrator
-`docs/architecture/feature-module-standard.md` as its source-layout standard.
+`docs/architecture/feature-module-standard.md` as its source-layout standard,
+reviewed at orchestrator commit `81e6946`. This repository keeps its enforcement
+local rather than importing application code from the orchestrator.
 Production behavior is owned by a real capability under
 `src/features/<feature>/`; layers are created only when they contain behavior.
 Broad `domain`, `shared`, `common`, `utils`, `services` and `infrastructure`
 packages or directories are prohibited.
 
 The current bootstrap `packages/domain/src/supply.ts` predates this adoption and
-is intentionally not treated as the target architecture. Before adding the next
-production slice it moves, with its tests, into the feature-owned boundary below.
-No contract implementation starts on the old generic package topology.
+is intentionally not treated as the target architecture. Its exact destination
+depends on proposed ADR-0004; no package migration or contract implementation
+starts on the old generic topology before that decision.
+
+## Proposed bounded-context topology
+
+ADR-0003 currently remains accepted and names six contexts. Independent review
+found the following two-context topology cleaner, but changing an accepted ADR
+requires [ADR-0004](decisions/0004-feature-module-topology.md) to be explicitly
+accepted rather than silently rewriting history.
 
 ```text
 packages/
@@ -63,8 +72,8 @@ contracts/evm/
     operations-budget/
     ecosystem-grants/
     launch-liquidity/
-    ccip-pool/                 # only after the protocol-line ADR
   test/features/
+  script/features/
 
 apps/
   monitor/                     # thin composition root
@@ -118,6 +127,16 @@ consumer, not with fabricated empty evidence.
 
 Directories are introduced with their first vertical slice, not pre-created as
 empty architecture.
+
+Before the first package move, enforcement adds a package catalog, default-deny
+source policy, token-local topology validator with negative fixtures, nested
+workspace/TypeScript discovery, package exports and black-box/declaration/packed-
+artifact consumer tests. Foundation supplies the released package-boundary
+recipe and repository gates; it does not replace feature-topology validation.
+
+The official CCIP pool is configured by feature-owned scripts after the protocol
+ADR. There is no local `ccip-pool` production-contract feature unless the project
+later approves a real custom onchain artifact.
 
 The detailed release-contract proposal and the limits of what code can prove are
 recorded in [CONTRACTS.md](CONTRACTS.md).
