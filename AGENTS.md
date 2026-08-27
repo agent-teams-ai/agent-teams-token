@@ -11,7 +11,7 @@ Hard rules:
 - do not write a custom bridge, relayer, CCIP program, or token mechanics;
 - do not call a mocked delivery a real CCIP E2E;
 - update `docs/PLAN.md` immediately when a confirmed plan error is found;
-- record irreversible architecture choices in `docs/adr/`;
+- record irreversible architecture choices in `docs/decisions/`;
 - pin dependencies, binaries, images, program artifacts, and network data;
 - use decimal strings or `bigint` for CCIP selectors, never JavaScript number;
 - use conventional commits and never use an AI/agent branch prefix;
@@ -32,6 +32,7 @@ Before handoff run:
 
 ```text
 ./dev doctor
+pnpm check:changed
+pnpm check:fast
 pnpm check
 ```
-

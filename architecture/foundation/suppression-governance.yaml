@@ -1,0 +1,7 @@
+schemaVersion: 1
+governedRoots:
+  - packages
+  - apps
+nonWaivableRulePrefixes:
+  - access-control.
+waivers: []

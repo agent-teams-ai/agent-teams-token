@@ -36,14 +36,14 @@ if [[ ! -d "$token_tools_root/node-v24.20.0-darwin-arm64" ]]; then
   tar -xzf "$node_archive" -C "$token_tools_root"
 fi
 
-foundry_archive="$token_tools_root/downloads/foundry-v1.7.1-darwin-arm64.tar.gz"
+foundry_archive="$token_tools_root/downloads/foundry-v1.8.0-darwin-arm64.tar.gz"
 download_verified \
-  "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_darwin_arm64.tar.gz" \
-  "eacdc67718fac857cad9e19c7f6729dd80de731d09df81856391d093cfcab547" \
+  "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.tar.gz" \
+  "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0" \
   "$foundry_archive"
-if [[ ! -d "$token_tools_root/foundry-v1.7.1" ]]; then
-  mkdir -p "$token_tools_root/foundry-v1.7.1"
-  tar -xzf "$foundry_archive" -C "$token_tools_root/foundry-v1.7.1"
+if [[ ! -d "$token_tools_root/foundry-v1.8.0" ]]; then
+  mkdir -p "$token_tools_root/foundry-v1.8.0"
+  tar -xzf "$foundry_archive" -C "$token_tools_root/foundry-v1.8.0"
 fi
 
 agave_archive="$token_tools_root/downloads/agave-v4.2.1-darwin-arm64.tar.bz2"
@@ -62,4 +62,3 @@ corepack prepare pnpm@11.24.0 --activate
 pnpm install --frozen-lockfile=false
 
 echo "Project-local toolchains are ready. Run ./dev doctor."
-

@@ -1,46 +1,100 @@
 schemaVersion: 1
 status: proposal
 token:
-  workingName: Agent Teams Commons
-  workingSymbol: ATCM
+  workingName: Agent Teams AI
+  workingSymbol: ATAI
+  namingStatus: exact-symbol-collision-review
   fixedSupply: "100000000"
   decimals: 9
 allocations:
   communityTreasury:
-    percent: 35
-    initialPercentOfTotalSupply: 3
-    remainingVestingMonths: 72
-  projectDevelopment:
-    percent: 18
-    initialPercentOfTotalSupply: 2
-    remainingVestingMonths: 60
+    percent: 42
+    yearOneOutflowCeilingPercentOfTotalSupply: 2
+    custody: community-timelock
+  protocolOperations:
+    percent: 12
+    yearOneTokenOutflowCeilingPercentOfTotalSupply: 0.5
+    custody: project-timelock
   teamAndContributors:
-    percent: 14
+    percent: 13
     cliffMonths: 12
-    vestingMonths: 48
+    fullyVestedAtMonth: 48
+    cliffCatchUp: false
+    grantStartsAreStaggered: true
+    futureGrantUnvestedRevocable: true
   founder:
-    percent: 8
-    cliffMonths: 12
-    vestingMonths: 60
-  airdrop:
-    percent: 15
-    plannedWaves: 4
+    percent: 5
+    cliffMonths: 18
+    fullyVestedAtMonth: 60
+    cliffCatchUp: false
+    revocable: false
+  communityDistributions:
+    percent: 20
+    plannedMaximumWaves: 6
+    targetDurationMonths: 60
+    pilotMaximumPercentOfTotalSupply: 0.25
+    yearOneMaximumPercentOfTotalSupply: 1
+    appealPreviewDays: 14
     claimWindowDays: 180
+    unclaimedDestination: community-distribution-reserve
   liquidity:
-    percent: 10
-    betaPercentOfTotalSupply: 0
-    initialPostGateMaximumPercentOfTotalSupply: 2
+    percent: 8
+    publicBetaPercentOfTotalSupply: 0
+    initialTokenSideMaximumPercentOfTotalSupply: 0.25
+    devnetQuoteReserveUsdMaximum: 100
+    publicDepthProbeUsd: 100
+    publicDepthMaximumExecutionSlippageBps: 100
+    listingCommitment: false
 governance:
+  adminSafeThreshold: 3
+  adminSafeOwners: 5
   treasurySafeThreshold: 3
   treasurySafeOwners: 5
+  emergencySafeThreshold: 2
+  emergencySafeOwners: 3
+  emergencyRole: cancel-only
   timelockDays: 7
+rights:
+  liveConsumptiveUtilityRequiredBeforePublicDistribution: true
+  equity: false
+  debt: false
+  dividend: false
+  revenueOrProfitShare: false
+  passiveYield: false
+  redemption: false
+  treasuryOrAssetClaim: false
+  priceFloorOrBuybackPromise: false
+consideration:
+  airdropIsFreeByDefault: false
+  perWaveLegalMemoRequired: true
+  retrospectiveSnapshotRequired: true
+  promotionReferralWorkOrPersonalDataAllowedForFreeAirdrop: false
+transparency:
+  controlledWalletsPublished: true
+  signerAffiliationsPublished: true
+  beneficialOwnersAggregated: true
+  perWalletUnlockCalendarPublished: true
+  lpWithdrawalPowersPublished: true
+  tokenFactsPackRequired: true
+marketPolicy:
+  treasurySalesInBeta: false
+  issuerPriceSupport: false
+  buybacksInBeta: false
+  liquidityMiningInBeta: false
+  tokenFundedYield: false
+  tokenFundedInsurance: false
 invariants:
   mintOnceOnEthereum: true
   deployerBalanceAfterGenesis: "0"
+  treasurySafeBalanceAfterGenesis: "0"
+  directMintToAllocationContracts: true
   ownerMint: false
   proxyUpgrade: false
   transferTax: false
   blacklist: false
-  founderVestingTransferable: false
+  founderVestingHasOnchainTransferPath: false
   unreleasedTokensVote: false
-
+  bridgePreservesAllocationClassification: true
+  orphanBridgeMints: "0"
+  duplicateSettlements: "0"
+  unexplainedSupplyDelta: "0"

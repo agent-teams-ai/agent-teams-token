@@ -14,9 +14,9 @@
       "version": "7.0.2"
     },
     "foundry": {
-      "version": "1.7.1",
-      "darwinArm64Url": "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_darwin_arm64.tar.gz",
-      "sha256": "eacdc67718fac857cad9e19c7f6729dd80de731d09df81856391d093cfcab547"
+      "version": "1.8.0",
+      "darwinArm64Url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.tar.gz",
+      "sha256": "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0"
     },
     "agave": {
       "version": "4.2.1",

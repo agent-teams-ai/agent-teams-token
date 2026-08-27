@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256",
+  "decisions": [
+    {
+      "id": "ADR-0001",
+      "path": "docs/decisions/0001-hybrid-toolchain.md",
+      "immutableDigest": "sha256:b297d8a18e61b81940ae7abed90ded4a896f6e9fb6e8e5494222f468127ca0ac"
+    },
+    {
+      "id": "ADR-0002",
+      "path": "docs/decisions/0002-script-first-ccip.md",
+      "immutableDigest": "sha256:050e521babe2355eedf4757cc4c393c380e8eec4aa47f4aefe042733c41720f9"
+    },
+    {
+      "id": "ADR-0003",
+      "path": "docs/decisions/0003-clean-architecture-boundaries.md",
+      "immutableDigest": "sha256:7ff425e0328aa92dbbc2c6973e869aaaa5aa111f66be6f5c6add2596187afbc6"
+    }
+  ]
+}

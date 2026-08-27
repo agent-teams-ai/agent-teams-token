@@ -1,0 +1,19 @@
+schemaVersion: 1
+workspace:
+  kind: pnpm
+  manifest: pnpm-workspace.yaml
+governedRoots:
+  - packages/domain/src
+boundaries:
+  - id: token.domain
+    roots:
+      - packages/domain/src
+    entrypoints:
+      - packages/domain/src/supply.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins:
+        - node:assert/strict
+        - node:test
+      runtimeReferences: []

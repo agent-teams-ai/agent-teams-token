@@ -2,7 +2,7 @@ name: agent-teams-token
 
 services:
   anvil:
-    image: ghcr.io/foundry-rs/foundry:v1.7.1@sha256:8347b728d5d393dac1c018691b36f506d23b9dcd78341d40ea0fcb11c3a19cdd
+    image: ghcr.io/foundry-rs/foundry:v1.8.0@sha256:502b630dbbffd94d493122cd849c71d13633d5e5114588568a564434c64687e7
     # Override the image's `sh -c` entrypoint so every Anvil argument is kept.
     entrypoint: ["anvil"]
     command: ["--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1"]

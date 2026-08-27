@@ -5,7 +5,7 @@ token_env_tools_root="$token_env_repo_root/.tools"
 
 for token_env_bin_dir in \
   "$token_env_tools_root/node-v24.20.0-darwin-arm64/bin" \
-  "$token_env_tools_root/foundry-v1.7.1" \
+  "$token_env_tools_root/foundry-v1.8.0" \
   "$token_env_tools_root/bin"
 do
   if [[ -d "$token_env_bin_dir" ]]; then

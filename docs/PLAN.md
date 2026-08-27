@@ -21,7 +21,7 @@
    - `docs/DECISIONS.md`;
    - `docs/OPEN_QUESTIONS.md`;
    - `docs/STATUS.md`;
-   - каталог `docs/adr/` для Architecture Decision Records.
+   - каталог `docs/decisions/` для Architecture Decision Records.
 4. Задай пользователю **одним сообщением один пакет продуктовых вопросов уровня P0**, перечисленных ниже.
 5. Пока пользователь отвечает, не простаивай:
    - исследуй актуальные версии;
@@ -106,8 +106,8 @@
 | Token-level pause | Нет |
 | Solana freeze authority | None |
 | Ethereum trading pool на старте | Нет |
-| Solana trading pool | Raydium CPMM TOKEN/USDC |
-| Начальная cash liquidity | Ориентир $50–100 USDC |
+| Solana trading pool | Raydium CPMM TOKEN/USDC только после отдельного depth/legal gate |
+| Начальная cash liquidity | Не зафиксирована; $50–100 USDC допустимы только для Devnet |
 | LP custody | LP-токены держит Squads, не сжигаются в beta |
 | Ethereum governance | Отдельные Admin Safe и Treasury Safe |
 | Solana governance | Squads + SPL Token Multisig |
@@ -161,7 +161,8 @@
 │ - no post-deploy mint                                    │
 │ - immutable / no proxy                                   │
 │                                                          │
-│ Treasury Safe ── sends tokens ──> LockReleaseTokenPool   │
+│ Named allocation contracts / Timelocks                  │
+│      └── approved bridge budget ──> LockReleaseTokenPool │
 │ Admin Safe ── manages CCT admin, pool and rate limits     │
 └──────────────────────────┬───────────────────────────────┘
                            │
@@ -191,7 +192,11 @@ CCIP официально описывает такую комбинацию к�
 - актуальную стабильную версию OpenZeppelin Contracts;
 - `ERC20`;
 - переопределение `decimals()` → `9`;
-- constructor mint всего fixed supply на Treasury Safe;
+- constructor mint каждого allocation bucket напрямую в его конечный
+  vesting/reserve/timelock contract; deployer и Treasury Safe не получают
+  промежуточную custody над `100%` supply;
+- `GENESIS_MANIFEST_HASH` связывает token deployment с точными allocation IDs,
+  base-unit amounts, beneficiaries, UTC timestamps и revocability rules;
 - минимальный механизм регистрации CCIP admin, если его требует актуальный выбранный registration flow.
 
 Не добавлять без отдельного решения:
@@ -309,23 +314,34 @@ adjustedGlobalSupply =
 Предлагаемая схема:
 
 ```text
-Admin Safe 2-of-3
+Admin Safe 3-of-5
 ├── CCT token admin
 ├── LockRelease pool owner
 ├── rate-limit admin
 ├── remote-chain configuration
 └── emergency cross-chain actions
 
-Treasury Safe 2-of-3
-├── unallocated supply
-├── liquidity allocation
-├── contributor allocations
-└── operational treasury
+Treasury Safe 3-of-5
+└── proposer для отдельных Community и Project Timelock
+
+Emergency Safe 2-of-3
+└── CANCELLER_ROLE only; не может schedule/execute/transfer assets
+
+Community / Project Timelock
+├── sole DEFAULT_ADMIN_ROLE после атомарного bootstrap
+├── minimum delay 7 дней
+└── открытый EXECUTOR_ROLE не обходит schedule/delay
 ```
 
-Admin и Treasury должны быть разными Safe-адресами. Хотя бы один signer должен различаться; одинаковый signer set не изолирует correlated compromise. Ключи и устройства не переиспользуются между ролями.
+Admin, Treasury и Emergency должны быть разными Safe-адресами. Пересечение
+Admin/Treasury signer sets должно быть меньше их threshold: отличие только
+одного signer не защищает от correlated threshold compromise. Ключи, устройства
+и recovery channels не переиспользуются между ролями.
 
-Для более зрелой версии можно перейти на 3-of-5 и добавить timelock для обычных admin-операций. Emergency lane restriction должна оставаться быстрее, чем обычные governance changes.
+При bootstrap нужно явно отозвать автоматически выданные proposer/canceller и
+временные admin roles: в актуальном `TimelockController` proposer из constructor
+также получает `CANCELLER_ROLE`. Emergency lane restriction для CCIP должна
+оставаться быстрее обычных treasury changes, но не получает treasury custody.
 
 Agent может:
 
@@ -406,7 +422,9 @@ Mint authority передаётся непосредственно Pool Signer P
 
 # 8. Бюджет и финансовые ограничения
 
-Главное: бюджет в десятки тысяч долларов не нужен.
+Главное: разработка и локальные тесты не требуют газа. Публичный market pool не
+входит в минимальный технический бюджет и может потребовать существенно больше
+капитала для безопасной глубины.
 
 ## Предварительный минимальный бюджет
 
@@ -415,9 +433,10 @@ Mint authority передаётся непосредственно Pool Signer P
 | Ethereum deploy/config reserve | около $20–50 |
 | Solana token/CCIP/Squads/Raydium reserve | около 0.5–0.8 SOL |
 | CCIP mainnet round-trip tests | около $10–25 |
-| Initial Raydium liquidity | $50–100 USDC |
+| Raydium Devnet liquidity | $50–100 fake USDC |
+| Public Raydium liquidity | Не определена; отдельный depth/legal approval |
 | Непредвиденный резерв | $50–100 |
-| Общий подготовленный бюджет | примерно $250–350 |
+| Общий технический бюджет без public LP | примерно $250–350, уточняется по live gas/SOL |
 
 Неиспользованные ETH и SOL остаются на кошельках. USDC в LP — это risk capital, а не сервисная комиссия.
 
@@ -444,8 +463,8 @@ ETHEREUM_HARD_BUDGET_USD=200
 
 CCIP_TEST_SOFT_BUDGET_USD=25
 
-RAYDIUM_LIQUIDITY_USDC=100
-RAYDIUM_LIQUIDITY_HARD_CAP_USDC=100
+RAYDIUM_DEVNET_LIQUIDITY_USDC=100
+RAYDIUM_MAINNET_LIQUIDITY_USDC=UNSET
 
 ALLOW_PAID_SUBSCRIPTIONS=false
 ALLOW_MAINNET_BROADCAST=false
@@ -458,58 +477,68 @@ ALLOW_MAINNET_POOL_CREATION=false
 
 # 9. Продуктовые решения, которые нужно принять вместе с пользователем
 
-Tokenomics является отдельным product/security workstream, а не только строкой allocations. Source of truth — `docs/TOKENOMICS.md` и будущий machine-readable `config/tokenomics.yaml`.
+Tokenomics является отдельным product/security workstream, а не только строкой allocations. Source of truth — `docs/TOKENOMICS.md` и machine-readable proposal `config/tokenomics.proposal.yaml`; после принятия создаётся immutable genesis manifest.
 
 🔒 Инварианты tokenomics:
 
 - `100%` fixed supply распределяется между публично именованными allocation buckets;
 - сумма buckets и их onchain balances всегда проверяема;
 - founder/team allocations не попадают в обычные wallets до vesting release;
-- project/community treasury не является личным резервом founder: отдельный Safe, независимый signer и timelock для risk-increasing операций;
-- неиспользованные contributor grants остаются в locked reserve;
-- liquidity reserve не равен circulating supply и раскрывается отдельно;
+- project/community treasury не является личным резервом founder: это два
+  отдельных Timelock address с публичным budget accounting;
+- неиспользованные contributor grants остаются в locked reserve, который может
+  создавать только публичные grants и не может переводить резерв напрямую EOA;
+- undeployed liquidity reserve не равен circulating supply, но TOKEN внутри
+  permissionless AMM всегда circulating независимо от владельца LP;
+- bridged treasury/reserve tokens сохраняют allocation classification и не
+  становятся circulating только из-за появления на Solana;
 - manual mint отсутствует на Ethereum, а recoverable Solana mint authority раскрывается как governance risk;
-- dashboard показывает total, allocated, vested, claimable, spent и circulating amounts;
+- dashboard показывает total, allocated, available, vested, claimable,
+  liquid-overhang, spent и circulating amounts;
+- spot value treasury token не считается runway для payroll, audit, legal или infra;
+- beta запрещает treasury market sales, buybacks и token-funded yield;
 - никакой public sale или marketing с обещанием доходности без отдельного legal review.
 
-## P0 — блокируют mainnet deployment
+## P0 — блокируют production contract implementation или mainnet deployment
 
 | ID | Вопрос | Рекомендуемый default | Почему важно |
 |---|---|---|---|
-| D-01 | Финальное имя токена | Не использовать test name | Имя попадёт в immutable Ethereum contract |
-| D-02 | Финальный symbol | 3–6 латинских символов | Проверить конфликты в Etherscan, Jupiter и соцсетях |
+| D-01 | Финальное имя токена | `Agent Teams AI` как кандидат | Имя попадёт в immutable Ethereum contract |
+| D-02 | Финальный symbol | `ATAI` только после осознанного принятия collision risk | Уже существуют ArtemisAI/ATAI и публичная компания с ticker ATAI |
 | D-03 | Total supply | `100,000,000` | Стоимость deployment от supply не зависит |
 | D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
-| D-05 | Utility на старте | Минимум одна реальная функция | Не запускать публично только с обещанием роста |
-| D-06 | Allocations | Пользователь задаёт проценты | Treasury, contributors, community, liquidity |
-| D-07 | Team/contributor vesting | 18–24 месяца, milestone-based | Не выдавать всё кодерам сразу |
+| D-05 | Utility на старте | Минимум одна live consumptive function до public distribution | Не проектировать публичный запуск только вокруг будущего roadmap |
+| D-06 | Allocations | Предложение `42/12/13/5/20/8` | Treasury, operations, contributors, founder, distributions, liquidity |
+| D-07 | Vesting | Team: 12→48; founder: 18→60; оба без cliff catch-up; future grants revocable только в unvested части | Не смешивать assigned grants и свободный reserve и не создавать общий unlock cliff |
 | D-08 | Public sale | Нет на первом beta | Снижает legal и operational scope |
-| D-09 | Target jurisdictions | Явно назвать страны | Нужны для legal/onramp/marketing решений |
-| D-10 | Ethereum signer set | 3 независимых signer, threshold 2 | Не использовать один EOA |
-| D-11 | Solana signer set | 3 независимых signer, threshold 2 | Отдельные wallets/devices |
+| D-09 | Entity и target jurisdictions | Решить до production contracts | Нужны для rights, utility, legal/onramp/marketing решений |
+| D-10 | Ethereum signer sets | Admin/Treasury 3-of-5, Emergency 2-of-3; overlap ниже threshold | Изолировать custody, configuration и cancellation |
+| D-11 | Solana signer set | Squads threshold задаётся отдельно; SPL pool authority обязана соблюдать `M ≤ N/2` | Не путать Squads и SPL multisig |
 | D-12 | Solana authority model | Recoverable beta | Нужен осознанный выбор trust/recovery |
 | D-13 | Metadata authority | Squads на beta | Можно исправить URI/logo, затем заморозить |
-| D-14 | Initial USDC liquidity | $100 | $50 допустимо, но ещё более волатильно |
-| D-15 | Initial pool token amount | Не выбирать вслепую | Определяет initial price и implied FDV |
+| D-14 | Public liquidity depth | `$100` swap ≤1% execution slippage | Если капитал не оправдан, запускать utility beta без official pool |
+| D-15 | Initial pool ratio/token amount | UNSET до отдельного proposal | Tiny pool не является valuation или price discovery |
 | D-16 | Raydium fee tier | Сравнить доступные current configs | Не хардкодить устаревший tier |
 | D-17 | LP custody | Squads, не burn | Сохраняет recovery на beta |
-| D-18 | Launch access | Friends/community beta сначала | Позволяет выявить ошибки с маленьким TVL |
+| D-18 | Launch access | Utility/community beta без official pool | Permissionless pool не становится private от слова friends |
 | D-19 | Initial bridge allocation | Только LP + небольшой treasury buffer | Не переносить лишний supply |
 | D-20 | Rate-limit risk budget | Пользователь задаёт максимальный ущерб | Limits должны исходить из tolerable loss |
+| D-20A | 30/90-day liquid-supply shock | Утвердить числовой budget | Fixed supply не ограничивает dump pressure |
+| D-20B | Treasury sale/buyback policy | Zero в beta | Не допустить скрытого price support или treasury dump |
+| D-20C | Airdrop pilot/Sybil budget | ≤ min(0.25% supply, price-impact budget) | Первая wave должна быть обратимо малой |
+| D-20D | Cliff semantics | Zero до cliff, затем linear с нуля | Исключить catch-up dump в один день |
+| D-20E | Circulating/liquid-overhang formula | Machine-readable и dashboarded | Пользователь должен видеть будущий sell pressure |
+| D-20F | Governance activation gate | После flash-borrow/capture tests | Governor на genesis преждевременен |
 
-## Как выбрать количество токенов в LP
+## Как одобрять liquidity
 
-При fixed supply `100,000,000` и `$100 USDC`:
+Не выбирать token amount через желаемый FDV. Перед public pool воспроизводимая
+симуляция фиксирует quote reserve, ratio, fee tier и price impact для `$100` и
+`$500` swaps. Baseline gate: `$100` swap имеет не более 1% execution slippage;
+для простого CPMM это ориентировочно требует около `$10,000` quote reserve до
+fees. При недостаточной глубине официальный market pool не создаётся.
 
-| Желаемый условный initial FDV | TOKEN в паре с $100 USDC | Начальная цена |
-|---:|---:|---:|
-| $2,500 | 4,000,000 | $0.000025 |
-| $5,000 | 2,000,000 | $0.00005 |
-| $10,000 | 1,000,000 | $0.0001 |
-| $25,000 | 400,000 | $0.00025 |
-| $50,000 | 200,000 | $0.0005 |
-
-Это не настоящая устойчивая оценка проекта. При `$100` reserve даже небольшая сделка сильно изменяет цену. Frontend обязан показывать:
+Frontend обязан показывать:
 
 - pool TVL;
 - price impact;
@@ -548,9 +577,9 @@ Raydium отдельно предупреждает, что low-TVL CPMM pools �
 | D-35 | Jupiter visibility | Не обещать мгновенную verification |
 | D-36 | Incident communication | Публичная status page и runbook |
 | D-37 | Bridge UI minimum amount | UI warning, не custom onchain rule |
-| D-38 | Timelock | Добавить после beta либо сразу, если signer set готов |
+| D-38 | Timelock delay/cancel policy | Timelock обязателен до genesis; default 7 дней, Emergency Safe cancel-only |
 | D-39 | Independent code review | Хотя бы один технический reviewer до mainnet |
-| D-40 | Terms/risk disclosure | Опубликовать до публичной торговли |
+| D-40 | Token Facts Pack и legal classification | Draft до genesis; publish до первого offer/airdrop/marketing |
 
 ## P2 — не блокируют первый запуск
 
@@ -611,13 +640,13 @@ Optional token purchase
 
 Рекомендуемый первый запуск:
 
-- технический/community beta;
+- live consumptive utility + technical/community beta;
 - без публичного сбора инвестиций;
 - без обещаний доходности;
 - contributors получают grants за работу;
-- токен имеет конкретную utility;
-- небольшой DEX pool;
-- полное раскрытие low liquidity и admin authorities.
+- маленькая retrospective distribution wave только после отдельного gate;
+- без official DEX pool, пока depth gate не пройден;
+- полное раскрытие beneficial control, unlocks, LP и admin authorities.
 
 ---
 
@@ -761,10 +790,9 @@ Kora — готовый Solana gasless relayer/paymaster, позволяющий
 - signer addresses;
 - authority model;
 - mainnet rate limits;
-- initial LP ratio;
-- initial implied FDV;
+- public pool depth/venue and initial LP ratio;
 - fee tier;
-- public/private beta;
+- utility beta scope;
 - target countries;
 - публикация репозитория;
 - domain;
@@ -820,14 +848,11 @@ Kora — готовый Solana gasless relayer/paymaster, позволяющий
    - program/contract address;
    - bytecode/program owner;
    - version.
-6. Создать ADR:
-   - `ADR-001-ethereum-canonical.md`;
-   - `ADR-002-chainlink-ccip.md`;
-   - `ADR-003-lock-mint.md`;
-   - `ADR-004-solana-trading.md`;
-   - `ADR-005-fixed-supply.md`;
-   - `ADR-006-no-custom-bridge.md`.
-7. Отправить пользователю один пакет P0 вопросов.
+6. Фиксировать только реально принятые irreversible decisions в
+   `docs/decisions/`; proposed tokenomics остаётся вне immutable baseline.
+7. До production contracts получить ответы по имени/symbol, live utility,
+   allocations, entity и launch jurisdictions. Исследование среды можно
+   продолжать без этих ответов.
 
 ## Phase 1 — Hybrid native macOS arm64 + Linux CI environment
 
@@ -861,7 +886,18 @@ Docker/Compose используется для Linux CI parity, web, monitor и 
 - Solana CLI;
 - SPL Token CLI;
 - TypeScript 7 strict mode;
+- `@agent-teams/engineering-foundation` как exact dev-only dependency;
+- Clean Architecture dependency direction `domain <- application <- adapters <- composition`;
+- DDD bounded contexts Supply, Distribution, Treasury, Transport,
+  Transparency и Launch Liquidity;
 - Rust/Anchor не устанавливать для MVP: собственная Solana program запрещена и не нужна.
+
+Foundation capabilities применяются только там, где есть реальный consumer:
+workspace/source dependencies, documentation references, ADR governance,
+suppression governance, quality gates и portable agent workflow включены.
+Public API compatibility, executable specifications, publishing security и
+schema evolution включаются после появления соответствующего артефакта, а не с
+фиктивным пустым evidence.
 
 Docker requirements:
 
@@ -881,6 +917,10 @@ Docker requirements:
 
 ## Phase 2 — Ethereum token
 
+🚨 Не начинать production implementation до подтверждения D-01/D-02/D-05/D-06,
+entity/jurisdiction classification memo и holder-rights matrix. Local throwaway
+spikes допустимы, но не становятся deployable artifact.
+
 Реализовать и протестировать:
 
 ```text
@@ -891,7 +931,8 @@ Properties:
 
 - immutable deployment;
 - fixed supply;
-- constructor mint to Treasury Safe;
+- constructor mints exact base-unit allocations directly to the predeclared
+  vesting/reserve/timelock recipients;
 - 9 decimals;
 - no post-deployment mint;
 - no owner-only transfer controls;
@@ -1155,6 +1196,13 @@ Solana RPC
 - Squads threshold/signers;
 - LP owner;
 - Raydium reserves;
+- liquid supply и liquid overhang 30/90 дней;
+- worst-case 30-day sell pressure относительно executable depth;
+- unlock-to-float ratio и beneficial-control concentration;
+- treasury/issuer net flows и issuer buy share;
+- airdrop cluster share, immediate sells и retention 30/90 дней;
+- organic liquidity retention после incentives;
+- orphan mints, duplicate settlements и bridge reconciliation lag;
 - RPC consistency.
 
 Chainlink оставляет за разработчиком ответственность за application monitoring, risk communication и обработку сообщений, требующих manual execution.
@@ -1190,14 +1238,9 @@ Raydium:
 - calculate pool setup;
 - compare fee tiers;
 - calculate initial price;
-- calculate implied FDV;
-- calculate expected price impact for:
-  - $1;
-  - $5;
-  - $10;
-  - $25;
-  - $50;
-  - $100.
+- prohibit choosing the ratio from a desired marketing FDV;
+- calculate expected price impact for `$100` and `$500` swaps;
+- stress 100% pilot-airdrop sale, 30/90-day unlock sale and 80% quote-liquidity loss;
 - no broadcast.
 
 ## Phase 11 — human-reviewed mainnet deployment
@@ -1220,28 +1263,29 @@ Verification command
 
 Mainnet последовательность:
 
-1. Создать/подтвердить Admin Safe.
-2. Создать/подтвердить Treasury Safe.
-3. Создать/подтвердить Squads.
-4. Deploy Ethereum token.
-5. Verify source.
-6. Deploy/configure LockRelease pool.
-7. Register CCIP admin.
-8. Create Solana mint.
-9. Create metadata.
-10. Remove freeze authority.
-11. Initialize BurnMint pool.
-12. Configure authority model.
-13. Configure remote pools.
-14. Configure conservative limits.
-15. Run verifier.
-16. Small Ethereum→Solana test.
-17. Small Solana→Ethereum test.
-18. Wait for clean monitoring window.
-19. Bridge LP allocation.
-20. Create Raydium pool after separate confirmation.
-21. Publish official address manifest.
-22. Start friends/community beta.
+1. Зафиксировать entity/jurisdictions, dated classification memo, live utility,
+   holder-rights matrix, Token Facts Pack draft и disclosure hash.
+2. Создать/подтвердить Admin Safe.
+3. Создать/подтвердить Treasury Safe.
+4. Создать/подтвердить Emergency Safe.
+5. Deploy и self-administer отдельные Community/Project Timelock и allocation
+   contracts; проверить role graph и отсутствие bootstrap-admin residue.
+6. Создать/подтвердить Squads.
+7. Deploy Ethereum token с прямым genesis allocation.
+8. Проверить source, `GENESIS_MANIFEST_HASH`, bucket balances и нулевые
+   необъяснимые balances deployer/factory/Safe.
+9. Deploy/configure LockRelease pool.
+10. Register CCIP admin.
+11. Create Solana mint and metadata; remove freeze authority.
+12. Initialize BurnMint pool and configure authority model/remotes/rate limits.
+13. Run verifier.
+14. Small Ethereum→Solana canary and target-chain state verification.
+15. Small Solana→Ethereum canary and target-chain state verification.
+16. Wait for clean monitoring window and publish official address manifest.
+17. Start utility/community beta without treasury sales or official pool.
+18. Separately approve airdrop consideration/Sybil gate before any wave.
+19. Separately approve venue, depth, LP conflict policy and exact ratio before
+    bridging LP allocation or creating Raydium pool.
 
 ---
 
@@ -1362,6 +1406,13 @@ Threat model минимум:
 - under-backed Solana supply;
 - Raydium LP removal;
 - low-liquidity manipulation;
+- mass sale of the first airdrop wave;
+- shared-cliff founder/team dump;
+- treasury dump or insider/treasury cross-trade;
+- token-funded reward or insurance death spiral;
+- mercenary liquidity exit after incentives;
+- flash-borrowed governance capture;
+- airdrop Sybil clusters and immediate dumping;
 - leaked testnet key reused on mainnet;
 - dependency compromise;
 - Docker secret leak;
@@ -1390,6 +1441,16 @@ Tests/checks:
 - frontend CSP;
 - Playwright smoke tests;
 - transaction simulation directly before signing.
+
+Deterministic economic scenarios:
+
+- 100% of an airdrop pilot is sold immediately;
+- every beneficiary in a 30/90-day unlock window sells;
+- quote liquidity falls by 80%;
+- treasury attempts a sale before an approved budget;
+- governance uses flash-borrowed voting balance;
+- rewards continue while product usage falls by 90%;
+- duplicate, forged or manual Solana mint occurs.
 
 ---
 
@@ -1425,6 +1486,13 @@ Tests/checks:
 ## Mainnet readiness
 
 - final P0 decisions complete;
+- live consumptive utility demonstrated;
+- legal entity and launch jurisdictions fixed;
+- dated classification memo covers exact rights, distribution and venue path;
+- Token Facts Pack, authority matrix and disclosure hash reviewed;
+- 24-month unlock calendar and beneficial-control report published;
+- sell-pressure simulation and liquid-supply budget pass;
+- treasury sale/buyback, airdrop consideration and LP conflict policies pass;
 - signer addresses verified out of band;
 - source code frozen;
 - dependency versions pinned;
@@ -1444,11 +1512,10 @@ Tests/checks:
 - human-approved mainnet deployment;
 - round-trip successful;
 - monitoring clean;
-- LP ratio explicitly approved;
-- pool created;
-- LP held by disclosed Squads;
+- official pool is optional and absent until its separate depth/legal gate;
+- if created, LP ratio is approved and LP is held by disclosed Squads;
 - official addresses published;
-- low-liquidity risk visible;
+- liquidity depth and withdrawal powers are visible;
 - no investment-return marketing.
 
 ---
@@ -1502,7 +1569,9 @@ Tests/checks:
 - крупная продажа может забрать значительную часть USDC;
 - spot price нельзя использовать как oracle.
 
-Это нормально для обозначенного beta, но не для заявления о зрелом рынке.
+Это нормально только для Devnet demo. Публичный mainnet pool не создаётся, пока
+отдельный depth gate не докажет приемлемый execution slippage; utility beta может
+работать без official pool.
 
 ### 4. Card → custom token не гарантирован
 
@@ -1849,23 +1918,19 @@ https://www.sec.gov/newsroom/press-releases/2026-30-sec-clarifies-application-fe
 >
 > Мне нужен один пакет ответов на launch-blocking решения:
 >
-> 1. Финальное название токена.
-> 2. Финальный symbol.
-> 3. Подтверждаем ли `100,000,000` supply и `9 decimals`?
-> 4. Какая конкретная utility будет доступна уже на старте?
-> 5. Как делим supply между treasury, contributors, community/rewards и liquidity?
-> 6. Будет ли какая-либо продажа токенов или только grants + DEX beta?
-> 7. Какие страны являются основной аудиторией?
-> 8. Кто три реальных signer для Ethereum Safe?
-> 9. Кто три реальных signer для Solana Squads?
-> 10. Выбираем recoverable Solana mint-authority model или strict Pool Signer PDA?
-> 11. $50 или $100 USDC initial liquidity?
-> 12. Какой initial implied FDV/сколько TOKEN кладём против USDC?
-> 13. Friends-only beta или сразу публичная торговля?
-> 14. Какой максимальный финансовый ущерб должен ограничивать суточный bridge rate limit?
-> 15. Есть ли уже логотип, domain, сайт и metadata URI?
+> 1. Принимаем `Agent Teams AI / ATAI`, несмотря на exact crypto и public-company
+>    ticker collisions, или выбираем свободный symbol?
+> 2. Подтверждаем предложение `42/12/13/5/20/8`, `100,000,000` supply и 9 decimals?
+> 3. Какая live consumptive utility будет доступна до public distribution?
+> 4. Какая entity выпускает token и какие страны входят в launch scope?
+> 5. Кто входит в изолированные Admin/Treasury/Emergency Safe и Solana Squads?
+> 6. Выбираем recoverable Solana beta с переходом на Pool Signer PDA или strict
+>    authority сразу?
+> 7. Какой максимальный bridge loss и 30/90-day liquid-supply shock допустим?
+> 8. Есть ли logo, domain, site и metadata URI?
 >
-> Пока ты отвечаешь, я фиксирую версии, создаю Docker stack, ADR, test configs и Ethereum/Solana local tests. Никакие mainnet-средства и private keys мне не нужны.
+> Пока ты отвечаешь, я продолжаю локальную архитектуру и тестовую среду без
+> production contracts, mainnet funds или private keys.
 
 ---
 

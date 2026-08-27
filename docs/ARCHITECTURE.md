@@ -18,8 +18,9 @@ Ethereum ERC-20 -> allocation contracts / treasury
 
 ## Languages
 
-- Solidity `0.8.24` + Foundry for the immutable ERC-20, vesting and Ethereum
-  integration tests.
+- Solidity `0.8.36` is the current compiler candidate; it becomes an exact pin
+  only after the first OpenZeppelin/Chainlink compatibility spike. Foundry 1.8.0
+  runs the immutable ERC-20, vesting and Ethereum integration tests.
 - TypeScript `7.0.2` for domain rules, deployment tooling, Solana instructions,
   monitoring, configuration and the future transparency UI.
 - Shell only for the small project-local bootstrap entrypoint.
@@ -28,6 +29,12 @@ Ethereum ERC-20 -> allocation contracts / treasury
 
 ## Boundaries
 
+Dependency direction is `domain <- application <- adapters <- composition`.
+Domain code cannot read clocks, randomness, environment, filesystems, RPC or
+wallets directly. These effects enter through narrow ports. Ethereum and Solana
+stay explicit adapters; a universal chain abstraction is prohibited until two
+real consumers prove identical invariants and failure semantics.
+
 - `packages/domain`: pure bigint supply and tokenomics rules. No RPC dependency.
 - `contracts/evm`: fixed-supply token, allocation contracts and CCIP pool setup.
 - `packages/chainlink-adapter`: pinned CCIP SDK integration.
@@ -35,6 +42,10 @@ Ethereum ERC-20 -> allocation contracts / treasury
 - `apps/monitor`: event ingestion, pending-transfer state and reconciliation.
 - `apps/transparency`: public allocations, unlocks, transfers and supply status.
 - `scripts`: repeatable deployment and verification orchestration.
+
+Bounded contexts are Supply, Distribution, Treasury, Cross-chain Transport,
+Transparency and Launch Liquidity. Foundation validates real source edges. It
+is an exact dev dependency and is never imported by production code.
 
 Directories are introduced with their first vertical slice, not pre-created as
 empty architecture.
@@ -48,4 +59,3 @@ must come from a separately approved Sepolia-to-Solana Devnet E2E run.
 
 No public-network command is enabled by the default environment. Mainnet
 deployment and Safe/Squads signatures always remain human actions.
-

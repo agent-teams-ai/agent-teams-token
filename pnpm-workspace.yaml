@@ -2,3 +2,8 @@ packages:
   - apps/*
   - packages/*
 
+catalogMode: strict
+catalog:
+  "@types/node": 24.13.3
+  oxlint: 1.80.0
+  typescript: 7.0.2
