@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "retrievedAt": "2026-08-27T15:00:00Z",
+  "tools": {
+    "node": {
+      "version": "24.20.0",
+      "darwinArm64Url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz",
+      "sha256": "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8"
+    },
+    "pnpm": {
+      "version": "11.24.0"
+    },
+    "typescript": {
+      "version": "7.0.2"
+    },
+    "foundry": {
+      "version": "1.7.1",
+      "darwinArm64Url": "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_darwin_arm64.tar.gz",
+      "sha256": "eacdc67718fac857cad9e19c7f6729dd80de731d09df81856391d093cfcab547"
+    },
+    "agave": {
+      "version": "4.2.1",
+      "darwinArm64Url": "https://github.com/anza-xyz/agave/releases/download/v4.2.1/solana-release-aarch64-apple-darwin.tar.bz2",
+      "sha256": "9fb744917877acc68ae2421aef8d7f44f0d5eb16428e9d3db2c98b1ae61fd239"
+    },
+    "ccipSdk": {
+      "version": "1.13.0"
+    },
+    "ccipSolanaPrograms": {
+      "version": "1.6.3",
+      "sourceRelease": "https://github.com/smartcontractkit/chainlink-ccip/releases/tag/solana-v1.6.3",
+      "localArtifactsTag": "solana-artifacts-localtest-ea7ff77a0ddb",
+      "localArtifactsSha256": "7072880e49ac873a7b6d6dbf5547b0517c87e17cd681e6143262a6c5fe803fc5"
+    }
+  }
+}

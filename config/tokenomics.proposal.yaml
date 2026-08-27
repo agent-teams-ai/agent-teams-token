@@ -1,0 +1,46 @@
+schemaVersion: 1
+status: proposal
+token:
+  workingName: Agent Teams Commons
+  workingSymbol: ATCM
+  fixedSupply: "100000000"
+  decimals: 9
+allocations:
+  communityTreasury:
+    percent: 35
+    initialPercentOfTotalSupply: 3
+    remainingVestingMonths: 72
+  projectDevelopment:
+    percent: 18
+    initialPercentOfTotalSupply: 2
+    remainingVestingMonths: 60
+  teamAndContributors:
+    percent: 14
+    cliffMonths: 12
+    vestingMonths: 48
+  founder:
+    percent: 8
+    cliffMonths: 12
+    vestingMonths: 60
+  airdrop:
+    percent: 15
+    plannedWaves: 4
+    claimWindowDays: 180
+  liquidity:
+    percent: 10
+    betaPercentOfTotalSupply: 0
+    initialPostGateMaximumPercentOfTotalSupply: 2
+governance:
+  treasurySafeThreshold: 3
+  treasurySafeOwners: 5
+  timelockDays: 7
+invariants:
+  mintOnceOnEthereum: true
+  deployerBalanceAfterGenesis: "0"
+  ownerMint: false
+  proxyUpgrade: false
+  transferTax: false
+  blacklist: false
+  founderVestingTransferable: false
+  unreleasedTokensVote: false
+

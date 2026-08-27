@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "retrievedAt": "2026-08-27T12:00:28Z",
+  "source": "https://docs.chain.link/api/ccip/v1",
+  "networks": {
+    "ethereumMainnet": {
+      "chainId": "1",
+      "selector": "5009297550715157269"
+    },
+    "solanaMainnet": {
+      "chainId": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      "selector": "124615329519749607"
+    },
+    "ethereumSepolia": {
+      "chainId": "11155111",
+      "selector": "16015286601757825753"
+    },
+    "solanaDevnet": {
+      "chainId": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+      "selector": "16423721717087811551"
+    }
+  }
+}
+

@@ -1,0 +1,1894 @@
+# Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
+
+**Дата контекста:** 27 августа 2026 года  
+**Статус:** living document; изменения архитектуры фиксируются здесь и в ADR  
+**Режим работы:** пользователь сейчас на связи, но ожидает, что ты будешь работать преимущественно автономно и обращаться к нему только в согласованных точках принятия решений.  
+**Главная цель:** довести проект от продуктовых решений и гибридной local/CI-среды до полностью проверенного testnet E2E, frontend/dashboard и подготовленного mainnet deployment. Mainnet-действия выполняются только после человеческого просмотра и подписей.
+
+> ⚠️ Этот файл перенесён из исходного handoff. При обнаружении подтверждённой ошибки она исправляется в этом документе сразу, а существенное решение дополнительно получает ADR. Git history остаётся audit trail исходных формулировок.
+
+---
+
+# 1. Как взаимодействовать с пользователем
+
+Не повторяй вопросы, ответы на которые уже зафиксированы ниже.
+
+Работай по следующей модели:
+
+1. Сначала прочитай весь handoff.
+2. Проверь актуальность официальной документации, версий, chain selectors, program IDs и ограничений сервисов.
+3. Создай:
+   - `docs/DECISIONS.md`;
+   - `docs/OPEN_QUESTIONS.md`;
+   - `docs/STATUS.md`;
+   - каталог `docs/adr/` для Architecture Decision Records.
+4. Задай пользователю **одним сообщением один пакет продуктовых вопросов уровня P0**, перечисленных ниже.
+5. Пока пользователь отвечает, не простаивай:
+   - исследуй актуальные версии;
+   - инициализируй репозиторий;
+   - подними Docker;
+   - подготовь конфигурации;
+   - реализуй локальные тесты с безопасными test-only параметрами.
+6. Не отвлекай пользователя из-за каждой команды или несущественного выбора. Используй рекомендованные defaults для local/testnet и документируй их.
+7. Перед каждым необратимым или платным действием покажи:
+   - сеть;
+   - адреса;
+   - decoded operation;
+   - ожидаемый state diff;
+   - комиссию;
+   - влияние на бюджет;
+   - возможность отката;
+   - необходимые подписи.
+8. Обновляй пользователя после завершения логического этапа, а не после каждой транзакции.
+9. Если внешний сервис, faucet или RPC недоступен, продолжай всё, что не зависит от блокера, и записывай ровно один конкретный следующий шаг в `NEEDS_INPUT.md`.
+10. Никогда не скрывай, что именно было реально исполнено, что симулировано, а что замокано.
+
+Текущий подтверждённый baseline на дату документа: production Solana CCIP release `1.6.3`; отдельный local-test artifact фиксируется своим release tag и SHA256 в `tooling/toolchain.lock.json`. Перед каждой public-network операцией baseline перечитывается из live directory и official releases.
+
+---
+
+# 2. Контекст проекта и история выбора
+
+Пользователь хочет запустить токен своего проекта сразу в нескольких сетях, чтобы:
+
+- supply оставался глобально контролируемым;
+- у пользователей не появлялись конкурирующие wrapped-версии;
+- токеном было удобно торговать;
+- управление сетью, ролями и лимитами было понятным;
+- можно было добавить frontend и dashboard;
+- не писать собственный bridge, relayer, consensus или Solana bridge program;
+- сохранить техническую гибкость;
+- уложиться в очень маленький стартовый бюджет.
+
+Пользователь технический, имеет опыт программирования и IT. Сложные CLI, Foundry, TypeScript, Docker, Solana tooling и config-as-code приемлемы, если они уменьшают риск и не превращают проект в самописный bridge.
+
+## Рассмотренные варианты
+
+Рассматривались:
+
+- Wormhole NTT;
+- LayerZero OFT;
+- Chainlink CCIP CCT;
+- Axelar ITS;
+- Hyperlane Warp Routes;
+- Base, Ethereum, Solana, Avalanche и другие сети.
+
+Итоговый выбор:
+
+- **Ethereum L1** — каноническая сеть и источник fixed supply;
+- **Solana** — пользовательская и торговая сеть;
+- **Chainlink CCIP Cross-Chain Token** — cross-chain инфраструктура;
+- **Lock & Mint** из Ethereum в Solana;
+- **Burn & Unlock** из Solana обратно в Ethereum.
+
+Причина отказа от Base как canonical chain: пользователь предпочитает не L2, а Ethereum L1 при нынешней низкой стоимости газа. Base можно добавить позже как remote network, но он не нужен для первого запуска.
+
+Причина выбора CCIP: на Solana доступен рекомендуемый self-serve режим стандартных BurnMint/LockRelease pool programs, которые поддерживаются через CCIP governance. Проект инициализирует состояние своего пула, но не пишет и не обслуживает собственную Rust bridge program. Стандартные pools уже реализуют cross-chain accounting, decimal conversion, rate limits и access control.
+
+---
+
+# 3. Зафиксированные решения
+
+| Область | Решение |
+|---|---|
+| Canonical chain | Ethereum Mainnet |
+| Remote/trading chain | Solana Mainnet |
+| Cross-chain protocol | Chainlink CCIP CCT |
+| Модель Ethereum → Solana | LockRelease на Ethereum + BurnMint на Solana |
+| Модель Solana → Ethereum | Burn на Solana + Release на Ethereum |
+| Ethereum token | Простой immutable fixed-supply OpenZeppelin ERC-20 |
+| Solana token | Обычный SPL Token, не Token-2022 |
+| Decimals | 9 в обеих сетях |
+| Начальный remote supply | 0 на Solana |
+| Upgradeable token proxy | Нет |
+| Transfer tax/reflections/rebase | Нет |
+| Blacklist и скрытые admin-функции | Нет |
+| Token-level pause | Нет |
+| Solana freeze authority | None |
+| Ethereum trading pool на старте | Нет |
+| Solana trading pool | Raydium CPMM TOKEN/USDC |
+| Начальная cash liquidity | Ориентир $50–100 USDC |
+| LP custody | LP-токены держит Squads, не сжигаются в beta |
+| Ethereum governance | Отдельные Admin Safe и Treasury Safe |
+| Solana governance | Squads + SPL Token Multisig |
+| Пользовательский bridge v0 | Transporter |
+| Cross-chain status v0 | CCIP Explorer |
+| Admin UI | Token Manager + Safe + Squads |
+| Branded UI | Собственный frontend после/параллельно testnet |
+| Mainnet signing | Только человек через Safe/Squads |
+| Agent mainnet keys | Запрещены |
+| Public token sale | Пока не планируется и не должна подразумеваться |
+| Card onramp | Второй этап; сначала card → USDC/SOL → swap |
+| Accounts/embedded wallets | Второй этап; MVP может быть wallet-only |
+| Дополнительные сети | Только после стабильного Ethereum↔Solana запуска |
+
+---
+
+# 4. Token Manager: подтверждённые возможности и границы
+
+Ранее предполагалось, что Token Manager не может развернуть Ethereum LockRelease pool. Актуальная документация точнее:
+
+- для **existing token** Token Manager предлагает выбрать `Burn / Mint` или `Lock / Release`;
+- для добавляемых remote networks wizard автоматически использует Burn & Mint;
+- указанное ограничение касается **Lock-and-Unlock**, pool replacement/upgrades и custom pools;
+- Transporter позволяет импортировать активированный токен по адресу.
+
+Документация Token Manager находится в EVM-разделе и не подтверждает полный cross-family wizard Ethereum ↔ Solana. Поэтому UI не является критическим deployment path.
+
+Следовательно, выполни только короткий необязательный capability spike:
+
+1. Проверь на testnet, способен ли текущий Token Manager провести именно:
+   - existing Ethereum ERC-20;
+   - LockRelease на Ethereum;
+   - новый BurnMint SPL token/pool на Solana.
+2. Зафиксируй, какие шаги UI реально поддерживает.
+3. Не используй browser automation как production deployment mechanism.
+4. Даже если UI закрывает весь flow, создай воспроизводимые Foundry/TypeScript scripts и verifier scripts.
+5. Если Solana flow не поддерживается полностью, используй официальный CCIP CLI, Solana BS58 generator и собственные воспроизводимые scripts.
+6. Token Manager используй как дополнительный control plane для просмотра, rate limits, admin operations и verification, но не как источник истины.
+
+---
+
+# 5. Целевая архитектура
+
+```text
+                         Ethereum L1
+┌──────────────────────────────────────────────────────────┐
+│ ProjectToken                                             │
+│ - OpenZeppelin ERC-20                                    │
+│ - fixed supply                                           │
+│ - 9 decimals                                             │
+│ - no post-deploy mint                                    │
+│ - immutable / no proxy                                   │
+│                                                          │
+│ Treasury Safe ── sends tokens ──> LockReleaseTokenPool   │
+│ Admin Safe ── manages CCT admin, pool and rate limits     │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           │ Chainlink CCIP
+                           │ Lock & Mint / Burn & Unlock
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│ Solana                                                   │
+│ - standard SPL mint                                      │
+│ - initial supply = 0                                     │
+│ - 9 decimals                                             │
+│ - freeze authority = None                                │
+│ - Chainlink self-serve BurnMint pool                     │
+│ - Squads governance                                      │
+│ - SPL mint-authority multisig                            │
+│                                                          │
+│ Bridged supply ──> Treasury ATA ──> Raydium TOKEN/USDC   │
+└──────────────────────────────────────────────────────────┘
+```
+
+CCIP официально описывает такую комбинацию как Lock & Mint: LockRelease используется на issuing chain, а BurnMint — на remote chain. В обратную сторону механизм становится Burn & Unlock.
+
+## Ethereum token
+
+Использовать:
+
+- актуальную стабильную версию OpenZeppelin Contracts;
+- `ERC20`;
+- переопределение `decimals()` → `9`;
+- constructor mint всего fixed supply на Treasury Safe;
+- минимальный механизм регистрации CCIP admin, если его требует актуальный выбранный registration flow.
+
+Не добавлять без отдельного решения:
+
+- `ERC20Permit`;
+- `ERC20Burnable`;
+- `ERC20Votes`;
+- `ERC20Pausable`;
+- `Ownable`;
+- proxy;
+- отдельную mint-функцию;
+- налог;
+- ограничения transfers;
+- staking/rewards;
+- автоматический market-making.
+
+`ERC20Permit` не запрещён навсегда, но по умолчанию не нужен: Ethereum DEX на первом этапе отсутствует, а дополнительный интерфейс следует добавлять только под конкретный UX.
+
+Canonical ERC-20 не должен наследовать bridge-specific token contract. CCIP подключается внешним `LockReleaseTokenPool`. Это оставляет возможность в будущем заменить bridge adapter без замены основного Ethereum token.
+
+## Solana token
+
+Использовать:
+
+- стандартный SPL Token Program;
+- не Token-2022;
+- initial mint supply = 0;
+- decimals = 9;
+- freeze authority = `None`;
+- Metaplex Token Metadata для name, symbol, logo URI и project URI;
+- metadata update authority первоначально — Squads, если пользователь не выберет immutable metadata сразу;
+- официальный self-service Chainlink BurnMint pool;
+- никакой собственной Solana bridge program.
+
+На Mainnet и Devnet CCIP Directory сейчас показывает self-service BurnMint/LockRelease programs и активные Ethereum/Sepolia lanes, но адреса и selectors необходимо читать из актуального CCIP Directory непосредственно перед execution, а не копировать из этого документа.
+
+---
+
+# 6. Supply accounting
+
+Обозначения:
+
+```text
+F = ProjectToken.totalSupply() на Ethereum
+L = ProjectToken.balanceOf(EthereumLockReleasePool)
+S = SPL mint supply на Solana
+P_ES = locked на Ethereum, но ещё не minted на Solana
+P_SE = burned на Solana, но ещё не released на Ethereum
+```
+
+Проверяемый invariant при отсутствии donation, pre-funding, manual mint и liquidity withdrawal:
+
+```text
+L = S + P_ES + P_SE
+adjustedGlobalSupply = F - L + S + P_ES + P_SE
+adjustedGlobalSupply = F
+backingSurplus = L - S - P_ES - P_SE
+```
+
+Интерпретация `backingSurplus`:
+
+```text
+< 0  under-backed, немедленный P0 incident
+= 0  точное причинное соответствие locks/burns/mints/releases
+> 0  donation, manual top-up, manual burn или потерянное событие; требуется классификация
+```
+
+После завершения всех сообщений и при отсутствии ручных liquidity operations:
+
+```text
+P_ES == 0
+P_SE == 0
+L == S
+```
+
+Monitor обязан строить ledger из finalized onchain events, а не только сравнивать snapshots. Для каждого message ID хранить направление, source lock/burn, destination mint/release, manual-execution state и terminal status. Pending message нельзя списывать по timeout.
+
+Нормальный режим запрещает:
+
+```text
+прямой Treasury transfer в pool
+withdrawLiquidity/provideLiquidity
+ручной Solana MintTo/Burn
+необъяснимый перевод из Ethereum pool
+```
+
+Критические состояния:
+
+```text
+backingSurplus < 0
+необъяснимый mint на Solana
+изменение mint authority без governance proposal
+remote pool не совпадает с manifest
+любое liquidity movement без отдельного proposal и reconciliation
+```
+
+При появлении дополнительных remote chains:
+
+```text
+adjustedGlobalSupply =
+    F
+    - lockedOnEthereum
+    + Σ remoteSupplies
+    + Σ pendingNormalizedAmounts
+```
+
+Никогда не показывать пользователю простую сумму `Ethereum totalSupply + Solana supply`: Ethereum `totalSupply()` включает заблокированные в pool токены.
+
+---
+
+# 7. Governance и authorities
+
+## Ethereum
+
+Предлагаемая схема:
+
+```text
+Admin Safe 2-of-3
+├── CCT token admin
+├── LockRelease pool owner
+├── rate-limit admin
+├── remote-chain configuration
+└── emergency cross-chain actions
+
+Treasury Safe 2-of-3
+├── unallocated supply
+├── liquidity allocation
+├── contributor allocations
+└── operational treasury
+```
+
+Admin и Treasury должны быть разными Safe-адресами. Хотя бы один signer должен различаться; одинаковый signer set не изолирует correlated compromise. Ключи и устройства не переиспользуются между ролями.
+
+Для более зрелой версии можно перейти на 3-of-5 и добавить timelock для обычных admin-операций. Emergency lane restriction должна оставаться быстрее, чем обычные governance changes.
+
+Agent может:
+
+- создавать Safe transaction proposal;
+- генерировать Safe Transaction Builder JSON;
+- декодировать calldata;
+- симулировать state diff;
+- проверять signatures threshold.
+
+Agent не может:
+
+- хранить Safe owner private key;
+- самостоятельно подтверждать mainnet proposal;
+- автоматически исполнять mainnet transaction.
+
+Safe официально поддерживает модель, где агент подготавливает proposal, а люди проверяют, подтверждают и исполняют его.
+
+## Solana
+
+Предлагаемая governance:
+
+```text
+Squads 2-of-3
+├── CCIP pool owner
+├── CCIP administration
+├── remote-chain configuration
+├── rate limits
+├── metadata update authority
+└── emergency recovery path
+
+SPL Token Multisig
+├── CCIP Pool Signer PDA повторяется M раз
+├── Squads Vault/governance signer slots
+└── mint authority policy
+```
+
+SPL multisig не равен обычному 2-of-3 Squads. Для автономной работы CCIP Pool Signer PDA должен встречаться минимум `M` и максимум `N-M` раз, поэтому `M ≤ N/2`; threshold 2 требует минимум `N=4`. Squads остаётся отдельным governance layer.
+
+Нужно принять отдельное продуктовое решение между двумя моделями.
+
+### Recoverable beta model — рекомендуемый старт
+
+Governance сохраняет возможность recovery/migration через Squads, а CCIP Pool Signer PDA автономно выполняет штатный mint/burn.
+
+Плюсы:
+
+- можно исправить ошибку authority;
+- можно мигрировать bridge provider;
+- можно восстановиться после инцидента;
+- соответствует production multisig pattern в документации Chainlink.
+
+Минусы:
+
+- governance теоретически может сделать ручной mint;
+- supply hard cap защищён не только математикой, но и честностью multisig;
+- это нужно публично раскрыть и мониторить.
+- SPL multisig реализует по смыслу `Pool PDA OR governance`, а не обязательную совместную подпись двух слоёв.
+
+### Strict model
+
+Mint authority передаётся непосредственно Pool Signer PDA без governance recovery path.
+
+Плюсы:
+
+- люди не могут отдельно напечатать Solana supply;
+- более сильное публичное supply-обещание.
+
+Минусы:
+
+- сложнее migration;
+- выше vendor lock-in;
+- тяжелее emergency recovery;
+- ошибка authority может стать необратимой.
+
+На beta по умолчанию используется **recoverable model**, но mainnet не запускается, пока пользователь явно не подтвердит этот выбор.
+
+---
+
+# 8. Бюджет и финансовые ограничения
+
+Главное: бюджет в десятки тысяч долларов не нужен.
+
+## Предварительный минимальный бюджет
+
+| Категория | Цель |
+|---|---:|
+| Ethereum deploy/config reserve | около $20–50 |
+| Solana token/CCIP/Squads/Raydium reserve | около 0.5–0.8 SOL |
+| CCIP mainnet round-trip tests | около $10–25 |
+| Initial Raydium liquidity | $50–100 USDC |
+| Непредвиденный резерв | $50–100 |
+| Общий подготовленный бюджет | примерно $250–350 |
+
+Неиспользованные ETH и SOL остаются на кошельках. USDC в LP — это risk capital, а не сервисная комиссия.
+
+В момент предыдущей проверки Ethereum gas был аномально низким; при снимке около `0.102 gwei` 10–30 млн gas давали ориентир примерно $1.66–$4.97 при ETH около $1,625. Это не обещание будущей стоимости: перед mainnet агент обязан получить живые gas estimates и показать их пользователю.
+
+Raydium указывает типичную стоимость создания CPMM около `0.19 SOL`: примерно `0.15 SOL` creation fee и `0.04 SOL` account rent. Seed liquidity оплачивается отдельно.
+
+Squads сейчас указывает разовую стоимость `0.1 SOL` для создания multisig и отсутствие обычной ежемесячной платы. Проверить цену снова перед mainnet.
+
+CCIP network fee table сейчас показывает примерно:
+
+- Ethereum → Solana: `$0.54` при оплате LINK или `$0.60` другим fee token;
+- Solana → Ethereum: `$1.35` или `$1.50`;
+- создание destination ATA на Solana: ещё около `$0.10`;
+- дополнительно оплачиваются blockchain и destination execution costs.
+
+## Hard guards
+
+По умолчанию:
+
+```text
+ETHEREUM_SOFT_BUDGET_USD=50
+ETHEREUM_HARD_BUDGET_USD=200
+
+CCIP_TEST_SOFT_BUDGET_USD=25
+
+RAYDIUM_LIQUIDITY_USDC=100
+RAYDIUM_LIQUIDITY_HARD_CAP_USDC=100
+
+ALLOW_PAID_SUBSCRIPTIONS=false
+ALLOW_MAINNET_BROADCAST=false
+ALLOW_MAINNET_POOL_CREATION=false
+```
+
+Любое превышение hard cap требует нового явного подтверждения пользователя.
+
+---
+
+# 9. Продуктовые решения, которые нужно принять вместе с пользователем
+
+Tokenomics является отдельным product/security workstream, а не только строкой allocations. Source of truth — `docs/TOKENOMICS.md` и будущий machine-readable `config/tokenomics.yaml`.
+
+🔒 Инварианты tokenomics:
+
+- `100%` fixed supply распределяется между публично именованными allocation buckets;
+- сумма buckets и их onchain balances всегда проверяема;
+- founder/team allocations не попадают в обычные wallets до vesting release;
+- project/community treasury не является личным резервом founder: отдельный Safe, независимый signer и timelock для risk-increasing операций;
+- неиспользованные contributor grants остаются в locked reserve;
+- liquidity reserve не равен circulating supply и раскрывается отдельно;
+- manual mint отсутствует на Ethereum, а recoverable Solana mint authority раскрывается как governance risk;
+- dashboard показывает total, allocated, vested, claimable, spent и circulating amounts;
+- никакой public sale или marketing с обещанием доходности без отдельного legal review.
+
+## P0 — блокируют mainnet deployment
+
+| ID | Вопрос | Рекомендуемый default | Почему важно |
+|---|---|---|---|
+| D-01 | Финальное имя токена | Не использовать test name | Имя попадёт в immutable Ethereum contract |
+| D-02 | Финальный symbol | 3–6 латинских символов | Проверить конфликты в Etherscan, Jupiter и соцсетях |
+| D-03 | Total supply | `100,000,000` | Стоимость deployment от supply не зависит |
+| D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
+| D-05 | Utility на старте | Минимум одна реальная функция | Не запускать публично только с обещанием роста |
+| D-06 | Allocations | Пользователь задаёт проценты | Treasury, contributors, community, liquidity |
+| D-07 | Team/contributor vesting | 18–24 месяца, milestone-based | Не выдавать всё кодерам сразу |
+| D-08 | Public sale | Нет на первом beta | Снижает legal и operational scope |
+| D-09 | Target jurisdictions | Явно назвать страны | Нужны для legal/onramp/marketing решений |
+| D-10 | Ethereum signer set | 3 независимых signer, threshold 2 | Не использовать один EOA |
+| D-11 | Solana signer set | 3 независимых signer, threshold 2 | Отдельные wallets/devices |
+| D-12 | Solana authority model | Recoverable beta | Нужен осознанный выбор trust/recovery |
+| D-13 | Metadata authority | Squads на beta | Можно исправить URI/logo, затем заморозить |
+| D-14 | Initial USDC liquidity | $100 | $50 допустимо, но ещё более волатильно |
+| D-15 | Initial pool token amount | Не выбирать вслепую | Определяет initial price и implied FDV |
+| D-16 | Raydium fee tier | Сравнить доступные current configs | Не хардкодить устаревший tier |
+| D-17 | LP custody | Squads, не burn | Сохраняет recovery на beta |
+| D-18 | Launch access | Friends/community beta сначала | Позволяет выявить ошибки с маленьким TVL |
+| D-19 | Initial bridge allocation | Только LP + небольшой treasury buffer | Не переносить лишний supply |
+| D-20 | Rate-limit risk budget | Пользователь задаёт максимальный ущерб | Limits должны исходить из tolerable loss |
+
+## Как выбрать количество токенов в LP
+
+При fixed supply `100,000,000` и `$100 USDC`:
+
+| Желаемый условный initial FDV | TOKEN в паре с $100 USDC | Начальная цена |
+|---:|---:|---:|
+| $2,500 | 4,000,000 | $0.000025 |
+| $5,000 | 2,000,000 | $0.00005 |
+| $10,000 | 1,000,000 | $0.0001 |
+| $25,000 | 400,000 | $0.00025 |
+| $50,000 | 200,000 | $0.0005 |
+
+Это не настоящая устойчивая оценка проекта. При `$100` reserve даже небольшая сделка сильно изменяет цену. Frontend обязан показывать:
+
+- pool TVL;
+- price impact;
+- предупреждение о низкой ликвидности;
+- предупреждение, что spot price и FDV легко манипулируются.
+
+Не использовать цену такого пула:
+
+- как oracle;
+- для collateral;
+- для reward calculation;
+- для vesting valuation;
+- для обещаний инвесторам;
+- для бухгалтерской оценки treasury.
+
+Raydium отдельно предупреждает, что low-TVL CPMM pools особенно подвержены сильному price movement и MEV; интеграции не должны использовать spot pool price как надёжный oracle.
+
+## P1 — решить до публичного mainnet beta
+
+| ID | Вопрос | Рекомендуемый подход |
+|---|---|---|
+| D-21 | Frontend day one | Собственный read-only dashboard + Transporter |
+| D-22 | Branded bridge | После successful testnet round-trip |
+| D-23 | User identity | Wallet-only либо internal UUID + linked wallets |
+| D-24 | Existing project accounts | Привязывать wallets через signed challenge |
+| D-25 | Embedded wallet | Не блокирует первый запуск; оценить Privy/Reown/CDP позже |
+| D-26 | Card payments | Card → USDC/SOL on Solana → swap |
+| D-27 | Gas sponsorship | Не в первой версии; позже Kora/Privy |
+| D-28 | Who pays CCIP fees | Пользователь платит native ETH/SOL |
+| D-29 | RPC providers | Бесплатные tiers для beta, два fallback RPC |
+| D-30 | Alerts | Telegram + structured logs |
+| D-31 | Public repository | Опубликовать перед mainnet после secret scan |
+| D-32 | License | MIT, если нет иной бизнес-причины |
+| D-33 | Token metadata immutability | После проверки логотипа, URI и domain |
+| D-34 | CCIP token verification | Подать после окончательных metadata/project URLs |
+| D-35 | Jupiter visibility | Не обещать мгновенную verification |
+| D-36 | Incident communication | Публичная status page и runbook |
+| D-37 | Bridge UI minimum amount | UI warning, не custom onchain rule |
+| D-38 | Timelock | Добавить после beta либо сразу, если signer set готов |
+| D-39 | Independent code review | Хотя бы один технический reviewer до mainnet |
+| D-40 | Terms/risk disclosure | Опубликовать до публичной торговли |
+
+## P2 — не блокируют первый запуск
+
+- social login;
+- embedded wallets;
+- account recovery;
+- card onramp;
+- gasless Solana transactions;
+- mobile app;
+- дополнительная EVM-сеть;
+- Base или Avalanche;
+- Ethereum DEX pool;
+- CEX listings;
+- staking;
+- governance voting;
+- referrals;
+- buybacks;
+- revenue sharing;
+- public presale;
+- professional market maker.
+
+Не реализовывать staking, revenue share, buyback promises или investment referrals без отдельного legal и economic review.
+
+---
+
+# 10. Product/legal context
+
+Пользователь рассматривал предложение друзьям-кодерам: купить токен как ранним инвесторам и заработать после привлечения пользователей.
+
+Не использовать такую формулировку.
+
+Правильное разделение:
+
+```text
+Founding contributor arrangement
+├── конкретная работа и ответственность
+├── milestone-based token allocation
+├── vesting
+├── IP/code contribution terms
+└── отсутствие гарантированной доходности
+
+Optional token purchase
+├── отдельное решение
+├── одинаковые прозрачные условия
+├── риск полной потери
+└── отсутствие обещаний роста
+```
+
+Не реализовывать:
+
+- процент за привлечённые инвестиции;
+- guaranteed return;
+- revenue share без legal review;
+- публичный fundraising под обещание роста цены;
+- маркетинг «мы привлечём пользователей, поэтому вы заработаете».
+
+В ЕС MiCA регулирует выпуск и маркетинг crypto-assets, а маркетинговые сообщения должны быть честными, понятными и не вводящими в заблуждение. В США SEC в актуальных материалах отдельно рассматривает ситуации, где crypto asset предлагается вместе с ожиданием прибыли от предпринимательских или управленческих усилий других лиц. Это не юридическое заключение, но продуктовый и маркетинговый wording должен пройти отдельную проверку.
+
+Рекомендуемый первый запуск:
+
+- технический/community beta;
+- без публичного сбора инвестиций;
+- без обещаний доходности;
+- contributors получают grants за работу;
+- токен имеет конкретную utility;
+- небольшой DEX pool;
+- полное раскрытие low liquidity и admin authorities.
+
+---
+
+# 11. User identity, accounts и card onramp
+
+## MVP identity
+
+Не делать обязательную централизованную регистрацию только ради токена.
+
+Варианты:
+
+### Wallet-only
+
+```text
+User identity = connected wallet
+```
+
+Подходит для первого DEX/bridge beta.
+
+### Product account + linked wallets
+
+```text
+Internal User UUID
+├── Ethereum wallet
+├── Solana wallet
+├── optional embedded wallet
+└── email/social account
+```
+
+Это лучший долгосрочный вариант, если у основного продукта уже есть пользователи.
+
+Связывание wallets выполнять через signed challenge:
+
+- random nonce;
+- domain;
+- chain;
+- wallet address;
+- expiration;
+- one-time use;
+- replay protection.
+
+Не считать wallet address вечным user ID: пользователь должен иметь возможность сменить или восстановить wallet.
+
+## Embedded wallets
+
+Кандидаты второго этапа:
+
+- Privy;
+- Reown AppKit;
+- Coinbase CDP;
+- Crossmint.
+
+Privy документирует Solana embedded wallets, wallet login и transaction signing. Reown поддерживает Solana wallets и email/social login. Coinbase CDP также поддерживает Solana accounts и embedded wallet flows.
+
+Для первой версии рекомендуется:
+
+```text
+External wallets:
+    Reown AppKit или стандартные EVM/Solana wallet adapters
+
+Embedded wallet:
+    не включать до решения об account model
+```
+
+## Card payments
+
+Не предполагать, что новый custom token автоматически поддерживается fiat onramp.
+
+Реалистичная схема:
+
+```text
+Card
+  ↓
+Onramp provider
+  ↓
+USDC или SOL на Solana
+  ↓
+Jupiter/Raydium swap
+  ↓
+Project token
+```
+
+Stripe onramp и Coinbase Onramp поддерживают ограниченные списки активов и сетей; Coinbase рекомендует получать актуальный список через Config/Options API. Stripe в текущей документации поддерживает SOL и USDC на Solana в ряде регионов, но доступность зависит от страны.
+
+Card onramp не включать в initial mainnet scope. Сначала:
+
+1. запустить токен;
+2. создать DEX pool;
+3. убедиться, что swap routing работает;
+4. проверить страну пользователей;
+5. подать заявку провайдеру;
+6. интегрировать USDC/SOL onramp;
+7. добавить атомарный или последовательный swap.
+
+## Gasless UX
+
+Позже можно рассмотреть:
+
+- Kora;
+- Privy gas sponsorship;
+- собственный ограниченный Solana fee payer.
+
+Kora — готовый Solana gasless relayer/paymaster, позволяющий приложению оплачивать fees или принимать оплату fee в SPL assets. Privy также позволяет задавать app-controlled fee payer для Solana. Это P2, потому что sponsorship создаёт отдельную abuse surface и требует policy/rate limits.
+
+---
+
+# 12. Agent autonomy matrix
+
+## Можно выполнять автономно
+
+- web research по официальной документации;
+- dependency/version discovery;
+- создание репозитория;
+- Docker/Docker Compose;
+- локальные сети;
+- test-only wallets;
+- local/testnet private keys;
+- unit/fuzz/invariant tests;
+- Slither и package audits;
+- Sepolia deployment;
+- Solana Devnet deployment;
+- CCIP testnet configuration;
+- testnet CCIP round-trip;
+- Raydium Devnet pool;
+- frontend;
+- monitor;
+- documentation;
+- gas simulations;
+- mainnet fork;
+- unsigned Safe transaction manifests;
+- unsigned Squads instruction builders;
+- public address verification;
+- testnet faucet attempts;
+- подготовка verification applications без отправки.
+
+## Нужно спросить пользователя
+
+- final name/symbol;
+- utility;
+- allocations;
+- signer addresses;
+- authority model;
+- mainnet rate limits;
+- initial LP ratio;
+- initial implied FDV;
+- fee tier;
+- public/private beta;
+- target countries;
+- публикация репозитория;
+- domain;
+- любой paid subscription;
+- подача verification/listing form;
+- mainnet deploy;
+- mainnet CCIP test;
+- mainnet Raydium pool;
+- публичный launch announcement.
+
+## Категорически запрещено
+
+- просить mainnet seed phrase;
+- помещать mainnet private key в `.env`;
+- хранить mainnet key в Docker;
+- auto-sign mainnet;
+- auto-broadcast mainnet;
+- создавать mainnet pool без подтверждения;
+- создавать публичную продажу;
+- обещать доходность;
+- писать собственный bridge;
+- писать собственный relayer;
+- писать собственную Solana CCIP program;
+- заменять CCIP без согласования;
+- добавлять custom token mechanics ради «гибкости»;
+- маскировать failed/simulated test как successful E2E.
+
+---
+
+# 13. Этапы реализации
+
+## Phase 0 — discovery и фиксация решений
+
+1. Проверить последние официальные версии:
+   - CCIP EVM contracts;
+   - CCIP SVM programs;
+   - CCIP SDK/CLI;
+   - OpenZeppelin Contracts;
+   - Foundry;
+   - Solana/Anza CLI;
+   - Raydium SDK V2;
+   - Safe SDK;
+   - Squads SDK.
+2. Прочитать Chainlink `llms.txt` и CCIP Agent Skill.
+3. Установить Chainlink Agent Skills на уровне проекта.
+4. Получить актуальные addresses/selectors из CCIP Directory.
+5. Записать:
+   - source URL;
+   - retrieval date;
+   - network;
+   - chain ID;
+   - selector;
+   - program/contract address;
+   - bytecode/program owner;
+   - version.
+6. Создать ADR:
+   - `ADR-001-ethereum-canonical.md`;
+   - `ADR-002-chainlink-ccip.md`;
+   - `ADR-003-lock-mint.md`;
+   - `ADR-004-solana-trading.md`;
+   - `ADR-005-fixed-supply.md`;
+   - `ADR-006-no-custom-bridge.md`.
+7. Отправить пользователю один пакет P0 вопросов.
+
+## Phase 1 — Hybrid native macOS arm64 + Linux CI environment
+
+Создать Compose profiles:
+
+```text
+local
+testnet
+frontend
+monitoring
+```
+
+Локальные native процессы:
+
+```text
+anvil
+solana-validator
+LiteSVM
+```
+
+Docker/Compose используется для Linux CI parity, web, monitor и поздних monitoring profiles. На Apple Silicon не запускать Agave через скрытую x86-эмуляцию по умолчанию.
+
+Предпочтительно:
+
+- Anvil для локальной EVM;
+- `solana-test-validator` как стабильный baseline;
+- Surfpool как опциональный fork/testing profile;
+- Node.js 24 LTS;
+- pnpm 11;
+- Foundry;
+- Solana CLI;
+- SPL Token CLI;
+- TypeScript 7 strict mode;
+- Rust/Anchor не устанавливать для MVP: собственная Solana program запрещена и не нужна.
+
+Docker requirements:
+
+- pinned base images;
+- lockfiles;
+- non-root containers;
+- healthchecks;
+- named volumes;
+- no secrets in layers;
+- `.dockerignore`;
+- SBOM;
+- dependency scan;
+- `docker compose config` validation;
+- Linux x86_64 support;
+- native macOS arm64 bootstrap;
+- no mainnet keys.
+
+## Phase 2 — Ethereum token
+
+Реализовать и протестировать:
+
+```text
+ProjectToken.sol
+```
+
+Properties:
+
+- immutable deployment;
+- fixed supply;
+- constructor mint to Treasury Safe;
+- 9 decimals;
+- no post-deployment mint;
+- no owner-only transfer controls;
+- no tax;
+- no proxy;
+- no pause;
+- no blacklist;
+- immutable `getCCIPAdmin()` bootstrap hook для self-service регистрации без `Ownable`.
+
+Tests:
+
+- name/symbol;
+- decimals;
+- total supply;
+- treasury balance;
+- transfers;
+- approvals;
+- `transferFrom`;
+- zero address;
+- constructor validation;
+- fuzz transfers;
+- invariant: total supply never increases;
+- interface/ABI snapshot;
+- gas report;
+- Slither.
+
+До финального mainnet contract не использовать test name/symbol.
+
+## Phase 3 — Ethereum CCIP pool
+
+Использовать официальный current `LockReleaseTokenPool`.
+
+Подготовить scripts для:
+
+- deploy token;
+- deploy pool;
+- register/propose admin;
+- accept admin;
+- set pool in TokenAdminRegistry;
+- configure Solana remote token;
+- configure remote pool;
+- rate limits;
+- owner transfer;
+- verify `rebalancer == address(0)` in steady state;
+- verifier;
+- state export.
+
+Нормальный режим запрещает `provideLiquidity`, `withdrawLiquidity` и прямое pre-funding. Initial Solana allocation создаётся только реальным CCIP transfer. Любое временное назначение rebalancer требует отдельного human-approved proposal, state diff и reconciliation до/после.
+
+Выполнить capability spike Token Manager:
+
+- проверить current existing-token workflow;
+- проверить Lock/Release source;
+- проверить добавление Solana BurnMint remote;
+- записать поддерживаемые и ручные шаги.
+
+Source of truth всё равно:
+
+```text
+config/*.yaml
+deployment-manifest.json
+verifier output
+Foundry/TypeScript scripts
+```
+
+## Phase 4 — Solana token и BurnMint pool
+
+Scripts:
+
+- create SPL mint;
+- create treasury ATA;
+- create metadata;
+- set freeze authority to None;
+- initialize self-serve BurnMint pool;
+- derive Pool Signer PDA;
+- configure remote Ethereum token/pool;
+- configure rate limits;
+- configure Squads;
+- configure SPL multisig;
+- inspect all authorities;
+- compare state with manifest.
+
+Не деплоить Chainlink program самостоятельно.
+
+Self-serve mode является рекомендуемым вариантом: Chainlink-maintained standard pool programs уже развёрнуты, а проект только инициализирует собственный token pool state.
+
+## Phase 5 — local tests
+
+Локально проверить:
+
+- ERC-20;
+- SPL mint;
+- authority transitions;
+- pool configuration encoding;
+- amount conversion;
+- supply monitor;
+- frontend with mocked CCIP messages;
+- all failure paths.
+
+Chainlink Local можно использовать для EVM-local tests, но он не доказывает реальную delivery Ethereum↔Solana. Настоящий cross-family E2E выполняется через Sepolia↔Solana Devnet. Не называть local mock настоящим CCIP E2E.
+
+## Phase 6 — public testnet E2E
+
+Использовать:
+
+```text
+Ethereum Sepolia
+↕
+Solana Devnet
+```
+
+CCIP Directory сейчас показывает активный Sepolia lane и self-service pool programs на Solana Devnet.
+
+Последовательность:
+
+1. Deploy Ethereum test token.
+2. Deploy/configure LockRelease pool.
+3. Создать Solana mint с supply 0.
+4. Initialize self-serve BurnMint pool.
+5. Configure peers/remotes.
+6. Configure low rate limits.
+7. Verify all authority graph.
+8. Bridge Ethereum → Solana.
+9. Записать:
+   - source tx;
+   - message ID;
+   - destination tx;
+   - balances;
+   - fee;
+   - latency.
+10. Проверить invariant.
+11. Bridge часть обратно.
+12. Повторно проверить invariant.
+13. Повторить с другим получателем.
+14. Проверить ATA creation.
+15. Проверить transfer above rate limit.
+16. Проверить pending/manual execution handling.
+17. Сохранить отчёт.
+
+## Phase 7 — frontend и dashboard
+
+### Day-zero готовые инструменты
+
+```text
+Token Manager
+Transporter
+CCIP Explorer
+Safe
+Squads
+Raydium
+Jupiter
+```
+
+### Branded frontend
+
+Страницы:
+
+```text
+/overview
+/bridge
+/transactions
+/governance
+/liquidity
+/health
+/contracts
+/risks
+```
+
+Функции:
+
+- EVM и Solana wallet connection;
+- strict network validation;
+- balances;
+- fee quote;
+- approve;
+- CCIP send;
+- message tracking;
+- Explorer links;
+- pending/manual status;
+- global supply;
+- Ethereum locked;
+- Solana supply;
+- backing ratio;
+- authorities;
+- rate limits;
+- Raydium reserves;
+- price impact;
+- low-liquidity warning.
+
+Использовать официальный CCIP SDK. SDK поддерживает EVM и Solana, fee/message tooling и требует Node 20+, с Node 24+ как рекомендуемым окружением.
+
+Официальный `ccip-sdk-examples` использовать как reference, но не копировать без проверки: example code может быть testnet-oriented и не является заменой production review.
+
+Frontend не должен:
+
+- хранить ключи;
+- принимать произвольные token/pool addresses из URL;
+- использовать pool spot price как oracle;
+- скрывать fee;
+- скрывать low TVL;
+- скрывать admin authorities;
+- разрешать mainnet при compile-time/runtime flag `ENABLE_MAINNET=false`.
+
+## Phase 8 — Raydium Devnet
+
+Только после successful CCIP round-trip:
+
+1. Создать fake testnet USDC с 6 decimals.
+2. Использовать bridged SPL token.
+3. Использовать Raydium SDK V2.
+4. Использовать актуальные Devnet program IDs.
+5. Не считать `cluster="devnet"` достаточной настройкой.
+6. Создать CPMM.
+7. Добавить liquidity.
+8. Swap TOKEN→fake USDC.
+9. Swap fake USDC→TOKEN.
+10. Проверить slippage.
+11. Сохранить pool ID, LP mint, vaults, reserves.
+12. Проверить dashboard.
+
+Raydium называет CPMM рекомендуемым default для большинства permissionless new pools; типичная mainnet creation cost сейчас около `0.19 SOL`.
+
+## Phase 9 — monitoring
+
+Primary monitor должен быть собственным read-only сервисом, а не критически зависеть от одного SaaS.
+
+Primary truth — event-sourced reconciler по finalized Ethereum/Solana history. CCIP Explorer/API используются только для enrichment и сверки.
+
+Рекомендуемый стек:
+
+```text
+TypeScript monitor
+Prometheus metrics
+Grafana dashboard
+SQLite/Postgres cache
+Telegram webhook
+structured JSON logs
+CCIP SDK/API
+Ethereum RPC
+Solana RPC
+```
+
+Проверять:
+
+- Ethereum fixed supply;
+- pool locked balance;
+- Solana supply;
+- `P_ES`, `P_SE` и `backingSurplus`;
+- причинное соответствие каждого mint/release конкретному message ID;
+- pending CCIP messages без автоматического списания по timeout;
+- manual execution;
+- все Solana `MintTo`/`Burn`;
+- все Ethereum pool transfers и liquidity events;
+- admin addresses;
+- pool owner;
+- remote pools/tokens;
+- rate limits;
+- mint authority;
+- freeze authority;
+- metadata authority;
+- Squads threshold/signers;
+- LP owner;
+- Raydium reserves;
+- RPC consistency.
+
+Chainlink оставляет за разработчиком ответственность за application monitoring, risk communication и обработку сообщений, требующих manual execution.
+
+## Phase 10 — mainnet dry-run
+
+Ethereum:
+
+- current mainnet fork;
+- simulate Safe creation/config;
+- simulate token deployment;
+- calculate deterministic/expected address where possible;
+- simulate LockRelease pool;
+- simulate registry operations;
+- simulate remote configuration;
+- simulate rate limits;
+- estimate gas;
+- generate Safe JSON;
+- no broadcast.
+
+Solana:
+
+- fetch current program IDs;
+- derive all PDAs;
+- simulate instructions;
+- create Squads transaction-builder payloads;
+- no mainnet keypair;
+- no recent blockhash transaction stored as a permanent artifact;
+- no broadcast.
+
+Raydium:
+
+- calculate pool setup;
+- compare fee tiers;
+- calculate initial price;
+- calculate implied FDV;
+- calculate expected price impact for:
+  - $1;
+  - $5;
+  - $10;
+  - $25;
+  - $50;
+  - $100.
+- no broadcast.
+
+## Phase 11 — human-reviewed mainnet deployment
+
+Перед каждым proposal показать:
+
+```text
+Operation
+Network
+Target
+Decoded calldata/instructions
+Current state
+Expected state
+Expected fee
+Budget remaining
+Signer threshold
+Rollback/recovery
+Verification command
+```
+
+Mainnet последовательность:
+
+1. Создать/подтвердить Admin Safe.
+2. Создать/подтвердить Treasury Safe.
+3. Создать/подтвердить Squads.
+4. Deploy Ethereum token.
+5. Verify source.
+6. Deploy/configure LockRelease pool.
+7. Register CCIP admin.
+8. Create Solana mint.
+9. Create metadata.
+10. Remove freeze authority.
+11. Initialize BurnMint pool.
+12. Configure authority model.
+13. Configure remote pools.
+14. Configure conservative limits.
+15. Run verifier.
+16. Small Ethereum→Solana test.
+17. Small Solana→Ethereum test.
+18. Wait for clean monitoring window.
+19. Bridge LP allocation.
+20. Create Raydium pool after separate confirmation.
+21. Publish official address manifest.
+22. Start friends/community beta.
+
+---
+
+# 14. Rate-limit policy
+
+Не задавать limits как случайный процент total supply.
+
+Использовать:
+
+```text
+max_tolerable_incident_loss
+normal_expected_daily_bridge_volume
+initial_remote_allocation
+current_remote_supply
+```
+
+Bootstrap mode:
+
+```text
+capacity ≈ exact LP allocation + small operational buffer
+```
+
+Post-launch mode:
+
+```text
+capacity + refillRate * detectionAndPauseLatency <= maximum tolerable incident loss
+refill based on expected daily volume
+outbound approximately 90% of inbound where appropriate
+```
+
+Нужно согласовать четыре bucket: Ethereum outbound ≤ Solana inbound и Solana outbound ≤ Ethereum inbound. `isEnabled=false` на EVM означает unlimited, а не pause. `paused.yaml` обязан сохранять limiter включённым с нулевыми capacity/rate и иметь executable contract test на pinned EVM и SVM versions.
+
+Chainlink production tutorial рекомендует conservative limits и приводит outbound около 90% от inbound, чтобы уменьшить риск congestion при transfers in flight.
+
+Нужно иметь:
+
+- `bootstrap.yaml`;
+- `beta.yaml`;
+- `paused.yaml`;
+- `production.template.yaml`.
+
+Все значения:
+
+- human-readable;
+- base units;
+- tokens/second;
+- tokens/day;
+- процент remote supply;
+- приблизительное значение относительно LP.
+
+---
+
+# 15. Trading и Jupiter visibility
+
+На старте создаётся только один pool:
+
+```text
+TOKEN / USDC
+Raydium CPMM
+Solana
+```
+
+Не создавать Ethereum pool, поскольку это:
+
+- раздробит маленькую liquidity;
+- потребует WETH/USDC capital;
+- ухудшит общий UX;
+- создаст два рынка при отсутствии market maker.
+
+После создания Raydium pool проверить:
+
+- доступность прямого swap;
+- обнаружение mint через Jupiter Tokens API;
+- наличие metadata;
+- наличие quote route;
+- warning/verification status;
+- organic score;
+- holder и trading metrics.
+
+Старый Jupiter token-list pull-request flow deprecated; актуальная discovery/verification опирается на Jupiter Verify и organic signals. Не обещать пользователю мгновенную зелёную verification badge.
+
+Не делать искусственный volume bot или фиктивную активность ради verification.
+
+---
+
+# 16. Security requirements
+
+Обязательные документы:
+
+```text
+THREAT_MODEL.md
+AUTHORITY_MODEL.md
+SUPPLY_INVARIANT.md
+INCIDENT_RUNBOOK.md
+MAINNET_RUNBOOK.md
+TESTNET_RUNBOOK.md
+KEY_MANAGEMENT.md
+USER_RISK_DISCLOSURE.md
+```
+
+Threat model минимум:
+
+- compromised deployer;
+- compromised Safe signer;
+- compromised Squads signer;
+- two compromised signers;
+- malicious frontend;
+- compromised RPC;
+- wrong chain selector;
+- wrong remote pool;
+- wrong token address;
+- wrong decimals;
+- unexpected Solana mint;
+- metadata authority takeover;
+- CCIP outage;
+- CCIP manual execution;
+- rate-limit misconfiguration;
+- under-backed Solana supply;
+- Raydium LP removal;
+- low-liquidity manipulation;
+- leaked testnet key reused on mainnet;
+- dependency compromise;
+- Docker secret leak;
+- phishing Safe/Squads proposal.
+
+Tests/checks:
+
+- Forge unit tests;
+- fuzz;
+- invariants;
+- Slither;
+- strict TypeScript;
+- ESLint;
+- dependency audit;
+- secret scan;
+- Docker scan;
+- chain ID guards;
+- program-owner validation;
+- bytecode checks;
+- PDA derivation;
+- decimals check;
+- peer symmetry;
+- role graph;
+- rate-limit readback;
+- multi-RPC consistency;
+- frontend CSP;
+- Playwright smoke tests;
+- transaction simulation directly before signing.
+
+---
+
+# 17. Definition of done
+
+## Local MVP
+
+- `docker compose build` проходит;
+- local stack стартует;
+- healthchecks green;
+- EVM tests green;
+- Solana tests green;
+- supply invariant green;
+- frontend собирается;
+- monitor запускается;
+- no secrets in Git;
+- reproducible bootstrap documented.
+
+## Testnet E2E
+
+- token deployed on Sepolia;
+- mint created on Solana Devnet;
+- pools configured;
+- Ethereum→Solana successful;
+- Solana→Ethereum successful;
+- message IDs сохранены;
+- balances match;
+- invariant holds;
+- limits tested;
+- frontend показывает реальные данные;
+- Raydium Devnet pool и swaps работают либо документирован внешний blocker.
+
+## Mainnet readiness
+
+- final P0 decisions complete;
+- signer addresses verified out of band;
+- source code frozen;
+- dependency versions pinned;
+- mainnet fork green;
+- Safe JSON generated;
+- Squads builders generated;
+- gas report complete;
+- budget under cap;
+- two-person review complete;
+- monitoring ready;
+- incident runbook ready;
+- user risk disclosure ready;
+- no mainnet transaction broadcast by agent.
+
+## Beta launch
+
+- human-approved mainnet deployment;
+- round-trip successful;
+- monitoring clean;
+- LP ratio explicitly approved;
+- pool created;
+- LP held by disclosed Squads;
+- official addresses published;
+- low-liquidity risk visible;
+- no investment-return marketing.
+
+---
+
+# 18. Критический разбор архитектуры
+
+## Что здесь действительно хорошо
+
+1. Canonical Ethereum token остаётся обычным ERC-20 и не привязан навсегда к CCIP-specific inheritance.
+2. Fixed supply создаётся один раз.
+3. Solana даёт дешёвую торговлю и transfers.
+4. CCIP решает bridge verification, execution, decimal conversion, rate limiting и standard pool logic.
+5. На Solana не нужно поддерживать собственную bridge program.
+6. Маленький budget достаточен для beta.
+7. Config-as-code и manifests обеспечивают воспроизводимость.
+8. Mainnet signing остаётся у людей.
+9. Ethereum DEX liquidity не дробит маленький Solana pool.
+10. Frontend может начать с готовых Transporter/Explorer.
+
+## Слабые места и компромиссы
+
+### 1. Зависимость от CCIP
+
+Проект зависит от:
+
+- availability выбранного lane;
+- CCIP governance;
+- Router/FeeQuoter upgrades;
+- CCIP fees;
+- manual execution process.
+
+Это приемлемо, потому что альтернативой при таком бюджете была бы большая собственная security/operations surface.
+
+### 2. Recoverable Solana authority не является абсолютным hard cap
+
+Если Squads может выполнить recovery mint, holders должны знать об этом. Защита:
+
+- multisig;
+- public signers;
+- alerts;
+- public supply dashboard;
+- documented emergency policy;
+- последующее возможное hardening.
+
+### 3. Tiny LP означает манипулируемую цену
+
+С `$50–100` USDC:
+
+- цена легко двигается;
+- FDV условный;
+- крупная продажа может забрать значительную часть USDC;
+- spot price нельзя использовать как oracle.
+
+Это нормально для обозначенного beta, но не для заявления о зрелом рынке.
+
+### 4. Card → custom token не гарантирован
+
+Большинство onramp providers сначала поддерживают ограниченный набор активов. Реалистичный UX — USDC/SOL onramp и затем swap.
+
+### 5. Token Manager не заменяет DevOps
+
+Даже если current wizard поддержит наш flow, нужны:
+
+- versioned config;
+- scripts;
+- verification;
+- state diff;
+- audit trail;
+- rollback/runbook.
+
+Это не «велосипед», а минимальная безопасная orchestration вокруг готового протокола.
+
+### 6. Local Docker не доказывает cross-chain delivery
+
+Offchain CCIP infrastructure нельзя полноценно заменить Anvil + local Solana validator. Настоящий E2E требует public testnet lane.
+
+### 7. Две governance systems
+
+Safe + Squads/SPL Multisig добавляют operational complexity. Но это безопаснее, чем один deployer EOA.
+
+### 8. Юридический wording
+
+Фраза «ранние инвесторы получат profit благодаря нашей работе» создаёт ненужный regulatory risk. Contributor grants и utility beta — более чистая стартовая модель.
+
+## Итоговый verdict
+
+Архитектура остаётся оптимальной для заданных ограничений:
+
+```text
+маленький бюджет
++ Ethereum L1
++ Solana trading
++ controlled supply
++ no custom bridge
++ operational flexibility
++ AI-assisted implementation
+```
+
+Базовый протокол менять не нужно: актуальные CCIP lanes и self-serve SVM pools подтверждены. Token Manager не является условием жизнеспособности, а его capability spike не блокирует script-first реализацию.
+
+---
+
+# 19. Рекомендуемая структура репозитория
+
+```text
+/
+├── compose.yaml
+├── Makefile
+├── README.md
+├── .env.example
+├── .gitignore
+├── .dockerignore
+├── docker/
+│   ├── evm.Dockerfile
+│   ├── solana.Dockerfile
+│   ├── web.Dockerfile
+│   └── monitor.Dockerfile
+├── config/
+│   ├── local.yaml
+│   ├── testnet.yaml
+│   ├── mainnet.template.yaml
+│   ├── bootstrap-rate-limits.yaml
+│   ├── beta-rate-limits.yaml
+│   └── paused-rate-limits.yaml
+├── evm/
+│   ├── src/
+│   ├── test/
+│   ├── script/
+│   └── foundry.toml
+├── solana/
+│   ├── scripts/
+│   ├── tests/
+│   └── config/
+├── crosschain/
+│   ├── scripts/
+│   ├── invariants/
+│   └── manifests/
+├── dex/
+│   └── raydium/
+├── apps/
+│   └── web/
+├── monitoring/
+│   ├── src/
+│   ├── prometheus/
+│   └── grafana/
+├── docs/
+│   ├── DECISIONS.md
+│   ├── OPEN_QUESTIONS.md
+│   ├── STATUS.md
+│   ├── ARCHITECTURE.md
+│   ├── THREAT_MODEL.md
+│   ├── AUTHORITY_MODEL.md
+│   ├── SUPPLY_INVARIANT.md
+│   ├── TESTNET_RUNBOOK.md
+│   ├── MAINNET_RUNBOOK.md
+│   ├── INCIDENT_RUNBOOK.md
+│   ├── USER_RISK_DISCLOSURE.md
+│   └── adr/
+├── reports/
+└── secrets/
+    └── testnet/        # gitignored
+```
+
+Make targets:
+
+```text
+make bootstrap
+make versions
+make build
+make up
+make down
+make lint
+make test
+make security
+make local-e2e
+make testnet-plan
+make testnet-deploy
+make testnet-e2e
+make raydium-devnet
+make frontend
+make monitor
+make report
+make mainnet-dry-run
+make verify-state
+make secret-scan
+make clean
+```
+
+---
+
+# 20. Отчёты, которые агент обязан предоставить
+
+`RUN_REPORT.md`:
+
+- реально выполненные действия;
+- simulated actions;
+- mocked components;
+- failed attempts;
+- blockers;
+- test results;
+- addresses;
+- transaction IDs;
+- CCIP message IDs;
+- pool IDs;
+- fees;
+- balances before/after;
+- authority graph;
+- supply invariant;
+- точные следующие действия.
+
+`BUDGET_REPORT.md`:
+
+- prepared funds;
+- actual spent;
+- refundable/rent amounts;
+- remaining ETH/SOL;
+- LP capital;
+- current quote;
+- hard cap comparison.
+
+`MAINNET_PROPOSALS.md`:
+
+- proposal order;
+- decoded operations;
+- Safe JSON paths;
+- Squads payload paths;
+- expected state diffs;
+- human verification steps.
+
+`NEEDS_INPUT.md`:
+
+Только реальные блокеры, например:
+
+- final name/symbol;
+- signer addresses;
+- allocation;
+- authority model;
+- metadata URI;
+- rate-limit risk cap;
+- LP ratio;
+- RPC credentials;
+- wallet connection/signature.
+
+---
+
+# 21. Официальные источники
+
+Все динамические адреса, версии и fees перепроверять во время реализации.
+
+## Chainlink CCIP
+
+```text
+https://docs.chain.link/ccip
+https://docs.chain.link/ccip/concepts/cross-chain-token
+https://docs.chain.link/ccip/concepts/cross-chain-token/overview
+https://docs.chain.link/ccip/concepts/cross-chain-token/evm/tokens
+https://docs.chain.link/ccip/concepts/cross-chain-token/evm/token-pools
+https://docs.chain.link/ccip/concepts/cross-chain-token/svm/token-pools
+https://docs.chain.link/ccip/concepts/cross-chain-token/svm/upgradability
+https://docs.chain.link/ccip/tutorials/evm/token-manager
+https://docs.chain.link/ccip/tools-resources/token-manager
+https://docs.chain.link/ccip/tutorials/evm/cross-chain-tokens/register-from-eoa-lock-mint-foundry
+https://docs.chain.link/ccip/tutorials/svm/cross-chain-tokens/production-multisig-tutorial
+https://docs.chain.link/ccip/tutorials/svm/cross-chain-tokens/spl-token-multisig-tutorial
+https://docs.chain.link/ccip/tutorials/svm/cross-chain-tokens/direct-mint-authority
+https://docs.chain.link/ccip/tutorials/svm/destination/token-transfers
+https://docs.chain.link/ccip/tutorials/svm/source/token-transfers
+https://docs.chain.link/ccip/concepts/rate-limit-management/overview
+https://docs.chain.link/ccip/concepts/rate-limit-management/how-rate-limits-work
+https://docs.chain.link/ccip/concepts/rate-limit-management/update-rate-limits
+https://docs.chain.link/ccip/concepts/best-practices/evm
+https://docs.chain.link/ccip/concepts/best-practices/svm
+https://docs.chain.link/ccip/service-responsibility
+https://docs.chain.link/ccip/billing
+https://docs.chain.link/ccip/tools/
+https://docs.chain.link/ccip/tools/sdk/
+https://docs.chain.link/ccip/tools/cli/show
+https://docs.chain.link/ccip/tools-resources/ccip-explorer
+https://docs.chain.link/ccip/tutorials/evm/test-ccip-locally
+https://docs.chain.link/ccip/directory/mainnet/chain/mainnet
+https://docs.chain.link/ccip/directory/mainnet/chain/solana-mainnet
+https://docs.chain.link/ccip/directory/testnet/chain/ethereum-testnet-sepolia
+https://docs.chain.link/ccip/directory/testnet/chain/solana-devnet
+https://docs.chain.link/resources/chainlink-developer-agent-skills
+https://github.com/smartcontractkit/chainlink-agent-skills
+https://github.com/smartcontractkit/ccip
+https://github.com/smartcontractkit/ccip-sdk-examples
+```
+
+## OpenZeppelin и Foundry
+
+```text
+https://docs.openzeppelin.com/contracts/5.x/api/token/ERC20
+https://docs.openzeppelin.com/contracts/5.x/wizard
+https://docs.openzeppelin.com/contracts/5.x/api/finance
+https://github.com/OpenZeppelin/openzeppelin-contracts
+https://www.getfoundry.sh/
+https://www.getfoundry.sh/introduction/installation
+https://www.getfoundry.sh/anvil
+https://www.getfoundry.sh/guides/fork-testing
+```
+
+## Safe и Squads
+
+```text
+https://docs.safe.global/home/ai-agent-quickstarts/human-approval
+https://docs.safe.global/sdk/api-kit/guides/propose-and-confirm-transactions
+https://docs.safe.global/sdk/protocol-kit/guides/execute-transactions
+https://docs.safe.global/home/ai-overview
+https://docs.squads.so/main
+https://docs.squads.so/main/development/introduction/quickstart
+https://docs.squads.so/main/getting-started/pricing
+https://docs.squads.so/main/development/reference/time-locks
+```
+
+## Solana и metadata
+
+```text
+https://solana.com/docs
+https://solana.com/docs/rpc
+https://solana.com/docs/tools/surfpool
+https://solana.com/docs/tools/litesvm
+https://docs.anza.xyz/cli/examples/test-validator
+https://github.com/metaplex-foundation/mpl-token-metadata
+https://developers.metaplex.com/token-metadata
+```
+
+## Raydium и Jupiter
+
+```text
+https://docs.raydium.io/
+https://docs.raydium.io/reference/fee-comparison
+https://docs.raydium.io/user-flows/choosing-a-pool-type
+https://docs.raydium.io/user-flows/create-cpmm-pool
+https://docs.raydium.io/quick-start/deploy-cpmm-pool
+https://docs.raydium.io/sdk-api/typescript-sdk
+https://docs.raydium.io/reference/program-addresses
+https://docs.raydium.io/security/attack-vectors
+https://github.com/raydium-io/raydium-sdk-V2-demo
+https://dev.jup.ag/docs/tokens
+https://developers.jup.ag/blog/what-is-organic-score
+https://github.com/jup-ag/token-list
+```
+
+## Docker
+
+```text
+https://docs.docker.com/reference/compose-file/
+https://docs.docker.com/reference/compose-file/services/
+https://docs.docker.com/compose/how-tos/startup-order/
+https://docs.docker.com/engine/swarm/secrets/
+```
+
+## Wallet/account UX
+
+```text
+https://docs.privy.io/recipes/solana/getting-started-with-privy-and-solana
+https://docs.privy.io/recipes/solana/standard-wallets
+https://docs.privy.io/basics/react/advanced/automatic-wallet-creation
+https://docs.privy.io/wallets/gas-and-asset-management/gas/solana
+https://docs.reown.com/appkit/networks/supported-chains
+https://docs.reown.com/appkit/authentication/socials
+https://docs.cdp.coinbase.com/wallets/using-wallets/create-and-manage-wallets
+https://docs.cdp.coinbase.com/onramp/introduction/welcome
+```
+
+## Onramp и gasless UX
+
+```text
+https://docs.stripe.com/crypto/onramp
+https://docs.stripe.com/crypto/onramp/embedded
+https://docs.transak.com/products/on-ramp
+https://docs.transak.com/guides/partner-faqs
+https://solana.com/docs/tools/kora
+https://solana.com/docs/tools/kora/getting-started
+https://solana.com/docs/tools/kora/operators
+```
+
+## Legal orientation
+
+```text
+https://eur-lex.europa.eu/eli/reg/2023/1114/oj/eng
+https://eur-lex.europa.eu/EN/legal-content/summary/european-crypto-assets-regulation-mica.html
+https://www.esma.europa.eu/esmas-activities/digital-finance-and-innovation/markets-crypto-assets-regulation-mica
+https://www.sec.gov/resources-small-businesses/capital-raising-building-blocks/transactions-involving-crypto-assets
+https://www.sec.gov/newsroom/press-releases/2026-30-sec-clarifies-application-federal-securities-laws-crypto-assets
+```
+
+---
+
+# 22. Текущий product intake
+
+Исходное первое сообщение выполнено частично: пользователь подтвердил hybrid native macOS arm64 + Linux CI, назначение токена для Agent Teams AI и необходимость community-first прозрачной tokenomics. Открытые решения ведутся в `docs/OPEN_QUESTIONS.md`, варианты названия — в `docs/NAMING.md`, allocation/vesting — в `docs/TOKENOMICS.md`.
+
+Не повторяй весь исходный опрос. Следующий пакет вопросов должен касаться только ещё не принятых P0 решений:
+
+> Я принял архитектуру: Ethereum fixed-supply ERC-20 → CCIP LockRelease → Solana BurnMint → Raydium TOKEN/USDC. Основную техническую работу начинаю автономно; mainnet останется за Safe/Squads approvals.
+>
+> Мне нужен один пакет ответов на launch-blocking решения:
+>
+> 1. Финальное название токена.
+> 2. Финальный symbol.
+> 3. Подтверждаем ли `100,000,000` supply и `9 decimals`?
+> 4. Какая конкретная utility будет доступна уже на старте?
+> 5. Как делим supply между treasury, contributors, community/rewards и liquidity?
+> 6. Будет ли какая-либо продажа токенов или только grants + DEX beta?
+> 7. Какие страны являются основной аудиторией?
+> 8. Кто три реальных signer для Ethereum Safe?
+> 9. Кто три реальных signer для Solana Squads?
+> 10. Выбираем recoverable Solana mint-authority model или strict Pool Signer PDA?
+> 11. $50 или $100 USDC initial liquidity?
+> 12. Какой initial implied FDV/сколько TOKEN кладём против USDC?
+> 13. Friends-only beta или сразу публичная торговля?
+> 14. Какой максимальный финансовый ущерб должен ограничивать суточный bridge rate limit?
+> 15. Есть ли уже логотип, domain, сайт и metadata URI?
+>
+> Пока ты отвечаешь, я фиксирую версии, создаю Docker stack, ADR, test configs и Ethereum/Solana local tests. Никакие mainnet-средства и private keys мне не нужны.
+
+---
+
+# 23. Последнее обязательное правило
+
+При конфликте между:
+
+```text
+скоростью
+удобством
+минимальным бюджетом
+безопасностью supply
+```
+
+приоритет такой:
+
+```text
+1. Не допустить неконтролируемый mint или неверный remote pool.
+2. Не допустить утечку mainnet keys.
+3. Обеспечить проверяемый global supply.
+4. Сохранить возможность recovery.
+5. Уложиться в бюджет.
+6. Улучшать UX.
+```
+
+Лучше запросить одну человеческую подпись и показать понятный state diff, чем автоматизировать необратимую ошибку.

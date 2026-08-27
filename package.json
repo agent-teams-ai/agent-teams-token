@@ -1,0 +1,28 @@
+{
+  "name": "@agent-teams/token-repository",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Agent Teams token, governance, transparency, and cross-chain tooling",
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.18.0 <25",
+    "pnpm": ">=11.24.0 <12"
+  },
+  "scripts": {
+    "build": "tsc --build --pretty false",
+    "clean": "node scripts/clean.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "lint": "oxlint --deny-warnings .",
+    "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built",
+    "typecheck": "tsc --build --pretty false",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "oxlint": "1.80.0",
+    "typescript": "7.0.2"
+  }
+}
+

@@ -1,0 +1,11 @@
+{
+  "name": "@agent-teams/token-domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build --pretty false",
+    "test:built": "node --test dist/**/*.test.js"
+  }
+}
+
