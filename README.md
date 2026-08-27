@@ -40,6 +40,8 @@ remain disabled until their explicit gates are implemented.
 - [Tokenomics proposal](docs/TOKENOMICS.md)
 - [Token naming research](docs/NAMING.md)
 - [Tokenomics evidence review](docs/research/TOKENOMICS-REVIEW-2026-08-27.md)
+- [Six-critic adversarial review](docs/research/CRITIQUE-ROUND-2026-08-27.md)
 - [Engineering baseline research](docs/research/ENGINEERING-BASELINE-2026-08-27.md)
 - [Open product decisions](docs/OPEN_QUESTIONS.md)
+- [Non-negotiable mistakes and invariants](docs/NON_NEGOTIABLES.md)
 - [Current status](docs/STATUS.md)

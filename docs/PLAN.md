@@ -7,6 +7,10 @@
 
 > ⚠️ Этот файл перенесён из исходного handoff. При обнаружении подтверждённой ошибки она исправляется в этом документе сразу, а существенное решение дополнительно получает ADR. Git history остаётся audit trail исходных формулировок.
 
+Запрещённые anti-patterns и уже подтверждённые исторические ошибки собраны в
+[`NON_NEGOTIABLES.md`](NON_NEGOTIABLES.md). Любая реализация и review обязаны
+проверять этот список как acceptance contract.
+
 ---
 
 # 1. Как взаимодействовать с пользователем
@@ -107,10 +111,11 @@
 | Solana freeze authority | None |
 | Ethereum trading pool на старте | Нет |
 | Solana trading pool | Raydium CPMM TOKEN/USDC только после отдельного depth/legal gate |
-| Начальная cash liquidity | Не зафиксирована; $50–100 USDC допустимы только для Devnet |
+| Devnet liquidity | $0 real money; 50–100 units of fake USDC + faucet test tokens |
+| Mainnet cash liquidity | Не зафиксирована; отдельный depth/legal approval |
 | LP custody | LP-токены держит Squads, не сжигаются в beta |
-| Ethereum governance | Отдельные Admin Safe и Treasury Safe |
-| Solana governance | Squads + SPL Token Multisig |
+| Ethereum governance | Отдельные Bridge, Treasury и Emergency Safe за timelocks/policy vaults |
+| Solana governance | Отдельные Bridge/Treasury Squads; strict Pool Signer PDA для public mainnet |
 | Пользовательский bridge v0 | Transporter |
 | Cross-chain status v0 | CCIP Explorer |
 | Admin UI | Token Manager + Safe + Squads |
@@ -161,9 +166,9 @@
 │ - no post-deploy mint                                    │
 │ - immutable / no proxy                                   │
 │                                                          │
-│ Named allocation contracts / Timelocks                  │
+│ Named allocation policy vaults / Timelocks              │
 │      └── approved bridge budget ──> LockReleaseTokenPool │
-│ Admin Safe ── manages CCT admin, pool and rate limits     │
+│ Bridge Safe ──> Bridge Timelock ──> CCT/pool/rate config │
 └──────────────────────────┬───────────────────────────────┘
                            │
                            │ Chainlink CCIP
@@ -241,7 +246,7 @@ Canonical ERC-20 не должен наследовать bridge-specific token 
 
 ```text
 F = ProjectToken.totalSupply() на Ethereum
-L = ProjectToken.balanceOf(EthereumLockReleasePool)
+L = ProjectToken.balanceOf(versionSpecificCanonicalBackingHolder)
 S = SPL mint supply на Solana
 P_ES = locked на Ethereum, но ещё не minted на Solana
 P_SE = burned на Solana, но ещё не released на Ethereum
@@ -272,16 +277,20 @@ P_SE == 0
 L == S
 ```
 
-Monitor обязан строить ledger из finalized onchain events, а не только сравнивать snapshots. Для каждого message ID хранить направление, source lock/burn, destination mint/release, manual-execution state и terminal status. Pending message нельзя списывать по timeout.
+Monitor обязан строить ledger из finalized onchain events, а не только сравнивать snapshots. Для каждого transfer хранить provenance tuple: source allocation vault, finalized source event, message ID, amount, canonical destination ATA, beneficial controller, direction, manual-execution state и terminal status. Message ID сам по себе не доказывает allocation classification. Pending message нельзя списывать по timeout; несовпадение tuple считается `unknown/circulating` до расследования.
 
 Нормальный режим запрещает:
 
 ```text
 прямой Treasury transfer в pool
-withdrawLiquidity/provideLiquidity
-ручной Solana MintTo/Burn
+version-specific unauthorized liquidity/LockBox caller operation
+ручной governance/system Solana MintTo
 необъяснимый перевод из Ethereum pool
 ```
+
+Обычный holder может сам burn-ить SPL token через стандартный Token Program.
+Monitor классифицирует это как voluntary holder burn; такой event не является
+CCIP settlement и не может быть запрещён обещанием в документации.
 
 Критические состояния:
 
@@ -314,34 +323,45 @@ adjustedGlobalSupply =
 Предлагаемая схема:
 
 ```text
-Admin Safe 3-of-5
-├── CCT token admin
-├── LockRelease pool owner
-├── rate-limit admin
-├── remote-chain configuration
-└── emergency cross-chain actions
+Bridge Safe 3-of-5
+└── proposer Bridge Timelock, minimum 7 days
+    ├── CCT token admin
+    ├── LockRelease pool and LockBox owner changes
+    ├── rate-limit increases
+    └── remote-chain configuration
 
 Treasury Safe 3-of-5
 └── proposer для отдельных Community и Project Timelock
 
 Emergency Safe 2-of-3
-└── CANCELLER_ROLE only; не может schedule/execute/transfer assets
+├── ExpiringCanceller, 30-day epoch; cannot self-renew
+└── down-only rate-limit brake; cannot increase limits
 
 Community / Project Timelock
 ├── sole DEFAULT_ADMIN_ROLE после атомарного bootstrap
 ├── minimum delay 7 дней
-└── открытый EXECUTOR_ROLE не обходит schedule/delay
+├── открытый EXECUTOR_ROLE не обходит schedule/delay
+└── purpose-specific policy vaults reject generic execute/transfer bypass
 ```
 
-Admin, Treasury и Emergency должны быть разными Safe-адресами. Пересечение
-Admin/Treasury signer sets должно быть меньше их threshold: отличие только
-одного signer не защищает от correlated threshold compromise. Ключи, устройства
-и recovery channels не переиспользуются между ролями.
+Bridge, Treasury и Emergency должны быть разными Safe-адресами. Пересечение
+Bridge/Treasury signer sets не больше одного natural person, а Emergency не
+пересекается с ними. Считать employer, custodian и recovery domain, не только
+wallet address. Ключи, устройства и recovery channels не переиспользуются.
 
 При bootstrap нужно явно отозвать автоматически выданные proposer/canceller и
 временные admin roles: в актуальном `TimelockController` proposer из constructor
-также получает `CANCELLER_ROLE`. Emergency lane restriction для CCIP должна
-оставаться быстрее обычных treasury changes, но не получает treasury custody.
+также получает `CANCELLER_ROLE`. Permanent cancel-only authority запрещена:
+скомпрометированный canceller может бесконечно отменять собственное удаление.
+Emergency lane остаётся быстрее обычных changes, но bounded по времени,
+down-only и не получает custody.
+
+Обычный `TimelockController`, владеющий ERC-20, не обеспечивает budget cap:
+он способен вызвать произвольный `transfer`. Community, Distribution,
+Operations, Grant Reserve и Liquidity используют отдельные policy vaults без
+generic `execute`; каждый vault enforce-ит разрешённые recipients, rolling cap,
+no-rollover и destination rules. Раскрытый лимит нельзя называть onchain
+invariant, пока это не доказано контрактом и stateful tests.
 
 Agent может:
 
@@ -364,25 +384,31 @@ Safe официально поддерживает модель, где аген
 Предлагаемая governance:
 
 ```text
-Squads 2-of-3
+Bridge Admin Squads 3-of-5, 7-day timelock
 ├── CCIP pool owner
 ├── CCIP administration
 ├── remote-chain configuration
 ├── rate limits
-├── metadata update authority
-└── emergency recovery path
+└── metadata update authority
 
-SPL Token Multisig
-├── CCIP Pool Signer PDA повторяется M раз
-├── Squads Vault/governance signer slots
-└── mint authority policy
+Treasury Squads 3-of-5, 7-day timelock
+├── separate ATA per allocation
+└── LP custody; no spending-limit bypass at genesis
+
+SPL mint authority on public mainnet
+└── CCIP Pool Signer PDA directly
 ```
 
-SPL multisig не равен обычному 2-of-3 Squads. Для автономной работы CCIP Pool Signer PDA должен встречаться минимум `M` и максимум `N-M` раз, поэтому `M ≤ N/2`; threshold 2 требует минимум `N=4`. Squads остаётся отдельным governance layer.
+SPL multisig не равен Squads. Recoverable `[P,P,G,G]`, `M=2,N=4` означает
+`Pool PDA OR governance`: один Squads Vault PDA может удовлетворить оба `G`
+slots и вручную mint-ить unlimited supply. Поэтому recoverable authority
+допустима только в test/bounded beta с headline disclosure и P0 alert; до
+широкой public distribution/liquidity mint authority переходит напрямую Pool
+Signer PDA и это проверяется на target chain.
 
 Нужно принять отдельное продуктовое решение между двумя моделями.
 
-### Recoverable beta model — рекомендуемый старт
+### Recoverable test/bounded-beta model
 
 Governance сохраняет возможность recovery/migration через Squads, а CCIP Pool Signer PDA автономно выполняет штатный mint/burn.
 
@@ -400,7 +426,7 @@ Governance сохраняет возможность recovery/migration чере
 - это нужно публично раскрыть и мониторить.
 - SPL multisig реализует по смыслу `Pool PDA OR governance`, а не обязательную совместную подпись двух слоёв.
 
-### Strict model
+### Strict public-mainnet model — рекомендуемый конечный invariant
 
 Mint authority передаётся непосредственно Pool Signer PDA без governance recovery path.
 
@@ -433,7 +459,7 @@ Mint authority передаётся непосредственно Pool Signer P
 | Ethereum deploy/config reserve | около $20–50 |
 | Solana token/CCIP/Squads/Raydium reserve | около 0.5–0.8 SOL |
 | CCIP mainnet round-trip tests | около $10–25 |
-| Raydium Devnet liquidity | $50–100 fake USDC |
+| Raydium Devnet liquidity | $0 real money; 50–100 units of mintable fake USDC |
 | Public Raydium liquidity | Не определена; отдельный depth/legal approval |
 | Непредвиденный резерв | $50–100 |
 | Общий технический бюджет без public LP | примерно $250–350, уточняется по live gas/SOL |
@@ -472,12 +498,15 @@ ALLOW_MAINNET_POOL_CREATION=false
 ```
 
 Любое превышение hard cap требует нового явного подтверждения пользователя.
+Testnet assets никогда не покупаются: Sepolia ETH, Devnet SOL, test LINK и fake
+USDC берутся из faucets или создаются локально. Недоступность faucet является
+временным blocker соответствующего E2E, а не основанием тратить реальные деньги.
 
 ---
 
 # 9. Продуктовые решения, которые нужно принять вместе с пользователем
 
-Tokenomics является отдельным product/security workstream, а не только строкой allocations. Source of truth — `docs/TOKENOMICS.md` и machine-readable proposal `config/tokenomics.proposal.yaml`; после принятия создаётся immutable genesis manifest.
+Tokenomics является отдельным product/security workstream, а не только строкой allocations. Пока `status: proposal`, `docs/TOKENOMICS.md` и `config/tokenomics.proposal.yaml` являются согласованным предложением, не execution truth. После явного принятия strict compiler создаёт canonical immutable genesis manifest, и только он допускается к deployment.
 
 🔒 Инварианты tokenomics:
 
@@ -486,6 +515,9 @@ Tokenomics является отдельным product/security workstream, а �
 - founder/team allocations не попадают в обычные wallets до vesting release;
 - project/community treasury не является личным резервом founder: это два
   отдельных Timelock address с публичным budget accounting;
+- 65% на genesis называются community-designated, не community-directed:
+  binding community control отсутствует, а project-administered control graph
+  раскрывается полностью;
 - неиспользованные contributor grants остаются в locked reserve, который может
   создавать только публичные grants и не может переводить резерв напрямую EOA;
 - undeployed liquidity reserve не равен circulating supply, но TOKEN внутри
@@ -499,24 +531,24 @@ Tokenomics является отдельным product/security workstream, а �
 - beta запрещает treasury market sales, buybacks и token-funded yield;
 - никакой public sale или marketing с обещанием доходности без отдельного legal review.
 
-## P0 — блокируют production contract implementation или mainnet deployment
+## P0 — блокируют rights/ABI freeze или mainnet deployment
 
 | ID | Вопрос | Рекомендуемый default | Почему важно |
 |---|---|---|---|
 | D-01 | Финальное имя токена | `Agent Teams AI` как кандидат | Имя попадёт в immutable Ethereum contract |
-| D-02 | Финальный symbol | `ATAI` только после осознанного принятия collision risk | Уже существуют ArtemisAI/ATAI и публичная компания с ticker ATAI |
+| D-02 | Финальный symbol | `AGTMAI` как current candidate | Exact CoinGecko/SEC/Jupiter/DexScreener/GitHub match не найден; formal clearance всё равно обязателен |
 | D-03 | Total supply | `100,000,000` | Стоимость deployment от supply не зависит |
 | D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
 | D-05 | Utility на старте | Минимум одна live consumptive function до public distribution | Не проектировать публичный запуск только вокруг будущего roadmap |
-| D-06 | Allocations | Предложение `42/12/13/5/20/8` | Treasury, operations, contributors, founder, distributions, liquidity |
+| D-06 | Allocations | Предложение `45/12/13/5/20/5` | Treasury, operations, contributors, founder, distributions, liquidity |
 | D-07 | Vesting | Team: 12→48; founder: 18→60; оба без cliff catch-up; future grants revocable только в unvested части | Не смешивать assigned grants и свободный reserve и не создавать общий unlock cliff |
 | D-08 | Public sale | Нет на первом beta | Снижает legal и operational scope |
-| D-09 | Entity и target jurisdictions | Решить до production contracts | Нужны для rights, utility, legal/onramp/marketing решений |
-| D-10 | Ethereum signer sets | Admin/Treasury 3-of-5, Emergency 2-of-3; overlap ниже threshold | Изолировать custody, configuration и cancellation |
-| D-11 | Solana signer set | Squads threshold задаётся отдельно; SPL pool authority обязана соблюдать `M ≤ N/2` | Не путать Squads и SPL multisig |
-| D-12 | Solana authority model | Recoverable beta | Нужен осознанный выбор trust/recovery |
+| D-09 | Entity и target jurisdictions | Решить до rights/ABI freeze, mainnet genesis и public communications | Local/test-only neutral implementation разрешена раньше |
+| D-10 | Ethereum signer sets | Bridge/Treasury 3-of-5, Emergency 2-of-3; `|B∩T|≤1`, `E∩(B∪T)=0` | Изолировать custody, configuration и bounded cancellation |
+| D-11 | Solana signer sets | Bridge/Treasury Squads 3-of-5 с 7-day timelock, без spending-limit bypass | Не путать Squads и SPL mint authority |
+| D-12 | Solana authority model | Recoverable только test/bounded beta; Pool Signer PDA до широкой public distribution/liquidity | Строгий mainnet supply invariant важнее удобства recovery |
 | D-13 | Metadata authority | Squads на beta | Можно исправить URI/logo, затем заморозить |
-| D-14 | Public liquidity depth | `$100` swap ≤1% execution slippage | Если капитал не оправдан, запускать utility beta без official pool |
+| D-14 | Public liquidity depth | Raydium SDK `priceImpact`: `$100` ≤1%, `$500` ≤5%; exact current fee config | При 25 bps baseline `$100` требует ≈$13.2k quote; plan ≥$15k, prefer $20k headroom, иначе без official pool |
 | D-15 | Initial pool ratio/token amount | UNSET до отдельного proposal | Tiny pool не является valuation или price discovery |
 | D-16 | Raydium fee tier | Сравнить доступные current configs | Не хардкодить устаревший tier |
 | D-17 | LP custody | Squads, не burn | Сохраняет recovery на beta |
@@ -533,10 +565,11 @@ Tokenomics является отдельным product/security workstream, а �
 ## Как одобрять liquidity
 
 Не выбирать token amount через желаемый FDV. Перед public pool воспроизводимая
-симуляция фиксирует quote reserve, ratio, fee tier и price impact для `$100` и
-`$500` swaps. Baseline gate: `$100` swap имеет не более 1% execution slippage;
-для простого CPMM это ориентировочно требует около `$10,000` quote reserve до
-fees. При недостаточной глубине официальный market pool не создаётся.
+симуляция фиксирует quote reserve, ratio, fee tier и SDK `priceImpact` для `$100`
+и `$500` swaps. Baseline gate: `$100 <=1%`, `$500 <=5%`. При 25 bps CPMM первый
+gate требует примерно `$13.2k` quote reserve; planning floor `$15k`, предпочтён
+`$20k` с запасом. Realized slippage tolerance остаётся отдельным user execution
+guard. При недостаточной глубине официальный market pool не создаётся.
 
 Frontend обязан показывать:
 
@@ -577,9 +610,11 @@ Raydium отдельно предупреждает, что low-TVL CPMM pools �
 | D-35 | Jupiter visibility | Не обещать мгновенную verification |
 | D-36 | Incident communication | Публичная status page и runbook |
 | D-37 | Bridge UI minimum amount | UI warning, не custom onchain rule |
-| D-38 | Timelock delay/cancel policy | Timelock обязателен до genesis; default 7 дней, Emergency Safe cancel-only |
+| D-38 | Timelock delay/cancel policy | Timelock 7 дней; Emergency только expiring canceller + down-only brake |
 | D-39 | Independent code review | Хотя бы один технический reviewer до mainnet |
-| D-40 | Token Facts Pack и legal classification | Draft до genesis; publish до первого offer/airdrop/marketing |
+| D-40 | Token Facts Pack и legal classification | Freeze/sign до genesis, bind hash; signed address addendum до первого offer/airdrop/marketing |
+| D-41 | EU/public-offer path | Documented exemption либо выполненные white-paper/notification/publication/marketing gates | Facts Pack не заменяет MiCA white paper |
+| D-42 | Market-conduct path | Venue/CASP/admission memo, restricted list, trading windows, LP/affiliate disclosure | Нужен до pool, ratio announcement или issuer trading |
 
 ## P2 — не блокируют первый запуск
 
@@ -850,9 +885,17 @@ Kora — готовый Solana gasless relayer/paymaster, позволяющий
    - version.
 6. Фиксировать только реально принятые irreversible decisions в
    `docs/decisions/`; proposed tokenomics остаётся вне immutable baseline.
-7. До production contracts получить ответы по имени/symbol, live utility,
-   allocations, entity и launch jurisdictions. Исследование среды можно
-   продолжать без этих ответов.
+7. Local/test-only neutral implementation может идти до legal entity. До freeze
+   holder rights/ABI и mainnet genesis получить ответы по имени/symbol, live
+   utility, allocations, issuer/entity и launch jurisdictions. До public
+   communications/distribution/pool дополнительно закрыть phase-specific legal
+   gates.
+8. До pool contracts или monitor выполнить compatibility spike
+   `@chainlink/contracts-ccip 1.6.4` против `2.0.0` вместе с SVM `1.6.3`, Solidity
+   `0.8.36` и `evm_version=paris`: реально проверить registration/config encoding,
+   backing holder и Ethereum-Solana lane. Зафиксировать выбранную protocol line,
+   addresses, artifact digests и API отдельным ADR. Нельзя автоматически брать
+   npm latest или молча оставаться на 1.6.x.
 
 ## Phase 1 — Hybrid native macOS arm64 + Linux CI environment
 
@@ -915,16 +958,30 @@ Docker requirements:
 - native macOS arm64 bootstrap;
 - no mainnet keys.
 
-## Phase 2 — Ethereum token
+## Phase 2 — accepted config → manifest → local Ethereum vertical slice
 
-🚨 Не начинать production implementation до подтверждения D-01/D-02/D-05/D-06,
-entity/jurisdiction classification memo и holder-rights matrix. Local throwaway
-spikes допустимы, но не становятся deployable artifact.
+🚨 Local/test-only neutral implementation разрешена. Не freeze-ить holder
+rights/ABI и не готовить mainnet genesis до D-01/D-02/D-05/D-06,
+entity/jurisdiction classification memo и holder-rights matrix. Код до этого
+момента остаётся явно test-only и не является offer/launch artifact.
 
-Реализовать и протестировать:
+Сначала реализовать fail-closed schema и compiler proposal → canonical genesis
+manifest. Production compilation разрешена только при `status: accepted`.
+Amounts/caps кодируются только integer base units/bps; exact schedules только UTC
+seconds. Canonical JSON и hash имеют golden vectors в TypeScript и Solidity.
+
+Затем реализовать и протестировать один полный vertical slice:
 
 ```text
 ProjectToken.sol
+NoCatchUpVesting.sol
+GrantReserveVault.sol
+CommunityBudgetVault.sol
+DistributionVault.sol
+OperationsBudgetVault.sol
+LiquidityVault.sol
+Community/Project Timelock bootstrap
+local deploy + independent read-only verifier report
 ```
 
 Properties:
@@ -963,7 +1020,10 @@ Tests:
 
 ## Phase 3 — Ethereum CCIP pool
 
-Использовать официальный current `LockReleaseTokenPool`.
+Использовать только официальный version-specific LockRelease/LockBox design,
+выбранный compatibility ADR. Для CCIP 2.0 backing находится в отдельном
+`ERC20LockBox`; для 1.6.x API и holder отличаются. Monitor получает это из
+versioned manifest, а не предполагает `balanceOf(pool)`.
 
 Подготовить scripts для:
 
@@ -976,11 +1036,16 @@ Tests:
 - configure remote pool;
 - rate limits;
 - owner transfer;
-- verify `rebalancer == address(0)` in steady state;
+- verify version-specific pool/LockBox owner, authorized callers and absence of
+  unintended liquidity-management authority;
 - verifier;
 - state export.
 
-Нормальный режим запрещает `provideLiquidity`, `withdrawLiquidity` и прямое pre-funding. Initial Solana allocation создаётся только реальным CCIP transfer. Любое временное назначение rebalancer требует отдельного human-approved proposal, state diff и reconciliation до/после.
+Нормальный режим запрещает прямое pre-funding и любые version-specific
+provide/withdraw/authorized-caller paths вне approved Bridge Timelock proposal.
+Initial Solana allocation создаётся только реальным CCIP transfer. Любая
+временная liquidity-management authority требует отдельного human-approved
+proposal, state diff и reconciliation до/после.
 
 Выполнить capability spike Token Manager:
 
@@ -989,13 +1054,14 @@ Tests:
 - проверить добавление Solana BurnMint remote;
 - записать поддерживаемые и ручные шаги.
 
-Source of truth всё равно:
+Execution source of truth после принятия:
 
 ```text
-config/*.yaml
-deployment-manifest.json
+accepted config + schema/compiler version
+canonical deployment-manifest.json + hash
 verifier output
 Foundry/TypeScript scripts
+CCIP protocol-line ADR + artifact digests
 ```
 
 ## Phase 4 — Solana token и BurnMint pool
@@ -1035,6 +1101,10 @@ Self-serve mode является рекомендуемым вариантом: 
 Chainlink Local можно использовать для EVM-local tests, но он не доказывает реальную delivery Ethereum↔Solana. Настоящий cross-family E2E выполняется через Sepolia↔Solana Devnet. Не называть local mock настоящим CCIP E2E.
 
 ## Phase 6 — public testnet E2E
+
+Только после fresh human approval конкретных Sepolia/Devnet адресов и decoded
+operations. `$0` real-asset budget не является разрешением на public-network
+broadcast.
 
 Использовать:
 
@@ -1178,13 +1248,17 @@ Solana RPC
 Проверять:
 
 - Ethereum fixed supply;
-- pool locked balance;
+- version-specific canonical backing-holder balance;
 - Solana supply;
 - `P_ES`, `P_SE` и `backingSurplus`;
 - причинное соответствие каждого mint/release конкретному message ID;
 - pending CCIP messages без автоматического списания по timeout;
 - manual execution;
 - все Solana `MintTo`/`Burn`;
+- finalized cursors, reorg rollback и disagreement между независимыми RPC;
+- explicit `unknown`, `stale` и `inconsistent` states вместо ложного exact;
+- direct backing donations и пользовательские SPL burns как отдельные
+  классифицированные события;
 - все Ethereum pool transfers и liquidity events;
 - admin addresses;
 - pool owner;
@@ -1264,13 +1338,15 @@ Verification command
 Mainnet последовательность:
 
 1. Зафиксировать entity/jurisdictions, dated classification memo, live utility,
-   holder-rights matrix, Token Facts Pack draft и disclosure hash.
-2. Создать/подтвердить Admin Safe.
+   holder-rights matrix и applicable offer path. Freeze/sign Token Facts Pack,
+   bind disclosure hash, а где применимо завершить white-paper notification и
+   publication gates; Facts Pack не заменяет statutory document.
+2. Создать/подтвердить Bridge Safe и Bridge Timelock.
 3. Создать/подтвердить Treasury Safe.
 4. Создать/подтвердить Emergency Safe.
 5. Deploy и self-administer отдельные Community/Project Timelock и allocation
    contracts; проверить role graph и отсутствие bootstrap-admin residue.
-6. Создать/подтвердить Squads.
+6. Создать/подтвердить отдельные Bridge и Treasury Squads.
 7. Deploy Ethereum token с прямым genesis allocation.
 8. Проверить source, `GENESIS_MANIFEST_HASH`, bucket balances и нулевые
    необъяснимые balances deployer/factory/Safe.
@@ -1281,11 +1357,14 @@ Mainnet последовательность:
 13. Run verifier.
 14. Small Ethereum→Solana canary and target-chain state verification.
 15. Small Solana→Ethereum canary and target-chain state verification.
-16. Wait for clean monitoring window and publish official address manifest.
-17. Start utility/community beta without treasury sales or official pool.
+16. Wait for clean monitoring window; после legal/public-communications scrub
+    publish signed official address manifest.
+17. Start utility/community beta only после applicable offer/onboarding gates,
+    без treasury sales или official pool.
 18. Separately approve airdrop consideration/Sybil gate before any wave.
-19. Separately approve venue, depth, LP conflict policy and exact ratio before
-    bridging LP allocation or creating Raydium pool.
+19. Separately approve venue/CASP/admission, market-conduct, restricted-list,
+    trading-window, depth, LP conflict policy and exact ratio before announcing
+    a ratio, bridging LP allocation or creating Raydium pool.
 
 ---
 
@@ -1489,10 +1568,14 @@ Deterministic economic scenarios:
 - live consumptive utility demonstrated;
 - legal entity and launch jurisdictions fixed;
 - dated classification memo covers exact rights, distribution and venue path;
+- applicable exemption is documented or required white-paper notification,
+  publication and marketing prerequisites are complete;
 - Token Facts Pack, authority matrix and disclosure hash reviewed;
 - 24-month unlock calendar and beneficial-control report published;
 - sell-pressure simulation and liquid-supply budget pass;
 - treasury sale/buyback, airdrop consideration and LP conflict policies pass;
+- issuer/affiliate restricted list, trading windows, market-conduct owner and
+  related-party LP/withdrawal disclosures pass before any pool;
 - signer addresses verified out of band;
 - source code frozen;
 - dependency versions pinned;
@@ -1562,7 +1645,7 @@ Deterministic economic scenarios:
 
 ### 3. Tiny LP означает манипулируемую цену
 
-С `$50–100` USDC:
+С `50–100` units fake USDC на Devnet:
 
 - цена легко двигается;
 - FDV условный;
@@ -1570,7 +1653,7 @@ Deterministic economic scenarios:
 - spot price нельзя использовать как oracle.
 
 Это нормально только для Devnet demo. Публичный mainnet pool не создаётся, пока
-отдельный depth gate не докажет приемлемый execution slippage; utility beta может
+отдельные SDK `priceImpact` и realized-slippage gates не докажут достаточную глубину; utility beta может
 работать без official pool.
 
 ### 4. Card → custom token не гарантирован
@@ -1918,19 +2001,19 @@ https://www.sec.gov/newsroom/press-releases/2026-30-sec-clarifies-application-fe
 >
 > Мне нужен один пакет ответов на launch-blocking решения:
 >
-> 1. Принимаем `Agent Teams AI / ATAI`, несмотря на exact crypto и public-company
->    ticker collisions, или выбираем свободный symbol?
-> 2. Подтверждаем предложение `42/12/13/5/20/8`, `100,000,000` supply и 9 decimals?
+> 1. Принимаем `Agent Teams AI / AGTMAI`, или предпочитаем более короткий, но
+>    collision-prone `ATAI`?
+> 2. Подтверждаем предложение `45/12/13/5/20/5`, `100,000,000` supply и 9 decimals?
 > 3. Какая live consumptive utility будет доступна до public distribution?
 > 4. Какая entity выпускает token и какие страны входят в launch scope?
-> 5. Кто входит в изолированные Admin/Treasury/Emergency Safe и Solana Squads?
-> 6. Выбираем recoverable Solana beta с переходом на Pool Signer PDA или strict
->    authority сразу?
+> 5. Кто входит в изолированные Bridge/Treasury/Emergency Safe и два Solana Squads?
+> 6. Подтверждаем recoverable authority только для test/bounded beta и обязательный
+>    переход на Pool Signer PDA до широкой public distribution/liquidity?
 > 7. Какой максимальный bridge loss и 30/90-day liquid-supply shock допустим?
 > 8. Есть ли logo, domain, site и metadata URI?
 >
 > Пока ты отвечаешь, я продолжаю локальную архитектуру и тестовую среду без
-> production contracts, mainnet funds или private keys.
+> mainnet rights/ABI freeze, funds или private keys.
 
 ---
 

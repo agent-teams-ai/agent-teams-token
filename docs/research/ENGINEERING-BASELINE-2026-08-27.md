@@ -21,6 +21,8 @@ Verified current baseline:
 | Agave | 4.2.1 | Checksum-pinned local validator |
 | Chainlink CCIP SDK | 1.13.0 current | Add only with the first real adapter |
 | Chainlink Local | 0.2.9 current | Isolated test-only package because its CCIP contracts trail production |
+| Chainlink CCIP EVM | 1.6.4 versus 2.0.0 unresolved | Execute compatibility spike against live SVM lane, then ADR and exact pin |
+| Chainlink CCIP SVM | 1.6.3 live line | Pin program artifacts/digests only after EVM compatibility proof |
 | OpenZeppelin Contracts | v5.7.0 stable release | Pin only after compiler and Chainlink compatibility spike |
 | Solidity | 0.8.36 current | Candidate, not a contract baseline until the compatibility spike passes |
 
@@ -76,8 +78,9 @@ Enabled applicable capabilities:
 - portable agent instruction routing.
 
 Foundation remains an exact dev dependency and production imports are rejected.
-Executable specifications are deferred until the first real contract/schema
-donor exists. Public API compatibility is deferred while all workspace packages
+The strict tokenomics schema/compiler is the first executable specification and
+must precede production genesis compilation. Public API compatibility is
+deferred while all workspace packages
 are private. Repository publishing security and protobuf/JSON-schema evolution
 are deferred until those artifacts exist; fabricating empty evidence would not
 improve safety.
@@ -91,6 +94,9 @@ improve safety.
   messages and manual execution.
 - Local integration: Anvil plus Agave with valueless accounts; CCIP delivery is
   explicitly mocked.
+- Public testnet: `$0` real-asset budget. Sepolia ETH, Devnet SOL, test LINK and
+  fake USDC come from faucets/local minting; unavailable faucets pause only that
+  E2E step and never justify buying test assets.
 - Security: Slither first, then Echidna/Medusa/Halmos only for risks their model
   can prove; target-chain Safe/Squads ownership and authority readback.
 - Public testnet: one approved Sepolia-to-Solana Devnet round trip and return.
@@ -98,7 +104,9 @@ improve safety.
 - Mainnet: simulation, decoded state diff, canary amount, human multisig approval
   and independent post-state verification. No autonomous signing.
 
-The first implementation slice should be `allocation manifest -> immutable EVM
-token/allocation contracts -> local invariant tests -> read-only supply report`.
-CCIP, Solana and dashboard adapters follow once the economic and legal P0 gates
-are approved.
+The first implementation slice should be `accepted config -> canonical allocation
+manifest/hash -> immutable EVM token/policy vaults/vesting -> local invariant
+tests -> independent read-only verifier report`. Local/test-only neutral work may
+start before entity selection. CCIP and Solana adapters follow the protocol-line
+ADR; public distribution, marketing and pool work still wait for their legal and
+economic gates.

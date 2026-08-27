@@ -59,6 +59,6 @@ fi
 source "$token_repo_root/scripts/env.sh"
 corepack enable --install-directory "$token_tools_root/bin"
 corepack prepare pnpm@11.24.0 --activate
-pnpm install --frozen-lockfile=false
+pnpm install --frozen-lockfile
 
 echo "Project-local toolchains are ready. Run ./dev doctor."

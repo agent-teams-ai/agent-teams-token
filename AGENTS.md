@@ -17,6 +17,9 @@ Hard rules:
 - use conventional commits and never use an AI/agent branch prefix;
 - keep production code independent of test-only relay and fixtures;
 - keep tokenomics proposals clearly marked as proposals until approved;
+- never compile production genesis unless config is `accepted`, strictly
+  validated and canonically hashed with integer bps/base units and UTC seconds;
+- do not implement the CCIP pool adapter or monitor before the protocol-line ADR;
 - do not market expected profit, guaranteed returns, or investment upside.
 
 Start with:
@@ -25,6 +28,7 @@ Start with:
 - `docs/PLAN.md`
 - `docs/ARCHITECTURE.md`
 - `docs/TOKENOMICS.md`
+- `docs/NON_NEGOTIABLES.md`
 - `docs/OPEN_QUESTIONS.md`
 - `docs/STATUS.md`
 

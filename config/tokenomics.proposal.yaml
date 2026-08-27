@@ -1,61 +1,84 @@
 schemaVersion: 1
 status: proposal
+compilation:
+  productionManifestRequiresStatus: accepted
+  numericEncoding: integer-bps-and-base-units-only
+  canonicalSerialization: RFC8785-JSON
+  manifestRequiresExactUtcSeconds: true
+  yamlCalendarMonthsAreProposalTemplatesOnly: true
 token:
   workingName: Agent Teams AI
-  workingSymbol: ATAI
-  namingStatus: exact-symbol-collision-review
+  workingSymbol: AGTMAI
+  namingStatus: candidate-pending-formal-clearance
   fixedSupply: "100000000"
   decimals: 9
 allocations:
   communityTreasury:
-    percent: 42
-    yearOneOutflowCeilingPercentOfTotalSupply: 2
+    allocationBps: 4500
+    rollingTwelveMonthCommitmentCeilingBpsOfTotalSupply: 200
+    unusedCapRollover: false
     custody: community-timelock
   protocolOperations:
-    percent: 12
-    yearOneTokenOutflowCeilingPercentOfTotalSupply: 0.5
+    allocationBps: 1200
+    rollingTwelveMonthTokenOutflowCeilingBpsOfTotalSupply: 50
+    unusedCapRollover: false
     custody: project-timelock
   teamAndContributors:
-    percent: 13
+    allocationBps: 1300
     cliffMonths: 12
     fullyVestedAtMonth: 48
     cliffCatchUp: false
     grantStartsAreStaggered: true
     futureGrantUnvestedRevocable: true
   founder:
-    percent: 5
+    allocationBps: 500
     cliffMonths: 18
     fullyVestedAtMonth: 60
     cliffCatchUp: false
     revocable: false
   communityDistributions:
-    percent: 20
+    allocationBps: 2000
     plannedMaximumWaves: 6
     targetDurationMonths: 60
-    pilotMaximumPercentOfTotalSupply: 0.25
-    yearOneMaximumPercentOfTotalSupply: 1
+    pilotMaximumBpsOfTotalSupply: 25
+    perWaveMaximumBpsOfTotalSupply: 50
+    yearOneMaximumBpsOfTotalSupply: 100
+    rollingTwelveMonthMaximumBpsOfTotalSupplyAfterYearOne: 200
+    unusedCapRollover: false
     appealPreviewDays: 14
     claimWindowDays: 180
     unclaimedDestination: community-distribution-reserve
   liquidity:
-    percent: 8
-    publicBetaPercentOfTotalSupply: 0
-    initialTokenSideMaximumPercentOfTotalSupply: 0.25
-    devnetQuoteReserveUsdMaximum: 100
+    allocationBps: 500
+    publicBetaBpsOfTotalSupply: 0
+    initialTokenSideMaximumBpsOfTotalSupply: 25
+    cumulativeBetaTokenSideMaximumBpsOfTotalSupply: 50
+    devnetRealMoneyBudgetUsd: 0
+    devnetFakeUsdcUnits: 100
     publicDepthProbeUsd: 100
-    publicDepthMaximumExecutionSlippageBps: 100
+    publicDepthMaximumSdkPriceImpactBps: 100
+    secondaryPublicDepthProbeUsd: 500
+    secondaryPublicDepthMaximumSdkPriceImpactBps: 500
+    planningQuoteReserveUsdMinimum: 15000
+    preferredQuoteReserveUsdWithHeadroom: 20000
     listingCommitment: false
 governance:
-  adminSafeThreshold: 3
-  adminSafeOwners: 5
+  bridgeAdminSafeThreshold: 3
+  bridgeAdminSafeOwners: 5
   treasurySafeThreshold: 3
   treasurySafeOwners: 5
   emergencySafeThreshold: 2
   emergencySafeOwners: 3
-  emergencyRole: cancel-only
+  emergencyRole: expiring-canceller-and-down-only-bridge-brake
+  emergencyEpochDays: 30
+  emergencyMayRenewOwnAuthority: false
   timelockDays: 7
+  bridgeAdministrationBehindTimelock: true
+  policyVaultsRejectGenericExecute: true
 rights:
   liveConsumptiveUtilityRequiredBeforePublicDistribution: true
+  utilityIsClassificationSafeHarbor: false
+  venueIntentAssessmentRequired: true
   equity: false
   debt: false
   dividend: false
@@ -68,14 +91,23 @@ consideration:
   airdropIsFreeByDefault: false
   perWaveLegalMemoRequired: true
   retrospectiveSnapshotRequired: true
+  gratuitousLaneEligibilityTermsPublishedBeforeCutoff: false
+  earnedWorkPromotionOrReferralUsesGrantLane: true
+  usageOrLoyaltyRewardsRequireSeparateAnalysis: true
   promotionReferralWorkOrPersonalDataAllowedForFreeAirdrop: false
 transparency:
+  communityControlAtGenesisBps: 0
+  projectAdministeredControlBpsExcludingUnassignedTeamReserve: 8200
+  projectAdministeredControlBpsIncludingUnassignedTeamReserve: 9500
   controlledWalletsPublished: true
   signerAffiliationsPublished: true
   beneficialOwnersAggregated: true
   perWalletUnlockCalendarPublished: true
   lpWithdrawalPowersPublished: true
   tokenFactsPackRequired: true
+  tokenFactsPackFrozenAndSignedBeforeGenesis: true
+  tokenFactsPackHashBoundToGenesisManifest: true
+  signedPostDeployAddressAddendumBeforeDistribution: true
 marketPolicy:
   treasurySalesInBeta: false
   issuerPriceSupport: false
@@ -83,6 +115,9 @@ marketPolicy:
   liquidityMiningInBeta: false
   tokenFundedYield: false
   tokenFundedInsurance: false
+  discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfTotalSupply: 50
+  discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfLiquidSupply: 1000
+  discretionaryLiquidSupplyAlsoBoundedByExecutableSellDepth: true
 invariants:
   mintOnceOnEthereum: true
   deployerBalanceAfterGenesis: "0"
@@ -94,7 +129,8 @@ invariants:
   blacklist: false
   founderVestingHasOnchainTransferPath: false
   unreleasedTokensVote: false
-  bridgePreservesAllocationClassification: true
+  bridgePreservesAllocationClassificationOnlyForApprovedProvenanceTuple: true
   orphanBridgeMints: "0"
   duplicateSettlements: "0"
   unexplainedSupplyDelta: "0"
+  contributorGrantStartNotBeforeApprovalExecution: true

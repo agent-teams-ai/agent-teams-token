@@ -22,7 +22,7 @@ project conclusions.
 | Yearn | 30,000 YFI fair launch, followed by a later governance mint for contributors and treasury | A zero-team/zero-treasury launch can create an ad hoc mint later; reserve transparent long-term funding now |
 
 Primary sources: [Safe tokenomics](https://safefoundation.org/blog/safe-tokenomics),
-[Optimism token overview](https://community.optimism.io/op-token/op-token-overview),
+[Optimism capital allocation](https://docs.optimism.io/governance/capital-allocation),
 [Arbitrum distribution](https://docs.arbitrum.foundation/airdrop-eligibility-distribution),
 [ENS token](https://docs.ens.domains/dao/token/),
 [Uniswap launch](https://blog.uniswap.org/uni),
@@ -61,22 +61,27 @@ receive more than the unsplit identity. Measure useful product retention after
 30/90/180 days, not only claims.
 
 Raydium's CPMM is the likely first venue because a new token has no reliable
-price range. A `$50-100` quote reserve is only a devnet demonstration. Under
-constant-product math a `$100` swap needs about `$10,000` of quote reserve for
-roughly 1% execution slippage before fees; the final gate uses an executable
-simulation rather than that approximation. Sources: [Raydium CPMM
+price range. A `50-100` fake-USDC quote reserve costs `$0` and is only a Devnet
+demonstration. Test tokens are obtained from faucets or minted locally, never
+purchased. Under
+the current Raydium SDK semantics and a 25 bps CPMM, a `$100` swap needs roughly
+`$13.2k` quote reserve for at most 1% SDK `priceImpact`. Plan at least `$15k`
+and prefer `$20k` headroom. Realized user slippage is a separate guard; the final
+gate simulates both directions with the live fee config and vault balances.
+Sources: [Raydium CPMM
 math](https://docs.raydium.io/algorithms/constant-product.md), [CLMM
 overview](https://docs.raydium.io/products/clmm/overview.md), and [Optimism
 launch postmortem](https://github.com/ethereum-optimism/optimism/blob/develop/docs/postmortems/2022-05-31-drop-1.md).
 
 ## Treasury and vesting conclusions
 
-Use separate Community and Project timelocks. Treasury Safe 3-of-5 proposes;
-Emergency Safe 2-of-3 cancels only; the timelock is self-administered and has an
-open executor. Bootstrap must revoke the canceller role that OpenZeppelin grants
-to constructor proposers. Genesis transfers directly to final allocation
-contracts. A bridged treasury allocation arrives at a named Squads ATA and keeps
-the same policy classification.
+Use separate Bridge, Community and Project timelocks plus purpose-specific policy
+vaults. Bridge/Treasury Safe 3-of-5 propose; Emergency Safe 2-of-3 acts only
+through an expiring canceller and down-only brake. A permanent canceller can
+deadlock its own removal. Bootstrap revokes constructor-granted canceller and
+temporary admin roles. Genesis transfers directly to final allocation contracts.
+A bridged allocation preserves classification only through an approved
+source-vault/event/message/destination/controller provenance tuple.
 
 Relevant incidents and controls: [OpenZeppelin TimelockController
 postmortem](https://forum.openzeppelin.com/t/timelockcontroller-vulnerability-post-mortem/14958),
@@ -86,11 +91,13 @@ postmortem](https://forum.openzeppelin.com/t/timelockcontroller-vulnerability-po
 
 ## Legal and public-trust conclusions
 
-`Community token` is not a legal classification. Before production contracts,
-the exact holder rights, live utility, issuer/entity and launch countries need a
-dated classification memo. A public offer, airdrop and each liquidity venue need
+`Community token` and live utility are not legal safe harbors. Local/test-only
+neutral implementation may proceed, but rights/ABI freeze and mainnet genesis
+need exact holder rights, utility, issuer/entity, nexus countries and dated
+classification analysis. A public offer, airdrop and each liquidity venue need
 their own analysis. A supposedly free airdrop may not be free when the project
-receives personal data, promotion, referrals or work in exchange.
+receives personal data, promotion, referrals or work in exchange. The Token
+Facts Pack does not replace a MiCA white paper, notification or publication flow.
 
 Publish a versioned Token Facts Pack containing rights and explicit non-rights,
 all allocation and controlled wallets, beneficial ownership, unlock calendar,
@@ -106,7 +113,7 @@ and [FINMA ICO guidance](https://www.finma.ch/en/news/2018/02/20180216-mm-ico-we
 
 ## Recommendation
 
-Adopt the `42 / 12 / 13 / 5 / 20 / 8` proposal only after product-owner review.
+Adopt the `45 / 12 / 13 / 5 / 20 / 5` proposal only after product-owner review.
 The percentages alone are insufficient: the liquid-supply budget, timelocks,
 no-catch-up vesting, no-market-sale beta, airdrop wave gates and public reporting
 are part of the same tokenomics contract with the community.
