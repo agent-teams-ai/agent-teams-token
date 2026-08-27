@@ -38,6 +38,10 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 ## Designed, not implemented
 
+- Feature-owned repository topology from the Agent Teams Orchestrator standard;
+  the existing generic bootstrap domain package still needs its first-slice move.
+- Purpose-specific release/vesting vault proposal and rolling commitment model;
+  governance-reserve activation remains an explicit open decision.
 - Ethereum fixed-supply token, vesting and treasury contracts.
 - Chainlink CCIP Ethereum and Solana pool configuration.
 - CCIP EVM `1.6.4` versus `2.0.0` compatibility ADR and canonical backing-holder

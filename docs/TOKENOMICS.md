@@ -58,6 +58,11 @@ also with four-year locks. These are references, not targets to copy:
 
 ## Genesis and onchain transparency
 
+The proposed purpose-specific contract map, commitment semantics and mandatory
+adversarial tests are specified in [CONTRACTS.md](CONTRACTS.md). It remains a
+design proposal until the governance-activation gate and human approval model
+are accepted.
+
 - Mint every bucket exactly once and directly to its final allocation contract
   on Ethereum. The deployer, factory and Treasury Safe hold zero unexplained
   tokens after genesis.

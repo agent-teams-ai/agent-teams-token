@@ -38,6 +38,7 @@ remain disabled until their explicit gates are implemented.
 - [Living implementation plan](docs/PLAN.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Tokenomics proposal](docs/TOKENOMICS.md)
+- [Transparent release contract proposal](docs/CONTRACTS.md)
 - [Token naming research](docs/NAMING.md)
 - [Tokenomics evidence review](docs/research/TOKENOMICS-REVIEW-2026-08-27.md)
 - [Six-critic adversarial review](docs/research/CRITIQUE-ROUND-2026-08-27.md)

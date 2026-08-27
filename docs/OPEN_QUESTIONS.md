@@ -19,6 +19,10 @@ release gate, not an open naming choice.
 5. Name independent Bridge, Treasury and Emergency signers. Bridge/Treasury may
    share at most one natural person; Emergency has no overlap. Different wallet
    addresses under one employer/custodian/recovery domain are not independent.
+6. Approve the one-way activation rule for the 45% Community Governance Reserve:
+   minimum distributed community supply, earliest time, voting/capture defense
+   and the independent activation group. Until then those tokens are inaccessible
+   to both the project and the community.
 
 ## P0 before public liquidity or airdrop
 
@@ -33,7 +37,6 @@ release gate, not an open naming choice.
 
 ## P1 after the first vertical slice
 
-1. Governance activation criteria and how Solana holders participate fairly.
-2. Community-grant policy, budget cadence and reporting format.
-3. Whether the code is published under Apache-2.0 and how brand assets are
+1. Community-grant policy, budget cadence and reporting format.
+2. Whether the code is published under Apache-2.0 and how brand assets are
    separately protected.

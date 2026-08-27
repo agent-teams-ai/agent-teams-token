@@ -11,6 +11,10 @@
 [`NON_NEGOTIABLES.md`](NON_NEGOTIABLES.md). Любая реализация и review обязаны
 проверять этот список как acceptance contract.
 
+Проект release/vesting contracts, их role graph, onchain limits и честные
+границы гарантий ведутся в [`CONTRACTS.md`](CONTRACTS.md). До его продуктового
+обсуждения контрактная реализация не начинается.
+
 ---
 
 # 1. Как взаимодействовать с пользователем
@@ -809,11 +813,9 @@ Kora — готовый Solana gasless relayer/paymaster, позволяющий
 - local/testnet private keys;
 - unit/fuzz/invariant tests;
 - Slither и package audits;
-- Sepolia deployment;
-- Solana Devnet deployment;
-- CCIP testnet configuration;
-- testnet CCIP round-trip;
-- Raydium Devnet pool;
+- подготовка, simulation и unsigned manifests для Sepolia/Devnet;
+- локальный mock cross-chain round-trip, явно не называемый CCIP E2E;
+- local-validator liquidity pool со fake assets;
 - frontend;
 - monitor;
 - documentation;
@@ -840,6 +842,9 @@ Kora — готовый Solana gasless relayer/paymaster, позволяющий
 - публикация репозитория;
 - domain;
 - любой paid subscription;
+- любая public-network transaction, включая Sepolia и Solana Devnet;
+- реальный testnet CCIP round-trip;
+- создание Raydium/Orca Devnet pool;
 - подача verification/listing form;
 - mainnet deploy;
 - mainnet CCIP test;
@@ -939,8 +944,13 @@ Docker/Compose используется для Linux CI parity, web, monitor и 
 - TypeScript 7 strict mode;
 - `@agent-teams/engineering-foundation` как exact dev-only dependency;
 - Clean Architecture dependency direction `domain <- application <- adapters <- composition`;
-- DDD bounded contexts Supply, Distribution, Treasury, Transport,
-  Transparency и Launch Liquidity;
+- feature-module topology из принятого стандарта Agent Teams Orchestrator:
+  каждый production artifact принадлежит `src/features/<feature>/`, пустые
+  ceremonial layers и broad `domain/shared/common/utils` запрещены;
+- начальные bounded contexts `Token Control` и `Cross-chain Accounting`;
+  Supply, Distribution, Treasury и Launch Liquidity остаются feature
+  capabilities, пока реальная независимость языка/lifecycle не оправдает
+  отдельный package;
 - Rust/Anchor не устанавливать для MVP: собственная Solana program запрещена и не нужна.
 
 Foundation capabilities применяются только там, где есть реальный consumer:
@@ -949,6 +959,13 @@ suppression governance, quality gates и portable agent workflow включен�
 Public API compatibility, executable specifications, publishing security и
 schema evolution включаются после появления соответствующего артефакта, а не с
 фиктивным пустым evidence.
+
+До следующего production slice перенести текущий bootstrap
+`packages/domain/src/supply.ts` с тестами в
+`packages/contexts/cross-chain-accounting/src/features/supply-reconciliation/`.
+Не создавать заранее generic `packages/chainlink-adapter` и
+`packages/solana-adapter`: provider-specific code остаётся в outbound adapter
+владельца use case до второго доказанного consumer.
 
 Docker requirements:
 
@@ -983,14 +1000,29 @@ seconds. Canonical JSON и hash имеют golden vectors в TypeScript и Solid
 ```text
 ProjectToken.sol
 NoCatchUpVesting.sol
-GrantReserveVault.sol
-CommunityBudgetVault.sol
-DistributionVault.sol
+ContributorGrantReserveVault.sol
+CommunityGovernanceReserveVault.sol
+CommunityDistributionVault.sol
 OperationsBudgetVault.sol
+EcosystemGrantVault.sol
 LiquidityVault.sol
 Community/Project Timelock bootstrap
 local deploy + independent read-only verifier report
 ```
+
+Это не один универсальный treasury contract. Каждый vault имеет отдельный
+purpose и не содержит generic `execute`, generic `transfer`, arbitrary
+`approve`, proxy upgrade или controller replacement. Commitment списывает
+rolling capacity в момент создания обязательства, а не claim. Базовый вариант
+rolling cap использует append-only cumulative checkpoints за точные `365 days`,
+без calendar-boundary burst и rollover. Детали и обязательные adversarial tests
+описаны в [`CONTRACTS.md`](CONTRACTS.md).
+
+🚨 До кода нужно отдельно принять activation gate для 45% Community Governance
+Reserve. Project Safe не может сам выбрать любой адрес и назвать его community
+governance. До активации у project roles нет transfer/approve/bridge/delegate
+пути; после активации 45% не уходят в unrestricted treasury, а остаются под
+неизменяемым 2% rolling commitment cap.
 
 Properties:
 
@@ -1746,25 +1778,20 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 │   ├── bootstrap-rate-limits.yaml
 │   ├── beta-rate-limits.yaml
 │   └── paused-rate-limits.yaml
-├── evm/
-│   ├── src/
-│   ├── test/
-│   ├── script/
-│   └── foundry.toml
-├── solana/
-│   ├── scripts/
-│   ├── tests/
-│   └── config/
-├── crosschain/
-│   ├── scripts/
-│   ├── invariants/
-│   └── manifests/
-├── dex/
-│   └── raydium/
+├── contracts/
+│   └── evm/
+│       ├── src/features/
+│       ├── test/features/
+│       ├── script/
+│       └── foundry.toml
+├── packages/
+│   └── contexts/
+│       ├── token-control/src/features/
+│       └── cross-chain-accounting/src/features/
 ├── apps/
-│   └── web/
+│   ├── monitor/
+│   └── transparency/
 ├── monitoring/
-│   ├── src/
 │   ├── prometheus/
 │   └── grafana/
 ├── docs/
@@ -1779,7 +1806,7 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 │   ├── MAINNET_RUNBOOK.md
 │   ├── INCIDENT_RUNBOOK.md
 │   ├── USER_RISK_DISCLOSURE.md
-│   └── adr/
+│   └── decisions/
 ├── reports/
 └── secrets/
     └── testnet/        # gitignored
