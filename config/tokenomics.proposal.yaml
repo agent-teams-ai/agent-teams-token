@@ -9,7 +9,7 @@ compilation:
 token:
   workingName: Agent Teams AI
   workingSymbol: AGTMAI
-  namingStatus: candidate-pending-formal-clearance
+  namingStatus: owner-approved-pending-formal-clearance
   fixedSupply: "100000000"
   decimals: 9
 allocations:

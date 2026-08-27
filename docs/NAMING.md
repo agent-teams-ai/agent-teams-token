@@ -1,9 +1,10 @@
 # Token naming research
 
-Status: product decision required. These are working names, not trademark
-clearance.
+Status: `Agent Teams AI / AGTMAI` approved by the product owner on 2026-08-27.
+Formal trademark, exchange-symbol, domain and social-handle clearance remains a
+separate pre-launch gate.
 
-1. **Agent Teams AI (`AGTMAI`) - recommended current candidate. 🎯 9/10 🛡️
+1. **Agent Teams AI (`AGTMAI`) - approved. 🎯 9/10 🛡️
    9/10 🧠 1/10, roughly 20-40 LOC now; 100-250 LOC if renamed after
    integrations exist.** It preserves the project identity and is distinctive,
    although six letters are slightly less memorable than `ATAI`. Exact searches

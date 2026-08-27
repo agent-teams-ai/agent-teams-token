@@ -22,7 +22,7 @@ Solana architecture.
 
 ## Accepted amendments
 
-1. **Naming.** `Agent Teams AI / AGTMAI` is the recommended candidate. Exact
+1. **Naming.** `Agent Teams AI / AGTMAI` was approved by the product owner. Exact
    matches were not found in the checked CoinGecko, SEC, Jupiter, DexScreener or
    GitHub sources. Formal trademark/listing clearance is still required.
 2. **Test cost.** Local, Sepolia and Solana Devnet use `$0` real-value assets.
@@ -73,8 +73,8 @@ Solana architecture.
   reasonable hidden prerequisite for local MVP work. Before public distribution,
   publish the actual stablecoin/fiat operating plan and never count treasury
   tokens as runway.
-- `AGTMAI` remains a candidate, not an immutable symbol, until owner approval and
-  formal clearance.
+- Formal trademark/listing clearance remains a pre-launch gate; product-owner
+  approval is recorded and the naming choice is no longer open.
 
 ## Revised delivery shape
 

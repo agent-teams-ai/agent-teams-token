@@ -535,8 +535,8 @@ Tokenomics является отдельным product/security workstream, а �
 
 | ID | Вопрос | Рекомендуемый default | Почему важно |
 |---|---|---|---|
-| D-01 | Финальное имя токена | `Agent Teams AI` как кандидат | Имя попадёт в immutable Ethereum contract |
-| D-02 | Финальный symbol | `AGTMAI` как current candidate | Exact CoinGecko/SEC/Jupiter/DexScreener/GitHub match не найден; formal clearance всё равно обязателен |
+| D-01 | Финальное имя токена | ✅ `Agent Teams AI` утверждено владельцем 2026-08-27 | Имя попадёт в immutable Ethereum contract |
+| D-02 | Финальный symbol | ✅ `AGTMAI` утверждён владельцем 2026-08-27 | Exact collision не найден; formal clearance всё равно обязателен |
 | D-03 | Total supply | `100,000,000` | Стоимость deployment от supply не зависит |
 | D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
 | D-05 | Utility на старте | Минимум одна live consumptive function до public distribution | Не проектировать публичный запуск только вокруг будущего roadmap |
@@ -2001,16 +2001,16 @@ https://www.sec.gov/newsroom/press-releases/2026-30-sec-clarifies-application-fe
 >
 > Мне нужен один пакет ответов на launch-blocking решения:
 >
-> 1. Принимаем `Agent Teams AI / AGTMAI`, или предпочитаем более короткий, но
->    collision-prone `ATAI`?
-> 2. Подтверждаем предложение `45/12/13/5/20/5`, `100,000,000` supply и 9 decimals?
-> 3. Какая live consumptive utility будет доступна до public distribution?
-> 4. Какая entity выпускает token и какие страны входят в launch scope?
-> 5. Кто входит в изолированные Bridge/Treasury/Emergency Safe и два Solana Squads?
-> 6. Подтверждаем recoverable authority только для test/bounded beta и обязательный
+> `Agent Teams AI / AGTMAI` уже утверждено. Остались вопросы:
+>
+> 1. Подтверждаем предложение `45/12/13/5/20/5`, `100,000,000` supply и 9 decimals?
+> 2. Какая live consumptive utility будет доступна до public distribution?
+> 3. Какая entity выпускает token и какие страны входят в launch scope?
+> 4. Кто входит в изолированные Bridge/Treasury/Emergency Safe и два Solana Squads?
+> 5. Подтверждаем recoverable authority только для test/bounded beta и обязательный
 >    переход на Pool Signer PDA до широкой public distribution/liquidity?
-> 7. Какой максимальный bridge loss и 30/90-day liquid-supply shock допустим?
-> 8. Есть ли logo, domain, site и metadata URI?
+> 6. Какой максимальный bridge loss и 30/90-day liquid-supply shock допустим?
+> 7. Есть ли logo, domain, site и metadata URI?
 >
 > Пока ты отвечаешь, я продолжаю локальную архитектуру и тестовую среду без
 > mainnet rights/ABI freeze, funds или private keys.

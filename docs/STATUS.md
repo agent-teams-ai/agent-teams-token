@@ -2,6 +2,9 @@
 
 Last updated: 2026-08-27.
 
+Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
+clearance remains required.
+
 ## Proven locally
 
 - Monorepo dependency installation is reproducible from the lockfile.
