@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://agentteams.ai/schemas/genesis/local-source-v1.json",
+  "type": "object", "additionalProperties": false, "required": ["schemaVersion", "purpose", "status", "network", "token", "allocations"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "purpose": { "const": "local-fixture" }, "status": { "const": "test-only" },
+    "network": { "type": "object", "additionalProperties": false, "required": ["kind", "chainId"], "properties": { "kind": { "const": "local-evm" }, "chainId": { "const": "31337" } } },
+    "token": { "type": "object", "additionalProperties": false, "required": ["name", "symbol", "decimals", "initialSupplyBaseUnits"], "properties": { "name": { "const": "Agent Teams AI" }, "symbol": { "const": "AGTMAI" }, "decimals": { "const": 9 }, "initialSupplyBaseUnits": { "$ref": "#/$defs/uint" } } },
+    "allocations": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "object", "additionalProperties": false, "required": ["id", "recipient", "amountBaseUnits"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$" }, "recipient": { "type": "string", "pattern": "^0x[0-9a-f]{40}$" }, "amountBaseUnits": { "$ref": "#/$defs/uint" }, "bps": { "type": "integer", "minimum": 0, "maximum": 10000 } } } }
+  }, "$defs": { "uint": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" } }
+}

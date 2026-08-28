@@ -4,6 +4,7 @@ workspace:
   manifest: pnpm-workspace.yaml
 governedRoots:
   - packages/domain/src
+  - packages/contexts/supply/src
 boundaries:
   - id: token.domain
     roots:
@@ -16,4 +17,62 @@ boundaries:
       builtins:
         - node:assert/strict
         - node:test
+      runtimeReferences: []
+  - id: supply.genesis-manifest.domain
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/domain
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/domain/model.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: supply.genesis-manifest.application
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/application
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/application/compiler.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/canonical.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: supply.genesis-manifest.adapters
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/adapters
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/strict-source.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/abi.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/artifact-store.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/digest.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.application
+        - supply.genesis-manifest.domain
+      packages:
+        - "@noble/hashes"
+        - yaml
+      builtins:
+        - node:crypto
+        - node:fs/promises
+        - node:path
+      runtimeReferences: []
+  - id: supply.genesis-manifest.composition
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/composition
+      - packages/contexts/supply/src/features/genesis-manifest/index.ts
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/index.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.application
+        - supply.genesis-manifest.adapters
+        - supply.genesis-manifest.domain
+      packages: []
+      builtins:
+        - node:fs/promises
+        - node:path
       runtimeReferences: []

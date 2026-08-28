@@ -1,0 +1,863 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentteams.ai/schemas/genesis/proposal-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "purpose",
+    "status",
+    "compilation",
+    "token",
+    "allocations",
+    "governance",
+    "rights",
+    "consideration",
+    "transparency",
+    "marketPolicy",
+    "releasePolicy",
+    "invariants"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "purpose": {
+      "const": "proposal"
+    },
+    "status": {
+      "const": "proposal"
+    },
+    "compilation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "productionManifestRequiresStatus",
+        "productionManifestRequiresApprovalEnvelope",
+        "numericEncoding",
+        "canonicalSerialization",
+        "manifestRequiresExactUtcSeconds",
+        "yamlCalendarMonthsAreProposalTemplatesOnly"
+      ],
+      "properties": {
+        "productionManifestRequiresStatus": {
+          "type": "string"
+        },
+        "productionManifestRequiresApprovalEnvelope": {
+          "type": "boolean"
+        },
+        "numericEncoding": {
+          "type": "string"
+        },
+        "canonicalSerialization": {
+          "type": "string"
+        },
+        "manifestRequiresExactUtcSeconds": {
+          "type": "boolean"
+        },
+        "yamlCalendarMonthsAreProposalTemplatesOnly": {
+          "type": "boolean"
+        }
+      }
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workingName",
+        "workingSymbol",
+        "namingStatus",
+        "fixedSupplyBaseUnits",
+        "decimals"
+      ],
+      "properties": {
+        "workingName": {
+          "const": "Agent Teams AI"
+        },
+        "workingSymbol": {
+          "const": "AGTMAI"
+        },
+        "namingStatus": {
+          "type": "string"
+        },
+        "fixedSupplyBaseUnits": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "decimals": {
+          "const": 9
+        }
+      }
+    },
+    "allocations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "communityGovernanceReserve",
+        "communityDistributions",
+        "teamAndContributors",
+        "protocolOperations",
+        "ecosystemAndPublicGrants",
+        "liquidity"
+      ],
+      "properties": {
+        "communityGovernanceReserve": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allocationBps",
+            "projectMayTransferBeforeGovernanceActivation",
+            "activationRequiresIndependentCommunityApproval",
+            "activationEarliestTimestamp",
+            "postActivationRollingTwelveMonthCommitmentCeilingBpsOfTotalSupply",
+            "unusedCapRollover",
+            "custody",
+            "activationModel",
+            "activationParametersStatus"
+          ],
+          "properties": {
+            "allocationBps": {
+              "type": "integer"
+            },
+            "projectMayTransferBeforeGovernanceActivation": {
+              "type": "boolean"
+            },
+            "activationRequiresIndependentCommunityApproval": {
+              "type": "boolean"
+            },
+            "activationEarliestTimestamp": {
+              "type": "string"
+            },
+            "postActivationRollingTwelveMonthCommitmentCeilingBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "unusedCapRollover": {
+              "type": "boolean"
+            },
+            "custody": {
+              "type": "string"
+            },
+            "activationModel": {
+              "type": "string"
+            },
+            "activationParametersStatus": {
+              "type": "string"
+            }
+          }
+        },
+        "communityDistributions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allocationBps",
+            "initialProgramMaximumWaves",
+            "targetDurationMonths",
+            "pilotMaximumBpsOfTotalSupply",
+            "pilotRequiresWholeAllocationSellSimulation",
+            "pilotMaximumPriceImpactBps",
+            "pilotMinimumGenuineNonAffiliateFloatBps",
+            "publicPilotAuthorized",
+            "perWaveMaximumBpsOfTotalSupply",
+            "yearOneMaximumBpsOfTotalSupply",
+            "rollingTwelveMonthMaximumBpsOfTotalSupplyAfterYearOne",
+            "unusedCapRollover",
+            "appealPreviewDays",
+            "claimWindowDays",
+            "unclaimedDestination",
+            "currentProgramMaximumAuthorizedBpsOfTotalSupply",
+            "currentProgramMinimumUnprogrammedBpsOfTotalSupply"
+          ],
+          "properties": {
+            "allocationBps": {
+              "type": "integer"
+            },
+            "initialProgramMaximumWaves": {
+              "type": "integer"
+            },
+            "targetDurationMonths": {
+              "type": "integer"
+            },
+            "pilotMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "pilotRequiresWholeAllocationSellSimulation": {
+              "type": "boolean"
+            },
+            "pilotMaximumPriceImpactBps": {
+              "type": "string"
+            },
+            "pilotMinimumGenuineNonAffiliateFloatBps": {
+              "type": "string"
+            },
+            "publicPilotAuthorized": {
+              "type": "boolean"
+            },
+            "perWaveMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "yearOneMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "rollingTwelveMonthMaximumBpsOfTotalSupplyAfterYearOne": {
+              "type": "integer"
+            },
+            "unusedCapRollover": {
+              "type": "boolean"
+            },
+            "appealPreviewDays": {
+              "type": "integer"
+            },
+            "claimWindowDays": {
+              "type": "integer"
+            },
+            "unclaimedDestination": {
+              "type": "string"
+            },
+            "currentProgramMaximumAuthorizedBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "currentProgramMinimumUnprogrammedBpsOfTotalSupply": {
+              "type": "integer"
+            }
+          }
+        },
+        "teamAndContributors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allocationBps",
+            "founderMaximumBpsOfTotalSupply",
+            "initiallyAssignedNonFounderMaximumBpsOfTotalSupply",
+            "futureGrantReserveMinimumBpsOfTotalSupply",
+            "futureGrantCreationRollingTwelveMonthMaximumBpsOfTotalSupply",
+            "individualFutureGrantMaximumBpsOfTotalSupply",
+            "unusedCapRollover",
+            "teamCliffMonths",
+            "teamFullyVestedAtMonth",
+            "founderCliffMonths",
+            "founderFullyVestedAtMonth",
+            "cliffCatchUp",
+            "grantStartsAreStaggered",
+            "futureGrantUnvestedRevocable",
+            "founderGrantRevocable",
+            "initialTeamGrantRevocability",
+            "founderIsSeparateTopLevelAllocation"
+          ],
+          "properties": {
+            "allocationBps": {
+              "type": "integer"
+            },
+            "founderMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "initiallyAssignedNonFounderMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "futureGrantReserveMinimumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "futureGrantCreationRollingTwelveMonthMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "individualFutureGrantMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "unusedCapRollover": {
+              "type": "boolean"
+            },
+            "teamCliffMonths": {
+              "type": "integer"
+            },
+            "teamFullyVestedAtMonth": {
+              "type": "integer"
+            },
+            "founderCliffMonths": {
+              "type": "integer"
+            },
+            "founderFullyVestedAtMonth": {
+              "type": "integer"
+            },
+            "cliffCatchUp": {
+              "type": "boolean"
+            },
+            "grantStartsAreStaggered": {
+              "type": "boolean"
+            },
+            "futureGrantUnvestedRevocable": {
+              "type": "boolean"
+            },
+            "founderGrantRevocable": {
+              "type": "boolean"
+            },
+            "initialTeamGrantRevocability": {
+              "type": "string"
+            },
+            "founderIsSeparateTopLevelAllocation": {
+              "type": "boolean"
+            }
+          }
+        },
+        "protocolOperations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allocationBps",
+            "rollingTwelveMonthTokenOutflowCeilingBpsOfTotalSupply",
+            "unusedCapRollover",
+            "custody"
+          ],
+          "properties": {
+            "allocationBps": {
+              "type": "integer"
+            },
+            "rollingTwelveMonthTokenOutflowCeilingBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "unusedCapRollover": {
+              "type": "boolean"
+            },
+            "custody": {
+              "type": "string"
+            }
+          }
+        },
+        "ecosystemAndPublicGrants": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allocationBps",
+            "rollingTwelveMonthCommitmentCeilingBpsOfTotalSupply",
+            "unusedCapRollover",
+            "milestoneEvidenceRequired",
+            "relatedPartyRequiresIndependentApproval",
+            "directUnreviewedTransferToEoa"
+          ],
+          "properties": {
+            "allocationBps": {
+              "type": "integer"
+            },
+            "rollingTwelveMonthCommitmentCeilingBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "unusedCapRollover": {
+              "type": "boolean"
+            },
+            "milestoneEvidenceRequired": {
+              "type": "boolean"
+            },
+            "relatedPartyRequiresIndependentApproval": {
+              "type": "boolean"
+            },
+            "directUnreviewedTransferToEoa": {
+              "type": "boolean"
+            }
+          }
+        },
+        "liquidity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allocationBps",
+            "publicBetaBpsOfTotalSupply",
+            "initialExperimentalPoolTokenSideMaximumBpsOfTotalSupply",
+            "cumulativeExperimentalBetaTokenSideMaximumBpsOfTotalSupply",
+            "devnetRealMoneyBudgetUsd",
+            "devnetFakeUsdcUnits",
+            "founderMainnetLiquidityTotalCashBudgetUsdMaximum",
+            "poolCreationRentFeesAndQuoteCapitalShareOneBudget",
+            "communityLiquidityMustBeAddedDirectlyToPool",
+            "centrallyCollectedCommunityLiquidityFunds",
+            "experimentalPoolIsDepthOrValuationEvidence",
+            "publicDepthProbeUsd",
+            "publicDepthMaximumSdkPriceImpactBps",
+            "secondaryPublicDepthProbeUsd",
+            "secondaryPublicDepthMaximumSdkPriceImpactBps",
+            "maturePoolPlanningQuoteReserveUsdMinimum",
+            "maturePoolPreferredQuoteReserveUsdWithHeadroom",
+            "listingCommitment",
+            "proposedExperimentalVaultBpsOfTotalSupply",
+            "proposedFutureReserveBpsOfTotalSupply",
+            "physicalVaultSplitStatus"
+          ],
+          "properties": {
+            "allocationBps": {
+              "type": "integer"
+            },
+            "publicBetaBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "initialExperimentalPoolTokenSideMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "cumulativeExperimentalBetaTokenSideMaximumBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "devnetRealMoneyBudgetUsd": {
+              "type": "integer"
+            },
+            "devnetFakeUsdcUnits": {
+              "type": "integer"
+            },
+            "founderMainnetLiquidityTotalCashBudgetUsdMaximum": {
+              "type": "integer"
+            },
+            "poolCreationRentFeesAndQuoteCapitalShareOneBudget": {
+              "type": "boolean"
+            },
+            "communityLiquidityMustBeAddedDirectlyToPool": {
+              "type": "boolean"
+            },
+            "centrallyCollectedCommunityLiquidityFunds": {
+              "type": "boolean"
+            },
+            "experimentalPoolIsDepthOrValuationEvidence": {
+              "type": "boolean"
+            },
+            "publicDepthProbeUsd": {
+              "type": "integer"
+            },
+            "publicDepthMaximumSdkPriceImpactBps": {
+              "type": "integer"
+            },
+            "secondaryPublicDepthProbeUsd": {
+              "type": "integer"
+            },
+            "secondaryPublicDepthMaximumSdkPriceImpactBps": {
+              "type": "integer"
+            },
+            "maturePoolPlanningQuoteReserveUsdMinimum": {
+              "type": "integer"
+            },
+            "maturePoolPreferredQuoteReserveUsdWithHeadroom": {
+              "type": "integer"
+            },
+            "listingCommitment": {
+              "type": "boolean"
+            },
+            "proposedExperimentalVaultBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "proposedFutureReserveBpsOfTotalSupply": {
+              "type": "integer"
+            },
+            "physicalVaultSplitStatus": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bridgeAdminSafeThreshold",
+        "bridgeAdminSafeOwners",
+        "treasurySafeThreshold",
+        "treasurySafeOwners",
+        "emergencySafeThreshold",
+        "emergencySafeOwners",
+        "emergencyRole",
+        "emergencyEpochDays",
+        "emergencyMayRenewOwnAuthority",
+        "timelockDays",
+        "timelockMinimumIsImmutable",
+        "timelockOperationExpirySeconds",
+        "bridgeAdministrationBehindTimelock",
+        "policyVaultsRejectGenericExecute"
+      ],
+      "properties": {
+        "bridgeAdminSafeThreshold": {
+          "type": "integer"
+        },
+        "bridgeAdminSafeOwners": {
+          "type": "integer"
+        },
+        "treasurySafeThreshold": {
+          "type": "integer"
+        },
+        "treasurySafeOwners": {
+          "type": "integer"
+        },
+        "emergencySafeThreshold": {
+          "type": "integer"
+        },
+        "emergencySafeOwners": {
+          "type": "integer"
+        },
+        "emergencyRole": {
+          "type": "string"
+        },
+        "emergencyEpochDays": {
+          "type": "integer"
+        },
+        "emergencyMayRenewOwnAuthority": {
+          "type": "boolean"
+        },
+        "timelockDays": {
+          "type": "integer"
+        },
+        "timelockMinimumIsImmutable": {
+          "type": "boolean"
+        },
+        "timelockOperationExpirySeconds": {
+          "type": "string"
+        },
+        "bridgeAdministrationBehindTimelock": {
+          "type": "boolean"
+        },
+        "policyVaultsRejectGenericExecute": {
+          "type": "boolean"
+        }
+      }
+    },
+    "rights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "liveConsumptiveUtilityRequiredBeforePublicDistribution",
+        "utilityIsClassificationSafeHarbor",
+        "venueIntentAssessmentRequired",
+        "equity",
+        "debt",
+        "dividend",
+        "revenueOrProfitShare",
+        "passiveYield",
+        "redemption",
+        "treasuryOrAssetClaim",
+        "priceFloorOrBuybackPromise"
+      ],
+      "properties": {
+        "liveConsumptiveUtilityRequiredBeforePublicDistribution": {
+          "type": "boolean"
+        },
+        "utilityIsClassificationSafeHarbor": {
+          "type": "boolean"
+        },
+        "venueIntentAssessmentRequired": {
+          "type": "boolean"
+        },
+        "equity": {
+          "type": "boolean"
+        },
+        "debt": {
+          "type": "boolean"
+        },
+        "dividend": {
+          "type": "boolean"
+        },
+        "revenueOrProfitShare": {
+          "type": "boolean"
+        },
+        "passiveYield": {
+          "type": "boolean"
+        },
+        "redemption": {
+          "type": "boolean"
+        },
+        "treasuryOrAssetClaim": {
+          "type": "boolean"
+        },
+        "priceFloorOrBuybackPromise": {
+          "type": "boolean"
+        }
+      }
+    },
+    "consideration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "airdropIsFreeByDefault",
+        "perWaveLegalMemoRequired",
+        "retrospectiveSnapshotRequired",
+        "gratuitousLaneEligibilityTermsPublishedBeforeCutoff",
+        "earnedWorkPromotionOrReferralUsesGrantLane",
+        "usageOrLoyaltyRewardsRequireSeparateAnalysis",
+        "promotionReferralWorkOrPersonalDataAllowedForFreeAirdrop"
+      ],
+      "properties": {
+        "airdropIsFreeByDefault": {
+          "type": "boolean"
+        },
+        "perWaveLegalMemoRequired": {
+          "type": "boolean"
+        },
+        "retrospectiveSnapshotRequired": {
+          "type": "boolean"
+        },
+        "gratuitousLaneEligibilityTermsPublishedBeforeCutoff": {
+          "type": "boolean"
+        },
+        "earnedWorkPromotionOrReferralUsesGrantLane": {
+          "type": "boolean"
+        },
+        "usageOrLoyaltyRewardsRequireSeparateAnalysis": {
+          "type": "boolean"
+        },
+        "promotionReferralWorkOrPersonalDataAllowedForFreeAirdrop": {
+          "type": "boolean"
+        }
+      }
+    },
+    "transparency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "communityControlAtGenesisBps",
+        "communityDesignatedBps",
+        "communityDesignatedIsSecondaryLabelOnly",
+        "projectInaccessibleCommunityGovernanceReserveBps",
+        "projectAdministeredControlAtGenesisBps",
+        "projectAdministeredDistributionReserveBps",
+        "otherProjectOrInsiderAdministeredPurposeSpecificBps",
+        "controlledWalletsPublished",
+        "signerAffiliationsPublished",
+        "projectAffiliatesDisclosedPerWalletAndBeneficialOwner",
+        "independentCommunityBeneficialOwnersMayBeAggregated",
+        "perWalletUnlockCalendarPublished",
+        "lpWithdrawalPowersPublished",
+        "tokenFactsPackRequired",
+        "tokenFactsPackFrozenAndSignedBeforeGenesis",
+        "tokenFactsPackHashBoundToGenesisManifest",
+        "signedPostDeployAddressAddendumBeforeDistribution"
+      ],
+      "properties": {
+        "communityControlAtGenesisBps": {
+          "type": "integer"
+        },
+        "communityDesignatedBps": {
+          "type": "integer"
+        },
+        "communityDesignatedIsSecondaryLabelOnly": {
+          "type": "boolean"
+        },
+        "projectInaccessibleCommunityGovernanceReserveBps": {
+          "type": "integer"
+        },
+        "projectAdministeredControlAtGenesisBps": {
+          "type": "integer"
+        },
+        "projectAdministeredDistributionReserveBps": {
+          "type": "integer"
+        },
+        "otherProjectOrInsiderAdministeredPurposeSpecificBps": {
+          "type": "integer"
+        },
+        "controlledWalletsPublished": {
+          "type": "boolean"
+        },
+        "signerAffiliationsPublished": {
+          "type": "boolean"
+        },
+        "projectAffiliatesDisclosedPerWalletAndBeneficialOwner": {
+          "type": "boolean"
+        },
+        "independentCommunityBeneficialOwnersMayBeAggregated": {
+          "type": "boolean"
+        },
+        "perWalletUnlockCalendarPublished": {
+          "type": "boolean"
+        },
+        "lpWithdrawalPowersPublished": {
+          "type": "boolean"
+        },
+        "tokenFactsPackRequired": {
+          "type": "boolean"
+        },
+        "tokenFactsPackFrozenAndSignedBeforeGenesis": {
+          "type": "boolean"
+        },
+        "tokenFactsPackHashBoundToGenesisManifest": {
+          "type": "boolean"
+        },
+        "signedPostDeployAddressAddendumBeforeDistribution": {
+          "type": "boolean"
+        }
+      }
+    },
+    "marketPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "treasurySalesInBeta",
+        "issuerExecutesMarketSalesInBeta",
+        "contributorVendorAndGranteeSalesRemainPossible",
+        "claimablePaymentsCountAsFullySellableLiquidOverhang",
+        "issuerPriceSupport",
+        "buybacksInBeta",
+        "liquidityMiningInBeta",
+        "tokenFundedYield",
+        "tokenFundedInsurance",
+        "discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfTotalSupply",
+        "discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfLiquidSupply",
+        "discretionaryLiquidSupplyAlsoBoundedByExecutableSellDepth",
+        "globalLiquidizationBudgetIncludesAllAllocationVaultsAndProjectSolanaAccounts",
+        "liquidizationCapacityChargedAtEarliestPossibleRelease",
+        "projectControlledSolanaTreasuryBufferBaseUnits",
+        "betaOperationsLiquidTokenOutflowBaseUnits"
+      ],
+      "properties": {
+        "treasurySalesInBeta": {
+          "type": "boolean"
+        },
+        "issuerExecutesMarketSalesInBeta": {
+          "type": "boolean"
+        },
+        "contributorVendorAndGranteeSalesRemainPossible": {
+          "type": "boolean"
+        },
+        "claimablePaymentsCountAsFullySellableLiquidOverhang": {
+          "type": "boolean"
+        },
+        "issuerPriceSupport": {
+          "type": "boolean"
+        },
+        "buybacksInBeta": {
+          "type": "boolean"
+        },
+        "liquidityMiningInBeta": {
+          "type": "boolean"
+        },
+        "tokenFundedYield": {
+          "type": "boolean"
+        },
+        "tokenFundedInsurance": {
+          "type": "boolean"
+        },
+        "discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfTotalSupply": {
+          "type": "integer"
+        },
+        "discretionaryLiquidSupplyRollingNinetyDayMaximumBpsOfLiquidSupply": {
+          "type": "integer"
+        },
+        "discretionaryLiquidSupplyAlsoBoundedByExecutableSellDepth": {
+          "type": "boolean"
+        },
+        "globalLiquidizationBudgetIncludesAllAllocationVaultsAndProjectSolanaAccounts": {
+          "type": "boolean"
+        },
+        "liquidizationCapacityChargedAtEarliestPossibleRelease": {
+          "type": "boolean"
+        },
+        "projectControlledSolanaTreasuryBufferBaseUnits": {
+          "type": "string"
+        },
+        "betaOperationsLiquidTokenOutflowBaseUnits": {
+          "type": "string"
+        }
+      }
+    },
+    "releasePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rollingWindowSeconds",
+        "rollingWindowInterval",
+        "returnsRestoreCommitmentCapacity",
+        "rollingCommitmentCountCapsRequired",
+        "globalOutstandingCommittedButUnreleasedCeilingBps",
+        "globalRollingNinetyDayLiquidizationCeilingBps",
+        "futureGrantMinimumCliffSeconds",
+        "futureGrantMinimumFullVestingDurationSeconds",
+        "maximumCommitmentStartDelaySeconds"
+      ],
+      "properties": {
+        "rollingWindowSeconds": {
+          "type": "integer"
+        },
+        "rollingWindowInterval": {
+          "type": "string"
+        },
+        "returnsRestoreCommitmentCapacity": {
+          "type": "boolean"
+        },
+        "rollingCommitmentCountCapsRequired": {
+          "type": "boolean"
+        },
+        "globalOutstandingCommittedButUnreleasedCeilingBps": {
+          "type": "string"
+        },
+        "globalRollingNinetyDayLiquidizationCeilingBps": {
+          "type": "string"
+        },
+        "futureGrantMinimumCliffSeconds": {
+          "type": "string"
+        },
+        "futureGrantMinimumFullVestingDurationSeconds": {
+          "type": "string"
+        },
+        "maximumCommitmentStartDelaySeconds": {
+          "type": "string"
+        }
+      }
+    },
+    "invariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mintOnceOnEthereum",
+        "deployerBalanceAfterGenesis",
+        "treasurySafeBalanceAfterGenesis",
+        "directMintToAllocationContracts",
+        "ownerMint",
+        "proxyUpgrade",
+        "transferTax",
+        "blacklist",
+        "founderVestingHasOnchainTransferPath",
+        "unreleasedTokensVote",
+        "bridgePreservesAllocationClassificationOnlyForApprovedProvenanceTuple",
+        "orphanBridgeMints",
+        "duplicateSettlements",
+        "unexplainedSupplyDelta",
+        "contributorGrantStartNotBeforeApprovalExecution"
+      ],
+      "properties": {
+        "mintOnceOnEthereum": {
+          "type": "boolean"
+        },
+        "deployerBalanceAfterGenesis": {
+          "type": "string"
+        },
+        "treasurySafeBalanceAfterGenesis": {
+          "type": "string"
+        },
+        "directMintToAllocationContracts": {
+          "type": "boolean"
+        },
+        "ownerMint": {
+          "type": "boolean"
+        },
+        "proxyUpgrade": {
+          "type": "boolean"
+        },
+        "transferTax": {
+          "type": "boolean"
+        },
+        "blacklist": {
+          "type": "boolean"
+        },
+        "founderVestingHasOnchainTransferPath": {
+          "type": "boolean"
+        },
+        "unreleasedTokensVote": {
+          "type": "boolean"
+        },
+        "bridgePreservesAllocationClassificationOnlyForApprovedProvenanceTuple": {
+          "type": "boolean"
+        },
+        "orphanBridgeMints": {
+          "type": "string"
+        },
+        "duplicateSettlements": {
+          "type": "string"
+        },
+        "unexplainedSupplyDelta": {
+          "type": "string"
+        },
+        "contributorGrantStartNotBeforeApprovalExecution": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@agent-teams/supply", "version": "0.0.0", "private": true, "type": "module",
+  "exports": { "./genesis-manifest": { "types": "./dist/features/genesis-manifest/index.d.ts", "default": "./dist/features/genesis-manifest/index.js" } },
+  "scripts": {
+    "build": "tsc --build --pretty false", "build:tests": "tsc --build tsconfig.tests.json --pretty false",
+    "genesis:compile:local": "node dist/features/genesis-manifest/composition/cli.js compile-local ../../../config/genesis/local.fixture.yaml ../../../.local/genesis",
+    "genesis:inspect:local": "node dist/features/genesis-manifest/composition/cli.js inspect-local ../../../.local/genesis",
+    "genesis:validate:proposal": "node dist/features/genesis-manifest/composition/cli.js validate-proposal ../../../config/tokenomics.proposal.yaml",
+    "test:built": "tsc --project tsconfig.tests.json --pretty false && node --test .local/tests/tests/**/*.test.js",
+    "test:clean-built": "pnpm clean:test && pnpm build && pnpm test:built",
+    "clean:test": "node -e \"require('node:fs').rmSync('.local/tests',{recursive:true,force:true})\""
+  },
+  "dependencies": { "@noble/hashes": "catalog:", "yaml": "catalog:" }
+}
