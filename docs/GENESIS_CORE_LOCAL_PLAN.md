@@ -9,10 +9,15 @@ production-hosted subscription-runtime workers. Barrier 1 закрыт на exac
 29 manifest tests, 5 supply-domain tests и 19 Foundry tests. Wave 2 W3 local
 Anvil E2E/verifier и W4 Linux CI parity выполняется параллельно от exact SHA
 `2220ef44be87aa41fb7e6f651ce1d02634eb792c` в изолированных hosted worktrees.
-R2 workers используют canonical auth pool `/var/data/codex-home/live-codex-auth`
-и три live-проверенных независимых slots `account-b/c/d`; устаревший root-cache
-pool не используется. Barrier 2 ещё не объявлен. План ранее исправлен после пяти
-независимых hosted-review и содержит обязательную worker/review orchestration.
+R2 workers используют canonical auth pool `/var/data/codex-home/live-codex-auth`;
+устаревший root-cache pool не используется. Снимок capacity-aware registry
+показал 25 slots и 17 доступных независимых identities. После исчерпания попыток
+на `account-b/c/d` сохранённые worktrees безопасно продолжены: W3 на
+live-проверенных `account-l/m/o`, W4 на `account-i/j/k`. Операционная инструкция
+проверки пула хранится на hosted runtime в
+`/var/data/codex-home/ACCOUNT-STATUS-RUNBOOK.md`. Barrier 2 ещё не объявлен. План
+ранее исправлен после пяти независимых hosted-review и содержит обязательную
+worker/review orchestration.
 
 После Barrier 1 интегратор исправил ещё один strict-parser gap: explicit
 standard YAML tags `!!str`/`!!int` теперь также запрещены. Exact commit
