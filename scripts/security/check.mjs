@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -9,6 +10,13 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 export function scanTextForSecrets(text, path = "fixture") {
   const patterns = [
     ["pem-private-key", new RegExp(`${["-----", "BEGIN"].join("")} (?:[A-Z0-9]+ )*${["PRIVATE", " KEY-----"].join("")}`)],
+    [
+      "evm-private-key",
+      new RegExp(
+        `["']?\\b(?:[a-z0-9_-]+[-_])?(?:${["pri", "vate"].join("")}|deployer|signer|wallet|owner|admin)[-_]?key\\b["']?\\s*[:=]\\s*["']?(?:0x)?[0-9a-f]{64}\\b`,
+        "i",
+      ),
+    ],
     ["aws-access-key", new RegExp(`\\b${["AK", "IA"].join("")}[A-Z0-9]{16}\\b`)],
     ["github-token", new RegExp(`\\b(?:${["gh", "[pousr]_"].join("")}[A-Za-z0-9]{30,}|${["github", "_pat_"].join("")}[A-Za-z0-9_]{40,})\\b`)],
     ["npm-token", new RegExp(`\\b${["npm", "_"].join("")}[A-Za-z0-9]{30,}\\b`)],
@@ -201,6 +209,106 @@ export function checkInstalledLicenses(manifests, policy) {
   return { packages: manifests.length };
 }
 
+export function checkVendoredDependencies(manifest, { root = repositoryRoot, allowedSpdx = [] } = {}) {
+  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.dependencies) || manifest.dependencies.length === 0) {
+    throw new Error("SECURITY_VENDOR_POLICY_INVALID");
+  }
+  const allowed = new Set(allowedSpdx);
+  let fileCount = 0;
+  for (const dependency of manifest.dependencies) {
+    validateVendorMetadata(dependency, allowed);
+    const vendorRoot = resolveVendorRoot(root, dependency.root);
+    const actualFiles = listVendoredFiles(vendorRoot).toSorted();
+    const expectedFiles = Object.keys(dependency.files).toSorted();
+    if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
+      throw new Error(`SECURITY_VENDOR_FILE_SET_FAILED dependency=${dependency.name}`);
+    }
+    for (const path of expectedFiles) {
+      validateRelativePath(path, "SECURITY_VENDOR_FILE_PATH_INVALID");
+      const contents = readFileSync(join(vendorRoot, ...path.split("/")));
+      const digest = createHash("sha256").update(contents).digest("hex");
+      if (dependency.files[path] !== digest) {
+        throw new Error(`SECURITY_VENDOR_CHECKSUM_FAILED dependency=${dependency.name} file=${path}`);
+      }
+      if (path.endsWith(".sol") && contents.toString("utf8").split(/\r?\n/, 1)[0] !== `// SPDX-License-Identifier: ${dependency.license}`) {
+        throw new Error(`SECURITY_VENDOR_SPDX_FAILED dependency=${dependency.name} file=${path}`);
+      }
+    }
+    validateVendorIdentity(vendorRoot, dependency);
+    fileCount += expectedFiles.length;
+  }
+  return { packages: manifest.dependencies.length, files: fileCount };
+}
+
+function validateVendorMetadata(dependency, allowed) {
+  if (
+    !dependency
+    || typeof dependency.name !== "string"
+    || !/^\d+\.\d+\.\d+$/.test(dependency.version)
+    || !/^[0-9a-f]{40}$/.test(dependency.sourceCommit)
+    || typeof dependency.license !== "string"
+    || !allowed.has(dependency.license)
+    || typeof dependency.root !== "string"
+    || !dependency.files
+    || typeof dependency.files !== "object"
+    || Array.isArray(dependency.files)
+    || Object.keys(dependency.files).length === 0
+    || Object.values(dependency.files).some((digest) => !/^[0-9a-f]{64}$/.test(digest))
+  ) {
+    throw new Error("SECURITY_VENDOR_METADATA_INVALID");
+  }
+}
+
+function resolveVendorRoot(root, path) {
+  validateRelativePath(path, "SECURITY_VENDOR_ROOT_INVALID");
+  const resolvedRoot = resolve(root);
+  const resolvedVendor = resolve(root, ...path.split("/"));
+  if (!resolvedVendor.startsWith(`${resolvedRoot}${sep}`) || !lstatSync(resolvedVendor).isDirectory()) {
+    throw new Error("SECURITY_VENDOR_ROOT_INVALID");
+  }
+  return resolvedVendor;
+}
+
+function validateRelativePath(path, errorCode) {
+  if (
+    typeof path !== "string"
+    || path.length === 0
+    || isAbsolute(path)
+    || path.includes("\\")
+    || path.split("/").some((part) => part.length === 0 || part === "." || part === "..")
+  ) {
+    throw new Error(errorCode);
+  }
+}
+
+function listVendoredFiles(directory, base = directory) {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {throw new Error("SECURITY_VENDOR_SYMLINK_FAILED");}
+    if (stat.isDirectory()) {
+      files.push(...listVendoredFiles(path, base));
+    } else if (stat.isFile()) {
+      files.push(relative(base, path).split(sep).join("/"));
+    } else {
+      throw new Error("SECURITY_VENDOR_FILE_TYPE_FAILED");
+    }
+  }
+  return files;
+}
+
+function validateVendorIdentity(vendorRoot, dependency) {
+  const pinned = readFileSync(join(vendorRoot, "PINNED_VERSION"), "utf8");
+  if (!pinned.includes(`v${dependency.version}\n`) || !pinned.includes(`Source commit: ${dependency.sourceCommit}\n`)) {
+    throw new Error(`SECURITY_VENDOR_IDENTITY_FAILED dependency=${dependency.name}`);
+  }
+  const license = readFileSync(join(vendorRoot, "LICENSE"), "utf8");
+  if (dependency.license === "MIT" && !license.startsWith("The MIT License (MIT)\n")) {
+    throw new Error(`SECURITY_VENDOR_LICENSE_FAILED dependency=${dependency.name}`);
+  }
+}
+
 export function runSecurityCheck({ root = repositoryRoot, now = new Date() } = {}) {
   const secrets = scanTrackedFiles({ root });
   const npmrc = readFileSync(join(root, ".npmrc"), "utf8");
@@ -215,13 +323,22 @@ export function runSecurityCheck({ root = repositoryRoot, now = new Date() } = {
   const licensePolicy = JSON.parse(readFileSync(join(root, "tooling/security/license-allowlist.json"), "utf8"));
   const manifests = installedPackageManifests(join(root, "node_modules"));
   const licenses = checkInstalledLicenses(manifests, licensePolicy);
-  return { trackedFiles: secrets.scanned, lockedPackages: packages.length, installedPackages: licenses.packages, frozenAdvisories: advisories.advisories };
+  const vendorPolicy = JSON.parse(readFileSync(join(root, "tooling/security/vendor-dependencies.json"), "utf8"));
+  const vendored = checkVendoredDependencies(vendorPolicy, { root, allowedSpdx: licensePolicy.allowedSpdx });
+  return {
+    trackedFiles: secrets.scanned,
+    lockedPackages: packages.length,
+    installedPackages: licenses.packages,
+    vendoredPackages: vendored.packages,
+    vendoredFiles: vendored.files,
+    frozenAdvisories: advisories.advisories,
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = runSecurityCheck();
-    process.stdout.write(`SECURITY_SCAN_OK trackedFiles=${result.trackedFiles} lockedPackages=${result.lockedPackages} installedPackages=${result.installedPackages} frozenAdvisories=${result.frozenAdvisories}\n`);
+    process.stdout.write(`SECURITY_SCAN_OK trackedFiles=${result.trackedFiles} lockedPackages=${result.lockedPackages} installedPackages=${result.installedPackages} vendoredPackages=${result.vendoredPackages} vendoredFiles=${result.vendoredFiles} frozenAdvisories=${result.frozenAdvisories}\n`);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

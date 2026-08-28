@@ -11,6 +11,10 @@ export interface LocalGenesisSource {
   readonly token: { readonly name: string; readonly symbol: string; readonly decimals: number; readonly initialSupplyBaseUnits: string };
   readonly allocations: readonly SourceAllocation[];
 }
+declare const validatedLocalGenesisSourceBrand: unique symbol;
+export type ValidatedLocalGenesisSource = LocalGenesisSource & {
+  readonly [validatedLocalGenesisSourceBrand]: "strict-local-genesis-source";
+};
 export interface NormalizedAllocation { readonly id: string; readonly idBytes32: `0x${string}`; readonly recipient: `0x${string}`; readonly amountBaseUnits: string; readonly bps?: number }
 export interface LocalGenesisManifest {
   readonly schemaVersion: 1; readonly purpose: "local-fixture-artifact"; readonly status: "test-only";

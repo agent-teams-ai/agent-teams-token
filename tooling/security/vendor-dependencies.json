@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "name": "@openzeppelin/contracts",
+      "version": "5.7.0",
+      "sourceCommit": "cab19933c33c2ad1d4c7a84864a3601dddfd16f3",
+      "license": "MIT",
+      "root": "contracts/evm/lib/openzeppelin-contracts",
+      "files": {
+        "LICENSE": "20aebc68b11c063133aa2af0ef4bb29875477c6d16d715718f0daec563938b84",
+        "PINNED_VERSION": "3a1c9fbbf1233e552070cfac330a40acfb727ef14eb5ff3051548842870e7d79",
+        "contracts/interfaces/draft-IERC6093.sol": "fa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30",
+        "contracts/token/ERC20/ERC20.sol": "50f34ae16a067a41c2c1091445d11d63788e54c717677cb6d6b0e4cdea2ad21d",
+        "contracts/token/ERC20/IERC20.sol": "01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c",
+        "contracts/token/ERC20/extensions/IERC20Metadata.sol": "0b7132f17d14d1d84b41b0bb429be62dafdff00fd3470f68724d8018eb07f57a",
+        "contracts/utils/Context.sol": "847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6"
+      }
+    }
+  ]
+}

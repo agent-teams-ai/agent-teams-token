@@ -60,6 +60,23 @@ test("Anvil account and mnemonic output is never returned by the owned-process A
   } finally { await anvil.stop(); }
 });
 
+test("concurrent stop callers share cleanup through forced termination", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-anvil-concurrent-stop-"));
+  const executable = join(directory, "stubborn-anvil.mjs");
+  await writeFile(executable, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nprocess.stdout.write('Listening on 127.0.0.1:18545\\n');\nsetInterval(() => {}, 1000);\n", { mode: 0o700 });
+  await chmod(executable, 0o700);
+  try {
+    const anvil = await startOwnedAnvil(executable, firstAddress);
+    const first = anvil.stop();
+    const second = anvil.stop();
+    assert.equal(first, second);
+    await Promise.all([first, second]);
+    assert.equal(processExists(anvil.pid), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function processExists(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }

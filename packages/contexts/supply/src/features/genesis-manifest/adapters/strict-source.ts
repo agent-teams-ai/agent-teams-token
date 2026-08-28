@@ -19,6 +19,7 @@ import {
   type Diagnostic,
   type LocalGenesisSource,
   type SourcePosition,
+  type ValidatedLocalGenesisSource,
 } from "../domain/model.js";
 import { PROPOSAL_LEAF_TYPES, type ProposalScalarType } from "./proposal-contract.js";
 
@@ -43,7 +44,7 @@ const LOCAL_KEYS = {
 
 const proposalChildren = buildProposalChildren();
 
-export function parseLocalSource(text: string): ParsedSource<LocalGenesisSource> {
+export function parseLocalSource(text: string): ParsedSource<ValidatedLocalGenesisSource> {
   const parsed = parseStrict(text);
   if (parsed.value === undefined) {
     return { diagnostics: parsed.diagnostics };
@@ -60,7 +61,7 @@ export function parseLocalSource(text: string): ParsedSource<LocalGenesisSource>
   }
   return {
     diagnostics,
-    value,
+    value: value as ValidatedLocalGenesisSource,
     canonicalBytes: Buffer.from(canonicalJson(value as unknown as JsonValue), "utf8"),
   };
 }

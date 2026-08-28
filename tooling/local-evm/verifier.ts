@@ -10,6 +10,10 @@ import { assertPinnedSolcVersionOutput } from "./toolchain.ts";
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const TRANSACTION = /^0x[0-9a-f]{64}$/;
+const HASH = /^0x[0-9a-f]{64}$/;
+const ZERO_ADDRESS = `0x${"0".repeat(40)}` as const;
+const ZERO_HASH = `0x${"0".repeat(64)}` as const;
+const TOOL_KEYS = ["anvil", "cast", "forge", "node", "pnpm", "solc"] as const;
 const CONTRACT_SOURCE = "src/features/token-genesis/AGTMAIToken.sol";
 const CONTRACT_NAME = "AGTMAIToken";
 
@@ -86,8 +90,10 @@ export async function verifyLocalDeployment(input: VerificationInput, suppliedRp
     return evidence(input, checks, { status: "passed", code: "OK", sourceDigest: approved.manifest.sourceSha256, transactionHash });
   } catch (cause) {
     const error = asError(cause);
-    checks.push({ id: "verification-exit", status: "failed", diagnostic: error.code });
-    return evidence(input, checks, { status: "failed", code: error.code, sourceDigest: `0x${"0".repeat(64)}`, transactionHash });
+    const diagnostic = safeDiagnosticCode(error.code);
+    return evidence(undefined, [{ id: "verification-exit", status: "failed", diagnostic }], {
+      status: "failed", code: diagnostic, sourceDigest: ZERO_HASH, transactionHash: ZERO_HASH,
+    });
   }
 }
 
@@ -111,8 +117,9 @@ interface EvidenceOutcome {
   readonly transactionHash: `0x${string}`;
 }
 
-function evidence(input: VerificationInput, checks: EvidenceCheck[], outcome: EvidenceOutcome): VerificationEvidence {
+function evidence(input: VerificationInput | undefined, checks: EvidenceCheck[], outcome: EvidenceOutcome): VerificationEvidence {
   const { status, code, sourceDigest, transactionHash } = outcome;
+  const successfulInput = successfulEvidenceInput(input, status);
   const stable = {
     schemaVersion: 1,
     kind: "agtmai-local-evm-verification",
@@ -122,30 +129,49 @@ function evidence(input: VerificationInput, checks: EvidenceCheck[], outcome: Ev
       deferred: ["production-genesis-approval", "public-network-deployment", "ccip-delivery"],
       notProven: ["audit", "mainnet-readiness", "approved-tokenomics", "investment-or-return-claims"],
     },
-    inputs: {
-      sourceSha256: sourceDigest,
-      localFixtureArtifactSha256: input.approvedArtifactSha256,
-      buildInfoSha256: input.expectedBuildInfoSha256,
-      contractArtifactSha256: input.expectedContractArtifactSha256,
-      abiSha256: input.expectedAbiSha256,
-      approvedBuildProfileSha256: input.expectedApprovedBuildProfileSha256,
-      constructorInputsSha256: input.expectedConstructorInputsSha256,
-      deploymentReportSha256: input.expectedDeploymentReportSha256,
-    },
+    inputs: evidenceInputs(successfulInput, sourceDigest),
     chain: { kind: "local-evm", chainId: "31337" },
-    tools: input.toolVersions,
+    tools: successfulInput === undefined ? {} : successfulInput.toolVersions,
     checks,
     exit: { status, code },
   } as const;
   const normalized = {
     ...stable,
     inputs: Object.fromEntries(Object.entries(stable.inputs).filter(([key]) => key !== "deploymentReportSha256" && key !== "buildInfoSha256")),
+    tools: successfulInput === undefined ? {} : normalizedToolVersions(successfulInput.toolVersions),
   };
   return {
     ...stable,
     normalizedEvidenceSha256: sha256(canonicalJson(normalized)),
-    volatile: { runId: input.runId, targetAddress: input.targetAddress, deployerAddress: input.deployerAddress, transactionHash },
+    volatile: volatileEvidence(successfulInput, transactionHash),
   };
+}
+
+function successfulEvidenceInput(input: VerificationInput | undefined, status: EvidenceOutcome["status"]): VerificationInput | undefined {
+  if (status === "failed") {return undefined;}
+  if (input === undefined) {throw new LocalEvmError("LOCAL_EVM_INTERNAL_FAILURE", "passed evidence requires validated input");}
+  return input;
+}
+
+function evidenceInputs(input: VerificationInput | undefined, sourceDigest: string): Record<string, string> {
+  if (input === undefined) {
+    return {
+      sourceSha256: ZERO_HASH, localFixtureArtifactSha256: ZERO_HASH, buildInfoSha256: ZERO_HASH,
+      contractArtifactSha256: ZERO_HASH, abiSha256: ZERO_HASH, approvedBuildProfileSha256: ZERO_HASH,
+      constructorInputsSha256: ZERO_HASH, deploymentReportSha256: ZERO_HASH,
+    };
+  }
+  return {
+    sourceSha256: sourceDigest, localFixtureArtifactSha256: input.approvedArtifactSha256,
+    buildInfoSha256: input.expectedBuildInfoSha256, contractArtifactSha256: input.expectedContractArtifactSha256,
+    abiSha256: input.expectedAbiSha256, approvedBuildProfileSha256: input.expectedApprovedBuildProfileSha256,
+    constructorInputsSha256: input.expectedConstructorInputsSha256, deploymentReportSha256: input.expectedDeploymentReportSha256,
+  };
+}
+
+function volatileEvidence(input: VerificationInput | undefined, transactionHash: `0x${string}`): VerificationEvidence["volatile"] {
+  if (input === undefined) {return { runId: "failed-input-redacted", targetAddress: ZERO_ADDRESS, deployerAddress: ZERO_ADDRESS, transactionHash: ZERO_HASH };}
+  return { runId: input.runId, targetAddress: input.targetAddress, deployerAddress: input.deployerAddress, transactionHash };
 }
 
 async function readAndMatch(path: string, expected: string, label: string): Promise<Buffer> {
@@ -155,10 +181,45 @@ async function readAndMatch(path: string, expected: string, label: string): Prom
 }
 
 function assertVerificationInput(input: VerificationInput): void {
+  if (!isRecord(input)) {throw new LocalEvmError("VERIFY_INPUT_SHAPE_INVALID", "verification input must be an object");}
+  const pathKeys = ["manifestPath", "readyPath", "buildInfoPath", "contractArtifactPath", "abiPath", "approvedBuildProfilePath", "constructorInputsPath", "deploymentReportPath", "reportOutputRoot"] as const;
+  for (const key of pathKeys) {
+    const value = input[key];
+    if (typeof value !== "string" || value.length === 0 || value.length > 4096 || value.includes("\0")) {
+      throw new LocalEvmError("VERIFY_INPUT_PATH_INVALID", "verification input paths must be bounded strings");
+    }
+  }
+  const digestKeys = ["approvedArtifactSha256", "expectedBuildInfoSha256", "expectedContractArtifactSha256", "expectedAbiSha256", "expectedApprovedBuildProfileSha256", "expectedConstructorInputsSha256", "expectedDeploymentReportSha256"] as const;
+  if (digestKeys.some((key) => !HASH.test(input[key]))) {throw new LocalEvmError("VERIFY_INPUT_DIGEST_INVALID", "verification input digests must be canonical SHA-256 values");}
+  if (typeof input.runId !== "string" || !/^[a-z0-9][a-z0-9-]{0,95}$/u.test(input.runId)) {throw new LocalEvmError("VERIFY_RUN_ID_INVALID", "run ID must use a bounded canonical form");}
+  normalizedToolVersions(input.toolVersions);
   assertPrivateRpcUrl(input.rpcUrl);
-  assertPinnedSolcVersionOutput(input.toolVersions.solc ?? "");
   if (!ADDRESS.test(input.targetAddress) || !ADDRESS.test(input.deployerAddress)) {throw new LocalEvmError("VERIFY_ADDRESS_INVALID", "target and deployer must be canonical lowercase addresses");}
   if (basename(input.buildInfoPath) === "latest" || basename(dirname(input.manifestPath)) === "latest" || basename(input.approvedBuildProfilePath) !== "approved-build-profile.v1.json") {throw new LocalEvmError("VERIFY_MUTABLE_LATEST_FORBIDDEN", "mutable or unapproved inputs are forbidden");}
+}
+
+function normalizedToolVersions(value: Readonly<Record<string, string>>): Record<string, string> {
+  if (!isRecord(value) || !exactKeys(value, TOOL_KEYS)) {throw new LocalEvmError("VERIFY_TOOL_VERSIONS_INVALID", "tool versions must contain the exact approved tool set");}
+  const raw = Object.fromEntries(TOOL_KEYS.map((key) => [key, value[key]])) as Record<(typeof TOOL_KEYS)[number], unknown>;
+  if (Object.values(raw).some((item) => typeof item !== "string" || item.length === 0 || item.length > 160 || !/^[\x20-\x7e]+$/u.test(item))) {
+    throw new LocalEvmError("VERIFY_TOOL_VERSIONS_INVALID", "tool versions must be bounded printable strings");
+  }
+  const node = /^v(24\.20\.0)$/u.exec(raw.node as string)?.[1];
+  const pnpm = /^(11\.24\.0)$/u.exec(raw.pnpm as string)?.[1];
+  const foundry = Object.fromEntries(["forge", "cast", "anvil"].map((name) => {
+    const match = new RegExp(`^(?:${name} Version: )?(1\\.8\\.0)$`, "u").exec(raw[name as keyof typeof raw] as string);
+    return [name, match?.[1]];
+  })) as Record<string, string | undefined>;
+  const solcLine = assertPinnedSolcVersionOutput(raw.solc as string);
+  const solc = /^(Version: )?(0\.8\.36\+commit\.8a079791)\./u.exec(solcLine)?.[2];
+  if (!node || !pnpm || !foundry.forge || !foundry.cast || !foundry.anvil || !solc) {
+    throw new LocalEvmError("VERIFY_TOOL_VERSIONS_INVALID", "tool versions differ from the pinned toolchain");
+  }
+  return { node, pnpm, forge: foundry.forge, cast: foundry.cast, anvil: foundry.anvil, solc };
+}
+
+function safeDiagnosticCode(value: string): string {
+  return /^[A-Z][A-Z0-9_]{0,95}$/u.test(value) ? value : "LOCAL_EVM_INTERNAL_FAILURE";
 }
 
 function assertDeploymentReport(value: DeploymentReport, input: VerificationInput): void {

@@ -111,14 +111,13 @@ export async function startOwnedAnvil(executable: string, fundedAddress: string)
     await stopExactChild(child);
     throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
   }
-  let stopped = false;
+  let stopPromise: Promise<void> | undefined;
   return {
     pid: child.pid,
     rpcUrl,
-    async stop(): Promise<void> {
-      if (stopped) {return;}
-      stopped = true;
-      await stopExactChild(child);
+    stop(): Promise<void> {
+      stopPromise ??= stopExactChild(child);
+      return stopPromise;
     },
   };
 }

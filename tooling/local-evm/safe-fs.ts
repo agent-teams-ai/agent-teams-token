@@ -54,7 +54,13 @@ async function ensureDirectoryComponent(absolute: string, requirePrivate: boolea
     entry = await lstat(absolute);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {throw cause;}
-    await mkdir(absolute, { recursive: false, mode: 0o700 });
+    try {
+      await mkdir(absolute, { recursive: false, mode: 0o700 });
+    } catch (mkdirCause) {
+      // Another local run may have created the same component after lstat.
+      // Re-open and validate that winner instead of treating EEXIST as failure.
+      if ((mkdirCause as NodeJS.ErrnoException).code !== "EEXIST") {throw mkdirCause;}
+    }
     entry = await lstat(absolute);
   }
   if (!entry.isDirectory() || entry.isSymbolicLink()) {

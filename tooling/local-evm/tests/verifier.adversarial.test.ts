@@ -10,7 +10,7 @@ import { encodeConstructorArguments, reconstructCreationInput } from "../constru
 import { encodeAllocationCommitment, readApprovedManifest } from "../manifest.ts";
 import { APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type DeploymentReport, type LocalManifest, type VerificationInput } from "../model.ts";
 import type { RpcClient } from "../rpc.ts";
-import { reconstructRuntime, verifyLocalDeployment } from "../verifier.ts";
+import { reconstructRuntime, verifyLocalDeployment, writeEvidence } from "../verifier.ts";
 import { pinnedSolcPath } from "../toolchain.ts";
 
 const execute = promisify(execFile);
@@ -168,7 +168,7 @@ async function makeCase(): Promise<CaseContext> {
     expectedApprovedBuildProfileSha256: sha256(await readFile(approvalPath)), constructorInputsPath: constructorPath,
     expectedConstructorInputsSha256: deployment.constructorInputsSha256, deploymentReportPath: deploymentPath,
     expectedDeploymentReportSha256: sha256(deploymentBytes), targetAddress, deployerAddress,
-    toolVersions: { node: process.version, forge: "1.8.0", cast: "1.8.0", anvil: "1.8.0", solc: "Version: 0.8.36+commit.8a079791.Linux.g++" }, reportOutputRoot: join(directory, "reports"), runId: "test-run",
+    toolVersions: { node: process.version, pnpm: "11.24.0", forge: "1.8.0", cast: "1.8.0", anvil: "1.8.0", solc: "Version: 0.8.36+commit.8a079791.Linux.g++" }, reportOutputRoot: join(directory, "reports"), runId: "test-run",
   };
   return { directory, input, rpc: new MockRpc(), paths: { constructor: constructorPath, deployment: deploymentPath, abi: abiPath, artifact: artifactPath, build: buildPath, manifest: manifestPath, ready: readyPath } };
 }
@@ -184,6 +184,38 @@ test("clean approved deployment is independently proven without trusting deploye
   assert.equal(report.checks.some((check) => check.id === "rpc-proven-direct-creation"), true);
   assert.equal(context.rpc.calls.some((call) => call.method === "eth_getTransactionByHash"), true);
   assert.equal(context.rpc.calls.some((call) => call.method === "eth_getTransactionReceipt"), true);
+});
+
+test("normalized evidence is identical across Linux and macOS solc identities", { timeout: 60_000 }, async () => {
+  const linux = await makeCase();
+  const macos = await makeCase();
+  (macos.input.toolVersions as Record<string, string>).solc = "Version: 0.8.36+commit.8a079791.Darwin.appleclang";
+
+  const linuxReport = await verifyLocalDeployment(linux.input, linux.rpc);
+  const macosReport = await verifyLocalDeployment(macos.input, macos.rpc);
+
+  assert.equal(linuxReport.exit.code, "OK");
+  assert.equal(macosReport.exit.code, "OK");
+  assert.notEqual(linuxReport.tools.solc, macosReport.tools.solc);
+  assert.equal(linuxReport.normalizedEvidenceSha256, macosReport.normalizedEvidenceSha256);
+});
+
+test("failed evidence redacts every unvalidated free-form input from JSON and Markdown", { timeout: 60_000 }, async () => {
+  const context = await makeCase();
+  const sentinel = "never-leak-sensitive-sentinel";
+  (context.input.toolVersions as Record<string, string>).untrusted = sentinel;
+  (context.input as { runId: string }).runId = sentinel;
+
+  const report = await verifyLocalDeployment(context.input, context.rpc);
+  assert.equal(report.exit.code, "VERIFY_TOOL_VERSIONS_INVALID");
+  assert.deepEqual(report.tools, {});
+  assert.equal(report.volatile.runId, "failed-input-redacted");
+  assert.equal(JSON.stringify(report).includes(sentinel), false);
+
+  await mkdir(context.input.reportOutputRoot, { mode: 0o700 });
+  const written = await writeEvidence(context.input, report);
+  const [json, markdown] = await Promise.all([readFile(written.jsonPath, "utf8"), readFile(written.markdownPath, "utf8")]);
+  assert.equal(`${JSON.stringify(written)}${json}${markdown}`.includes(sentinel), false);
 });
 
 test("wrong chain, forged target, balances, commitment and RPC creation proof are rejected", { timeout: 60_000 }, async () => {

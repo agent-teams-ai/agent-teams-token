@@ -1,13 +1,13 @@
 import { canonicalJson, type JsonValue } from "./canonical.js";
-import { EXPECTED_TOKEN, normalizeLocalSource, type Diagnostic, type LocalGenesisManifest, type LocalGenesisSource } from "../domain/model.js";
+import { EXPECTED_TOKEN, normalizeLocalSource, type Diagnostic, type LocalGenesisManifest, type ValidatedLocalGenesisSource } from "../domain/model.js";
 
 const ARTIFACT_DOMAIN = new TextEncoder().encode("AGTMAI_LOCAL_FIXTURE_ARTIFACT_V1\0");
 export interface CompilerPorts {
   readonly sha256: (bytes: Uint8Array) => `0x${string}`;
-  readonly encodeAllocationCommitment: (source: LocalGenesisSource, allocations: NonNullable<ReturnType<typeof normalizeLocalSource>["allocations"]>) => { rawAbi: `0x${string}`; hash: `0x${string}` };
+  readonly encodeAllocationCommitment: (source: ValidatedLocalGenesisSource, allocations: NonNullable<ReturnType<typeof normalizeLocalSource>["allocations"]>) => { rawAbi: `0x${string}`; hash: `0x${string}` };
 }
 
-export function compileLocalSource(source: LocalGenesisSource, ports: CompilerPorts): { diagnostics: Diagnostic[]; manifest?: LocalGenesisManifest; canonicalBytes?: Uint8Array } {
+export function compileLocalSource(source: ValidatedLocalGenesisSource, ports: CompilerPorts): { diagnostics: Diagnostic[]; manifest?: LocalGenesisManifest; canonicalBytes?: Uint8Array } {
   const normalized = normalizeLocalSource(source);
   if (!normalized.allocations) {return { diagnostics: normalized.diagnostics };}
   const canonicalSourceBytes = new TextEncoder().encode(canonicalJson(source as unknown as JsonValue));

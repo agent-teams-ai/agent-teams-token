@@ -58,11 +58,16 @@ test("direct normalization fails closed for a non-array runtime allocation value
 });
 
 test("compiler derives the source digest from the runtime source internally", () => {
-  const compiled = compileLocalSource(base, { encodeAllocationCommitment, sha256 });
-  const expected = sha256(new TextEncoder().encode(canonicalJson(base as unknown as JsonValue)));
+  const source = validatedLocalSource(base);
+  const compiled = compileLocalSource(source, { encodeAllocationCommitment, sha256 });
+  const expected = sha256(new TextEncoder().encode(canonicalJson(source as unknown as JsonValue)));
   assert.equal(compiled.manifest?.sourceSha256, expected);
   assert.equal(compileLocalSource.length, 2);
 });
+
+type RawCompilerInputRejected = LocalGenesisSource extends Parameters<typeof compileLocalSource>[0] ? false : true;
+const rawCompilerInputRejected: RawCompilerInputRejected = true;
+void rawCompilerInputRejected;
 
 test("internal local compilation strictly parses before invoking the typed compiler", () => {
   let encodeCalls = 0, digestCalls = 0;
@@ -236,6 +241,13 @@ test("CLI distinguishes validation and I/O exits and exposes no production comma
   assert.equal((await runCli(cli, ["validate-proposal", ".local/does-not-exist.yaml"])).code, 3);
   assert.equal((await runCli(cli, ["compile-production"])).code, 2);
 });
+
+function validatedLocalSource(source: LocalGenesisSource) {
+  const parsed = parseLocalSource(toYaml(source));
+  assert.deepEqual(parsed.diagnostics, []);
+  assert.ok(parsed.value);
+  return parsed.value;
+}
 
 function toYaml(source: LocalGenesisSource): string {
   return `schemaVersion: 1\npurpose: local-fixture\nstatus: test-only\nnetwork:\n  kind: local-evm\n  chainId: "31337"\ntoken:\n  name: Agent Teams AI\n  symbol: AGTMAI\n  decimals: 9\n  initialSupplyBaseUnits: "1000000000000"\nallocations:\n${source.allocations.map((a) => `  - id: ${a.id}\n    recipient: "${a.recipient}"\n    amountBaseUnits: "${a.amountBaseUnits}"\n`).join("")}`;

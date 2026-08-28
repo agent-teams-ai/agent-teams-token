@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { assertSafeSource, inspectArtifacts, writeArtifact } from "../src/features/genesis-manifest/adapters/artifact-store.js";
 import { encodeAllocationCommitment } from "../src/features/genesis-manifest/adapters/abi.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
+import { parseLocalSource } from "../src/features/genesis-manifest/adapters/strict-source.js";
 import { compileLocalSource } from "../src/features/genesis-manifest/application/compiler.js";
 import { canonicalJson } from "../src/features/genesis-manifest/application/canonical.js";
 import type { JsonValue } from "../src/features/genesis-manifest/application/canonical.js";
@@ -111,7 +112,9 @@ test("inspection rejects symlink and hardlink READY and manifest files before re
 async function makeTemp(label: string): Promise<string> { const packageRoot = process.cwd().endsWith("/packages/contexts/supply") ? process.cwd() : resolve(process.cwd(), "packages/contexts/supply"), parent = join(packageRoot, "../../../.local"); await mkdir(parent, { recursive: true }); return mkdtemp(join(parent, `agtmai-${label}-`)); }
 function validManifest(): ReturnType<typeof compileLocalSource> {
   const source: LocalGenesisSource = { schemaVersion: 1, purpose: "local-fixture", status: "test-only", network: { kind: "local-evm", chainId: "31337" }, token: { name: "Agent Teams AI", symbol: "AGTMAI", decimals: 9, initialSupplyBaseUnits: "1" }, allocations: [{ id: "a", recipient: "0x0000000000000000000000000000000000001001", amountBaseUnits: "1", bps: 10_000 }] };
-  return compileLocalSource(source, { encodeAllocationCommitment, sha256 });
+  const parsed = parseLocalSource(JSON.stringify(source));
+  assert.ok(parsed.value);
+  return compileLocalSource(parsed.value, { encodeAllocationCommitment, sha256 });
 }
 
 async function writeForged(root: string, value: Record<string, unknown>, sourceSha256: string): Promise<void> {

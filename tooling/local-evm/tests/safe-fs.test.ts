@@ -37,3 +37,17 @@ test("a substituted intermediate directory is rejected without changing its targ
     && "code" in cause && cause.code === "LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION");
   assert.equal((await lstat(target)).mode & 0o777, before);
 });
+
+test("parallel cold creation shares safely validated directory components", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-safe-concurrent-")));
+  roots.push(root);
+  const target = join(root, "cold", "nested", "private");
+
+  await Promise.all(Array.from({ length: 16 }, async () => await ensurePrivateDirectoryPath(root, target)));
+
+  const entry = await lstat(target);
+  assert.equal(entry.isDirectory(), true);
+  assert.equal(entry.isSymbolicLink(), false);
+  assert.equal(entry.mode & 0o077, 0);
+  assert.equal(await realpath(target), target);
+});
