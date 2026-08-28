@@ -237,7 +237,7 @@ function validateProposalSemantics(value: Record<string, unknown>): Diagnostic[]
   let sum = 0;
   for (const section of sections) {
     const bps = asRecord(allocations?.[section])?.allocationBps;
-    if (!Number.isInteger(bps) || (bps as number) < 0 || (bps as number) > 10_000) {
+    if (!Number.isSafeInteger(bps) || (bps as number) < 0 || (bps as number) > 10_000) {
       diagnostics.push(problem("GENESIS_PROPOSAL_BPS_INVALID", `/allocations/${section}/allocationBps`, "must be an integer from 0 through 10000"));
     } else {
       sum += bps as number;
@@ -304,7 +304,7 @@ function requireObject(value: unknown, pointer: string, output: Diagnostic[]): R
 }
 
 function expectType(value: unknown, expected: ProposalScalarType, pointer: string, output: Diagnostic[]): void {
-  const matches = expected === "integer" ? typeof value === "number" && Number.isInteger(value) : typeof value === expected;
+  const matches = expected === "integer" ? typeof value === "number" && Number.isSafeInteger(value) : typeof value === expected;
   if (!matches) {output.push(problem("GENESIS_SCHEMA_TYPE", pointer, `must be ${expected === "integer" ? "an integer" : `a ${expected}`}`));}
 }
 

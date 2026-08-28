@@ -9,6 +9,7 @@ import { parseLocalSource, parseProposal } from "../src/features/genesis-manifes
 import { encodeAllocationCommitment } from "../src/features/genesis-manifest/adapters/abi.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 import { canonicalJson, type JsonValue } from "../src/features/genesis-manifest/application/canonical.js";
+import { compileLocalText } from "../src/features/genesis-manifest/composition/compile-local.js";
 import { UINT64_MAX, UINT256_MAX, encodeAllocationId, normalizeLocalSource, parseCanonicalUint, type LocalGenesisSource } from "../src/features/genesis-manifest/domain/model.js";
 
 const packageRoot = process.cwd().endsWith("/packages/contexts/supply") ? process.cwd() : resolvePath(process.cwd(), "packages/contexts/supply");
@@ -61,6 +62,28 @@ test("compiler derives the source digest from the runtime source internally", ()
   const expected = sha256(new TextEncoder().encode(canonicalJson(base as unknown as JsonValue)));
   assert.equal(compiled.manifest?.sourceSha256, expected);
   assert.equal(compileLocalSource.length, 2);
+});
+
+test("internal local compilation strictly parses before invoking the typed compiler", () => {
+  let encodeCalls = 0, digestCalls = 0;
+  const ports = {
+    encodeAllocationCommitment: (...arguments_: Parameters<typeof encodeAllocationCommitment>) => {encodeCalls += 1; return encodeAllocationCommitment(...arguments_);},
+    sha256: (bytes: Uint8Array) => {digestCalls += 1; return sha256(bytes);},
+  };
+  const source = toYaml(base);
+  for (const text of [
+    `${source}unknownRoot: forbidden\n`,
+    source.replace("    amountBaseUnits: \"400000000000\"", "    amountBaseUnits: \"400000000000\"\n    unknownAllocation: forbidden"),
+  ]) {
+    const result = compileLocalText(text, ports);
+    assert.equal(result.manifest, undefined);
+    assert.ok(result.diagnostics.some((item) => item.code === "GENESIS_SCHEMA_UNKNOWN_FIELD"));
+    assert.equal(encodeCalls, 0);
+    assert.equal(digestCalls, 0);
+  }
+  assert.ok(compileLocalText(source, ports).manifest);
+  assert.equal(encodeCalls, 1);
+  assert.ok(digestCalls > 0);
 });
 
 test("canonical decimals retain 2^53 and uint256 boundaries without Number", () => {
@@ -154,6 +177,20 @@ test("proposal is validation-only with exact bps and cannot parse as a local sou
   assert.deepEqual(parseProposal(text).diagnostics, []);
   assert.ok(parseProposal(text.replace("allocationBps: 4500", "allocationBps: 4499")).diagnostics.some((item) => item.code === "GENESIS_PROPOSAL_BPS_SUM_MISMATCH"));
   assert.notEqual(parseLocalSource(text).diagnostics.length, 0);
+});
+
+test("declared YAML integers reject unsafe Number boundaries without returning a rounded proposal", async () => {
+  const text = await readFile(join(repositoryRoot, "config/tokenomics.proposal.yaml"), "utf8");
+  const pointer = "/allocations/communityDistributions/initialProgramMaximumWaves";
+  const withInteger = (value: string): string => text.replace("initialProgramMaximumWaves: 6", `initialProgramMaximumWaves: ${value}`);
+  const maximumSafe = parseProposal(withInteger("9007199254740991"));
+  assert.ok(maximumSafe.value);
+  assert.equal(maximumSafe.diagnostics.some((item) => item.code === "GENESIS_SCHEMA_TYPE" && item.pointer === pointer), false);
+  for (const value of ["9007199254740992", "9007199254740993"]) {
+    const parsed = parseProposal(withInteger(value));
+    assert.equal(parsed.value, undefined);
+    assert.ok(parsed.diagnostics.some((item) => item.code === "GENESIS_SCHEMA_TYPE" && item.pointer === pointer));
+  }
 });
 
 test("proposal rejects nested unknown, missing, and wrong-type fields at every object level", async () => {

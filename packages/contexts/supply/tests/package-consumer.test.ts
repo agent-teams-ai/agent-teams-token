@@ -7,8 +7,9 @@ import { test } from "node:test";
 test("black-box consumer can use only the declared genesis-manifest subpath", async (context) => {
   const packageRoot = process.cwd().endsWith("/packages/contexts/supply") ? process.cwd() : resolvePath(process.cwd(), "packages/contexts/supply"), repositoryRoot = resolvePath(packageRoot, "../../.."), consumer = join(repositoryRoot, ".local/package-consumer"), scope = join(consumer, "node_modules/@agent-teams");
   context.after(() => rm(consumer, { force: true, recursive: true })); await mkdir(scope, { recursive: true }); await symlink(packageRoot, join(scope, "supply"));
-  const entry = join(consumer, "consumer.mjs"); await writeFile(entry, 'import { ALLOCATION_DOMAIN, encodeAllocationId } from "@agent-teams/supply/genesis-manifest"; if (ALLOCATION_DOMAIN.length !== 66 || !encodeAllocationId("test-alpha")) process.exit(2);\n');
+  const entry = join(consumer, "consumer.mjs"); await writeFile(entry, 'import * as manifest from "@agent-teams/supply/genesis-manifest"; if (manifest.ALLOCATION_DOMAIN.length !== 66 || !manifest.encodeAllocationId("test-alpha") || "compileLocalSource" in manifest) process.exit(2);\n');
   assert.equal(await exitCode(entry), 0);
+  await writeFile(entry, 'import { compileLocalSource } from "@agent-teams/supply/genesis-manifest"; void compileLocalSource;\n'); assert.notEqual(await exitCode(entry), 0);
   await writeFile(entry, 'import "@agent-teams/supply/domain/model.js";\n'); assert.notEqual(await exitCode(entry), 0);
 });
 

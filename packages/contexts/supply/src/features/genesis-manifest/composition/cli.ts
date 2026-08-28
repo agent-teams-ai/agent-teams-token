@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { compileLocalSource } from "../application/compiler.js";
 import { inspectArtifacts, readSafeSource, writeArtifact } from "../adapters/artifact-store.js";
 import { encodeAllocationCommitment } from "../adapters/abi.js";
 import { sha256 } from "../adapters/digest.js";
-import { parseLocalSource, parseProposal } from "../adapters/strict-source.js";
+import { parseProposal } from "../adapters/strict-source.js";
 import type { Diagnostic } from "../domain/model.js";
+import { compileLocalText } from "./compile-local.js";
 
 export const EXIT = Object.freeze({ success: 0, validation: 2, io: 3, internal: 4 });
 async function main(arguments_: readonly string[]): Promise<number> {
@@ -16,9 +16,8 @@ async function main(arguments_: readonly string[]): Promise<number> {
       process.stdout.write(`${JSON.stringify({ valid: true, purpose: "proposal", deployable: false })}\n`); return EXIT.success;
     }
     if (command === "compile-local" && first && second) {
-      const text = await readSafeSource(first, second), parsed = parseLocalSource(text);
-      if (!parsed.value || !parsed.canonicalBytes) {return report(parsed.diagnostics);}
-      const compiled = compileLocalSource(parsed.value, { encodeAllocationCommitment, sha256 }); if (!compiled.manifest || !compiled.canonicalBytes) {return report(compiled.diagnostics);}
+      const text = await readSafeSource(first, second);
+      const compiled = compileLocalText(text, { encodeAllocationCommitment, sha256 }); if (!compiled.manifest || !compiled.canonicalBytes) {return report(compiled.diagnostics);}
       const directory = await writeArtifact(second, compiled.manifest, compiled.canonicalBytes);
       process.stdout.write(`${JSON.stringify({ directory: resolve(directory), sourceSha256: compiled.manifest.sourceSha256, localFixtureArtifactSha256: compiled.manifest.localFixtureArtifactSha256, genesisAllocationHash: compiled.manifest.genesisAllocationHash })}\n`); return EXIT.success;
     }
