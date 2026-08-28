@@ -44,18 +44,52 @@ engineering review, not a security audit or production approval.
 - The valueless, run-scoped Anvil signing key is passed to Cast in process
   arguments. It is never a production key, and every run uses a private
   mode-0700 directory and deletes its state.
+- Supply tests still use the package-level `tests/` topology rather than the
+  newer feature-local test topology. This does not alter runtime boundaries;
+  migration is deferred until the next real supply feature changes that area.
 
 These limitations do not widen authority, enable public-network use or weaken
 the fixed-supply contract. They remain visible backlog for the next relevant
 slice rather than being hidden behind an audit claim.
 
+## First final exact-SHA review and remediation
+
+Five fresh read-only hosted critics reviewed clean exact commit
+`ec735a6c21ce6a2d7fdf882b53bf5d17a60530db` in independent clones with the
+same `gpt-5.6-sol`, `xhigh`, fast and network-disabled profile.
+
+| Focus | Job | Verdict | Blocking result |
+| --- | --- | --- | --- |
+| Solidity | `agtmai-final-review-solidity-ec735a6-r1` | ACCEPT | None |
+| Manifest | `agtmai-final-review-manifest-ec735a6-r1` | AMEND | Compiler accepted a structurally forged internal value without an opaque parser proof. |
+| Local EVM | `agtmai-final-review-local-evm-ec735a6-r1` | AMEND | Unvalidated failed evidence, platform-specific normalized hashes, cold mkdir races and non-shared concurrent cleanup. |
+| CI/security | `agtmai-final-review-ci-ec735a6-r1` | AMEND | EVM key assignments escaped the tracked-secret scan. |
+| Holistic | `agtmai-final-review-holistic-ec735a6-r1` | ACCEPT | No P0/P1; one test-topology P2 added above. |
+
+The CI critic also identified incomplete vendored OpenZeppelin license closure
+as P2. Commit `416ca13` resolves every accepted P1 and this vendor-policy P2:
+
+- only the strict parser can create the opaque compiler input;
+- failed reports replace unvalidated tools, digests, addresses and run IDs with
+  stable redacted values;
+- normalized tool identities omit the Linux/macOS solc suffix;
+- cold concurrent directory creation reopens and validates the winning entry;
+- all concurrent Anvil stop callers share the same cleanup promise;
+- tracked EVM key assignments and the exact vendored dependency/license/file
+  closure are security-gated.
+
+Regression coverage includes a compile-time assignability proof, Linux versus
+macOS evidence equality, secret sentinels in JSON/Markdown, 16 cold concurrent
+directory creators, forced concurrent Anvil termination, key-scan positives and
+vendor checksum/SPDX/identity failures.
+
 ## Verification state before final exact-head gate
 
 - macOS arm64 `pnpm check`: passed.
 - Pinned toolchain offline verification and Core doctor: passed.
-- Focused local-EVM tests: 24 passed.
+- Focused local-EVM tests: 28 passed.
 - Isolated integration scenarios: 3 passed, including repeated and parallel runs.
 - One direct local deploy plus independent verifier: passed.
-- Final Linux GitHub Actions and final exact-head hosted re-review: pending at
-  the time of this document commit; only their exact-SHA results may close
-  Barrier 2.
+- Remediation commit: `416ca137af3ce54d73af74a0add046b718bf6334`.
+- Final Linux GitHub Actions and affected plus holistic exact-head hosted
+  re-review remain pending; only their same-SHA results may close Barrier 2.

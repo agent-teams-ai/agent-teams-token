@@ -8,10 +8,13 @@ immutable token, изолированный Anvil deploy, независимый
 macOS/Linux toolchain и Linux CI wiring интегрированы. Пять read-only критиков
 проверили точный чистый SHA `9d50b04d6635474b2c65425570ae99fa971e1e3e`;
 принятые P0/P1 исправлены в последующих коммитах, включая `2640ca2`, `dabd567`,
-`891e25b` и `3826166`. Полный macOS arm64 gate и локальный E2E зелёные. До
-объявления Barrier 2 остаются green GitHub Actions на финальном exact SHA и
-повторная hosted-критика этого же SHA. Результаты и классификация замечаний
-ведутся в `docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md`.
+`891e25b` и `3826166`. Первая финальная exact-SHA проверка коммита `ec735a6`
+приняла Solidity и целостную архитектуру, но нашла шесть P1 в CI, manifest и
+локальном EVM. Все шесть закрыты кодом и regression tests в `416ca13`. Полный
+macOS arm64 gate и локальный E2E зелёные. До объявления Barrier 2 остаются
+green GitHub Actions и affected плюс holistic hosted re-review на одном
+финальном exact SHA. Результаты и классификация замечаний ведутся в
+`docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md`.
 
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,

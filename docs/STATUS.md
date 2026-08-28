@@ -63,10 +63,14 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   symlink, forged-evidence, parallel-run and interrupted-cleanup regressions pass.
 - The current macOS arm64 full gate passes Foundation 0.20, lint, TypeScript,
   package tests, Linux-definition parity, canonical vectors, deterministic
-  dependency/secret/license policy, 24 local-EVM tests and 3 isolated integration
+  dependency/secret/license policy, 28 local-EVM tests and 3 isolated integration
   scenarios. No public RPC, real secret, real asset or paid gas was used.
 - Five exact-SHA implementation critics and their remediation ledger are recorded
   in [`GENESIS-CORE-CODE-REVIEW-2026-08-28.md`](research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md).
+- The first final review of exact SHA `ec735a6` accepted Solidity and the
+  holistic slice, and returned six blocking P1 findings across CI, manifest and
+  local EVM. Commit `416ca13` closes all six with regression tests; same-SHA
+  affected and holistic re-review is still required before Barrier 2.
 
 ## In progress
 
