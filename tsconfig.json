@@ -2,7 +2,8 @@
   "extends": "@agent-teams/engineering-foundation/presets/typescript/node.json",
   "files": [],
   "references": [
-    { "path": "packages/domain" }
+    { "path": "packages/domain" },
+    { "path": "packages/contexts/supply" }
   ],
   "compilerOptions": {
     "composite": true

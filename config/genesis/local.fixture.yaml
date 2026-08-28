@@ -1,0 +1,25 @@
+# Deliberately non-production fixture. These test-only values are not approved tokenomics.
+schemaVersion: 1
+purpose: local-fixture
+status: test-only
+network:
+  kind: local-evm
+  chainId: "31337"
+token:
+  name: Agent Teams AI
+  symbol: AGTMAI
+  decimals: 9
+  initialSupplyBaseUnits: "1000000000000"
+allocations:
+  - id: test-alpha
+    recipient: "0x0000000000000000000000000000000000001001"
+    amountBaseUnits: "400000000000"
+    bps: 4000
+  - id: test-beta
+    recipient: "0x0000000000000000000000000000000000001002"
+    amountBaseUnits: "350000000000"
+    bps: 3500
+  - id: test-gamma
+    recipient: "0x0000000000000000000000000000000000001003"
+    amountBaseUnits: "250000000000"
+    bps: 2500
