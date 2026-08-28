@@ -15,10 +15,10 @@
 границы гарантий ведутся в [`CONTRACTS.md`](CONTRACTS.md). Спорные policy vaults,
 governance activation и production genesis wiring не реализуются до отдельных
 продуктовых решений. Переиспользуемое local-only ядро - strict manifest,
-immutable ERC-20, самостоятельный no-catch-up vesting primitive, verifier и
-тесты - выполняется по
+immutable ERC-20 и verifier с тестами - выполняется по
 [`GENESIS_CORE_LOCAL_PLAN.md`](GENESIS_CORE_LOCAL_PLAN.md) без фиксации
-токеномики или mainnet ABI.
+токеномики или mainnet ABI. Самостоятельный no-catch-up vesting primitive
+остаётся следующим отдельным slice и не входит в обязательный Genesis Core.
 
 ---
 

@@ -14,6 +14,12 @@ subscription slots требуют повторной авторизации/им
 W3/W4 файл пока не изменён; Barrier 2 не объявлен. План ранее исправлен после
 пяти независимых hosted-review и содержит обязательную worker/review
 orchestration.
+
+После Barrier 1 интегратор исправил ещё один strict-parser gap: explicit
+standard YAML tags `!!str`/`!!int` теперь также запрещены. Exact commit
+`d88edb4ffb2f7d3bfd7552b375bc5850cef5b835` проходит полный Foundation 0.20,
+lint, TypeScript и 30 manifest tests на macOS arm64 и Linux Node 24.20.0.
+
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,
 mainnet-ключей, публичных транзакций и необратимого утверждения спорной

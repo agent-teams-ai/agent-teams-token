@@ -21,9 +21,10 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - The pure supply projection covers quiescent and both in-flight bridge
   directions; it is not yet a finalized event-ledger source of truth.
 - Public networks are disabled by default.
-- Tool and container versions are exact pins with checksum or digest evidence.
+- Текущие macOS arm64 pins имеют exact version/checksum evidence; полный
+  двухплатформенный lock/bootstrap и Linux CI wiring остаются Wave 2.
 - Foundry 1.8.0 native and containerized Anvil are verified on chain ID 31337.
-- Engineering Foundation 0.19.0 is installed dev-only; applicable architecture,
+- Engineering Foundation 0.20.0 is installed dev-only; applicable architecture,
   dependency, documentation, ADR, suppression and quality-gate policies pass
   static validation.
 - The containerized Anvil RPC responds on host port `8545` with chain ID 31337.
@@ -45,6 +46,23 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   `xhigh` reasoning and fast service tier. Their accepted findings narrowed the
   executable first slice and are recorded in
   [`GENESIS-CORE-PLAN-CRITIQUE-2026-08-28.md`](research/GENESIS-CORE-PLAN-CRITIQUE-2026-08-28.md).
+- Strict proposal/local-fixture separation, canonical manifest compiler,
+  content-addressed READY-last artifact store and shared ABI/hash vector are
+  implemented. Exact commit `d88edb4ffb2f7d3bfd7552b375bc5850cef5b835`
+  passes Foundation 0.20, lint, TypeScript, 5 supply-domain tests and 30
+  manifest tests on macOS arm64 and Linux Node 24.20.0.
+- Immutable local-candidate `AGTMAIToken` is implemented without external
+  mint/admin/proxy/pause/tax/blacklist paths. The code-identical Barrier 1
+  commit passes 19 Foundry tests, including 10,000-run fuzzing and 65,536
+  invariant calls, on macOS arm64 and Linux. This is local evidence, not an
+  audit or production deployment approval.
+
+## In progress
+
+- W3 local Anvil deploy/independent verifier and W4 pinned Linux CI parity have
+  isolated hosted jobs and ownership scopes, but no W3/W4 source change exists
+  yet because the available subscription slots require reauthorization or are
+  quota-blocked. Barrier 2 and exact-SHA GitHub Actions evidence do not exist.
 
 ## Designed, not implemented
 
@@ -63,11 +81,12 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - Purpose-specific release/vesting vault proposal, rolling commitments and global
   liquidization budget; governance-reserve activation remains an explicit open
   decision and ABI blocker.
-- Ethereum fixed-supply token, vesting and treasury contracts.
+- Production genesis wiring, vesting and treasury contracts.
 - Chainlink CCIP Ethereum and Solana pool configuration.
 - CCIP EVM `1.6.4` versus `2.0.0` compatibility ADR and canonical backing-holder
   model for the live SVM `1.6.3` lane.
-- Strict tokenomics schema/compiler and canonical genesis manifest/hash.
+- Production tokenomics approval envelope/compiler; the implemented local
+  fixture manifest/hash is deliberately test-only and cannot approve launch.
 - Event-sourced cross-chain monitor and public transparency dashboard.
 - Airdrop, liquidity and governance execution.
 - Legal entity, launch jurisdictions, live utility and final tokenomics approval.
