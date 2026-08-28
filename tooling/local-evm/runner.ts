@@ -1,13 +1,16 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { canonicalJson, sha256, strip0x } from "./crypto.ts";
+import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
 import { checkedCommand, command, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
-import { atomicWrite, ensurePrivateDirectory, readRegularFile } from "./safe-fs.ts";
+import { bootstrapRpcRequest } from "./rpc.ts";
+import { atomicWrite, ensurePrivateDirectory, ensurePrivateDirectoryPath, readRegularFile } from "./safe-fs.ts";
+import { assertPinnedSolcVersionOutput, pinnedSolcPath } from "./toolchain.ts";
 
 interface RunnerOptions { readonly repositoryRoot: string; readonly reportsRoot?: string }
 
@@ -15,15 +18,12 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   const root = resolve(options.repositoryRoot);
   const privateRoot = privateRunRoot(root);
   const reportsRoot = resolve(options.reportsRoot ?? join(root, ".local", "local-evm", "reports"));
-  await mkdir(privateRoot, { recursive: true, mode: 0o700 });
-  await chmod(privateRoot, 0o700);
-  await ensurePrivateDirectory(privateRoot);
-  await mkdir(reportsRoot, { recursive: true, mode: 0o700 });
-  await chmod(reportsRoot, 0o700);
-  await ensurePrivateDirectory(reportsRoot);
+  const canonicalTemporaryRoot = realpathSync(tmpdir());
+  await ensurePrivateDirectoryPath(canonicalTemporaryRoot, privateRoot);
+  await ensurePrivateDirectoryPath(root, reportsRoot);
   const runId = `${Date.now().toString(36)}-${randomBytes(12).toString("hex")}`;
   const runDirectory = await mkdtemp(join(privateRoot, `run-${runId}-`));
-  await chmod(runDirectory, 0o700);
+  await ensurePrivateDirectory(runDirectory);
   await atomicWrite(join(runDirectory, "runner.pid"), Buffer.from(`${process.pid}\n`, "ascii"));
   let anvil: OwnedAnvil | undefined;
   let interruptedSignal: NodeJS.Signals | undefined;
@@ -36,7 +36,8 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
   try {
-    const tools = await toolVersions(commandAbort.signal);
+    const solc = pinnedSolcPath(root);
+    const tools = await toolVersions(solc, commandAbort.signal);
     const walletResult = await checkedCommand("cast", ["wallet", "new", "--json"], { code: "LOCAL_EVM_WALLET_GENERATION_FAILED", signal: commandAbort.signal });
     const wallet = parseWallet(walletResult.stdout);
     const keyPath = join(runDirectory, "ephemeral-signing-key");
@@ -44,7 +45,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     anvil = await startOwnedAnvil("anvil", wallet.address);
     await atomicWrite(join(runDirectory, "anvil.pid"), Buffer.from(`${anvil.pid}\n`, "ascii"));
     if (interruptedSignal) {throw new LocalEvmError("LOCAL_EVM_INTERRUPTED", `interrupted by ${interruptedSignal}`);}
-    const chain = await rpc(anvil.rpcUrl, "eth_chainId", []);
+    const chain = await bootstrapRpcRequest(anvil.rpcUrl, "eth_chainId", []);
     if (BigInt(chain).toString() !== "31337") {throw new LocalEvmError("LOCAL_EVM_CHAIN_ID_MISMATCH", "Anvil chain ID is not exactly 31337");}
 
     const compilerCli = join(root, "packages", "contexts", "supply", "dist", "features", "genesis-manifest", "composition", "cli.js");
@@ -72,6 +73,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     await checkedCommand("forge", [
       "build", "--out", forgeOutput,
       "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", forgeCache,
+      "--use", solc,
     ], { cwd: contractsRoot, code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: commandAbort.signal, timeoutMs: 60_000 });
     const artifactPath = join(forgeOutput, "AGTMAIToken.sol", "AGTMAIToken.json");
     const artifactBytes = await readRegularFile(artifactPath, "CONTRACT_ARTIFACT");
@@ -88,13 +90,12 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     const contractArtifactSha256 = sha256(artifactBytes);
     const abiSha256 = sha256(abiBytes);
     assertApprovedBuild(contractArtifactSha256, abiSha256, sha256(approvedBuildProfileBytes));
-    const artifactBytecode = artifact.bytecode;
-    if (!isRecord(artifactBytecode) || typeof artifactBytecode.object !== "string" || !/^0x[0-9a-f]+$/u.test(artifactBytecode.object)) {throw new LocalEvmError("LOCAL_EVM_CREATION_BYTECODE_INVALID", "contract artifact has no canonical creation bytecode");}
+    const build = parseObject(buildInfoBytes.toString("utf8"), "LOCAL_EVM_BUILD_INFO_INVALID");
     const constructorInputs = constructorInputsFromManifest(approved.manifest);
     const constructorPath = join(runDirectory, "constructor-inputs.v1.json");
     const constructorBytes = Buffer.from(canonicalJson(constructorInputs), "utf8");
     await atomicWrite(constructorPath, constructorBytes);
-    const creationInput = `${artifactBytecode.object}${encodeConstructorArguments(constructorInputs).slice(2)}`;
+    const creationInput = reconstructCreationInput(build, artifact, constructorInputs);
     const key = (await readRegularFile(keyPath, "EPHEMERAL_KEY")).toString("ascii").trim();
     const send = await checkedCommand("cast", ["send", "--private-key", key, "--rpc-url", anvil.rpcUrl, "--json", "--create", creationInput], { code: "LOCAL_EVM_DEPLOY_FAILED", signal: commandAbort.signal });
     const receipt = parseObject(send.stdout, "LOCAL_EVM_DEPLOY_RECEIPT_INVALID");
@@ -146,27 +147,21 @@ export function privateRunRoot(repositoryRoot: string): string {
   return join(realpathSync(tmpdir()), "agtmai-local-evm", repositoryIdentity);
 }
 
-function encodeConstructorArguments(value: ReturnType<typeof constructorInputsFromManifest>): `0x${string}` {
-  const words = [word(value.initialSupplyBaseUnits), word("64"), word(String(value.allocations.length))];
-  for (const allocation of value.allocations) {words.push(strip0x(allocation.idBytes32), strip0x(allocation.recipient).padStart(64, "0"), word(allocation.amountBaseUnits));}
-  return `0x${words.join("")}`;
-}
-
 function assertApprovedBuild(artifact: string, abi: string, profile: string): void {
   const approved = artifact === APPROVED_CONTRACT_ARTIFACT_SHA256
     && abi === APPROVED_ABI_SHA256
     && profile === "0x1efe84db9573a50e5b465e69c4d95dda74f6ca303bbf52cbb0de2a21ffb998f8";
   if (!approved) {throw new LocalEvmError("LOCAL_EVM_BUILD_NOT_APPROVED", "token artifact, ABI, or build approval differs from the committed test-only pins");}
 }
-function word(value: string): string { return BigInt(value).toString(16).padStart(64, "0"); }
-
-async function toolVersions(signal: AbortSignal): Promise<Record<string, string>> {
+async function toolVersions(solc: string, signal: AbortSignal): Promise<Record<string, string>> {
   const commands: Record<string, readonly string[]> = { node: ["--version"], pnpm: ["--version"], forge: ["--version"], cast: ["--version"], anvil: ["--version"] };
   const versions: Record<string, string> = {};
   for (const [name, arguments_] of Object.entries(commands)) {
     const result = await checkedCommand(name === "node" ? process.execPath : name, arguments_, { code: "LOCAL_EVM_TOOL_VERSION_FAILED", signal });
     versions[name] = result.stdout.trim().split(/\r?\n/u)[0];
   }
+  const solcVersion = await checkedCommand(solc, ["--version"], { code: "LOCAL_EVM_SOLC_VERSION_FAILED", signal });
+  versions.solc = assertPinnedSolcVersionOutput(solcVersion.stdout);
   if (!versions.forge.includes("1.8.0") || !versions.cast.includes("1.8.0") || !versions.anvil.includes("1.8.0")) {throw new LocalEvmError("LOCAL_EVM_FOUNDRY_VERSION_MISMATCH", "forge, cast and anvil must all be pinned Foundry 1.8.0");}
   return versions;
 }
@@ -189,4 +184,3 @@ function parseObject(text: string, code: string): Record<string, unknown> { try 
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function canonicalAddress(value: unknown, label: string): `0x${string}` { if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value)) {throw new LocalEvmError("LOCAL_EVM_ADDRESS_INVALID", `${label} is malformed`);} return value.toLowerCase() as `0x${string}`; }
 function canonicalHash(value: unknown, label: string): `0x${string}` { if (typeof value !== "string" || !/^0x[0-9a-fA-F]{64}$/u.test(value)) {throw new LocalEvmError("LOCAL_EVM_HASH_INVALID", `${label} is malformed`);} return value.toLowerCase() as `0x${string}`; }
-async function rpc(url: string, method: string, params: readonly unknown[]): Promise<string> { const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(5_000) }); const value: unknown = await response.json(); if (!isRecord(value) || typeof value.result !== "string") {throw new LocalEvmError("LOCAL_EVM_RPC_INVALID", "local RPC returned an invalid response");} return value.result; }

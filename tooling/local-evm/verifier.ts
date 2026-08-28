@@ -2,9 +2,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { atomicWrite, readRegularFile } from "./safe-fs.ts";
 import { canonicalJson, keccak256, sha256, strip0x } from "./crypto.ts";
-import { assertConstructorInputs, readApprovedManifest } from "./manifest.ts";
+import { reconstructCreationInput } from "./constructor.ts";
+import { assertConstructorInputs, constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_SOURCE_SHA256, asError, LocalEvmError, type ApprovedBuildProfile, type DeploymentReport, type EvidenceCheck, type VerificationEvidence, type VerificationInput } from "./model.ts";
 import { assertPrivateRpcUrl, createRpcClient, type RpcClient } from "./rpc.ts";
+import { assertPinnedSolcVersionOutput } from "./toolchain.ts";
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const TRANSACTION = /^0x[0-9a-f]{64}$/;
@@ -39,10 +41,12 @@ export async function verifyLocalDeployment(input: VerificationInput, suppliedRp
       throw new LocalEvmError("VERIFY_BUILD_APPROVAL_MISMATCH", "explicit build inputs differ from the committed approval");
     }
     assertConstructorInputs(constructorInputs, approved.manifest);
+    const manifestConstructorInputs = constructorInputsFromManifest(approved.manifest);
     assertDeploymentReport(deployment, input);
     transactionHash = deployment.transactionHash;
     checks.push(pass("constructor-inputs"), pass("deployment-report-integrity"));
     assertBuildProfile(build, artifact, abi, approval, abiBytes);
+    const expectedCreationInput = reconstructCreationInput(build, artifact, manifestConstructorInputs);
     checks.push(pass("compiler-build-and-abi"));
 
     const chainId = BigInt(rpcString(await rpc.request("eth_chainId"), "VERIFY_RPC_CHAIN_ID_INVALID")).toString();
@@ -77,7 +81,7 @@ export async function verifyLocalDeployment(input: VerificationInput, suppliedRp
     checks.push(pass("every-fixture-balance"), pass("fixture-balance-aggregate"));
     const deployerBalance = decodeUint(rpcString(await rpc.request("eth_call", [{ to: input.targetAddress, data: `${selector("balanceOf(address)")}${strip0x(input.deployerAddress).padStart(64, "0")}` }, "latest"]), "VERIFY_RPC_CALL_INVALID"));
     if (deployerBalance !== "0") {throw new LocalEvmError("VERIFY_UNEXPLAINED_DEPLOYER_BALANCE", "deployer has an unexplained token balance");}
-    await verifyDirectCreation(rpc, deployment, input);
+    await verifyDirectCreation(rpc, deployment, input, expectedCreationInput);
     checks.push(pass("zero-deployer-balance"), pass("rpc-proven-direct-creation"));
     return evidence(input, checks, { status: "passed", code: "OK", sourceDigest: approved.manifest.sourceSha256, transactionHash });
   } catch (cause) {
@@ -152,6 +156,7 @@ async function readAndMatch(path: string, expected: string, label: string): Prom
 
 function assertVerificationInput(input: VerificationInput): void {
   assertPrivateRpcUrl(input.rpcUrl);
+  assertPinnedSolcVersionOutput(input.toolVersions.solc ?? "");
   if (!ADDRESS.test(input.targetAddress) || !ADDRESS.test(input.deployerAddress)) {throw new LocalEvmError("VERIFY_ADDRESS_INVALID", "target and deployer must be canonical lowercase addresses");}
   if (basename(input.buildInfoPath) === "latest" || basename(dirname(input.manifestPath)) === "latest" || basename(input.approvedBuildProfilePath) !== "approved-build-profile.v1.json") {throw new LocalEvmError("VERIFY_MUTABLE_LATEST_FORBIDDEN", "mutable or unapproved inputs are forbidden");}
 }
@@ -325,12 +330,15 @@ function assertApprovalShape(value: ApprovedBuildProfile): void {
   }
 }
 
-async function verifyDirectCreation(rpc: RpcClient, deployment: DeploymentReport, input: VerificationInput): Promise<void> {
+async function verifyDirectCreation(rpc: RpcClient, deployment: DeploymentReport, input: VerificationInput, expectedCreationInput: `0x${string}`): Promise<void> {
   const transaction = await rpc.request("eth_getTransactionByHash", [deployment.transactionHash]);
   const receipt = await rpc.request("eth_getTransactionReceipt", [deployment.transactionHash]);
-  if (!isRecord(transaction) || !isRecord(receipt)
+  if (!isRecord(transaction) || typeof transaction.input !== "string" || transaction.input !== expectedCreationInput
+    || sha256(expectedCreationInput) !== deployment.creationInputSha256) {
+    throw new LocalEvmError("VERIFY_CREATION_INPUT_MISMATCH", "transaction creation input differs from exact build-info bytecode and manifest constructor arguments");
+  }
+  if (!isRecord(receipt)
     || String(transaction.from).toLowerCase() !== input.deployerAddress || transaction.to !== null
-    || typeof transaction.input !== "string" || sha256(transaction.input) !== deployment.creationInputSha256
     || String(receipt.contractAddress).toLowerCase() !== input.targetAddress || receipt.to !== null
     || receipt.transactionHash !== deployment.transactionHash || BigInt(rpcString(receipt.status, "VERIFY_RECEIPT_STATUS_INVALID")) !== 1n) {
     throw new LocalEvmError("VERIFY_DIRECT_CREATION_MISMATCH", "RPC transaction/receipt do not prove direct deployer creation of the target");

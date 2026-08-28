@@ -41,13 +41,58 @@ export async function assertNoPathSubstitution(path: string, label: string): Pro
 }
 
 export async function ensurePrivateDirectory(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  const stat = await lstat(path);
+  await ensureDirectoryComponent(resolve(path), true);
+}
+
+async function ensureDirectoryComponent(absolute: string, requirePrivate: boolean): Promise<void> {
+  const parent = dirname(absolute);
+  if (await realpath(parent).catch(() => null) !== parent) {
+    throw new LocalEvmError("LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION", `${absolute} parent is absent or substituted`);
+  }
+  let entry;
+  try {
+    entry = await lstat(absolute);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {throw cause;}
+    await mkdir(absolute, { recursive: false, mode: 0o700 });
+    entry = await lstat(absolute);
+  }
+  if (!entry.isDirectory() || entry.isSymbolicLink()) {
+    throw new LocalEvmError("LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION", `${absolute} must be a real directory`);
+  }
+  let handle;
+  try {
+    handle = await open(absolute, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  } catch {
+    throw new LocalEvmError("LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION", `${absolute} could not be opened without following links`);
+  }
+  const stat = await handle.stat();
   const expectedOwner = process.getuid?.();
-  const substituted = await realpath(path) !== resolve(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || substituted || (stat.mode & 0o077) !== 0
-    || (expectedOwner !== undefined && stat.uid !== expectedOwner)) {
-    throw new LocalEvmError("LOCAL_EVM_DIRECTORY_NOT_PRIVATE", `${path} must be a real mode-0700 directory`);
+  try {
+    if (!stat.isDirectory() || (expectedOwner !== undefined && stat.uid !== expectedOwner)
+      || (requirePrivate && (stat.mode & 0o077) !== 0)) {
+      throw new LocalEvmError("LOCAL_EVM_DIRECTORY_NOT_PRIVATE", `${absolute} must be an owned${requirePrivate ? " mode-0700" : ""} directory`);
+    }
+    if (await realpath(absolute) !== absolute) {
+      throw new LocalEvmError("LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION", `${absolute} contains a substituted path component`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function ensurePrivateDirectoryPath(boundary: string, target: string): Promise<void> {
+  const absoluteBoundary = resolve(boundary);
+  const absoluteTarget = resolve(target);
+  if (await realpath(absoluteBoundary).catch(() => null) !== absoluteBoundary
+    || (absoluteTarget !== absoluteBoundary && !absoluteTarget.startsWith(`${absoluteBoundary}/`))) {
+    throw new LocalEvmError("LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION", "private directory escaped or substituted its trusted boundary");
+  }
+  const relative = absoluteTarget.slice(absoluteBoundary.length).split("/").filter(Boolean);
+  let current = absoluteBoundary;
+  for (const [index, component] of relative.entries()) {
+    current = `${current}/${component}`;
+    await ensureDirectoryComponent(current, index === relative.length - 1);
   }
 }
 
