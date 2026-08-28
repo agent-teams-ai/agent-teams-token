@@ -6,9 +6,13 @@
 production-hosted subscription-runtime workers. Barrier 1 закрыт на exact SHA
 `b9edc254a2a1e328bee0ef376418296b692d18b8`: macOS arm64 и Linux подтвердили
 одинаковые raw ABI bytes и allocation commitment, Foundation/TypeScript gates,
-29 manifest tests, 5 supply-domain tests и 19 Foundry tests. Wave 2 запускает W3
-local Anvil E2E/verifier и W4 Linux CI parity параллельно. План ранее исправлен
-после пяти независимых hosted-review и содержит обязательную worker/review
+29 manifest tests, 5 supply-domain tests и 19 Foundry tests. Wave 2 W3 local
+Anvil E2E/verifier и W4 Linux CI parity создана параллельно от exact SHA
+`7e2ebd6e2565595fafbcd9c279c9c5ae567af16e` в изолированных hosted worktrees,
+но implementation attempts ещё не получили доступ к модели: доступные
+subscription slots требуют повторной авторизации/имеют quota cooldown. Ни один
+W3/W4 файл пока не изменён; Barrier 2 не объявлен. План ранее исправлен после
+пяти независимых hosted-review и содержит обязательную worker/review
 orchestration.
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,
