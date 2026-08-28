@@ -3,23 +3,93 @@ set -euo pipefail
 
 token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 token_mode=${1:-all}
+token_tools_root="$token_repo_root/.tools"
+token_downloads="$token_tools_root/downloads"
 
-token_bootstrap_node=${TOKEN_BOOTSTRAP_NODE:-node}
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64)
+    token_node_archive=node-v24.20.0-darwin-arm64.tar.gz
+    token_node_directory=node-v24.20.0-darwin-arm64
+    token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz
+    token_node_sha256=40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8
+    token_node_tar_flag=-xzf
+    token_sha256_program=/usr/bin/shasum
+    token_sha256_argument=-a
+    ;;
+  Linux:x86_64)
+    token_node_archive=node-v24.20.0-linux-x64.tar.xz
+    token_node_directory=node-v24.20.0-linux-x64
+    token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz
+    token_node_sha256=2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2
+    token_node_tar_flag=-xJf
+    token_sha256_program=/usr/bin/sha256sum
+    token_sha256_argument=
+    ;;
+  *)
+    printf 'TOOLCHAIN_UNSUPPORTED_PLATFORM platform=%s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+token_sha256() {
+  if [[ -n "$token_sha256_argument" ]]; then
+    "$token_sha256_program" "$token_sha256_argument" 256 "$1" | /usr/bin/awk '{print $1}'
+  else
+    "$token_sha256_program" "$1" | /usr/bin/awk '{print $1}'
+  fi
+}
+
+token_prepare_pinned_node() {
+  local token_allow_fetch=$1
+  local token_archive_path="$token_downloads/$token_node_archive"
+  mkdir -p "$token_downloads"
+  if [[ ! -f "$token_archive_path" ]] || [[ "$(token_sha256 "$token_archive_path")" != "$token_node_sha256" ]]; then
+    if [[ "$token_allow_fetch" != true ]]; then
+      printf 'TOOLCHAIN_OFFLINE_CACHE_MISS tool=node expected=%s\n' "$token_archive_path" >&2
+      return 1
+    fi
+    rm -f "$token_archive_path"
+    local token_part="$token_archive_path.part"
+    rm -f "$token_part"
+    /usr/bin/curl --fail --location --proto '=https' --show-error --output "$token_part" "$token_node_url"
+    local token_actual_sha256
+    token_actual_sha256=$(token_sha256 "$token_part")
+    if [[ "$token_actual_sha256" != "$token_node_sha256" ]]; then
+      printf 'TOOLCHAIN_CHECKSUM_MISMATCH tool=node expected=%s actual=%s partial=%s\n' \
+        "$token_node_sha256" "$token_actual_sha256" "$token_part" >&2
+      return 1
+    fi
+    mv "$token_part" "$token_archive_path"
+  fi
+  token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
+  trap 'rm -rf "$token_node_stage"' EXIT
+  /usr/bin/tar "$token_node_tar_flag" "$token_archive_path" -C "$token_node_stage"
+  token_pinned_node="$token_node_stage/$token_node_directory/bin/node"
+  [[ "$($token_pinned_node --version)" == v24.20.0 ]]
+}
 
 case "$token_mode" in
   fetch)
-    exec "$token_bootstrap_node" "$token_repo_root/scripts/toolchain.mjs" fetch "${@:2}"
+    token_prepare_pinned_node true
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch "${@:2}"
     ;;
   install)
-    exec "$token_bootstrap_node" "$token_repo_root/scripts/toolchain.mjs" install "${@:2}"
+    token_prepare_pinned_node false
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install "${@:2}"
     ;;
   verify)
-    exec "$token_bootstrap_node" "$token_repo_root/scripts/toolchain.mjs" verify "${@:2}"
+    token_prepare_pinned_node false
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" verify "${@:2}"
     ;;
   all)
-    "$token_bootstrap_node" "$token_repo_root/scripts/toolchain.mjs" fetch
-    "$token_bootstrap_node" "$token_repo_root/scripts/toolchain.mjs" install --offline
+    token_prepare_pinned_node true
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install --offline
     source "$token_repo_root/scripts/env.sh"
+    if [[ "$(command -v pnpm)" != "$token_tools_root/bin/pnpm" ]]; then
+      printf '%s\n' 'TOOLCHAIN_PNPM_PATH_MISMATCH expected=.tools/bin/pnpm' >&2
+      exit 1
+    fi
     if [[ "$(pnpm --version 2>/dev/null || true)" != "11.24.0" ]]; then
       printf '%s\n' 'TOOLCHAIN_PNPM_MISMATCH expected=11.24.0 action=install-the-exact-packageManager-version' >&2
       exit 1

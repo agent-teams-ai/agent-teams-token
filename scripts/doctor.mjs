@@ -28,7 +28,7 @@ export function runDoctor({
 
   let failed = inspectCoreTools({ lock, toolsRoot, platform, write });
   if (!coreOnly) {
-    const packageFailed = inspectPackages({ lock, commandRunner, packageVersionReader, write });
+    const packageFailed = inspectPackages({ lock, toolsRoot, commandRunner, packageVersionReader, write });
     failed ||= packageFailed;
   }
 
@@ -45,9 +45,9 @@ export function runDoctor({
 
 function inspectCoreTools({ lock, toolsRoot, platform, write }) {
   let failed = false;
-  for (const name of lock.coreTools) {
+  for (const name of [...lock.coreTools, "pnpm"]) {
     const tool = lock.tools[name];
-    const artifact = tool.platforms[platform];
+    const artifact = name === "pnpm" ? tool : tool.platforms[platform];
     const archive = join(toolsRoot, "downloads", artifact.archiveName);
     const actualArchiveSha256 = existsSync(archive) ? sha256(archive) : "missing";
     const installation = inspectInstallation({
@@ -56,6 +56,8 @@ function inspectCoreTools({ lock, toolsRoot, platform, write }) {
       artifact,
       platform,
       destination: join(toolsRoot, artifact.installDirectory),
+      toolsRoot,
+      lock,
     });
     const checksumMatches = actualArchiveSha256 === artifact.sha256;
     if (checksumMatches && installation.ok) {
@@ -77,9 +79,9 @@ function inspectCoreTools({ lock, toolsRoot, platform, write }) {
   return failed;
 }
 
-function inspectPackages({ lock, commandRunner, packageVersionReader, write }) {
+function inspectPackages({ lock, toolsRoot, commandRunner, packageVersionReader, write }) {
   const packageChecks = [
-    ["pnpm", lock.tools.pnpm.version, () => commandRunner("pnpm", ["--version"])],
+    ["pnpm", lock.tools.pnpm.version, () => commandRunner(join(toolsRoot, "bin", "pnpm"), ["--version"])],
     ["typescript", lock.tools.typescript.version, () => packageVersionReader("typescript")],
     ["oxlint", lock.tools.oxlint.version, () => packageVersionReader("oxlint")],
     [

@@ -46,6 +46,7 @@ export function validateLock(lock) {
   for (const name of lock.coreTools) {
     validateCoreTool(lock, name);
   }
+  validatePackageManager(lock.tools?.pnpm);
   for (const name of ["pnpm", "typescript", "oxlint", "engineeringFoundation"]) {
     const tool = lock.tools?.[name];
     if (!tool?.version || !tool.source.startsWith('https://')) {
@@ -56,6 +57,21 @@ export function validateLock(lock) {
     if (lock.tools?.[name]?.scope !== "future-non-core" || lock.tools[name].enabledForCore !== false) {
       throw new Error(`TOOLCHAIN_LOCK_FUTURE_SCOPE tool=${name}`);
     }
+  }
+}
+
+function validatePackageManager(tool) {
+  if (
+    tool?.scope !== "genesis-core-package-manager"
+    || typeof tool.version !== "string"
+    || !tool.source?.startsWith("https://")
+    || !/^[a-f0-9]{64}$/.test(tool.sha256)
+    || tool.archive !== "tar.gz"
+    || !/^[a-zA-Z0-9.+_-]+$/.test(tool.archiveName)
+    || !/^[a-zA-Z0-9.+_-]+$/.test(tool.installDirectory)
+    || JSON.stringify(tool.expectedFiles) !== JSON.stringify(["bin/pnpm.cjs", "package.json"])
+  ) {
+    throw new Error("TOOLCHAIN_LOCK_PACKAGE_MANAGER expected=checksum-pinned-package-manager");
   }
 }
 
@@ -133,12 +149,18 @@ function coreDownloadableTools(lock) {
   return lock.coreTools.map((name) => [name, lock.tools[name]]);
 }
 
+function downloadableTools(lock, platform) {
+  return [
+    ...coreDownloadableTools(lock).map(([name, tool]) => [name, tool, tool.platforms[platform]]),
+    ["pnpm", lock.tools.pnpm, lock.tools.pnpm],
+  ];
+}
+
 export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl }) {
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(downloads, { recursive: true });
-  for (const [name, tool] of coreDownloadableTools(lock)) {
-    const artifact = tool.platforms[platform];
+  for (const [name, _tool, artifact] of downloadableTools(lock, platform)) {
     const target = join(downloads, artifact.archiveName);
     if (existsSync(target) && sha256(target) === artifact.sha256) {
       process.stdout.write(`FETCH_CACHED tool=${name} platform=${platform} sha256=${artifact.sha256}\n`);
@@ -147,7 +169,7 @@ export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloa
     if (existsSync(target)) {rmSync(target);}
     const part = `${target}.part`;
     if (existsSync(part)) {rmSync(part);}
-    const result = downloader(artifact.url, part);
+    const result = downloader(artifact.url ?? artifact.source, part);
     if (result !== 0) {
       throw new Error(`TOOLCHAIN_FETCH_FAILED tool=${name} platform=${platform} partial=${part}`);
     }
@@ -175,19 +197,18 @@ export function installArtifacts({ lock, platform, toolsRoot, offline }) {
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(toolsRoot, { recursive: true });
-  for (const [name, tool] of coreDownloadableTools(lock)) {
-    const artifact = tool.platforms[platform];
+  for (const [name, tool, artifact] of downloadableTools(lock, platform)) {
     const archive = join(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_OFFLINE_CACHE_MISS" });
     const destination = join(toolsRoot, artifact.installDirectory);
-    const present = inspectInstallation({ name, tool, artifact, platform, destination });
+    const present = inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock });
     if (present.ok) {
       process.stdout.write(
         `INSTALL_PRESENT tool=${name} platform=${platform} version=${present.actualVersion} sha256=${artifact.sha256}\n`,
       );
       continue;
     }
-    atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot });
+    atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock });
     process.stdout.write(
       `INSTALL_OK tool=${name} platform=${platform} version=${tool.version} sha256=${artifact.sha256}`
       + `${present.code === "missing" ? "" : ` replaced=${present.code}`}\n`,
@@ -207,7 +228,7 @@ function verifyArchive({ name, platform, artifact, archive, missingCode }) {
   }
 }
 
-function atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot }) {
+function atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock }) {
   const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
   const staged = join(stageRoot, "payload");
   let backup;
@@ -235,7 +256,15 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       }
       return [path, sha256(target)];
     }));
-    executeVersionChecks(source, artifact);
+    if (name === "pnpm") {
+      executePnpmVersionCheck({
+        root: source,
+        nodeExecutable: pinnedNode(lock, toolsRoot, platform),
+        tool,
+      });
+    } else {
+      executeVersionChecks(source, artifact);
+    }
     writeFileSync(join(source, provenanceFile), `${JSON.stringify({
       schemaVersion: 1,
       tool: name,
@@ -254,13 +283,14 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       if (backup && !existsSync(destination)) {renameSync(backup, destination);}
       throw error;
     }
+    if (name === "pnpm") {writePnpmWrapper({ lock, toolsRoot, platform });}
     if (backup) {rmSync(backup, { force: true, recursive: true });}
   } finally {
     rmSync(stageRoot, { recursive: true, force: true });
   }
 }
 
-export function inspectInstallation({ name, tool, artifact, platform, destination }) {
+export function inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock }) {
   if (!existsSync(destination)) {return { ok: false, code: "missing", actualVersion: "missing" };}
   const provenancePath = join(destination, provenanceFile);
   if (!existsSync(provenancePath)) {return { ok: false, code: "provenance-missing", actualVersion: "unknown" };}
@@ -290,11 +320,58 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
   }
   let actualVersion;
   try {
-    actualVersion = executeVersionChecks(destination, artifact);
+    actualVersion = name === "pnpm"
+      ? executePnpmVersionCheck({
+          root: destination,
+          nodeExecutable: pinnedNode(lock, toolsRoot, platform),
+          tool,
+        })
+      : executeVersionChecks(destination, artifact);
   } catch (error) {
     return { ok: false, code: "version-command", actualVersion: error instanceof Error ? error.message : String(error) };
   }
+  if (name === "pnpm") {
+    const wrapper = join(toolsRoot, "bin", "pnpm");
+    if (!existsSync(wrapper) || readFileSync(wrapper, "utf8") !== pnpmWrapper(lock, platform)) {
+      return { ok: false, code: "wrapper-missing-or-tampered", actualVersion: singleLine(actualVersion) };
+    }
+  }
   return { ok: true, code: "ok", actualVersion: singleLine(actualVersion) };
+}
+
+function pinnedNode(lock, toolsRoot, platform) {
+  return join(toolsRoot, lock.tools.node.platforms[platform].installDirectory, "bin", "node");
+}
+
+function executePnpmVersionCheck({ root, nodeExecutable, tool }) {
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  if (packageJson.name !== "pnpm" || packageJson.version !== tool.version) {
+    throw new Error(`pnpm-package-mismatch:actual=${packageJson.name}@${packageJson.version}`);
+  }
+  const actual = execFileSync(nodeExecutable, [join(root, "bin", "pnpm.cjs"), "--version"], {
+    encoding: "utf8",
+    env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", COREPACK_ENABLE_PROJECT_SPEC: "0" },
+    timeout: 15_000,
+  }).trim();
+  if (actual !== tool.version) {throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`);}
+  return `pnpm=${actual}`;
+}
+
+function pnpmWrapper(lock, platform) {
+  const nodeDirectory = lock.tools.node.platforms[platform].installDirectory;
+  const pnpmDirectory = lock.tools.pnpm.installDirectory;
+  return `#!/usr/bin/env bash\nset -euo pipefail\ntoken_pnpm_tools_root=$(CDPATH= cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd)\nexport COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nexport COREPACK_ENABLE_PROJECT_SPEC=0\nexec "$token_pnpm_tools_root/${nodeDirectory}/bin/node" "$token_pnpm_tools_root/${pnpmDirectory}/bin/pnpm.cjs" --config.auto-install-peers=false "$@"\n`;
+}
+
+function writePnpmWrapper({ lock, toolsRoot, platform }) {
+  const bin = join(toolsRoot, "bin");
+  const target = join(bin, "pnpm");
+  const part = `${target}.part`;
+  mkdirSync(bin, { recursive: true });
+  rmSync(part, { force: true });
+  writeFileSync(part, pnpmWrapper(lock, platform), { mode: 0o755 });
+  chmodSync(part, 0o755);
+  renameSync(part, target);
 }
 
 function executeVersionChecks(root, artifact) {
@@ -319,8 +396,7 @@ export function verifyCache({ lock, platform, toolsRoot, offline }) {
   if (!offline) {throw new Error("TOOLCHAIN_VERIFY_REQUIRES_OFFLINE use=verify --offline");}
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
-  for (const [name, tool] of coreDownloadableTools(lock)) {
-    const artifact = tool.platforms[platform];
+  for (const [name, tool, artifact] of downloadableTools(lock, platform)) {
     const archive = join(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_CACHE_MISSING" });
     const installation = inspectInstallation({
@@ -329,6 +405,8 @@ export function verifyCache({ lock, platform, toolsRoot, offline }) {
       artifact,
       platform,
       destination: join(toolsRoot, artifact.installDirectory),
+      toolsRoot,
+      lock,
     });
     if (!installation.ok) {
       throw new Error(`TOOLCHAIN_INSTALL_INVALID tool=${name} platform=${platform} reason=${installation.code}`);

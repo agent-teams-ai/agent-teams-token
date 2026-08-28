@@ -41,7 +41,12 @@
       "scope": "genesis-core-package-manager",
       "version": "11.24.0",
       "source": "https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz",
-      "integrityAuthority": "packageManager field and frozen pnpm-lock.yaml"
+      "sha256": "d1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f",
+      "archive": "tar.gz",
+      "archiveName": "pnpm-11.24.0.tgz",
+      "installDirectory": "pnpm-11.24.0",
+      "expectedFiles": ["bin/pnpm.cjs", "package.json"],
+      "integrityAuthority": "checksum-pinned npm package installed and executed by the checksum-pinned Node binary"
     },
     "typescript": {
       "scope": "genesis-core-package",

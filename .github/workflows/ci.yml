@@ -21,29 +21,39 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9 peeled commit
-        with:
-          version: 11.24.0
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.20.0
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Record workflow-dispatch exact-SHA evidence
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          printf '%s\n' \
+            "event=$GITHUB_EVENT_NAME" \
+            "repository=$GITHUB_REPOSITORY" \
+            "workflow=$GITHUB_WORKFLOW" \
+            "run_id=$GITHUB_RUN_ID" \
+            "run_attempt=$GITHUB_RUN_ATTEMPT" \
+            "ref=$GITHUB_REF" \
+            "sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Fetch, install and verify pinned toolchain
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          test "$(command -v pnpm)" = "$PWD/.tools/bin/pnpm"
+          test "$(pnpm --version)" = "11.24.0"
       - name: Install frozen workspace
-        run: pnpm install --frozen-lockfile
-      - name: Validate W4-owned environment and workflow behavior
-        run: node --test scripts/tests/*.test.mjs
-      - name: Validate pinned Compose definition
-        run: docker compose -f compose.yaml config --quiet
-      - name: Engineering Foundation
-        run: pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Unit, property and package tests
-        run: pnpm test
-      - name: Committed cross-language golden vector
-        run: pnpm genesis:vector:check
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Final repository check
+        shell: bash
+        run: source scripts/env.sh && pnpm check
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
 
   solidity:
     runs-on: ubuntu-24.04
@@ -52,13 +62,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.20.0
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
       - name: Fetch pinned Linux toolchain
+        shell: bash
         run: ./dev bootstrap fetch
       - name: Install and verify without network fallback
-        run: ./dev bootstrap install --offline && ./dev bootstrap verify --offline && ./dev doctor --scope=core
+        shell: bash
+        run: |
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev doctor --scope=core
       - name: Format, build, unit, fuzz, invariants and gas-size
         working-directory: contracts/evm
         shell: bash
@@ -70,6 +86,9 @@ jobs:
           FOUNDRY_PROFILE=ci forge test --no-match-path 'test/invariant/**' --use "$token_solc"
           FOUNDRY_PROFILE=ci forge test --match-path 'test/invariant/**' --use "$token_solc"
           forge test --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits --use "$token_solc" -vvvv
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
 
   local-evm-e2e:
     runs-on: ubuntu-24.04
@@ -79,20 +98,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9 peeled commit
-        with:
-          version: 11.24.0
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.20.0
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch, install and verify pinned Linux toolchain
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev doctor --scope=core
       - name: Install frozen workspace
-        run: pnpm install --frozen-lockfile
-      - name: Fetch and install pinned Linux toolchain
-        run: ./dev bootstrap fetch && ./dev bootstrap install --offline && ./dev bootstrap verify --offline && ./dev doctor --scope=core
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
       - name: Run W3 isolated Anvil deploy and independent verifier seam
+        shell: bash
         run: |
           source scripts/env.sh
           pnpm test:local-evm
           pnpm test:local-evm:integration
           pnpm genesis:verify:local
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-08-28T00:00:00Z",
+  "validThrough": "2026-09-27",
+  "source": "Maintainer-frozen review of public package advisories; refresh and review this file before expiry.",
+  "denylist": [
+    {
+      "id": "GHSA-c2qf-rxjj-qqgw",
+      "package": "semver",
+      "minInclusive": "0.0.0",
+      "maxExclusive": "7.5.2",
+      "reason": "Range parsing denial of service in affected semver releases"
+    },
+    {
+      "id": "GHSA-xvch-5gv4-984h",
+      "package": "minimist",
+      "minInclusive": "0.0.0",
+      "maxExclusive": "1.2.6",
+      "reason": "Prototype pollution in affected minimist releases"
+    }
+  ]
+}

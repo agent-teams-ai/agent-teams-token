@@ -28,27 +28,43 @@ test("workflow syntax has only the three exact-scope Barrier 1 jobs", () => {
   assert.doesNotMatch(workflowText, /\b(?:agave|slither|ccip)\b/i);
 });
 
-test("all third-party actions use immutable full commit SHAs and peeled pnpm action", () => {
+test("all third-party actions use immutable full commit SHAs without package-manager setup", () => {
   const uses = [...workflowText.matchAll(/^\s*- uses:\s*([^\s#]+)/gm)].map((match) => match[1]);
   assert.ok(uses.length > 0);
   for (const action of uses) {assert.match(action, /^[^@\s]+@[a-f0-9]{40}$/);}
-  assert.ok(uses.includes("pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271"));
-  assert.ok(!uses.includes("pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9"));
-  assert.doesNotMatch(workflowText, /actions\/upload-artifact|actions\/cache/);
+  assert.ok(uses.every((value) => value.startsWith("actions/checkout@")));
+  assert.doesNotMatch(workflowText, /pnpm\/action-setup|actions\/setup-node|actions\/upload-artifact|actions\/cache/);
 });
 
-test("foundation and TypeScript job runs frozen install and canonical package gates", () => {
+test("every job asserts exact clean GITHUB_SHA before and after its gates", () => {
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    const commands = job.steps.flatMap((step) => typeof step.run === "string" ? [step.run] : []);
+    assert.equal(commands.filter((command) => command === 'scripts/assert-clean-head.sh "$GITHUB_SHA"').length, 2, name);
+    assert.equal(job.steps.find((step) => step.name === "Assert exact clean checkout").shell, "bash");
+  }
+});
+
+test("workflow dispatch records GitHub exact-SHA metadata without an upload action", () => {
+  const step = workflow.jobs["foundation-and-typescript"].steps
+    .find(({ name }) => name === "Record workflow-dispatch exact-SHA evidence");
+  assert.equal(step.if, "${{ github.event_name == 'workflow_dispatch' }}");
+  for (const field of ["GITHUB_EVENT_NAME", "GITHUB_REPOSITORY", "GITHUB_WORKFLOW", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REF", "GITHUB_SHA"]) {
+    assert.match(step.run, new RegExp(field));
+  }
+  assert.doesNotMatch(workflowText, /upload-artifact/);
+});
+
+test("foundation and TypeScript job bootstraps verified pnpm and runs the final gate", () => {
   const commands = runs("foundation-and-typescript");
   for (const expected of [
-    "pnpm install --frozen-lockfile",
-    "node --test scripts/tests/*.test.mjs",
-    "docker compose -f compose.yaml config --quiet",
-    "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check",
-    "pnpm lint",
-    "pnpm typecheck",
-    "pnpm test",
-    "pnpm genesis:vector:check",
+    "source scripts/env.sh && pnpm install --frozen-lockfile",
+    "source scripts/env.sh && pnpm check",
   ]) {assert.ok(commands.includes(expected), `missing command: ${expected}`);}
+  const bootstrap = commands.join("\n");
+  assert.match(bootstrap, /bootstrap fetch/);
+  assert.match(bootstrap, /bootstrap install --offline/);
+  assert.match(bootstrap, /bootstrap verify --offline/);
+  assert.match(bootstrap, /command -v pnpm.*\.tools\/bin\/pnpm/);
 });
 
 test("solidity job selects pinned solc for format/build/unit/fuzz/invariants/gas-size", () => {
@@ -68,7 +84,7 @@ test("local EVM job exposes the narrow W3 command seam without mocked delivery",
   const job = workflow.jobs["local-evm-e2e"];
   assert.deepEqual(job.needs, ["foundation-and-typescript", "solidity"]);
   const commands = runs("local-evm-e2e").join("\n");
-  assert.match(commands, /bootstrap verify --offline.*doctor --scope=core/);
+  assert.match(commands, /bootstrap verify --offline[\s\S]*doctor --scope=core/);
   assert.match(commands, /source scripts\/env\.sh/);
   assert.match(commands, /pnpm test:local-evm\n/);
   assert.match(commands, /pnpm test:local-evm:integration/);
@@ -83,6 +99,8 @@ test("Compose is digest-pinned, local-only and hardened", () => {
   const anvil = compose.services.anvil;
   assert.match(anvil.image, /^ghcr\.io\/foundry-rs\/foundry:v1\.8\.0@sha256:[a-f0-9]{64}$/);
   assert.equal(anvil.read_only, true);
+  assert.equal(anvil.user, "10001:10001");
+  assert.deepEqual(anvil.environment, { HOME: "/tmp" });
   assert.deepEqual(anvil.ports, ["127.0.0.1:8545:8545"]);
   assert.deepEqual(anvil.security_opt, ["no-new-privileges:true"]);
   assert.ok(anvil.healthcheck);
@@ -110,6 +128,22 @@ test("environment PATH keeps verified Core tools ahead of the package-manager bi
   assert.ok(node >= 0 && node < foundry && foundry < solc && solc < packageBin);
   assert.match(environmentText, /export PATH="\$token_env_path_prefix:\$PATH"/);
   assert.doesNotMatch(environmentText, /\bfind\b/);
+});
+
+test("package-manager policy disables implicit downloads and the final check has no silent omissions", () => {
+  const npmrc = readFileSync(join(repositoryRoot, ".npmrc"), "utf8");
+  const lock = readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8");
+  const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
+  assert.match(npmrc, /^auto-install-peers=false$/m);
+  assert.match(npmrc, /^manage-package-manager-versions=false$/m);
+  assert.match(npmrc, /^package-manager-strict-version=true$/m);
+  assert.match(npmrc, /^registry=https:\/\/registry\.npmjs\.org\/$/m);
+  assert.match(lock, /^  autoInstallPeers: false$/m);
+  assert.equal(packageJson.packageManager, "pnpm@11.24.0");
+  for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built"]) {
+    assert.match(packageJson.scripts.check, new RegExp(`pnpm ${command.replaceAll(":", "\\:")}`));
+  }
+  assert.doesNotMatch(packageJson.scripts.check, /\|\|\s*true|--if-present/);
 });
 
 test("committed TypeScript and Solidity vectors use the same raw bytes and hash", () => {

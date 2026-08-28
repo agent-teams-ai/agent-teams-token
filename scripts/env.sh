@@ -8,6 +8,8 @@ fi
 
 token_env_repo_root=$(cd "$(dirname "$token_env_script")/.." && pwd)
 token_env_tools_root="$token_env_repo_root/.tools"
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+export COREPACK_ENABLE_PROJECT_SPEC=0
 
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64) token_env_platform=darwin-arm64 ;;
