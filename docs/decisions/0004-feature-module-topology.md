@@ -31,35 +31,57 @@ Engineering Foundation as dev-only enforcement. It replaces only ADR-0003
 decision 2, the bounded-context topology. Superseding ADR-0003 therefore means
 consolidating its surviving constraints here, not silently discarding them.
 
-Adopt two bounded contexts:
+Adopt two bounded contexts. These names describe product responsibility, not
+deployable bridge components:
 
 1. `Token Control`: genesis manifest, allocation and release policy, governance
-   activation, unlock policy, liquidity policy and bridge administration policy.
-2. `Cross-chain Accounting`: finalized transfer provenance, settlement ledger,
-   supply reconciliation and incident classification.
+   activation, unlock policy, liquidity policy, cross-chain transfer intent and
+   budget, allowed asset/lane/destination, and bridge-administration approval.
+   It does not determine finality, submit transactions or reconcile settlement.
+2. `Cross-chain Accounting`: immutable transfer identity, evidence ledger,
+   idempotency and duplicate/conflict detection, finality and reorg-aware state
+   transitions, coherent cursors/watermarks, supply reconciliation and incident
+   classification. Aggregate supply counters are derived projections, never the
+   source of truth. This context cannot approve or submit transfers, mint, burn
+   or release tokens, or administer a bridge.
 
 Supply, Distribution, Treasury and Launch Liquidity are feature capabilities of
 Token Control. Transparency is a query/application edge. Cross-chain Transport
 is consumer-owned provider integration, not a domain context.
 
-Every production artifact belongs to `src/features/<feature>/`. Feature layers
-exist only when they contain real behavior. Broad `domain`, `shared`, `common`,
-`utils`, `services` and `infrastructure` packages are prohibited. Applications
-remain thin composition roots; provider adapters stay with the use case that
-owns their policy until a second real consumer proves reusable semantics.
+Production behavior belongs to `src/features/<feature>/`. Thin package metadata,
+configuration, schemas, ABI declarations and composition roots may stay at their
+conventional package locations. Feature layers exist only when they contain real
+behavior. Repository-wide catch-all `domain`, `shared`, `common`, `utils`,
+`services` and `infrastructure` packages are prohibited. Applications remain
+thin composition roots.
 
-The rule is enforced mechanically through a package catalog, default-deny source
-dependency policy, a local topology validator with negative fixtures, package
-exports/scripts and package-consumer tests. Engineering Foundation validates the
-package boundary and repository gates; it is exact dev-only and never imported
-by production code.
+The handoff from Token Control to Cross-chain Accounting is an immutable,
+versioned transfer-intent artifact containing at least: intent ID/nonce,
+allocation, amount, direction, source and destination asset/accounts, allowed
+lane/configuration digest, approving controller and expiry. Application code
+orchestrates the handoff through narrow public ports. Provider adapters only
+encode, submit and observe chain operations; they do not own economic policy,
+finality rules, duplicate handling or settlement state transitions.
+
+Neither bounded context implements or replaces the Chainlink bridge, relayer,
+token pool or Solana program. Those remain external provider infrastructure.
+
+Package boundaries are enforced through a catalog, default-deny source policy,
+exports and package-consumer tests. A narrow repository-specific topology
+validator with negative fixtures covers feature-layout rules not supplied by
+Engineering Foundation. Foundation validates its supported repository gates; it
+is exact dev-only and never imported by production code.
 
 ## Consequences
 
 No package is created per contract, endpoint or provider. Directories are added
-with their first vertical slice. `packages/domain` is removed atomically with the
-first Cross-chain Accounting slice after this ADR is accepted and the topology
-gates are present.
+with their first vertical slice. Accepting this ADR records the target topology;
+it does not trigger an immediate package move. After the current Genesis Core
+barrier, `packages/domain` is removed once, together with the first real slice
+and the topology gates. Before that move, the manifest artifact schema/version
+and digest identity are preserved or explicitly versioned so a package rename
+cannot silently change a previously produced artifact.
 
 ## Rejected alternatives
 
@@ -74,4 +96,7 @@ gates are present.
 
 This ADR remains proposed until the product owner approves replacing the six
 contexts in ADR-0003. Until then ADR-0003 remains the accepted architecture and
-no package migration begins.
+no package migration begins. Acceptance is one atomic lifecycle update:
+ADR-0004 becomes accepted, ADR-0003 gains `superseded_by: [ADR-0004]`, the index
+moves both entries, and the immutable accepted-decision registry is regenerated.
+The later code migration has its own implementation gate and review.

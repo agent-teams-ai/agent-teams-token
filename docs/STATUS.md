@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-28.
+Last updated: 2026-08-29.
 
 Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
 clearance remains required.
@@ -86,6 +86,14 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   product decisions are approved. Concrete GitHub run IDs, exact SHAs and hosted
   verdicts remain part of the immutable workflow/review evidence; a local
   workflow-definition check is never called remote CI.
+- Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
+  constructor gas, every additional contract, live fees, total-cost guard and
+  unsigned-plan review must be completed before any public broadcast. The
+  current cheap local core estimate is not a whole-launch estimate.
+- The three zero-cost follow-up slices (local SPL fixture, unsigned Ethereum
+  deployment-cost plan and Slither/Linux security evidence) now have a proposed
+  executable plan in `docs/NEXT_ZERO_COST_SLICES_PLAN.md`. Implementation has
+  not started; hosted xhigh planners review the plan first without fast mode.
 
 ## Designed, not implemented
 
@@ -93,7 +101,9 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   slices. Production manifest approval is intentionally not simulated by a
   self-declared status or integrity hash.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
-  two-context topology is recorded in ADR-0004 and awaits explicit acceptance.
+  two-context topology is recorded in the independently reviewed and amended
+  ADR-0004 and awaits explicit product-owner acceptance. Acceptance records the
+  target only; package migration remains a later separately gated change.
   The local Genesis Core plan uses accepted ADR-0003 for the new manifest
   feature but leaves the generic bootstrap unchanged until ADR-0004 is accepted
   or rejected, avoiding a temporary double migration.

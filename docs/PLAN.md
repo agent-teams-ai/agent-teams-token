@@ -484,7 +484,15 @@ Mint authority передаётся непосредственно Pool Signer P
 
 Неиспользованные ETH и SOL остаются на кошельках. USDC в LP — это risk capital, а не сервисная комиссия.
 
-В момент предыдущей проверки Ethereum gas был аномально низким; при снимке около `0.102 gwei` 10–30 млн gas давали ориентир примерно $1.66–$4.97 при ETH около $1,625. Это не обещание будущей стоимости: перед mainnet агент обязан получить живые gas estimates и показать их пользователю.
+Локальный gas report текущего `AGTMAIToken` измеряет `540 495` gas для трёх
+allocation и `1 420 877` gas для предельных 32 allocation. Runtime-код занимает
+`1 945` bytes; тесты и TypeScript tooling в Ethereum не развёртываются. При
+снимке 2026-08-29 около `0.082 gwei` и ETH около `$2 426` сам core стоил бы
+примерно `$0.11-$0.29`, но это аномально дешёвый момент и не стоимость всего
+launch. Перед Mainnet обязательно оценить exact final constructor и отдельно
+каждый vesting/release/bridge contract, показать пользователю ETH/USD total и
+заблокировать broadcast при превышении утверждённого лимита. Полный обязательный
+чек-лист записан в `docs/OPEN_QUESTIONS.md`.
 
 Raydium указывает типичную стоимость создания CPMM около `0.19 SOL`: примерно `0.15 SOL` creation fee и `0.04 SOL` account rent. Seed liquidity оплачивается отдельно.
 
@@ -966,7 +974,8 @@ Docker/Compose используется для Linux CI parity, web, monitor и 
   ceremonial layers и broad `domain/shared/common/utils` запрещены;
 - предлагаемые в ADR-0004 bounded contexts `Token Control` и `Cross-chain
   Accounting`; до явного принятия ADR-0004 accepted ADR-0003 остаётся source of
-  truth и package migration не начинается;
+  truth и package migration не начинается; ADR задаёт границы ответственности,
+  но не является реализацией Ethereum-Solana bridge;
 - Rust/Anchor не устанавливать для MVP: собственная Solana program запрещена и не нужна.
 
 Foundation capabilities применяются только там, где есть реальный consumer:
@@ -979,8 +988,11 @@ schema evolution включаются после появления соотве
 До принятия ADR-0004 accepted ADR-0003 остаётся source of truth. Первый local
 Genesis Core slice создаёт только новую `genesis-manifest` feature в ADR-0003
 `Supply` и не переносит существующий `packages/domain`. Package migration
-начинается один раз только после решения по ADR-0004: в два целевых context при
-принятии либо в ADR-0003 `Supply` при отклонении.
+начинается один раз отдельным изменением после Genesis Core barrier и решения
+по ADR-0004: в два целевых context при принятии либо в ADR-0003 `Supply` при
+отклонении. Принятие ADR само по себе код не переносит. До переноса фиксируются
+package gates и сохранение либо явное версионирование identity уже созданного
+manifest artifact.
 Не создавать заранее generic `packages/chainlink-adapter` и
 `packages/solana-adapter`: provider-specific code остаётся в outbound adapter
 владельца use case до второго доказанного consumer.
@@ -1835,7 +1847,10 @@ Safe + Squads/SPL Multisig добавляют operational complexity. Но эт�
 Эта topology является proposed target из ADR-0004. Не создавать пустые каталоги
 и не мигрировать `packages/domain`, пока ADR-0004 не принят и package catalog,
 default-deny source policy, topology validator и consumer tests не включены в
-root `check`.
+root `check`. `Cross-chain Accounting` должен начинаться с identity каждого
+transfer, idempotency, finality/reorg evidence и reconciliation; агрегатные
+счётчики являются только производным представлением. Ни один из двух context не
+реализует Chainlink bridge, relayer или token pool.
 
 Make targets:
 

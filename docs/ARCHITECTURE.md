@@ -5,8 +5,10 @@ Status: working baseline, 2026-08-27.
 ## Product boundary
 
 Ethereum is the canonical chain. The fixed supply is minted once into named
-onchain allocation contracts. Solana holds only a 1:1 CCIP representation; it
-is never an independent source of supply.
+onchain allocation contracts. The target normal state is a fully backed 1:1
+Solana representation delivered through CCIP; Solana is never an independent
+source of supply. This is an architectural invariant, not a claim that the
+public cross-chain path has already been implemented or proven.
 
 ```text
 accepted config -> canonical manifest/hash -> Ethereum ERC-20 + policy vaults
@@ -88,13 +90,25 @@ apps/
 and Launch Liquidity are its feature capabilities until distinct language,
 lifecycle and ownership prove that another hard package boundary is warranted.
 `Cross-chain Accounting` is separate because finalized-event reconciliation and
-incident classification have different invariants and lifecycle. We do not create
-one package per contract or speculative empty layer.
+incident classification have different invariants and lifecycle. Its eventual
+ledger owns immutable transfer identity, duplicate/conflict detection,
+finality/reorg-aware transitions and coherent cursors. Aggregate supply values
+are projections of that ledger. We do not create one package per contract or
+speculative empty layer.
 
-Provider code remains inside the feature-owned outbound adapter that uses it.
+Token Control may approve a versioned transfer intent and its economic limits;
+Cross-chain Accounting may record and reconcile its evidence. Application code
+connects them through narrow public ports. Provider code remains inside the
+feature-owned outbound adapter that uses it and only encodes, submits or observes
+provider operations. Adapters do not decide budgets, finality, duplicate handling
+or settlement policy.
 There is no generic `chainlink-adapter` or `solana-adapter` package until a second
 real context proves independent reuse. Executable applications contain wiring and
 delivery only; business policy remains in a context feature.
+
+Neither context is the bridge: the Chainlink relayer, token pools and Solana
+program remain external infrastructure. Cross-chain Accounting cannot mint,
+burn, release, submit or administer transfers.
 
 Feature public entrypoints are narrow. Cross-feature or cross-package imports use
 only declared entrypoints and the Foundation source-dependency policy. Unit tests

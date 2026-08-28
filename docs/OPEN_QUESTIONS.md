@@ -55,6 +55,27 @@ release gate, not an open naming choice.
 5. Minimum genuine non-affiliate float, whole-pilot sell-impact limit and exact
    venue simulation. The current `0.01%` micro-pool cannot absorb a `0.25%` pilot.
 
+## Mandatory TODO before any Ethereum Mainnet deployment
+
+This checklist cannot be waived merely because gas happens to be cheap:
+
+1. Approve final fixed supply, allocation recipients and amounts, and every
+   vesting/release rule. The current proposal and local fixture are not approval.
+2. Measure gas against the exact final constructor input and exact pinned
+   bytecode; do not extrapolate from source-line count or an older build.
+3. Fetch live base/priority fees and ETH/USD immediately before signing. Present
+   the estimated ETH/USD total and worst-case transaction limit to the owner.
+4. Add fail-closed `chainId`, bytecode/hash, signer, nonce, fee and maximum-total-
+   cost guards. A violated guard must prevent signing and broadcasting.
+5. Produce and independently verify an unsigned deployment plan first. Public
+   broadcast requires a fresh explicit owner approval; no automatic retry after
+   an uncertain result.
+6. Estimate every deployment separately: AGTMAI core, vesting/release contracts,
+   treasury/bridge configuration and verification operations. The cheap core
+   deployment must never be presented as the cost of the whole launch.
+7. Reconfirm explorer verification inputs and retain transaction, receipt,
+   compiler/build and constructor evidence after deployment.
+
 ## P1 after the first vertical slice
 
 1. Community-grant policy, budget cadence and reporting format.

@@ -167,11 +167,19 @@ packages/contexts/supply/src/features/genesis-manifest/
 Accounting` предложен, но не утверждён владельцем. Первый блок не имеет права
 молча принять его. Поэтому `Core-12h` создаёт только новую
 `genesis-manifest` feature и не переносит существующий `packages/domain`.
-Решение принять либо отклонить ADR-0004 обязательно до package migration:
+Решение принять либо отклонить исправленный ADR-0004 обязательно до package
+migration. Принятие фиксирует целевую архитектуру, но само по себе не запускает
+перенос кода:
 
 - при принятии ADR-0004 код один раз переносится в два целевых context;
 - при отклонении код один раз переносится в принятый ADR-0003 `Supply`;
 - временный двойной перенос запрещён.
+
+После принятия перенос выполняется отдельным изменением только после Genesis
+Core barrier, с package catalog, default-deny source policy, topology validator,
+consumer tests и сохранением либо явным версионированием identity manifest
+artifact. Cross-chain Accounting начинается с ledger transfer identity,
+idempotency, finality/reorg evidence и reconciliation, а не с простого счётчика.
 
 Перед возможным принятием ADR-0004 он должен явно сохранить решения ADR-0003
 об explicit ports, отсутствии ambient effects, value objects, chain adapters и
@@ -1079,7 +1087,8 @@ pnpm test:linux-parity
 
 Следующая реализация начинается только после отдельного выбора:
 
-1. Принять или отклонить ADR-0004 и окончательную package topology.
+1. Принять или отклонить исправленный ADR-0004 и окончательную package topology;
+   код переносить позже отдельным проверяемым изменением.
 2. Утвердить supply/allocation/vesting tokenomics.
 3. Утвердить production manifest fields и approval envelope, включая Facts
    Pack/decision digests, approvers, nonce/expiry и versioning.
