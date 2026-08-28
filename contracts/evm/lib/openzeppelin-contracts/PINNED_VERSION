@@ -1,0 +1,5 @@
+OpenZeppelin Contracts v5.7.0
+Release: https://github.com/OpenZeppelin/openzeppelin-contracts/releases/tag/v5.7.0
+Source commit: cab19933c33c2ad1d4c7a84864a3601dddfd16f3
+Source tree: official release tag v5.7.0
+Vendored files are byte-for-byte copies of the required ERC20 dependency closure.
