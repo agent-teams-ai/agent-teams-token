@@ -1,9 +1,12 @@
 # AGTMAI Genesis Core: подробный план локальной реализации
 
 **Дата:** 28 августа 2026 года
-**Статус:** исправлен после пяти независимых hosted-review на commit
-`853a14a54832908f1f73fbc0f923592ab86c6247` и дополнен обязательной hosted
-worker/review orchestration; реализация ещё не начата
+**Статус:** исполняется на integration branch `feat/genesis-core` от baseline
+`b11fbb9ef2d847bc172c3c4f03651bc93e4722c8`. Wave 1 запущена через
+production-hosted subscription-runtime workers: W2 Solidity принят после
+независимой Linux/macOS arm64 проверки, W1 manifest проходит repair и Barrier 1
+ещё не закрыт. План ранее исправлен после пяти независимых hosted-review и
+содержит обязательную worker/review orchestration.
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,
 mainnet-ключей, публичных транзакций и необратимого утверждения спорной
