@@ -38,7 +38,7 @@ Documentation authoring route:
   immutable history; new ADRs use the profile's `ADR-NNNN` identity;
 - new documents use only the authorable `adr`, `architecture`, and
   `open-decision` types declared by that profile;
-- Docs Protocol stable7 managed surfaces and qualification v2 integration are
+- Docs Protocol stable8 managed surfaces and qualification v2 integration are
   active. Do not hand-edit their
   package aliases, managed route block, workflow, managed state, or local
   authoring Skill; use the consumer controller for those surfaces;

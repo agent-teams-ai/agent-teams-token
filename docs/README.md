@@ -26,5 +26,5 @@ documents and individually tracked open decisions created through the authoring
 protocol must be linked from this index.
 
 The consumer-owned Foundation profile v3 authoring authority and Docs Protocol
-stable7 qualification v2 integration are active. The consumer controller owns
+stable8 qualification v2 integration are active. The consumer controller owns
 the generated Skill, caller workflow, package pins, and managed state.
