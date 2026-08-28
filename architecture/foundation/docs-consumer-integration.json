@@ -20,10 +20,10 @@
   ],
   "cohort": {
     "schemaVersion": 1,
-    "cohortId": "docs-2026-08-28-stable6",
+    "cohortId": "docs-2026-08-28-stable7",
     "channel": "stable",
-    "recordDigest": "sha256:bc3685ddfed689ec003f14e334d590421cca468475b3084e75ccdc7eedde8fca",
-    "qualificationEventDigest": "sha256:aa6e08d46ba363c9a32de04378b5135712df748549ea47faa86c26da435ac3db",
+    "recordDigest": "sha256:24a711013e6b0bb55e6cbb0feecbf2760239ee26453cc2347cf2934ba2e38a25",
+    "qualificationEventDigest": "sha256:05b27a8b08f427389a02c0e84b23dc3c0262ce960e55f324f15ebcd1654631a7",
     "eligibleAfter": "2026-08-28T23:40:55Z",
     "upgradeFrom": [
       "docs-2026-08-25-stable3"
