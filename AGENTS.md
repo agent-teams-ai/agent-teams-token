@@ -38,11 +38,12 @@ Documentation authoring route:
   immutable history; new ADRs use the profile's `ADR-NNNN` identity;
 - new documents use only the authorable `adr`, `architecture`, and
   `open-decision` types declared by that profile;
-- Docs Protocol stable3 v1 managed surfaces are active. Do not hand-edit its
+- Docs Protocol stable6 managed surfaces and qualification v2 integration are
+  active. Do not hand-edit their
   package aliases, managed route block, workflow, managed state, or local
   authoring Skill; use the consumer controller for those surfaces;
-- `architecture/foundation/docs-protocol-rollout.yaml` records the separate
-  pending v2 qualification projection and release/cohort blocker.
+- the canonical authoring profile uses Foundation profile v3 with inline owner
+  allowlists for the three repository-owned document types.
 
 Before handoff run:
 

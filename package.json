@@ -27,8 +27,8 @@
     "docs:protocol:check": "pnpm docs:check"
   },
   "devDependencies": {
-    "@agent-teams/docs-protocol": "0.1.4",
-    "@agent-teams/engineering-foundation": "0.19.0",
+    "@agent-teams/docs-protocol": "0.2.0",
+    "@agent-teams/engineering-foundation": "0.20.0",
     "@types/node": "24.13.3",
     "oxlint": "1.80.0",
     "typescript": "7.0.2"
