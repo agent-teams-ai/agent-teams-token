@@ -36,9 +36,48 @@ export function encodeAllocationId(id: unknown): `0x${string}` | undefined {
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 function error(code: string, pointer: string, message: string): Diagnostic { return { code, severity: "error", pointer, message }; }
+
 export function normalizeLocalSource(value: LocalGenesisSource): { diagnostics: Diagnostic[]; allocations?: NormalizedAllocation[] } {
-  const diagnostics: Diagnostic[] = [], seenIds = new Set<string>(), seenRecipients = new Set<string>();
-  let sum = 0n, bpsSum = 0, hasBps = false; const allocations: NormalizedAllocation[] = [];
+  const diagnostics: Diagnostic[] = [];
+  const allocations: NormalizedAllocation[] = [];
+  const seenIds = new Set<string>();
+  const seenRecipients = new Set<string>();
+  const sourceAllocations: readonly SourceAllocation[] = Array.isArray(value.allocations) ? value.allocations : [];
+  const supply = validateSourceProfile(value, diagnostics);
+  if (!Array.isArray(value.allocations) || sourceAllocations.length < 1 || sourceAllocations.length > 32) {
+    diagnostics.push(error("GENESIS_ALLOCATION_COUNT_INVALID", "/allocations", "must contain 1 through 32 allocations"));
+  }
+  let sum = 0n;
+  let bpsSum = 0;
+  let hasBps = false;
+  for (const [index, allocation] of sourceAllocations.entries()) {
+    const pointer = `/allocations/${index}`;
+    const idBytes32 = validateAllocationId(allocation.id, pointer, seenIds, diagnostics);
+    const recipient = validateRecipient(allocation.recipient, pointer, seenRecipients, diagnostics);
+    const amount = validateAmount(allocation.amountBaseUnits, pointer, diagnostics);
+    const bps = validateBps(allocation.bps, supply, amount, pointer, diagnostics);
+    sum += amount ?? 0n;
+    hasBps ||= allocation.bps !== undefined;
+    bpsSum += bps ?? 0;
+    if (idBytes32 && recipient && amount) {
+      allocations.push({
+        id: allocation.id,
+        idBytes32,
+        recipient,
+        amountBaseUnits: amount.toString(),
+        ...(allocation.bps === undefined ? {} : { bps: allocation.bps }),
+      });
+    }
+  }
+  if (supply !== undefined && sum !== supply) {diagnostics.push(error("GENESIS_ALLOCATION_SUM_MISMATCH", "/allocations", `allocation sum ${sum} does not equal initial supply ${supply}`));}
+  if (hasBps && (sourceAllocations.some((entry) => entry.bps === undefined) || bpsSum !== 10_000)) {diagnostics.push(error("GENESIS_BPS_SUM_MISMATCH", "/allocations", "when present, bps are required on every allocation and must sum to 10000"));}
+  const orderedDiagnostics = diagnostics.toSorted(compareDiagnostics);
+  return orderedDiagnostics.length > 0
+    ? { diagnostics: orderedDiagnostics }
+    : { diagnostics: orderedDiagnostics, allocations: allocations.toSorted((left, right) => compareText(left.idBytes32, right.idBytes32)) };
+}
+
+function validateSourceProfile(value: LocalGenesisSource, diagnostics: Diagnostic[]): bigint | undefined {
   const supply = parseCanonicalUint(value.token.initialSupplyBaseUnits);
   if (supply === undefined || supply === 0n) {diagnostics.push(error("GENESIS_AMOUNT_INVALID", "/token/initialSupplyBaseUnits", "must be a positive canonical uint256 decimal string"));}
   else if (supply > UINT64_MAX) {diagnostics.push(error("GENESIS_SPL_SUPPLY_OVERFLOW", "/token/initialSupplyBaseUnits", "must fit the selected SPL-compatible uint64 profile"));}
@@ -46,24 +85,61 @@ export function normalizeLocalSource(value: LocalGenesisSource): { diagnostics: 
   if (value.network.chainId !== "31337" || value.network.kind !== "local-evm") {diagnostics.push(error("GENESIS_NETWORK_MISMATCH", "/network", "local fixtures are restricted to local-evm chain 31337"));}
   if (value.purpose !== "local-fixture" || value.status !== "test-only") {diagnostics.push(error("GENESIS_PURPOSE_STATUS_MISMATCH", "", "only purpose local-fixture with status test-only is compilable"));}
   if (value.token.name !== EXPECTED_TOKEN.name || value.token.symbol !== EXPECTED_TOKEN.symbol || value.token.decimals !== EXPECTED_TOKEN.decimals) {diagnostics.push(error("GENESIS_TOKEN_PROFILE_MISMATCH", "/token", "token identity must match the AGTMAI local profile"));}
-  if (!Array.isArray(value.allocations) || value.allocations.length < 1 || value.allocations.length > 32) {
-    diagnostics.push(error("GENESIS_ALLOCATION_COUNT_INVALID", "/allocations", "must contain 1 through 32 allocations"));
+  return supply;
+}
+
+function validateAllocationId(id: string, pointer: string, seen: Set<string>, diagnostics: Diagnostic[]): `0x${string}` | undefined {
+  const encoded = encodeAllocationId(id);
+  if (!encoded) {
+    diagnostics.push(error("GENESIS_ID_INVALID", `${pointer}/id`, "must be 1-31 lowercase ASCII [a-z0-9-] and start/end alphanumeric"));
+    return undefined;
   }
-  value.allocations.forEach((allocation, index) => {
-    const pointer = `/allocations/${index}`, idBytes32 = encodeAllocationId(allocation.id), recipient = allocation.recipient, amount = parseCanonicalUint(allocation.amountBaseUnits);
-    if (!idBytes32) {diagnostics.push(error("GENESIS_ID_INVALID", `${pointer}/id`, "must be 1-31 lowercase ASCII [a-z0-9-] and start/end alphanumeric"));}
-    else if (seenIds.has(idBytes32)) {diagnostics.push(error("GENESIS_ID_DUPLICATE", `${pointer}/id`, "duplicate encoded allocation id"));} else {seenIds.add(idBytes32);}
-    if (typeof recipient !== "string" || !/^0x[0-9a-f]{40}$/.test(recipient)) {diagnostics.push(error("GENESIS_RECIPIENT_INVALID", `${pointer}/recipient`, "must be lowercase 0x plus 40 hex digits"));}
-    else if (/^0x0{40}$/.test(recipient)) {diagnostics.push(error("GENESIS_RECIPIENT_ZERO", `${pointer}/recipient`, "zero address is forbidden"));}
-    else if (seenRecipients.has(recipient)) {diagnostics.push(error("GENESIS_RECIPIENT_DUPLICATE", `${pointer}/recipient`, "duplicate 20-byte recipient"));}
-    else if (!/^0x0{36}100[1-9]$/.test(recipient)) {diagnostics.push(error("GENESIS_RECIPIENT_NOT_ALLOWLISTED", `${pointer}/recipient`, "recipient is outside the local test address allowlist"));} else {seenRecipients.add(recipient);}
-    if (amount === undefined || amount === 0n) {diagnostics.push(error("GENESIS_AMOUNT_INVALID", `${pointer}/amountBaseUnits`, "must be a positive canonical uint256 decimal string"));} else {sum += amount;}
-    if (allocation.bps !== undefined) { hasBps = true; if (!Number.isInteger(allocation.bps) || allocation.bps < 0 || allocation.bps > 10_000) {diagnostics.push(error("GENESIS_BPS_INVALID", `${pointer}/bps`, "must be an integer from 0 through 10000"));} else {bpsSum += allocation.bps;} }
-    if (supply !== undefined && amount !== undefined && allocation.bps !== undefined && Number.isInteger(allocation.bps) && amount * 10_000n !== supply * BigInt(allocation.bps)) {diagnostics.push(error("GENESIS_BPS_AMOUNT_MISMATCH", `${pointer}/bps`, "bps verification does not exactly match the authoritative base-unit amount"));}
-    if (idBytes32 && /^0x[0-9a-f]{40}$/.test(recipient) && amount !== undefined && amount > 0n) {allocations.push({ id: allocation.id, idBytes32, recipient: recipient as `0x${string}`, amountBaseUnits: amount.toString(), ...(allocation.bps === undefined ? {} : { bps: allocation.bps }) });}
-  });
-  if (supply !== undefined && sum !== supply) {diagnostics.push(error("GENESIS_ALLOCATION_SUM_MISMATCH", "/allocations", `allocation sum ${sum} does not equal initial supply ${supply}`));}
-  if (hasBps && (value.allocations.some((entry) => entry.bps === undefined) || bpsSum !== 10_000)) {diagnostics.push(error("GENESIS_BPS_SUM_MISMATCH", "/allocations", "when present, bps are required on every allocation and must sum to 10000"));}
-  allocations.sort((left, right) => compareText(left.idBytes32, right.idBytes32)); diagnostics.sort(compareDiagnostics);
-  return diagnostics.length ? { diagnostics } : { diagnostics, allocations };
+  if (seen.has(encoded)) {
+    diagnostics.push(error("GENESIS_ID_DUPLICATE", `${pointer}/id`, "duplicate encoded allocation id"));
+    return undefined;
+  }
+  seen.add(encoded);
+  return encoded;
+}
+
+function validateRecipient(recipient: string, pointer: string, seen: Set<string>, diagnostics: Diagnostic[]): `0x${string}` | undefined {
+  if (!/^0x[0-9a-f]{40}$/.test(recipient)) {
+    diagnostics.push(error("GENESIS_RECIPIENT_INVALID", `${pointer}/recipient`, "must be lowercase 0x plus 40 hex digits"));
+    return undefined;
+  }
+  if (/^0x0{40}$/.test(recipient)) {
+    diagnostics.push(error("GENESIS_RECIPIENT_ZERO", `${pointer}/recipient`, "zero address is forbidden"));
+    return undefined;
+  }
+  if (seen.has(recipient)) {
+    diagnostics.push(error("GENESIS_RECIPIENT_DUPLICATE", `${pointer}/recipient`, "duplicate 20-byte recipient"));
+    return undefined;
+  }
+  if (!/^0x0{36}100[1-9]$/.test(recipient)) {
+    diagnostics.push(error("GENESIS_RECIPIENT_NOT_ALLOWLISTED", `${pointer}/recipient`, "recipient is outside the local test address allowlist"));
+    return undefined;
+  }
+  seen.add(recipient);
+  return recipient as `0x${string}`;
+}
+
+function validateAmount(amountText: string, pointer: string, diagnostics: Diagnostic[]): bigint | undefined {
+  const amount = parseCanonicalUint(amountText);
+  if (amount === undefined || amount === 0n) {
+    diagnostics.push(error("GENESIS_AMOUNT_INVALID", `${pointer}/amountBaseUnits`, "must be a positive canonical uint256 decimal string"));
+    return undefined;
+  }
+  return amount;
+}
+
+function validateBps(bps: number | undefined, supply: bigint | undefined, amount: bigint | undefined, pointer: string, diagnostics: Diagnostic[]): number | undefined {
+  if (bps === undefined) {return undefined;}
+  if (!Number.isInteger(bps) || bps < 0 || bps > 10_000) {
+    diagnostics.push(error("GENESIS_BPS_INVALID", `${pointer}/bps`, "must be an integer from 0 through 10000"));
+    return undefined;
+  }
+  if (supply !== undefined && amount !== undefined && amount * 10_000n !== supply * BigInt(bps)) {
+    diagnostics.push(error("GENESIS_BPS_AMOUNT_MISMATCH", `${pointer}/bps`, "bps verification does not exactly match the authoritative base-unit amount"));
+  }
+  return bps;
 }

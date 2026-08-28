@@ -102,7 +102,7 @@ test("inspection rejects symlink and hardlink READY and manifest files before re
       const compiled = validManifest(), directory = await writeArtifact(caseRoot, compiled.manifest!, compiled.canonicalBytes!);
       const path = join(directory, file), bytes = await readFile(path), external = join(caseRoot, `external-${file}`);
       await writeFile(external, bytes); await rm(path);
-      if (kind === "symlink") await symlink(external, path); else await link(external, path);
+      if (kind === "symlink") {await symlink(external, path);} else {await link(external, path);}
       assert.deepEqual(await inspectArtifacts(caseRoot), []);
     }
   }
@@ -125,6 +125,6 @@ function withArtifactDigest(value: Record<string, unknown>): { manifest: LocalGe
   const withoutDigest = { ...value }; delete withoutDigest.localFixtureArtifactSha256;
   const prefix = Buffer.from("AGTMAI_LOCAL_FIXTURE_ARTIFACT_V1\0", "ascii");
   const digest = sha256(Buffer.concat([prefix, Buffer.from(canonicalJson(withoutDigest as JsonValue), "utf8")]));
-  const manifest = { ...withoutDigest, localFixtureArtifactSha256: digest } as unknown as LocalGenesisManifest;
-  return { manifest, bytes: Buffer.from(canonicalJson(manifest as unknown as JsonValue), "utf8") };
+  const forgedManifest = { ...withoutDigest, localFixtureArtifactSha256: digest } as unknown as LocalGenesisManifest;
+  return { manifest: forgedManifest, bytes: Buffer.from(canonicalJson(forgedManifest as unknown as JsonValue), "utf8") };
 }

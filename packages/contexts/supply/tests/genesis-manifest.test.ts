@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { join, resolve } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { compileLocalSource } from "../src/features/genesis-manifest/application/compiler.js";
@@ -11,8 +11,8 @@ import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 import { canonicalJson, type JsonValue } from "../src/features/genesis-manifest/application/canonical.js";
 import { UINT64_MAX, UINT256_MAX, encodeAllocationId, normalizeLocalSource, parseCanonicalUint, type LocalGenesisSource } from "../src/features/genesis-manifest/domain/model.js";
 
-const packageRoot = process.cwd().endsWith("/packages/contexts/supply") ? process.cwd() : resolve(process.cwd(), "packages/contexts/supply");
-const repositoryRoot = resolve(packageRoot, "../../..");
+const packageRoot = process.cwd().endsWith("/packages/contexts/supply") ? process.cwd() : resolvePath(process.cwd(), "packages/contexts/supply");
+const repositoryRoot = resolvePath(packageRoot, "../../..");
 const fixturePath = join(repositoryRoot, "config/genesis/local.fixture.yaml");
 const goldenPath = join(packageRoot, "tests/fixtures/local.golden.json");
 const base: LocalGenesisSource = {
@@ -35,7 +35,7 @@ test("committed source, normalization, raw ABI and allocation hash match the gol
 });
 
 test("normalization is deterministic and idempotent across input permutations", () => {
-  const reversed = { ...base, allocations: [...base.allocations].reverse() };
+  const reversed = { ...base, allocations: base.allocations.toReversed() };
   const first = normalizeLocalSource(reversed), second = normalizeLocalSource({ ...reversed, allocations: first.allocations! });
   assert.deepEqual(first.diagnostics, []); assert.deepEqual(second.allocations, first.allocations);
 });
@@ -48,6 +48,12 @@ test("direct normalization rejects allocation arrays outside 1 through 32", () =
   for (const source of [empty, tooMany]) {
     assert.ok(normalizeLocalSource(source).diagnostics.some((item) => item.code === "GENESIS_ALLOCATION_COUNT_INVALID"));
   }
+});
+
+test("direct normalization fails closed for a non-array runtime allocation value", () => {
+  const malformed = { ...base, allocations: null } as unknown as LocalGenesisSource;
+  assert.doesNotThrow(() => normalizeLocalSource(malformed));
+  assert.ok(normalizeLocalSource(malformed).diagnostics.some((item) => item.code === "GENESIS_ALLOCATION_COUNT_INVALID"));
 });
 
 test("compiler derives the source digest from the runtime source internally", () => {
@@ -168,9 +174,9 @@ test("all three committed schemas are strict and conform to accepted runtime val
     assert.deepEqual(findOpenObjectShapes(schema), [], `${name} must close every declared object shape`);
 
     const negative = structuredClone(value) as Record<string, unknown>;
-    if (name === "proposal") (negative.token as Record<string, unknown>).unexpected = true;
-    if (name === "local-source") (negative.network as Record<string, unknown>).unexpected = true;
-    if (name === "local-manifest") (negative.tool as Record<string, unknown>).unexpected = true;
+    if (name === "proposal") {(negative.token as Record<string, unknown>).unexpected = true;}
+    if (name === "local-source") {(negative.network as Record<string, unknown>).unexpected = true;}
+    if (name === "local-manifest") {(negative.tool as Record<string, unknown>).unexpected = true;}
     assert.ok(validateSchema(schema, negative).some((item) => item.endsWith("/unexpected:unknown")), `${name} nested unknown fixture`);
   }
 });
@@ -194,48 +200,85 @@ async function runCli(cli: URL, arguments_: readonly string[]): Promise<{ code: 
 
 function validateSchema(schemaRoot: Record<string, unknown>, value: unknown): string[] {
   const errors: string[] = [];
-  const visit = (rawSchema: unknown, candidate: unknown, pointer: string): void => {
-    let schema = rawSchema as Record<string, unknown>;
-    if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/$defs/")) {
-      schema = ((schemaRoot.$defs as Record<string, unknown>)[schema.$ref.slice(8)] as Record<string, unknown>);
+  validateSchemaNode(schemaRoot, schemaRoot, value, "", errors);
+  return errors.toSorted();
+}
+
+function validateSchemaNode(schemaRoot: Record<string, unknown>, rawSchema: unknown, candidate: unknown, pointer: string, errors: string[]): void {
+  const schema = resolveSchema(schemaRoot, rawSchema);
+  if ("const" in schema && candidate !== schema.const) {errors.push(`${pointer}:const`);}
+  if (schema.type === "object") {
+    validateObjectSchema(schemaRoot, schema, candidate, pointer, errors);
+  } else if (schema.type === "array") {
+    validateArraySchema(schemaRoot, schema, candidate, pointer, errors);
+  } else {
+    validateScalarSchema(schema, candidate, pointer, errors);
+  }
+  validateSchemaConstraints(schema, candidate, pointer, errors);
+}
+
+function resolveSchema(schemaRoot: Record<string, unknown>, rawSchema: unknown): Record<string, unknown> {
+  const schema = rawSchema as Record<string, unknown>;
+  if (typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/$defs/")) {return schema;}
+  return (schemaRoot.$defs as Record<string, Record<string, unknown>>)[schema.$ref.slice(8)]!;
+}
+
+function validateObjectSchema(schemaRoot: Record<string, unknown>, schema: Record<string, unknown>, candidate: unknown, pointer: string, errors: string[]): void {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    errors.push(`${pointer}:object`);
+    return;
+  }
+  const object = candidate as Record<string, unknown>;
+  const properties = schema.properties as Record<string, unknown>;
+  for (const required of (schema.required as string[] ?? [])) {
+    if (!(required in object)) {errors.push(`${pointer}/${required}:required`);}
+  }
+  if (schema.additionalProperties === false) {
+    for (const key of Object.keys(object)) {
+      if (!(key in properties)) {errors.push(`${pointer}/${key}:unknown`);}
     }
-    if ("const" in schema && candidate !== schema.const) errors.push(`${pointer}:const`);
-    if (schema.type === "object") {
-      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) { errors.push(`${pointer}:object`); return; }
-      const object = candidate as Record<string, unknown>, properties = schema.properties as Record<string, unknown>;
-      for (const required of (schema.required as string[] ?? [])) if (!(required in object)) errors.push(`${pointer}/${required}:required`);
-      if (schema.additionalProperties === false) for (const key of Object.keys(object)) if (!(key in properties)) errors.push(`${pointer}/${key}:unknown`);
-      for (const [key, child] of Object.entries(properties)) if (key in object) visit(child, object[key], `${pointer}/${key}`);
-    } else if (schema.type === "array") {
-      if (!Array.isArray(candidate)) { errors.push(`${pointer}:array`); return; }
-      if (typeof schema.minItems === "number" && candidate.length < schema.minItems) errors.push(`${pointer}:minItems`);
-      if (typeof schema.maxItems === "number" && candidate.length > schema.maxItems) errors.push(`${pointer}:maxItems`);
-      candidate.forEach((item, index) => visit(schema.items, item, `${pointer}/${index}`));
-    } else if (schema.type === "integer" && (!Number.isInteger(candidate))) errors.push(`${pointer}:integer`);
-    else if (schema.type === "string" && typeof candidate !== "string") errors.push(`${pointer}:string`);
-    else if (schema.type === "boolean" && typeof candidate !== "boolean") errors.push(`${pointer}:boolean`);
-    if (typeof schema.pattern === "string" && (typeof candidate !== "string" || !new RegExp(schema.pattern).test(candidate))) errors.push(`${pointer}:pattern`);
-    if (typeof schema.minimum === "number" && typeof candidate === "number" && candidate < schema.minimum) errors.push(`${pointer}:minimum`);
-    if (typeof schema.maximum === "number" && typeof candidate === "number" && candidate > schema.maximum) errors.push(`${pointer}:maximum`);
-  };
-  visit(schemaRoot, value, "");
-  return errors.sort();
+  }
+  for (const [key, childSchema] of Object.entries(properties)) {
+    if (key in object) {validateSchemaNode(schemaRoot, childSchema, object[key], `${pointer}/${key}`, errors);}
+  }
+}
+
+function validateArraySchema(schemaRoot: Record<string, unknown>, schema: Record<string, unknown>, candidate: unknown, pointer: string, errors: string[]): void {
+  if (!Array.isArray(candidate)) {
+    errors.push(`${pointer}:array`);
+    return;
+  }
+  if (typeof schema.minItems === "number" && candidate.length < schema.minItems) {errors.push(`${pointer}:minItems`);}
+  if (typeof schema.maxItems === "number" && candidate.length > schema.maxItems) {errors.push(`${pointer}:maxItems`);}
+  candidate.forEach((item, index) => validateSchemaNode(schemaRoot, schema.items, item, `${pointer}/${index}`, errors));
+}
+
+function validateScalarSchema(schema: Record<string, unknown>, candidate: unknown, pointer: string, errors: string[]): void {
+  if (schema.type === "integer" && !Number.isInteger(candidate)) {errors.push(`${pointer}:integer`);}
+  else if (schema.type === "string" && typeof candidate !== "string") {errors.push(`${pointer}:string`);}
+  else if (schema.type === "boolean" && typeof candidate !== "boolean") {errors.push(`${pointer}:boolean`);}
+}
+
+function validateSchemaConstraints(schema: Record<string, unknown>, candidate: unknown, pointer: string, errors: string[]): void {
+  if (typeof schema.pattern === "string" && (typeof candidate !== "string" || !new RegExp(schema.pattern).test(candidate))) {errors.push(`${pointer}:pattern`);}
+  if (typeof schema.minimum === "number" && typeof candidate === "number" && candidate < schema.minimum) {errors.push(`${pointer}:minimum`);}
+  if (typeof schema.maximum === "number" && typeof candidate === "number" && candidate > schema.maximum) {errors.push(`${pointer}:maximum`);}
 }
 
 function findOpenObjectShapes(schemaRoot: Record<string, unknown>): string[] {
   const errors: string[] = [];
   const seen = new Set<unknown>();
   const walk = (value: unknown, pointer: string): void => {
-    if (!value || typeof value !== "object" || seen.has(value)) return;
+    if (!value || typeof value !== "object" || seen.has(value)) {return;}
     seen.add(value);
     if (Array.isArray(value)) {
       value.forEach((child, index) => walk(child, `${pointer}/${index}`));
       return;
     }
     const schema = value as Record<string, unknown>;
-    if (schema.type === "object" && schema.additionalProperties !== false) errors.push(pointer || "/");
-    for (const [key, child] of Object.entries(schema)) walk(child, `${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`);
+    if (schema.type === "object" && schema.additionalProperties !== false) {errors.push(pointer || "/");}
+    for (const [key, child] of Object.entries(schema)) {walk(child, `${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`);}
   };
   walk(schemaRoot, "");
-  return errors.sort();
+  return errors.toSorted();
 }

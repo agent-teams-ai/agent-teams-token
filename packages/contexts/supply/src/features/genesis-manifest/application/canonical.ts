@@ -9,5 +9,5 @@ export function canonicalJson(value: JsonValue): string {
   }
   if (Array.isArray(value)) {return `[${value.map(canonicalJson).join(",")}]`;}
   const object = value as { readonly [key: string]: JsonValue };
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key]!)}`).join(",")}}`;
+  return `{${Object.keys(object).toSorted().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key]!)}`).join(",")}}`;
 }

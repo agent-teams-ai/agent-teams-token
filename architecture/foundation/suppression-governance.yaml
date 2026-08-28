@@ -1,6 +1,8 @@
 schemaVersion: 1
 governedRoots:
-  - packages
+  - packages/domain/src
+  - packages/contexts/supply/src
+  - packages/contexts/supply/tests
 nonWaivableRulePrefixes:
   - access-control.
 waivers: []

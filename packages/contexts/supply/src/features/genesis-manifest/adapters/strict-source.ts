@@ -98,8 +98,8 @@ function parseStrict(text: string): StrictParse {
   }
   const document = documents[0];
   if (!document?.contents) {
-    if (diagnostics.length === 0) diagnostics.push(problem("GENESIS_SOURCE_EMPTY", "", "source must not be empty"));
-    return { diagnostics: diagnostics.sort(compareDiagnostics), positions: new Map() };
+    if (diagnostics.length === 0) {diagnostics.push(problem("GENESIS_SOURCE_EMPTY", "", "source must not be empty"));}
+    return { diagnostics: diagnostics.toSorted(compareDiagnostics), positions: new Map() };
   }
   visit(document, (_key, node) => inspectNode(node, lineCounter, diagnostics));
   if (diagnostics.length > 0) {
@@ -164,7 +164,7 @@ function validateLocalShape(value: unknown): Diagnostic[] {
 
 function validateLocalNetwork(value: unknown, diagnostics: Diagnostic[]): void {
   const network = requireObject(value, "/network", diagnostics);
-  if (!network) return;
+  if (!network) {return;}
   exactKeys(network, "/network", LOCAL_KEYS["/network"], diagnostics);
   expectType(network.kind, "string", "/network/kind", diagnostics);
   expectType(network.chainId, "string", "/network/chainId", diagnostics);
@@ -172,7 +172,7 @@ function validateLocalNetwork(value: unknown, diagnostics: Diagnostic[]): void {
 
 function validateLocalToken(value: unknown, diagnostics: Diagnostic[]): void {
   const token = requireObject(value, "/token", diagnostics);
-  if (!token) return;
+  if (!token) {return;}
   exactKeys(token, "/token", LOCAL_KEYS["/token"], diagnostics);
   expectType(token.name, "string", "/token/name", diagnostics);
   expectType(token.symbol, "string", "/token/symbol", diagnostics);
@@ -188,12 +188,12 @@ function validateLocalAllocations(value: unknown, diagnostics: Diagnostic[]): vo
   value.forEach((item, index) => {
     const pointer = `/allocations/${index}`;
     const allocation = requireObject(item, pointer, diagnostics);
-    if (!allocation) return;
+    if (!allocation) {return;}
     exactKeys(allocation, pointer, LOCAL_KEYS["/allocations/*"], diagnostics, ["id", "recipient", "amountBaseUnits"]);
     expectType(allocation.id, "string", `${pointer}/id`, diagnostics);
     expectType(allocation.recipient, "string", `${pointer}/recipient`, diagnostics);
     expectType(allocation.amountBaseUnits, "string", `${pointer}/amountBaseUnits`, diagnostics);
-    if (allocation.bps !== undefined) expectType(allocation.bps, "integer", `${pointer}/bps`, diagnostics);
+    if (allocation.bps !== undefined) {expectType(allocation.bps, "integer", `${pointer}/bps`, diagnostics);}
   });
 }
 
@@ -210,7 +210,7 @@ function validateProposalObject(value: Record<string, unknown>, pointer: string,
   const children = proposalChildren.get(pointer) ?? new Set<string>();
   exactKeys(value, pointer, [...children], diagnostics);
   for (const key of children) {
-    if (!(key in value)) continue;
+    if (!(key in value)) {continue;}
     const childPointer = `${pointer}/${escapePointer(key)}`;
     const expectedType = PROPOSAL_LEAF_TYPES.get(childPointer);
     if (expectedType) {
@@ -218,7 +218,7 @@ function validateProposalObject(value: Record<string, unknown>, pointer: string,
       continue;
     }
     const child = requireObject(value[key], childPointer, diagnostics);
-    if (child) validateProposalObject(child, childPointer, diagnostics);
+    if (child) {validateProposalObject(child, childPointer, diagnostics);}
   }
 }
 
@@ -251,18 +251,18 @@ function validateProposalSemantics(value: Record<string, unknown>): Diagnostic[]
 
 function collectPositions(node: unknown, pointer: string, lines: LineCounter, output: Map<string, SourcePosition>): void {
   const offset = rangeStart(node);
-  if (offset !== undefined) output.set(pointer, sourcePosition(offset, lines));
+  if (offset !== undefined) {output.set(pointer, sourcePosition(offset, lines));}
   if (isMap(node)) {
     for (const pair of node.items) {
-      if (!isScalar(pair.key) || typeof pair.key.value !== "string") continue;
+      if (!isScalar(pair.key) || typeof pair.key.value !== "string") {continue;}
       const childPointer = `${pointer}/${escapePointer(pair.key.value)}`;
       const childOffset = rangeStart(pair.value) ?? rangeStart(pair.key);
-      if (childOffset !== undefined) output.set(childPointer, sourcePosition(childOffset, lines));
-      if (pair.value) collectPositions(pair.value, childPointer, lines, output);
+      if (childOffset !== undefined) {output.set(childPointer, sourcePosition(childOffset, lines));}
+      if (pair.value) {collectPositions(pair.value, childPointer, lines, output);}
     }
   } else if (isSeq(node)) {
     node.items.forEach((item, index) => {
-      if (item) collectPositions(item, `${pointer}/${index}`, lines, output);
+      if (item) {collectPositions(item, `${pointer}/${index}`, lines, output);}
     });
   }
 }
@@ -290,37 +290,37 @@ function buildProposalChildren(): Map<string, Set<string>> {
 
 function exactKeys(value: Record<string, unknown>, pointer: string, allowed: readonly string[], output: Diagnostic[], required = allowed): void {
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) output.push(problem("GENESIS_SCHEMA_UNKNOWN_FIELD", `${pointer}/${escapePointer(key)}`, "unknown field"));
+    if (!allowed.includes(key)) {output.push(problem("GENESIS_SCHEMA_UNKNOWN_FIELD", `${pointer}/${escapePointer(key)}`, "unknown field"));}
   }
   for (const key of required) {
-    if (!(key in value)) output.push(problem("GENESIS_SCHEMA_REQUIRED", `${pointer}/${escapePointer(key)}`, "required field is missing"));
+    if (!(key in value)) {output.push(problem("GENESIS_SCHEMA_REQUIRED", `${pointer}/${escapePointer(key)}`, "required field is missing"));}
   }
 }
 
 function requireObject(value: unknown, pointer: string, output: Diagnostic[]): Record<string, unknown> | undefined {
   const object = asRecord(value);
-  if (!object) output.push(problem("GENESIS_SCHEMA_TYPE", pointer, "must be an object"));
+  if (!object) {output.push(problem("GENESIS_SCHEMA_TYPE", pointer, "must be an object"));}
   return object;
 }
 
 function expectType(value: unknown, expected: ProposalScalarType, pointer: string, output: Diagnostic[]): void {
   const matches = expected === "integer" ? typeof value === "number" && Number.isInteger(value) : typeof value === expected;
-  if (!matches) output.push(problem("GENESIS_SCHEMA_TYPE", pointer, `must be ${expected === "integer" ? "an integer" : `a ${expected}`}`));
+  if (!matches) {output.push(problem("GENESIS_SCHEMA_TYPE", pointer, `must be ${expected === "integer" ? "an integer" : `a ${expected}`}`));}
 }
 
 function expectConst(value: unknown, expected: unknown, pointer: string, output: Diagnostic[]): void {
-  if (value !== expected) output.push(problem("GENESIS_SCHEMA_CONST", pointer, `must equal ${JSON.stringify(expected)}`));
+  if (value !== expected) {output.push(problem("GENESIS_SCHEMA_CONST", pointer, `must equal ${JSON.stringify(expected)}`));}
 }
 
 function positioned(diagnostics: readonly Diagnostic[], positions: ReadonlyMap<string, SourcePosition>): Diagnostic[] {
-  return diagnostics.map((diagnostic) => diagnostic.position ? diagnostic : { ...diagnostic, position: findPosition(diagnostic.pointer, positions) }).sort(compareDiagnostics);
+  return diagnostics.map((diagnostic) => diagnostic.position ? diagnostic : { ...diagnostic, position: findPosition(diagnostic.pointer, positions) }).toSorted(compareDiagnostics);
 }
 
 function findPosition(pointer: string, positions: ReadonlyMap<string, SourcePosition>): SourcePosition {
   let candidate = pointer;
   while (candidate !== "") {
     const position = positions.get(candidate);
-    if (position) return position;
+    if (position) {return position;}
     candidate = candidate.slice(0, candidate.lastIndexOf("/"));
   }
   return positions.get("") ?? { offset: 0, line: 1, column: 1 };
@@ -352,5 +352,5 @@ function rangeStart(value: unknown): number | undefined {
 }
 
 function dedupe(items: Diagnostic[]): Diagnostic[] {
-  return [...new Map(items.map((item) => [`${item.code}:${item.pointer}:${item.position?.offset ?? -1}:${item.message}`, item])).values()].sort(compareDiagnostics);
+  return [...new Map(items.map((item) => [`${item.code}:${item.pointer}:${item.position?.offset ?? -1}:${item.message}`, item])).values()].toSorted(compareDiagnostics);
 }

@@ -16,10 +16,10 @@ export async function readSafeSource(sourcePath: string, outputRoot: string): Pr
     const source = await handle.stat();
     try {
       const output = await lstat(outputRoot);
-      if (output.isSymbolicLink()) throw new Error("GENESIS_IO_OUTPUT_SYMLINK");
-      if (source.dev === output.dev && source.ino === output.ino) throw new Error("GENESIS_IO_SOURCE_OUTPUT_SAME_INODE");
+      if (output.isSymbolicLink()) {throw new Error("GENESIS_IO_OUTPUT_SYMLINK");}
+      if (source.dev === output.dev && source.ino === output.ino) {throw new Error("GENESIS_IO_SOURCE_OUTPUT_SAME_INODE");}
     } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {throw cause;}
     }
     return await handle.readFile("utf8");
   } finally {
@@ -67,24 +67,24 @@ export async function writeArtifact(outputRoot: string, manifest: LocalGenesisMa
 
 async function assertRealDirectory(path: string, label: string): Promise<void> {
   const entry = await lstat(path);
-  if (entry.isSymbolicLink()) throw new Error(`GENESIS_IO_${label}_SYMLINK`);
-  if (!entry.isDirectory()) throw new Error(`GENESIS_IO_${label}_NOT_DIRECTORY`);
+  if (entry.isSymbolicLink()) {throw new Error(`GENESIS_IO_${label}_SYMLINK`);}
+  if (!entry.isDirectory()) {throw new Error(`GENESIS_IO_${label}_NOT_DIRECTORY`);}
 }
 
 export async function inspectArtifacts(outputRoot: string): Promise<Array<{ directory: string; marker: ReadyMarker; manifest: LocalGenesisManifest }>> {
   const output: Array<{ directory: string; marker: ReadyMarker; manifest: LocalGenesisManifest }> = [];
   await assertRealDirectory(outputRoot, "OUTPUT_ROOT");
-  for (const name of (await readdir(outputRoot)).sort()) {
-    if (!/^[0-9a-f]{64}$/.test(name)) continue;
+  for (const name of (await readdir(outputRoot)).toSorted()) {
+    if (!/^[0-9a-f]{64}$/.test(name)) {continue;}
     const directory = resolve(outputRoot, name);
     const entry = await lstat(directory);
-    if (entry.isSymbolicLink() || !entry.isDirectory() || entry.nlink < 2) continue;
+    if (entry.isSymbolicLink() || !entry.isDirectory() || entry.nlink < 2) {continue;}
     try {
       const markerBytes = await readRegularNoLinks(join(directory, "READY"), "READY");
       const artifactBytes = await readRegularNoLinks(join(directory, "manifest.json"), "MANIFEST");
       const markerValue: unknown = JSON.parse(markerBytes.toString("utf8"));
       const manifestValue: unknown = JSON.parse(artifactBytes.toString("utf8"));
-      if (!isReadyMarker(markerValue) || !isLocalManifest(manifestValue)) continue;
+      if (!isReadyMarker(markerValue) || !isLocalManifest(manifestValue)) {continue;}
       if (
         basename(directory) === markerValue.localFixtureArtifactSha256.slice(2)
         && markerValue.localFixtureArtifactSha256 === manifestValue.localFixtureArtifactSha256
@@ -106,7 +106,9 @@ async function openRegularNoLinks(path: string, label: string) {
   try {
     handle = await open(path, constants.O_RDONLY | noFollow);
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ELOOP") throw new Error(`GENESIS_IO_${label}_SYMLINK`);
+    if ((cause as NodeJS.ErrnoException).code === "ELOOP") {
+      throw new Error(`GENESIS_IO_${label}_SYMLINK`, { cause });
+    }
     throw cause;
   }
   const file = await handle.stat();
@@ -166,21 +168,58 @@ function isReadyMarker(value: unknown): value is ReadyMarker {
 
 function isLocalManifest(value: unknown): value is LocalGenesisManifest {
   const manifest = asRecord(value);
-  if (!manifest || !hasExactKeys(manifest, ["schemaVersion", "purpose", "status", "network", "token", "allocations", "sourceSha256", "rawAllocationAbi", "genesisAllocationHash", "tool", "localFixtureArtifactSha256"])) return false;
-  const network = asRecord(manifest.network);
-  const token = asRecord(manifest.token);
-  const tool = asRecord(manifest.tool);
-  if (
-    manifest.schemaVersion !== 1 || manifest.purpose !== "local-fixture-artifact" || manifest.status !== "test-only"
-    || !network || !hasExactKeys(network, ["kind", "chainId"]) || network.kind !== "local-evm" || network.chainId !== "31337"
-    || !token || !hasExactKeys(token, ["name", "symbol", "decimals", "initialSupplyBaseUnits"])
-    || token.name !== "Agent Teams AI" || token.symbol !== "AGTMAI" || token.decimals !== 9 || !isUint(token.initialSupplyBaseUnits)
-    || !tool || !hasExactKeys(tool, ["name", "feature", "version"]) || tool.name !== "@agent-teams/supply" || tool.feature !== "genesis-manifest" || tool.version !== "1"
-    || !isHash(manifest.sourceSha256) || !isHash(manifest.genesisAllocationHash) || !isHash(manifest.localFixtureArtifactSha256)
-    || typeof manifest.rawAllocationAbi !== "string" || !/^0x(?:[0-9a-f]{2})+$/.test(manifest.rawAllocationAbi)
-    || !Array.isArray(manifest.allocations) || manifest.allocations.length < 1 || manifest.allocations.length > 32
-  ) return false;
+  if (!manifest || !hasExactKeys(manifest, MANIFEST_KEYS)) {return false;}
+  if (!hasValidManifestHeader(manifest) || !hasValidManifestNetwork(manifest.network)) {return false;}
+  if (!hasValidManifestToken(manifest.token) || !hasValidManifestTool(manifest.tool)) {return false;}
+  if (!hasValidManifestCommitments(manifest)) {return false;}
+  if (!Array.isArray(manifest.allocations) || manifest.allocations.length < 1 || manifest.allocations.length > 32) {return false;}
   return manifest.allocations.every(isManifestAllocation);
+}
+
+const MANIFEST_KEYS = [
+  "schemaVersion", "purpose", "status", "network", "token", "allocations", "sourceSha256",
+  "rawAllocationAbi", "genesisAllocationHash", "tool", "localFixtureArtifactSha256",
+] as const;
+
+function hasValidManifestHeader(manifest: Record<string, unknown>): boolean {
+  return manifest.schemaVersion === 1
+    && manifest.purpose === "local-fixture-artifact"
+    && manifest.status === "test-only";
+}
+
+function hasValidManifestNetwork(value: unknown): boolean {
+  const network = asRecord(value);
+  return network !== undefined
+    && hasExactKeys(network, ["kind", "chainId"])
+    && network.kind === "local-evm"
+    && network.chainId === "31337";
+}
+
+function hasValidManifestToken(value: unknown): boolean {
+  const token = asRecord(value);
+  return token !== undefined
+    && hasExactKeys(token, ["name", "symbol", "decimals", "initialSupplyBaseUnits"])
+    && token.name === "Agent Teams AI"
+    && token.symbol === "AGTMAI"
+    && token.decimals === 9
+    && isUint(token.initialSupplyBaseUnits);
+}
+
+function hasValidManifestTool(value: unknown): boolean {
+  const tool = asRecord(value);
+  return tool !== undefined
+    && hasExactKeys(tool, ["name", "feature", "version"])
+    && tool.name === "@agent-teams/supply"
+    && tool.feature === "genesis-manifest"
+    && tool.version === "1";
+}
+
+function hasValidManifestCommitments(manifest: Record<string, unknown>): boolean {
+  return isHash(manifest.sourceSha256)
+    && isHash(manifest.genesisAllocationHash)
+    && isHash(manifest.localFixtureArtifactSha256)
+    && typeof manifest.rawAllocationAbi === "string"
+    && /^0x(?:[0-9a-f]{2})+$/.test(manifest.rawAllocationAbi);
 }
 
 function isManifestAllocation(value: unknown): boolean {
@@ -196,11 +235,11 @@ function isManifestAllocation(value: unknown): boolean {
 
 function verifyManifest(manifest: LocalGenesisManifest, artifactBytes: Uint8Array): boolean {
   const canonical = canonicalJson(manifest as unknown as JsonValue);
-  if (!Buffer.from(artifactBytes).equals(Buffer.from(canonical, "utf8"))) return false;
+  if (!Buffer.from(artifactBytes).equals(Buffer.from(canonical, "utf8"))) {return false;}
   const { localFixtureArtifactSha256: _digest, ...withoutDigest } = manifest;
   const prefix = Buffer.from("AGTMAI_LOCAL_FIXTURE_ARTIFACT_V1\0", "ascii");
   const expectedDigest = sha256(Buffer.concat([prefix, Buffer.from(canonicalJson(withoutDigest as unknown as JsonValue), "utf8")]));
-  if (expectedDigest !== manifest.localFixtureArtifactSha256) return false;
+  if (expectedDigest !== manifest.localFixtureArtifactSha256) {return false;}
   const source: LocalGenesisSource = {
     schemaVersion: 1,
     purpose: "local-fixture",
@@ -210,7 +249,7 @@ function verifyManifest(manifest: LocalGenesisManifest, artifactBytes: Uint8Arra
     allocations: manifest.allocations,
   };
   const normalized = normalizeLocalSource(source);
-  if (!normalized.allocations || canonicalJson(normalized.allocations as unknown as JsonValue) !== canonicalJson(manifest.allocations as unknown as JsonValue)) return false;
+  if (!normalized.allocations || canonicalJson(normalized.allocations as unknown as JsonValue) !== canonicalJson(manifest.allocations as unknown as JsonValue)) {return false;}
   const commitment = encodeAllocationCommitment(source, normalized.allocations);
   return commitment.rawAbi === manifest.rawAllocationAbi && commitment.hash === manifest.genesisAllocationHash;
 }
@@ -220,8 +259,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value).sort();
-  return keys.length === expected.length && keys.every((key, index) => key === [...expected].sort()[index]);
+  const keys = Object.keys(value).toSorted();
+  const orderedExpected = expected.toSorted();
+  return keys.length === orderedExpected.length && keys.every((key, index) => key === orderedExpected[index]);
 }
 
 function isHash(value: unknown): value is `0x${string}` {

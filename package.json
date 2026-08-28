@@ -19,6 +19,7 @@
     "genesis:compile:local": "pnpm --filter @agent-teams/supply genesis:compile:local",
     "genesis:inspect:local": "pnpm --filter @agent-teams/supply genesis:inspect:local",
     "genesis:validate:proposal": "pnpm --filter @agent-teams/supply genesis:validate:proposal",
+    "genesis:vector:check": "node scripts/check-genesis-vector.mjs",
     "foundation:assert-dev-only": "agent-teams-foundation assert-dev-only",
     "foundation:assert-registry": "agent-teams-foundation assert-registry",
     "foundation:attach": "agent-teams-foundation attach",
