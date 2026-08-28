@@ -129,8 +129,8 @@ function inspectNode(node: unknown, lines: LineCounter, diagnostics: Diagnostic[
   if (candidate.anchor) {
     diagnostics.push(at("GENESIS_SOURCE_ANCHOR_FORBIDDEN", "anchors are forbidden", candidate.range?.[0], lines));
   }
-  if (candidate.tag && !candidate.tag.startsWith("tag:yaml.org,2002:")) {
-    diagnostics.push(at("GENESIS_SOURCE_CUSTOM_TAG_FORBIDDEN", "custom tags are forbidden", candidate.range?.[0], lines));
+  if (candidate.tag) {
+    diagnostics.push(at("GENESIS_SOURCE_TAG_FORBIDDEN", "explicit tags are forbidden", candidate.range?.[0], lines));
   }
   if (isScalar(node) && typeof node.value === "number" && !/^(0|[1-9][0-9]*)$/.test(String(node.source))) {
     diagnostics.push(at("GENESIS_SOURCE_UNSUPPORTED_SCALAR", "numeric scalars must be canonical non-negative decimal integers", node.range?.[0], lines));

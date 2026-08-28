@@ -126,6 +126,16 @@ test("strict YAML rejects duplicate, alias, merge, tag, multi-doc, float, scient
   const unknown = `${toYaml(base)}unknown: true\n`; assert.ok(parseLocalSource(unknown).diagnostics.some((item) => item.code === "GENESIS_SCHEMA_UNKNOWN_FIELD"));
 });
 
+test("strict YAML rejects explicit standard tags before value conversion", () => {
+  const source = toYaml(base);
+  for (const tagged of [
+    source.replace("purpose: local-fixture", "purpose: !!str local-fixture"),
+    source.replace("schemaVersion: 1", "schemaVersion: !!int 1"),
+  ]) {
+    assert.ok(parseLocalSource(tagged).diagnostics.some((item) => item.code === "GENESIS_SOURCE_TAG_FORBIDDEN"));
+  }
+});
+
 test("JSON duplicate members are rejected before last-wins object conversion", () => {
   const parsed = parseLocalSource('{"schemaVersion":1,"schemaVersion":1}');
   assert.ok(parsed.diagnostics.some((item) => item.code === "GENESIS_SOURCE_SYNTAX"));
