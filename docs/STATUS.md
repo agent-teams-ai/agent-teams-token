@@ -69,15 +69,23 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   in [`GENESIS-CORE-CODE-REVIEW-2026-08-28.md`](research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md).
 - The first final review of exact SHA `ec735a6` accepted Solidity and the
   holistic slice, and returned six blocking P1 findings across CI, manifest and
-  local EVM. Commit `416ca13` closes all six with regression tests; same-SHA
-  affected and holistic re-review is still required before Barrier 2.
+  local EVM. Commit `416ca13` closes all six with regression tests.
+- Frozen code candidate `816bb10dc305741cb3ce7b0d5603aa6828c44732`
+  passed all three Linux GitHub Actions jobs in run `33192539415`: Solidity,
+  Foundation/TypeScript and isolated local-EVM E2E. Three affected exact-head
+  hosted reviews returned `ACCEPT` with no findings. The holistic review found
+  no code defect and requested only that this completed evidence replace the
+  stale pending text in the review ledger.
+- Barrier 2 is closed for the frozen code candidate. The evidence-recording
+  documentation commit does not change product code and must independently
+  retain green exact-head CI before merge.
 
 ## In progress
 
-- Final Barrier 2 is pending only the remote three-job GitHub Actions run and
-  affected plus holistic hosted re-review on the same final exact commit SHA.
-  Concrete run ID, SHA and conclusions belong to the immutable workflow summary
-  and final handoff; a local workflow-definition check is not called remote CI.
+- The next implementation slice remains intentionally unstarted until its
+  product decisions are approved. Concrete GitHub run IDs, exact SHAs and hosted
+  verdicts remain part of the immutable workflow/review evidence; a local
+  workflow-definition check is never called remote CI.
 
 ## Designed, not implemented
 

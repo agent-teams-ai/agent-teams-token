@@ -11,9 +11,12 @@ macOS/Linux toolchain и Linux CI wiring интегрированы. Пять re
 `891e25b` и `3826166`. Первая финальная exact-SHA проверка коммита `ec735a6`
 приняла Solidity и целостную архитектуру, но нашла шесть P1 в CI, manifest и
 локальном EVM. Все шесть закрыты кодом и regression tests в `416ca13`. Полный
-macOS arm64 gate и локальный E2E зелёные. До объявления Barrier 2 остаются
-green GitHub Actions и affected плюс holistic hosted re-review на одном
-финальном exact SHA. Результаты и классификация замечаний ведутся в
+macOS arm64 gate и локальный E2E зелёные. Замороженный code candidate
+`816bb10dc305741cb3ce7b0d5603aa6828c44732` прошёл все три Linux GitHub Actions
+jobs в run `33192539415`. Три affected hosted re-review дали `ACCEPT` без
+замечаний; holistic review не нашёл дефектов кода и запросил только обновить
+устаревший pending-текст доказательств. Barrier 2 для code candidate закрыт.
+Результаты и классификация замечаний ведутся в
 `docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md`.
 
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить

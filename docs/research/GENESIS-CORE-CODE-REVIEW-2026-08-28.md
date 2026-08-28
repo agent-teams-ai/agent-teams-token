@@ -83,7 +83,7 @@ macOS evidence equality, secret sentinels in JSON/Markdown, 16 cold concurrent
 directory creators, forced concurrent Anvil termination, key-scan positives and
 vendor checksum/SPDX/identity failures.
 
-## Verification state before final exact-head gate
+## Final exact-head gate
 
 - macOS arm64 `pnpm check`: passed.
 - Pinned toolchain offline verification and Core doctor: passed.
@@ -91,5 +91,22 @@ vendor checksum/SPDX/identity failures.
 - Isolated integration scenarios: 3 passed, including repeated and parallel runs.
 - One direct local deploy plus independent verifier: passed.
 - Remediation commit: `416ca137af3ce54d73af74a0add046b718bf6334`.
-- Final Linux GitHub Actions and affected plus holistic exact-head hosted
-  re-review remain pending; only their same-SHA results may close Barrier 2.
+- Frozen code candidate: `816bb10dc305741cb3ce7b0d5603aa6828c44732`.
+- Linux GitHub Actions run `33192539415`: passed on that exact SHA. Its
+  `solidity`, `foundation-and-typescript` and `local-evm-e2e` jobs all completed
+  successfully and preserved a clean checkout.
+
+Four fresh read-only hosted critics then reviewed the same clean exact SHA with
+`gpt-5.6-sol`, `xhigh` reasoning, fast service tier and no product edits:
+
+| Focus | Job | Verdict | Result |
+| --- | --- | --- | --- |
+| Manifest/compiler | `agtmai-r17x-review-manifest` | ACCEPT | No findings. |
+| Local EVM/verifier | `agtmai-r17x-review-local-evm` | ACCEPT | No findings. |
+| CI/security/vendor | `agtmai-r17x-review-ci` | ACCEPT | No findings. |
+| Holistic plan compliance | `agtmai-r17x-review-holistic` | AMEND | No code defect; this ledger still described the already completed same-SHA CI and re-review as pending. |
+
+This evidence-only documentation update resolves the holistic finding without
+changing the frozen candidate. Barrier 2 is closed for `816bb10`; any later
+documentation-only head still runs exact-head CI before merge so evidence edits
+cannot silently break repository gates.
