@@ -2,11 +2,14 @@
 
 **Дата:** 28 августа 2026 года
 **Статус:** исполняется на integration branch `feat/genesis-core` от baseline
-`b11fbb9ef2d847bc172c3c4f03651bc93e4722c8`. Wave 1 запущена через
-production-hosted subscription-runtime workers: W2 Solidity принят после
-независимой Linux/macOS arm64 проверки, W1 manifest проходит repair и Barrier 1
-ещё не закрыт. План ранее исправлен после пяти независимых hosted-review и
-содержит обязательную worker/review orchestration.
+`b11fbb9ef2d847bc172c3c4f03651bc93e4722c8`. Wave 1 завершена через
+production-hosted subscription-runtime workers. Barrier 1 закрыт на exact SHA
+`b9edc254a2a1e328bee0ef376418296b692d18b8`: macOS arm64 и Linux подтвердили
+одинаковые raw ABI bytes и allocation commitment, Foundation/TypeScript gates,
+29 manifest tests, 5 supply-domain tests и 19 Foundry tests. Wave 2 запускает W3
+local Anvil E2E/verifier и W4 Linux CI parity параллельно. План ранее исправлен
+после пяти независимых hosted-review и содержит обязательную worker/review
+orchestration.
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,
 mainnet-ключей, публичных транзакций и необратимого утверждения спорной
