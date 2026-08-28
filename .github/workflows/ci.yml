@@ -10,21 +10,85 @@ permissions:
   contents: read
 
 concurrency:
-  group: token-ci-${{ github.workflow }}-${{ github.ref }}
+  group: genesis-core-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
+  foundation-and-typescript:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9 peeled commit
+        with:
+          version: 11.24.0
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+          node-version: 24.20.0
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Validate W4-owned environment and workflow behavior
+        run: node --test scripts/tests/*.test.mjs
+      - name: Validate pinned Compose definition
+        run: docker compose -f compose.yaml config --quiet
+      - name: Engineering Foundation
+        run: pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit, property and package tests
+        run: pnpm test
+      - name: Committed cross-language golden vector
+        run: pnpm genesis:vector:check
+
+  solidity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - name: Fetch pinned Linux toolchain
+        run: ./dev bootstrap fetch
+      - name: Install and verify without network fallback
+        run: ./dev bootstrap install --offline && ./dev bootstrap verify --offline && ./dev doctor --scope=core
+      - name: Format, build, unit, fuzz, invariants and gas-size
+        working-directory: contracts/evm
+        shell: bash
+        run: |
+          source ../../scripts/env.sh
+          token_solc="$PWD/../../.tools/solc-v0.8.36-linux-x64/solc"
+          forge fmt --check
+          forge build --sizes --use "$token_solc"
+          FOUNDRY_PROFILE=ci forge test --no-match-path 'test/invariant/**' --use "$token_solc"
+          FOUNDRY_PROFILE=ci forge test --match-path 'test/invariant/**' --use "$token_solc"
+          forge test --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits --use "$token_solc" -vvvv
+
+  local-evm-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [foundation-and-typescript, solidity]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9 peeled commit
+        with:
+          version: 11.24.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Fetch and install pinned Linux toolchain
+        run: ./dev bootstrap fetch && ./dev bootstrap install --offline && ./dev bootstrap verify --offline && ./dev doctor --scope=core
+      - name: Run W3 isolated Anvil deploy and independent verifier seam
+        run: source scripts/env.sh && pnpm genesis:verify:local

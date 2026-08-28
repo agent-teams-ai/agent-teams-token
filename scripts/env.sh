@@ -3,19 +3,26 @@
 token_env_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 token_env_tools_root="$token_env_repo_root/.tools"
 
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) token_env_platform=darwin-arm64 ;;
+  Linux:x86_64) token_env_platform=linux-x64 ;;
+  *) token_env_platform=unsupported ;;
+esac
+
+token_env_path_prefix=
 for token_env_bin_dir in \
-  "$token_env_tools_root/node-v24.20.0-darwin-arm64/bin" \
-  "$token_env_tools_root/foundry-v1.8.0" \
+  "$token_env_tools_root/node-v24.20.0-$token_env_platform/bin" \
+  "$token_env_tools_root/foundry-v1.8.0-$token_env_platform" \
+  "$token_env_tools_root/solc-v0.8.36-$token_env_platform" \
   "$token_env_tools_root/bin"
 do
   if [[ -d "$token_env_bin_dir" ]]; then
-    export PATH="$token_env_bin_dir:$PATH"
+    token_env_path_prefix="${token_env_path_prefix:+$token_env_path_prefix:}$token_env_bin_dir"
   fi
 done
 
-token_env_agave_validator=$(find "$token_env_tools_root/agave-v4.2.1" -type f -name solana-test-validator -print -quit 2>/dev/null || true)
-if [[ -n "$token_env_agave_validator" ]]; then
-  export PATH="$(dirname "$token_env_agave_validator"):$PATH"
+if [[ -n "$token_env_path_prefix" ]]; then
+  export PATH="$token_env_path_prefix:$PATH"
 fi
 
-unset token_env_repo_root token_env_tools_root token_env_bin_dir token_env_agave_validator
+unset token_env_repo_root token_env_tools_root token_env_platform token_env_bin_dir token_env_path_prefix

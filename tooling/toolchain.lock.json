@@ -1,32 +1,146 @@
 {
-  "schemaVersion": 1,
-  "retrievedAt": "2026-08-27T15:00:00Z",
+  "schemaVersion": 2,
+  "retrievedAt": "2026-08-28T00:00:00Z",
+  "platforms": ["darwin-arm64", "linux-x64"],
+  "coreTools": ["node", "foundry", "solc"],
+  "policy": {
+    "node": ">=24.20.0 <25",
+    "pnpm": ">=11.24.0 <12",
+    "offlineInstallMayUsePath": false,
+    "floatingVersionsAllowed": false,
+    "publicNetworksEnabledByDefault": false
+  },
   "tools": {
     "node": {
+      "scope": "genesis-core",
       "version": "24.20.0",
-      "darwinArm64Url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz",
-      "sha256": "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8"
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz",
+          "checksumSource": "https://nodejs.org/dist/v24.20.0/SHASUMS256.txt",
+          "sha256": "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8",
+          "archive": "tar.gz",
+          "archiveName": "node-v24.20.0-darwin-arm64.tar.gz",
+          "installDirectory": "node-v24.20.0-darwin-arm64",
+          "expectedFiles": ["bin/node"],
+          "versionChecks": [{"name": "node", "path": "bin/node", "args": ["--version"], "pattern": "^v24\\.20\\.0$"}]
+        },
+        "linux-x64": {
+          "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz",
+          "checksumSource": "https://nodejs.org/dist/v24.20.0/SHASUMS256.txt",
+          "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+          "archive": "tar.xz",
+          "archiveName": "node-v24.20.0-linux-x64.tar.xz",
+          "installDirectory": "node-v24.20.0-linux-x64",
+          "expectedFiles": ["bin/node"],
+          "versionChecks": [{"name": "node", "path": "bin/node", "args": ["--version"], "pattern": "^v24\\.20\\.0$"}]
+        }
+      }
     },
     "pnpm": {
-      "version": "11.24.0"
+      "scope": "genesis-core-package-manager",
+      "version": "11.24.0",
+      "source": "https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz",
+      "integrityAuthority": "packageManager field and frozen pnpm-lock.yaml"
     },
     "typescript": {
-      "version": "7.0.2"
+      "scope": "genesis-core-package",
+      "version": "7.0.2",
+      "source": "https://registry.npmjs.org/typescript/-/typescript-7.0.2.tgz",
+      "integrityAuthority": "pnpm-lock.yaml"
+    },
+    "oxlint": {
+      "scope": "genesis-core-package",
+      "version": "1.80.0",
+      "source": "https://registry.npmjs.org/oxlint/-/oxlint-1.80.0.tgz",
+      "integrityAuthority": "pnpm-lock.yaml"
+    },
+    "engineeringFoundation": {
+      "scope": "genesis-core-package",
+      "version": "0.20.0",
+      "source": "https://registry.npmjs.org/@agent-teams/engineering-foundation/-/engineering-foundation-0.20.0.tgz",
+      "integrityAuthority": "pnpm-lock.yaml"
     },
     "foundry": {
+      "scope": "genesis-core",
       "version": "1.8.0",
-      "darwinArm64Url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.tar.gz",
-      "sha256": "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0"
+      "commit": "61ae26af36320d4fa1020f7db53785885e29eeb5",
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.tar.gz",
+          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_attestation.txt",
+          "sha256": "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0",
+          "archive": "tar.gz",
+          "archiveName": "foundry-v1.8.0-darwin-arm64.tar.gz",
+          "installDirectory": "foundry-v1.8.0-darwin-arm64",
+          "expectedFiles": ["forge", "cast", "anvil", "chisel"],
+          "versionChecks": [
+            {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "cast", "path": "cast", "args": ["--version"], "pattern": "^cast Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "anvil", "path": "anvil", "args": ["--version"], "pattern": "^anvil Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "chisel", "path": "chisel", "args": ["--version"], "pattern": "^chisel Version: 1\\.8\\.0(?:$|\\n)"}
+          ]
+        },
+        "linux-x64": {
+          "url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_linux_amd64.tar.gz",
+          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_attestation.txt",
+          "sha256": "8c8560d0e0d24dcc33b68e0f3d4db54e76948157937499747ab74634f863b957",
+          "archive": "tar.gz",
+          "archiveName": "foundry-v1.8.0-linux-amd64.tar.gz",
+          "installDirectory": "foundry-v1.8.0-linux-x64",
+          "expectedFiles": ["forge", "cast", "anvil", "chisel"],
+          "versionChecks": [
+            {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "cast", "path": "cast", "args": ["--version"], "pattern": "^cast Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "anvil", "path": "anvil", "args": ["--version"], "pattern": "^anvil Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "chisel", "path": "chisel", "args": ["--version"], "pattern": "^chisel Version: 1\\.8\\.0(?:$|\\n)"}
+          ]
+        }
+      }
+    },
+    "solc": {
+      "scope": "genesis-core",
+      "version": "0.8.36",
+      "build": "8a079791",
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://binaries.soliditylang.org/macosx-amd64/solc-macosx-amd64-v0.8.36+commit.8a079791",
+          "checksumSource": "https://binaries.soliditylang.org/macosx-amd64/list.json",
+          "sha256": "d4abcf0b3e24b7948ddfd64c374d26c3214648717777790ecb936979054a129d",
+          "archive": "executable",
+          "archiveName": "solc-v0.8.36-darwin-amd64",
+          "installDirectory": "solc-v0.8.36-darwin-arm64",
+          "expectedFiles": ["solc"],
+          "versionChecks": [{"name": "solc", "path": "solc", "args": ["--version"], "pattern": "Version: 0\\.8\\.36\\+commit\\.8a079791\\."}],
+          "requires": "Rosetta 2 because upstream publishes macosx-amd64"
+        },
+        "linux-x64": {
+          "url": "https://binaries.soliditylang.org/linux-amd64/solc-linux-amd64-v0.8.36+commit.8a079791",
+          "checksumSource": "https://binaries.soliditylang.org/linux-amd64/list.json",
+          "sha256": "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6",
+          "archive": "executable",
+          "archiveName": "solc-v0.8.36-linux-amd64",
+          "installDirectory": "solc-v0.8.36-linux-x64",
+          "expectedFiles": ["solc"],
+          "versionChecks": [{"name": "solc", "path": "solc", "args": ["--version"], "pattern": "Version: 0\\.8\\.36\\+commit\\.8a079791\\."}]
+        }
+      }
     },
     "agave": {
+      "scope": "future-non-core",
+      "enabledForCore": false,
       "version": "4.2.1",
       "darwinArm64Url": "https://github.com/anza-xyz/agave/releases/download/v4.2.1/solana-release-aarch64-apple-darwin.tar.bz2",
-      "sha256": "9fb744917877acc68ae2421aef8d7f44f0d5eb16428e9d3db2c98b1ae61fd239"
+      "darwinArm64Sha256": "9fb744917877acc68ae2421aef8d7f44f0d5eb16428e9d3db2c98b1ae61fd239"
     },
     "ccipSdk": {
+      "scope": "future-non-core",
+      "enabledForCore": false,
       "version": "1.13.0"
     },
     "ccipSolanaPrograms": {
+      "scope": "future-non-core",
+      "enabledForCore": false,
       "version": "1.6.3",
       "sourceRelease": "https://github.com/smartcontractkit/chainlink-ccip/releases/tag/solana-v1.6.3",
       "localArtifactsTag": "solana-artifacts-localtest-ea7ff77a0ddb",
