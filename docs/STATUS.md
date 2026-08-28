@@ -60,9 +60,11 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 ## In progress
 
 - W3 local Anvil deploy/independent verifier and W4 pinned Linux CI parity have
-  isolated hosted jobs and ownership scopes, but no W3/W4 source change exists
-  yet because the available subscription slots require reauthorization or are
-  quota-blocked. Barrier 2 and exact-SHA GitHub Actions evidence do not exist.
+  isolated hosted jobs and ownership scopes and are running in parallel from
+  exact SHA `2220ef44be87aa41fb7e6f651ce1d02634eb792c`. Their canonical account pool
+  is `/var/data/codex-home/live-codex-auth`; slots `account-b/c/d` passed live
+  auth/quota checks. Barrier 2 and exact-SHA GitHub Actions evidence do not yet
+  exist.
 
 ## Designed, not implemented
 
