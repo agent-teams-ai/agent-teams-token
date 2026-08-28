@@ -20,6 +20,9 @@ fullScanPaths:
   - .github/workflows
   - .oxlintrc.json
   - architecture/foundation
+  - foundation.config.yaml
+  - package.json
+  - packages
   - pnpm-lock.yaml
   - pnpm-workspace.yaml
   - tsconfig.json

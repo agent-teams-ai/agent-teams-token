@@ -14,9 +14,7 @@ boundaries:
     allow:
       boundaries: []
       packages: []
-      builtins:
-        - node:assert/strict
-        - node:test
+      builtins: []
       runtimeReferences: []
   - id: supply.genesis-manifest.domain
     roots:

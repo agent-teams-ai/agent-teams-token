@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { reconcileSupply, type SupplySnapshot } from "./supply.js";
+import { reconcileSupply, type SupplySnapshot } from "../src/supply.js";
 
 const fixedSupply = 100_000_000_000_000_000n;
 
@@ -68,4 +68,3 @@ test("negative inputs are rejected", () => {
     /must not be negative/,
   );
 });
-

@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "build": "tsc --build --pretty false",
-    "test:built": "node --test dist/**/*.test.js"
+    "test:built": "tsc --project tsconfig.tests.json --pretty false && node --test .local/tests/tests/**/*.test.js"
   }
 }
-
