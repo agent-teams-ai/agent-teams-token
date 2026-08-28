@@ -91,4 +91,8 @@ jobs:
       - name: Fetch and install pinned Linux toolchain
         run: ./dev bootstrap fetch && ./dev bootstrap install --offline && ./dev bootstrap verify --offline && ./dev doctor --scope=core
       - name: Run W3 isolated Anvil deploy and independent verifier seam
-        run: source scripts/env.sh && pnpm genesis:verify:local
+        run: |
+          source scripts/env.sh
+          pnpm test:local-evm
+          pnpm test:local-evm:integration
+          pnpm genesis:verify:local

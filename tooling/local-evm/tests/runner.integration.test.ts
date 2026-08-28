@@ -1,0 +1,173 @@
+import assert from "node:assert/strict";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { readdir, readFile, rm } from "node:fs/promises";
+import { join, resolve as resolvePath } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { after, test } from "node:test";
+import type { Readable } from "node:stream";
+import { privateRunRoot } from "../runner.ts";
+
+const repositoryRoot = resolvePath(import.meta.dirname, "../../..");
+const runnerPath = join(repositoryRoot, "scripts/genesis/local-evm.ts");
+const privateRoot = privateRunRoot(repositoryRoot);
+const generatedReports = new Set<string>();
+const activeChildren = new Set<ChildProcessByStdio<null, Readable, Readable>>();
+
+after(async () => {
+  await Promise.all([...activeChildren].map(stopChild));
+  for (const path of generatedReports) {await rm(path, { recursive: true, force: true });}
+});
+
+test("two repeated clean chains prove stable normalized evidence", { timeout: 120_000 }, async () => {
+  const first = await run();
+  const second = await run();
+  assert.equal(first.exitCode, 0, first.stderr);
+  assert.equal(second.exitCode, 0, second.stderr);
+  const firstResult = lastJson(first.stdout);
+  const secondResult = lastJson(second.stdout);
+  rememberReport(firstResult); rememberReport(secondResult);
+  assert.notEqual(firstResult.runId, secondResult.runId);
+  assert.notEqual(firstResult.targetAddress, secondResult.targetAddress);
+  assert.notEqual(firstResult.transactionHash, secondResult.transactionHash);
+  assert.notEqual(firstResult.reportDirectory, secondResult.reportDirectory);
+  assert.equal(firstResult.normalizedEvidenceSha256, secondResult.normalizedEvidenceSha256);
+  await assertNoPrivateRunDirectories();
+  await assertRedactedReport(firstResult.reportDirectory as string);
+  await assertRedactedReport(secondResult.reportDirectory as string);
+});
+
+test("two parallel runs use isolated ports, processes, private directories and reports", { timeout: 90_000 }, async () => {
+  const [first, second] = await Promise.all([run(), run()]);
+  assert.equal(first.exitCode, 0, first.stderr);
+  assert.equal(second.exitCode, 0, second.stderr);
+  const firstResult = lastJson(first.stdout);
+  const secondResult = lastJson(second.stdout);
+  rememberReport(firstResult); rememberReport(secondResult);
+  assert.notEqual(firstResult.runId, secondResult.runId);
+  assert.notEqual(firstResult.reportDirectory, secondResult.reportDirectory);
+  assert.equal(firstResult.normalizedEvidenceSha256, secondResult.normalizedEvidenceSha256);
+  await assertNoPrivateRunDirectories();
+});
+
+test("interrupting one run removes only its owned directory and does not affect its neighbour", { timeout: 90_000 }, async () => {
+  await assertNoPrivateRunDirectories();
+  const interrupted = start();
+  const neighbour = start();
+  await waitFor(async () => (await runDirectories()).length === 2, 15_000, "two private run directories");
+  await waitFor(async () => (await anvilPids()).length === 2, 30_000, "both owned Anvil PIDs");
+  const pidsBeforeInterrupt = await anvilPids();
+  assert.equal(pidsBeforeInterrupt.every(processExists), true);
+  assert.equal(interrupted.child.kill("SIGTERM"), true);
+  await waitFor(async () => (await runDirectories()).length === 1, 30_000, "only interrupted run cleanup");
+  const [neighbourAnvilPid] = await anvilPids();
+  assert.notEqual(neighbourAnvilPid, undefined);
+  const interruptedAnvilPid = pidsBeforeInterrupt.find((pid) => pid !== neighbourAnvilPid);
+  assert.notEqual(interruptedAnvilPid, undefined);
+  assert.equal(neighbour.child.exitCode, null);
+  assert.equal(processExists(interruptedAnvilPid!), false);
+  assert.equal(processExists(neighbourAnvilPid!), true);
+  assert.equal((await runDirectories()).length, 1);
+  const interruptedResult = await interrupted.result;
+  assert.equal(processExists(interrupted.pid), false);
+  const neighbourResult = await neighbour.result;
+  assert.equal(processExists(neighbour.pid), false);
+  assert.equal(processExists(neighbourAnvilPid!), false);
+  assert.notEqual(interruptedResult.exitCode, 0);
+  assert.equal(neighbourResult.exitCode, 0, neighbourResult.stderr);
+  const output = lastJson(neighbourResult.stdout);
+  rememberReport(output);
+  await assertNoPrivateRunDirectories();
+});
+
+function start(): { child: ChildProcessByStdio<null, Readable, Readable>; pid: number; result: Promise<RunResult> } {
+  const child = spawn(process.execPath, [runnerPath], { cwd: repositoryRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  assert.notEqual(child.pid, undefined);
+  const pid = child.pid!;
+  activeChildren.add(child);
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  let stdout = ""; let stderr = "";
+  let timedOut = false;
+  let escalation: NodeJS.Timeout | undefined;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    stderr += "\nrunner exceeded its 60s child-process deadline";
+    child.kill("SIGTERM");
+    escalation = setTimeout(() => child.kill("SIGKILL"), 5_000);
+  }, 60_000);
+  child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  const result = new Promise<RunResult>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      clearTimeout(deadline);
+      if (escalation) {clearTimeout(escalation);}
+      activeChildren.delete(child);
+      resolve({ stdout, stderr, exitCode: timedOut ? 124 : code ?? (signal ? 128 : 1) });
+    });
+  });
+  return { child, pid, result };
+}
+
+interface RunResult { readonly stdout: string; readonly stderr: string; readonly exitCode: number }
+async function run(): Promise<RunResult> { return await start().result; }
+
+async function runDirectories(): Promise<string[]> {
+  try { return (await readdir(privateRoot)).filter((name) => name.startsWith("run-")); } catch { return []; }
+}
+
+async function readPid(path: string): Promise<number | undefined> {
+  try {
+    const pid = Number(await readFile(path, "utf8"));
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+  } catch { return undefined; }
+}
+
+async function anvilPids(): Promise<number[]> {
+  const values = await Promise.all((await runDirectories()).map((directory) => readPid(join(privateRoot, directory, "anvil.pid"))));
+  return values.filter((value): value is number => value !== undefined);
+}
+
+async function assertNoPrivateRunDirectories(): Promise<void> {
+  assert.deepEqual(await runDirectories(), []);
+}
+
+async function waitFor(predicate: () => Promise<boolean>, timeout: number, label: string): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) { if (await predicate()) {return;} await delay(50); }
+  assert.fail(`timed out waiting for ${label}`);
+}
+
+function processExists(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+async function stopChild(child: ChildProcessByStdio<null, Readable, Readable>): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {return;}
+  const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); });
+  child.kill("SIGTERM");
+  if (!await Promise.race([closed.then(() => true), delay(5_000).then(() => false)])) {
+    child.kill("SIGKILL");
+    await closed;
+  }
+}
+
+function lastJson(output: string): Record<string, unknown> {
+  for (const line of output.trim().split(/\r?\n/u).toReversed()) {
+    try { const value: unknown = JSON.parse(line); if (value && typeof value === "object" && !Array.isArray(value)) {return value as Record<string, unknown>;} } catch { /* continue */ }
+  }
+  assert.fail(`missing JSON output: ${output}`);
+}
+
+function rememberReport(result: Record<string, unknown>): void {
+  assert.equal(typeof result.reportDirectory, "string");
+  generatedReports.add(result.reportDirectory as string);
+}
+
+async function assertRedactedReport(directory: string): Promise<void> {
+  const json = await readFile(join(directory, "verification-report.v1.json"), "utf8");
+  const markdown = await readFile(join(directory, "verification-summary.md"), "utf8");
+  for (const text of [json, markdown]) {
+    assert.doesNotMatch(text, /private[_-]?key|mnemonic|seed phrase|https?:\/\/(?!127\.0\.0\.1)/iu);
+    assert.doesNotMatch(text, /test test test test test test test test test test test junk/iu);
+  }
+}

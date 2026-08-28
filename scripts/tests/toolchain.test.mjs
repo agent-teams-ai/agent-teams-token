@@ -60,6 +60,22 @@ test("unsupported hosts fail closed", () => {
   assert.throws(() => hostPlatform({ platform: "win32", arch: "x64" }), /TOOLCHAIN_UNSUPPORTED_PLATFORM/);
 });
 
+test("environment helper resolves its own repository when sourced by Bash or Zsh", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-env-test-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const scripts = join(root, "scripts");
+  const bin = join(root, ".tools", "bin");
+  mkdirSync(scripts, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  copyFileSync(join(repositoryRoot, "scripts/env.sh"), join(scripts, "env.sh"));
+  writeExecutable(join(bin, "agtmai-env-probe"), "#!/bin/sh\nexit 0\n");
+  for (const shell of ["/bin/bash", "/bin/zsh"].filter(existsSync)) {
+    const result = spawnSync(shell, ["-c", `source '${join(scripts, "env.sh")}' && command -v agtmai-env-probe`], { encoding: "utf8" });
+    assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), join(bin, "agtmai-env-probe"));
+  }
+});
+
 test("production CLI rejects platform override", () => {
   const result = spawnSync(
     process.execPath,

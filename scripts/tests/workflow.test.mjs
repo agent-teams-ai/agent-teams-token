@@ -67,8 +67,12 @@ test("solidity job selects pinned solc for format/build/unit/fuzz/invariants/gas
 test("local EVM job exposes the narrow W3 command seam without mocked delivery", () => {
   const job = workflow.jobs["local-evm-e2e"];
   assert.deepEqual(job.needs, ["foundation-and-typescript", "solidity"]);
-  assert.ok(runs("local-evm-e2e").includes("source scripts/env.sh && pnpm genesis:verify:local"));
-  assert.match(runs("local-evm-e2e").join("\n"), /bootstrap verify --offline.*doctor --scope=core/);
+  const commands = runs("local-evm-e2e").join("\n");
+  assert.match(commands, /bootstrap verify --offline.*doctor --scope=core/);
+  assert.match(commands, /source scripts\/env\.sh/);
+  assert.match(commands, /pnpm test:local-evm\n/);
+  assert.match(commands, /pnpm test:local-evm:integration/);
+  assert.match(commands, /pnpm genesis:verify:local/);
   assert.doesNotMatch(JSON.stringify(job), /mock|public-rpc|sepolia|mainnet/i);
 });
 

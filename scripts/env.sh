@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
-token_env_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  token_env_script=${(%):-%N}
+else
+  token_env_script=${BASH_SOURCE[0]}
+fi
+
+token_env_repo_root=$(cd "$(dirname "$token_env_script")/.." && pwd)
 token_env_tools_root="$token_env_repo_root/.tools"
 
 case "$(uname -s):$(uname -m)" in
@@ -25,4 +31,4 @@ if [[ -n "$token_env_path_prefix" ]]; then
   export PATH="$token_env_path_prefix:$PATH"
 fi
 
-unset token_env_repo_root token_env_tools_root token_env_platform token_env_bin_dir token_env_path_prefix
+unset token_env_script token_env_repo_root token_env_tools_root token_env_platform token_env_bin_dir token_env_path_prefix

@@ -19,6 +19,7 @@
     "genesis:compile:local": "pnpm --filter @agent-teams/supply genesis:compile:local",
     "genesis:inspect:local": "pnpm --filter @agent-teams/supply genesis:inspect:local",
     "genesis:validate:proposal": "pnpm --filter @agent-teams/supply genesis:validate:proposal",
+    "genesis:verify:local": "pnpm build && node scripts/genesis/local-evm.ts",
     "genesis:vector:check": "node scripts/check-genesis-vector.mjs",
     "foundation:assert-dev-only": "agent-teams-foundation assert-dev-only",
     "foundation:assert-registry": "agent-teams-foundation assert-registry",
@@ -28,8 +29,12 @@
     "foundation:status": "agent-teams-foundation status",
     "lint": "oxlint --deny-warnings .",
     "lint:files": "oxlint --deny-warnings",
-    "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built && pnpm --filter @agent-teams/supply test:built",
-    "typecheck": "tsc --build --pretty false",
+    "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built && pnpm --filter @agent-teams/supply test:built && pnpm test:local-evm:built",
+    "test:linux-parity": "node --test scripts/tests/*.test.mjs && docker compose -f compose.yaml config --quiet",
+    "test:local-evm": "pnpm build && pnpm test:local-evm:built",
+    "test:local-evm:built": "node --test tooling/local-evm/tests/process.test.ts tooling/local-evm/tests/verifier.adversarial.test.ts",
+    "test:local-evm:integration": "pnpm build && node --test tooling/local-evm/tests/runner.integration.test.ts",
+    "typecheck": "tsc --build --pretty false && tsc -p tooling/local-evm/tsconfig.json --pretty false",
     "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
