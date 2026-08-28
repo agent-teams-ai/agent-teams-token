@@ -11,7 +11,7 @@ Hard rules:
 - do not write a custom bridge, relayer, CCIP program, or token mechanics;
 - do not call a mocked delivery a real CCIP E2E;
 - update `docs/PLAN.md` immediately when a confirmed plan error is found;
-- record irreversible architecture choices in `docs/adr/`;
+- record irreversible architecture choices only in `docs/decisions/`;
 - pin dependencies, binaries, images, program artifacts, and network data;
 - use decimal strings or `bigint` for CCIP selectors, never JavaScript number;
 - use conventional commits and never use an AI/agent branch prefix;
@@ -28,6 +28,23 @@ Start with:
 - `docs/OPEN_QUESTIONS.md`
 - `docs/STATUS.md`
 
+Documentation authoring route:
+
+- `architecture/foundation/document-authoring.yaml` owns document types,
+  placement, owners, templates, and reachability;
+- `docs/README.md` is the documentation entry point and
+  `docs/decisions/README.md` is the only ADR index;
+- accepted `ADR-NNN` identities already present in `docs/decisions/` are stable
+  immutable history; new ADRs use the profile's `ADR-NNNN` identity;
+- new documents use only the authorable `adr`, `architecture`, and
+  `open-decision` types declared by that profile;
+- Docs Protocol stable8 managed surfaces and qualification v2 integration are
+  active. Do not hand-edit their
+  package aliases, managed route block, workflow, managed state, or local
+  authoring Skill; use the consumer controller for those surfaces;
+- the canonical authoring profile uses Foundation profile v3 with inline owner
+  allowlists for the three repository-owned document types.
+
 Before handoff run:
 
 ```text
@@ -35,3 +52,6 @@ Before handoff run:
 pnpm check
 ```
 
+<!-- agent-teams-docs:route/v1 begin -->
+Use [.agents/skills/docs-authoring/SKILL.md](.agents/skills/docs-authoring/SKILL.md) for documentation.
+<!-- agent-teams-docs:route/v1 end -->
