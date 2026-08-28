@@ -745,7 +745,9 @@ Rollback: весь structural gate находится в отдельном comm
 4. Реализовать semantic validator и diagnostic codes.
 5. Реализовать deterministic ordering.
 6. Реализовать ABI commitment builder.
-7. Реализовать commands `validate:proposal`, `compile:local`, `inspect:local`.
+7. Реализовать namespaced root commands `genesis:validate:proposal`,
+   `genesis:compile:local`, `genesis:inspect:local`; ненamespaced aliases не
+   добавлять, чтобы не создавать два имени одной операции.
 8. Production command и production source schema отсутствуют.
 9. Сгенерировать local artifact только из `status=test-only` в новом
    content-addressed gitignored directory с `READY` marker.
