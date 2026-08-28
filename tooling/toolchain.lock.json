@@ -68,7 +68,7 @@
       "platforms": {
         "darwin-arm64": {
           "url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.tar.gz",
-          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_attestation.txt",
+          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.sha256",
           "sha256": "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0",
           "archive": "tar.gz",
           "archiveName": "foundry-v1.8.0-darwin-arm64.tar.gz",
@@ -83,8 +83,8 @@
         },
         "linux-x64": {
           "url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_linux_amd64.tar.gz",
-          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_attestation.txt",
-          "sha256": "8c8560d0e0d24dcc33b68e0f3d4db54e76948157937499747ab74634f863b957",
+          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_linux_amd64.sha256",
+          "sha256": "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57",
           "archive": "tar.gz",
           "archiveName": "foundry-v1.8.0-linux-amd64.tar.gz",
           "installDirectory": "foundry-v1.8.0-linux-x64",

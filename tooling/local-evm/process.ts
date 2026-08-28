@@ -100,13 +100,16 @@ export async function startOwnedAnvil(executable: string, fundedAddress: string)
     "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
     "--fund-accounts", `${fundedAddress}:1000000000000000000`,
   ], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
-  if (child.pid === undefined) {throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");}
   let rpcUrl: string;
   try {
     rpcUrl = await listeningUrl(child);
   } catch (cause) {
     await stopExactChild(child);
     throw cause;
+  }
+  if (child.pid === undefined) {
+    await stopExactChild(child);
+    throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
   }
   let stopped = false;
   return {

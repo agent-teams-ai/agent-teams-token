@@ -23,6 +23,15 @@ test("Anvil startup failure is fail-closed and leaves no child behind", { timeou
   await rm(directory, { recursive: true, force: true });
 });
 
+test("a missing Anvil executable rejects through the owned-process API", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-anvil-missing-"));
+  try {
+    await assert.rejects(startOwnedAnvil(join(directory, "absent-anvil"), firstAddress), /ENOENT/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 20_000 }, async () => {
   const first = await startOwnedAnvil("anvil", firstAddress);
   const second = await startOwnedAnvil("anvil", secondAddress);

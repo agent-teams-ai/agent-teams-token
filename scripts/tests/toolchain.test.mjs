@@ -37,6 +37,9 @@ test("committed lock schema covers both platforms and keeps future tools out of 
   assert.deepEqual(lock.platforms, ["darwin-arm64", "linux-x64"]);
   assert.deepEqual(lock.coreTools, ["node", "foundry", "solc"]);
   assert.equal(lock.tools.solc.platforms["darwin-arm64"].sha256, "d4abcf0b3e24b7948ddfd64c374d26c3214648717777790ecb936979054a129d");
+  assert.equal(lock.tools.foundry.platforms["linux-x64"].sha256, "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57");
+  assert.match(lock.tools.foundry.platforms["darwin-arm64"].checksumSource, /darwin_arm64\.sha256$/);
+  assert.match(lock.tools.foundry.platforms["linux-x64"].checksumSource, /linux_amd64\.sha256$/);
   for (const platform of lock.platforms) {
     assert.deepEqual(
       lock.tools.foundry.platforms[platform].versionChecks.map(({ name }) => name),
