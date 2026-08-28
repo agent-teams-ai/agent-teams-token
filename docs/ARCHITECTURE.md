@@ -109,12 +109,13 @@ wallets directly. These effects enter through narrow ports. Ethereum and Solana
 stay explicit adapters; a universal chain abstraction is prohibited until two
 real consumers prove identical invariants and failure semantics.
 
-- `token-control/genesis-manifest`: strict proposal decoder and canonical
-  accepted-manifest compiler. Production output rejects floats, calendar-month
-  templates and any status other than `accepted`.
-- `token-control/release-policy`: pure allocation, commitment-cap and recipient
-  policy with no chain dependency.
-- `cross-chain-accounting/supply-reconciliation`: pure bigint supply rules.
+- `supply/genesis-manifest`: strict proposal validator plus canonical,
+  test-only local-fixture compiler. There is no production manifest schema or
+  production compile command in Genesis Core.
+- `token-control/release-policy`: designed future capability for pure allocation,
+  commitment-cap and recipient policy; it is not implemented in Genesis Core.
+- `cross-chain-accounting/supply-reconciliation`: current pure bigint bootstrap;
+  its final event-ledger boundary remains a later slice.
 - feature-owned outbound adapters: pinned CCIP SDK, Ethereum RPC and typed Solana
   instruction/account validation only where their use case needs them.
 - `contracts/evm/src/features`: fixed-supply token and separate allocation
@@ -123,7 +124,7 @@ real consumers prove identical invariants and failure semantics.
 - `scripts`: thin repeatable entrypoints into application use cases, not a home
   for business rules.
 
-Engineering Foundation `0.19.0` validates real source edges, dependency
+Engineering Foundation `0.20.0` validates real source edges, dependency
 declarations, documentation links, ADR lifecycle, suppressions and quality gates.
 It is an exact dev dependency and is never imported by production code. Its
 scaffolding and public-API capabilities are enabled only with their first real

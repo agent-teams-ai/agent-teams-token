@@ -1,28 +1,17 @@
 # AGTMAI Genesis Core: подробный план локальной реализации
 
 **Дата:** 28 августа 2026 года
-**Статус:** исполняется на integration branch `feat/genesis-core` от baseline
-`b11fbb9ef2d847bc172c3c4f03651bc93e4722c8`. Wave 1 завершена через
-production-hosted subscription-runtime workers. Barrier 1 закрыт на exact SHA
-`b9edc254a2a1e328bee0ef376418296b692d18b8`: macOS arm64 и Linux подтвердили
-одинаковые raw ABI bytes и allocation commitment, Foundation/TypeScript gates,
-29 manifest tests, 5 supply-domain tests и 19 Foundry tests. Wave 2 W3 local
-Anvil E2E/verifier и W4 Linux CI parity выполняется параллельно от exact SHA
-`2220ef44be87aa41fb7e6f651ce1d02634eb792c` в изолированных hosted worktrees.
-R2 workers используют canonical auth pool `/var/data/codex-home/live-codex-auth`;
-устаревший root-cache pool не используется. Снимок capacity-aware registry
-показал 25 slots и 17 доступных независимых identities. После исчерпания попыток
-на `account-b/c/d` сохранённые worktrees безопасно продолжены: W3 на
-live-проверенных `account-l/m/o`, W4 на `account-i/j/k`. Операционная инструкция
-проверки пула хранится на hosted runtime в
-`/var/data/codex-home/ACCOUNT-STATUS-RUNBOOK.md`. Barrier 2 ещё не объявлен. План
-ранее исправлен после пяти независимых hosted-review и содержит обязательную
-worker/review orchestration.
-
-После Barrier 1 интегратор исправил ещё один strict-parser gap: explicit
-standard YAML tags `!!str`/`!!int` теперь также запрещены. Exact commit
-`d88edb4ffb2f7d3bfd7552b375bc5850cef5b835` проходит полный Foundation 0.20,
-lint, TypeScript и 30 manifest tests на macOS arm64 и Linux Node 24.20.0.
+**Статус:** финальная верификация на integration branch `feat/genesis-core` от
+baseline `b11fbb9ef2d847bc172c3c4f03651bc93e4722c8`. Обе implementation wave
+завершены через production-hosted subscription-runtime workers. Manifest,
+immutable token, изолированный Anvil deploy, независимый verifier, pinned
+macOS/Linux toolchain и Linux CI wiring интегрированы. Пять read-only критиков
+проверили точный чистый SHA `9d50b04d6635474b2c65425570ae99fa971e1e3e`;
+принятые P0/P1 исправлены в последующих коммитах, включая `2640ca2`, `dabd567`,
+`891e25b` и `3826166`. Полный macOS arm64 gate и локальный E2E зелёные. До
+объявления Barrier 2 остаются green GitHub Actions на финальном exact SHA и
+повторная hosted-критика этого же SHA. Результаты и классификация замечаний
+ведутся в `docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md`.
 
 **Цель первого блока:** за один автономный рабочий цикл до 12 часов получить
 узкий проверяемый Ethereum vertical slice токена AGTMAI без газа,

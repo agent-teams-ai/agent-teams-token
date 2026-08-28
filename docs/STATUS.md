@@ -21,8 +21,9 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - The pure supply projection covers quiescent and both in-flight bridge
   directions; it is not yet a finalized event-ledger source of truth.
 - Public networks are disabled by default.
-- Текущие macOS arm64 pins имеют exact version/checksum evidence; полный
-  двухплатформенный lock/bootstrap и Linux CI wiring остаются Wave 2.
+- Node 24.20.0, pnpm 11.24.0, Foundry 1.8.0 and solc 0.8.36 are pinned by
+  platform-specific checksums for macOS arm64 and Linux x64. Fetch, offline
+  install, tamper recovery and fail-closed verification are implemented.
 - Foundry 1.8.0 native and containerized Anvil are verified on chain ID 31337.
 - Engineering Foundation 0.20.0 is installed dev-only; applicable architecture,
   dependency, documentation, ADR, suppression and quality-gate policies pass
@@ -56,29 +57,29 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   commit passes 19 Foundry tests, including 10,000-run fuzzing and 65,536
   invariant calls, on macOS arm64 and Linux. This is local evidence, not an
   audit or production deployment approval.
+- The local Anvil runner rebuilds with the pinned solc, deploys only to chain
+  ID 31337, and is independently verified against trusted manifest, artifact,
+  build-info, constructor input, runtime code, state and balances. Redirect,
+  symlink, forged-evidence, parallel-run and interrupted-cleanup regressions pass.
+- The current macOS arm64 full gate passes Foundation 0.20, lint, TypeScript,
+  package tests, Linux-definition parity, canonical vectors, deterministic
+  dependency/secret/license policy, 24 local-EVM tests and 3 isolated integration
+  scenarios. No public RPC, real secret, real asset or paid gas was used.
+- Five exact-SHA implementation critics and their remediation ledger are recorded
+  in [`GENESIS-CORE-CODE-REVIEW-2026-08-28.md`](research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md).
 
 ## In progress
 
-- W3 local Anvil deploy/independent verifier and W4 pinned Linux CI parity have
-  isolated hosted jobs and ownership scopes and are running in parallel from
-  exact SHA `2220ef44be87aa41fb7e6f651ce1d02634eb792c`. Their canonical account pool
-  is `/var/data/codex-home/live-codex-auth`; its capacity-aware snapshot reports
-  25 slots and 17 available independent identities. After `account-b/c/d`
-  attempts were exhausted, both dirty worktrees were preserved and safely
-  resumed: W3 uses live-checked `account-l/m/o`, W4 uses `account-i/j/k`.
-  The hosted account-status procedure is recorded at
-  `/var/data/codex-home/ACCOUNT-STATUS-RUNBOOK.md`. Barrier 2 and exact-SHA
-  GitHub Actions evidence do not yet exist.
+- Final Barrier 2 is pending only the remote three-job GitHub Actions run and
+  affected plus holistic hosted re-review on the same final exact commit SHA.
+  Concrete run ID, SHA and conclusions belong to the immutable workflow summary
+  and final handoff; a local workflow-definition check is not called remote CI.
 
 ## Designed, not implemented
 
-- Detailed local-only Genesis Core implementation plan: strict proposal/test
-  fixture separation, constructor-computed allocation commitment, immutable
-  ERC-20, adversarial Anvil verifier and exact-SHA Linux parity. Vesting, local
-  SPL and mocked accounting are later independent slices. Production manifest
-  approval is intentionally not simulated by a self-declared status/hash. The
-  plan includes two hosted implementation waves, non-overlapping file ownership,
-  integration barriers, five parallel read-only critics and exact-head re-review.
+- Vesting, local SPL and mocked cross-chain accounting remain later independent
+  slices. Production manifest approval is intentionally not simulated by a
+  self-declared status or integrity hash.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
   two-context topology is recorded in ADR-0004 and awaits explicit acceptance.
   The local Genesis Core plan uses accepted ADR-0003 for the new manifest

@@ -13,10 +13,7 @@
     "path": "out/AGTMAIToken.sol/AGTMAIToken.json",
     "sha256": "0eab21f9aa412c52aff557eeaf8a802306b57e21067c02748c9b6f9f7a87cb7c"
   },
-  "buildInfo": {
-    "path": "out/build-info/1f882f404d5ffc58.json",
-    "sha256": "9c2003654ef6f177accf231cea8669cbc03962cfd7a6b38d27a2157c8a729b38"
-  },
+  "buildInfoPolicy": "Each local run content-binds its exact build-info bytes and digest. Raw build-info file names and bytes are not claimed to be reproducible across clean Forge invocations.",
   "sizesBytes": {
     "initcode": 4284,
     "runtime": 1945,
@@ -29,7 +26,7 @@
     "evidenceCommand": "forge test --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits -vvvv"
   },
   "notes": [
-    "The artifact and build-info paths are reproducible generated outputs and are intentionally ignored by Git.",
+    "The artifact path is a generated output and is intentionally ignored by Git; its digest records the reviewed clean Linux build.",
     "The artifact hash is not a deployed-code hash; no deployment or public RPC was used."
   ]
 }
