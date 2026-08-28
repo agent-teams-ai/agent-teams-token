@@ -121,15 +121,18 @@ production-компилятору.
 
 Используются два разных, дополняющих друг друга источника:
 
-1. `@agent-teams/engineering-foundation` версии `0.19.0` - точная dev-only
-   зависимость для механических проверок репозитория.
+1. `@agent-teams/engineering-foundation` версии `0.20.0` - точная dev-only
+   зависимость для механических проверок репозитория. Версия опубликована
+   2026-08-27 и соответствует release tag
+   `@agent-teams/engineering-foundation@0.20.0` / commit
+   `775824b32c200663f1076eb9448dafa3f913a4f6`.
 2. Agent Teams Orchestrator
    `docs/architecture/feature-module-standard.md` в редакции commit
    `81e6946bd4161b30e456965f09bcb7969ecd3cbb` - стандарт структуры feature
    modules и ответственности слоёв.
 
 Engineering Foundation не импортируется production-кодом и не становится
-runtime framework. Его опубликованный scaffolding в `0.19.0` пока не содержит
+runtime framework. Его опубликованный scaffolding в `0.20.0` пока не содержит
 квалифицированного product recipe для этого репозитория, поэтому нельзя
 притворяться, что Foundation автоматически создаст наши feature modules.
 Структура создаётся локально, а Foundation проверяет применимые границы,
@@ -702,7 +705,8 @@ holistic review относится к final SHA, remote CI green на том ж�
 5. Зафиксировать exact versions, source URLs, release tag/commit и checksums.
 6. Обновить lockfile только пакетным менеджером.
 7. Не использовать dirty checkout `engineering-foundation`; consumer зависит
-   только от registry package `0.19.0`.
+   только от registry package `0.20.0`. При каждом новом barrier повторно
+   проверять stable dist-tag, release tag и совместимость до изменения pin.
 
 Stop condition: baseline red по причине существующего проекта документируется;
 новые изменения не маскируют его.
