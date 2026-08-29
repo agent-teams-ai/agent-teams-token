@@ -143,16 +143,22 @@ boundaries:
   - id: tooling.deployment-plan.domain
     roots:
       - tooling/deployment-plan/src/domain
-    entrypoints: []
+    entrypoints:
+      - tooling/deployment-plan/src/domain/identity.ts
+      - tooling/deployment-plan/src/domain/model.ts
     allow:
       boundaries: []
       packages: []
-      builtins: []
+      builtins:
+        - node:crypto
       runtimeReferences: []
   - id: tooling.deployment-plan.application
     roots:
       - tooling/deployment-plan/src/application
-    entrypoints: []
+    entrypoints:
+      - tooling/deployment-plan/src/application/builder.ts
+      - tooling/deployment-plan/src/application/ports.ts
+      - tooling/deployment-plan/src/application/verifier.ts
     allow:
       boundaries:
         - tooling.deployment-plan.domain
@@ -162,33 +168,41 @@ boundaries:
   - id: tooling.deployment-plan.adapters
     roots:
       - tooling/deployment-plan/src/adapters
-    entrypoints: []
+    entrypoints:
+      - tooling/deployment-plan/src/adapters/artifact.ts
+      - tooling/deployment-plan/src/adapters/rpc.ts
+      - tooling/deployment-plan/src/adapters/safe-output.ts
     allow:
       boundaries:
         - tooling.deployment-plan.application
         - tooling.deployment-plan.domain
       packages: []
       builtins:
-        - node:crypto
+        - node:fs
         - node:fs/promises
         - node:path
       runtimeReferences: []
   - id: tooling.deployment-plan.composition
     roots:
       - tooling/deployment-plan/src/composition
-    entrypoints: []
+    entrypoints:
+      - tooling/deployment-plan/src/composition/index.ts
     allow:
       boundaries:
         - tooling.deployment-plan.adapters
         - tooling.deployment-plan.application
         - tooling.deployment-plan.domain
       packages: []
-      builtins: []
+      builtins:
+        - node:fs
+        - node:fs/promises
+        - node:path
       runtimeReferences: []
   - id: tooling.slither.domain
     roots:
       - tooling/security/slither/src/domain
-    entrypoints: []
+    entrypoints:
+      - tooling/security/slither/src/domain/model.ts
     allow:
       boundaries: []
       packages: []
@@ -197,7 +211,9 @@ boundaries:
   - id: tooling.slither.application
     roots:
       - tooling/security/slither/src/application
-    entrypoints: []
+    entrypoints:
+      - tooling/security/slither/src/application/policy.ts
+      - tooling/security/slither/src/application/ports.ts
     allow:
       boundaries:
         - tooling.slither.domain
@@ -207,7 +223,15 @@ boundaries:
   - id: tooling.slither.adapters
     roots:
       - tooling/security/slither/src/adapters
-    entrypoints: []
+    entrypoints:
+      - tooling/security/slither/src/adapters/container-contract.ts
+      - tooling/security/slither/src/adapters/evidence.ts
+      - tooling/security/slither/src/adapters/executable.ts
+      - tooling/security/slither/src/adapters/fingerprint.ts
+      - tooling/security/slither/src/adapters/image-preflight.ts
+      - tooling/security/slither/src/adapters/process.ts
+      - tooling/security/slither/src/adapters/runner.ts
+      - tooling/security/slither/src/adapters/slither-json.ts
     allow:
       boundaries:
         - tooling.slither.application
@@ -224,7 +248,10 @@ boundaries:
   - id: tooling.slither.composition
     roots:
       - tooling/security/slither/src/composition
-    entrypoints: []
+    entrypoints:
+      - tooling/security/slither/src/composition/cli.ts
+      - tooling/security/slither/src/composition/prepare-image.ts
+      - tooling/security/slither/src/composition/record-environment-failure.ts
     allow:
       boundaries:
         - tooling.slither.adapters

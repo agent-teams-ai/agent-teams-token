@@ -16,6 +16,7 @@
     "check:fast": "agent-teams-foundation gate run fast --consumer .",
     "clean": "node scripts/clean.mjs",
     "doctor": "node scripts/doctor.mjs",
+    "deployment:estimate:local": "node scripts/deployment/estimate-local.ts",
     "genesis:compile:local": "pnpm --filter @agent-teams/supply genesis:compile:local",
     "genesis:inspect:local": "pnpm --filter @agent-teams/supply genesis:inspect:local",
     "genesis:validate:proposal": "pnpm --filter @agent-teams/supply genesis:validate:proposal",
@@ -30,6 +31,9 @@
     "lint": "oxlint --deny-warnings .",
     "lint:files": "oxlint --deny-warnings",
     "security:check": "node --test tooling/security/security.test.mjs && node scripts/security/check.mjs",
+    "security:slither:test": "node --test tooling/security/slither/tests/*.test.ts",
+    "security:solidity": "node tooling/security/slither/src/composition/cli.ts",
+    "security:solidity:prepare-image": "node tooling/security/slither/src/composition/prepare-image.ts",
     "solana:fixture:local": "node scripts/solana/local-fixture.ts",
     "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built && pnpm --filter @agent-teams/supply test:built",
     "test:linux-parity": "node --test scripts/tests/toolchain.test.mjs scripts/tests/tooling-boundaries.test.mjs scripts/tests/workflow.test.mjs && docker compose -f compose.yaml config --quiet",
@@ -37,8 +41,10 @@
     "test:local-evm:built": "node --test tooling/local-evm/tests/constructor.test.ts tooling/local-evm/tests/process.test.ts tooling/local-evm/tests/rpc.test.ts tooling/local-evm/tests/safe-fs.test.ts tooling/local-evm/tests/toolchain.test.ts tooling/local-evm/tests/verifier.adversarial.test.ts tooling/local-evm/tests/verify-cli.test.ts",
     "test:local-evm:integration": "pnpm build && node --test tooling/local-evm/tests/runner.integration.test.ts",
     "test:local-solana": "node --test tooling/local-solana/tests/*.test.ts",
-    "typecheck": "tsc --build --pretty false && tsc -p tooling/local-evm/tsconfig.json --pretty false && tsc -p tooling/local-solana/tsconfig.json --pretty false",
-    "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:linux-parity && pnpm genesis:vector:check && pnpm security:check && pnpm test:local-evm:built && pnpm test:local-solana"
+    "test:deployment-plan": "node --test tooling/deployment-plan/tests/*.test.ts",
+    "typecheck": "tsc --build --pretty false && tsc -p tooling/local-evm/tsconfig.json --pretty false && tsc -p tooling/local-solana/tsconfig.json --pretty false && tsc -p tooling/deployment-plan/tsconfig.json --pretty false && tsc -p tooling/security/slither/tsconfig.json --pretty false",
+    "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:linux-parity && pnpm genesis:vector:check && pnpm security:check && pnpm test:local-evm:built && pnpm test:local-solana && pnpm test:deployment-plan && pnpm security:slither:test",
+    "check:release": "pnpm check && pnpm security:solidity"
   },
   "devDependencies": {
     "@agent-teams/engineering-foundation": "0.20.0",

@@ -11,13 +11,15 @@ const workflowPath = join(repositoryRoot, ".github/workflows/ci.yml");
 const workflowText = readFileSync(workflowPath, "utf8");
 const workflow = parse(workflowText);
 
-test("workflow syntax has the four integrated exact-scope jobs", () => {
+test("workflow syntax has the six integrated exact-scope jobs", () => {
   assert.equal(workflow.name, "CI");
   assert.deepEqual(Object.keys(workflow.jobs), [
     "foundation-and-typescript",
     "solidity",
     "local-evm-e2e",
     "local-solana-e2e",
+    "deployment-plan-e2e",
+    "solidity-security",
   ]);
   assert.deepEqual(workflow.permissions, { contents: "read" });
   assert.equal(workflow.concurrency["cancel-in-progress"], true);
@@ -26,15 +28,22 @@ test("workflow syntax has the four integrated exact-scope jobs", () => {
     assert.ok(Number.isInteger(job["timeout-minutes"]));
     assert.ok(job["timeout-minutes"] <= 20);
   }
-  assert.doesNotMatch(workflowText, /\b(?:slither|ccip)\b/i);
+  assert.doesNotMatch(workflowText, /\bccip\b/i);
 });
 
 test("all third-party actions use immutable full commit SHAs without package-manager setup", () => {
-  const uses = [...workflowText.matchAll(/^\s*- uses:\s*([^\s#]+)/gm)].map((match) => match[1]);
+  const uses = [...workflowText.matchAll(/^\s*(?:-\s+)?uses:\s*([^\s#]+)/gm)].map((match) => match[1]);
   assert.ok(uses.length > 0);
   for (const action of uses) {assert.match(action, /^[^@\s]+@[a-f0-9]{40}$/);}
-  assert.ok(uses.every((value) => value.startsWith("actions/checkout@")));
-  assert.doesNotMatch(workflowText, /pnpm\/action-setup|actions\/setup-node|actions\/upload-artifact|actions\/cache/);
+  assert.ok(uses.every((value) =>
+    value === "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    || value === "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+  ));
+  assert.equal(
+    uses.filter((value) => value.startsWith("actions/upload-artifact@")).length,
+    1,
+  );
+  assert.doesNotMatch(workflowText, /pnpm\/action-setup|actions\/setup-node|actions\/cache/);
 });
 
 test("every job asserts exact clean GITHUB_SHA before and after its gates", () => {
@@ -45,14 +54,14 @@ test("every job asserts exact clean GITHUB_SHA before and after its gates", () =
   }
 });
 
-test("workflow dispatch records GitHub exact-SHA metadata without an upload action", () => {
+test("workflow dispatch records GitHub exact-SHA metadata", () => {
   const step = workflow.jobs["foundation-and-typescript"].steps
     .find(({ name }) => name === "Record workflow-dispatch exact-SHA evidence");
   assert.equal(step.if, "${{ github.event_name == 'workflow_dispatch' }}");
   for (const field of ["GITHUB_EVENT_NAME", "GITHUB_REPOSITORY", "GITHUB_WORKFLOW", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REF", "GITHUB_SHA"]) {
     assert.match(step.run, new RegExp(field));
   }
-  assert.doesNotMatch(workflowText, /upload-artifact/);
+  assert.equal(step.uses, undefined);
 });
 
 test("foundation and TypeScript job bootstraps verified pnpm and runs the final gate", () => {
@@ -105,6 +114,34 @@ test("local Solana job installs the pinned fixture tools and proves the real zer
   assert.doesNotMatch(JSON.stringify(job), /public-rpc|devnet|mainnet|continue-on-error/i);
 });
 
+test("deployment-plan job proves the real unsigned loopback path", () => {
+  const job = workflow.jobs["deployment-plan-e2e"];
+  assert.deepEqual(job.needs, ["foundation-and-typescript", "solidity"]);
+  const commands = runs("deployment-plan-e2e").join("\n");
+  assert.match(commands, /bootstrap verify --offline[\s\S]*doctor --scope=core/);
+  assert.match(commands, /pnpm test:deployment-plan/);
+  assert.match(job.steps.find((step) => step.name === "Prove unsigned deployment plan against loopback Anvil").env.AGTMAI_ANVIL_BINARY, /foundry-v1\.8\.0-linux-x64\/anvil/u);
+  assert.doesNotMatch(JSON.stringify(job), /public-rpc|sepolia|mainnet|sendTransaction|continue-on-error/i);
+});
+
+test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence", () => {
+  const job = workflow.jobs["solidity-security"];
+  assert.deepEqual(job.needs, ["solidity"]);
+  assert.equal(job.env.SLITHER_CANDIDATE_SHA, "${{ github.sha }}");
+  assert.equal(job.env.SLITHER_DOCKER_PATH, "/usr/bin/docker");
+  assert.match(job.env.SLITHER_FORGE_PATH, /foundry-v1\.8\.0-linux-x64\/forge/u);
+  assert.match(job.env.SLITHER_SOLC_PATH, /solc-v0\.8\.36-linux-x64\/solc/u);
+  const commands = runs("solidity-security").join("\n");
+  assert.match(commands, /pnpm security:solidity:prepare-image/);
+  assert.match(commands, /pnpm security:solidity/);
+  const upload = job.steps.find((step) => step.name === "Upload immutable Slither evidence");
+  assert.equal(upload.if, "${{ always() }}");
+  assert.equal(upload.uses, "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+  assert.equal(upload.with["if-no-files-found"], "error");
+  assert.equal(upload.with["retention-days"], 14);
+  assert.doesNotMatch(JSON.stringify(job), /continue-on-error|:latest\b/u);
+});
+
 test("Compose is digest-pinned, local-only and hardened", () => {
   const composeText = readFileSync(join(repositoryRoot, "compose.yaml"), "utf8");
   const compose = parse(composeText);
@@ -153,7 +190,7 @@ test("package-manager policy disables implicit downloads and the final check has
   assert.match(npmrc, /^registry=https:\/\/registry\.npmjs\.org\/$/m);
   assert.match(lock, /^  autoInstallPeers: false$/m);
   assert.equal(packageJson.packageManager, "pnpm@11.24.0");
-  for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built", "test:local-solana"]) {
+  for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built", "test:local-solana", "test:deployment-plan", "security:slither:test"]) {
     assert.match(packageJson.scripts.check, new RegExp(`pnpm ${command.replaceAll(":", "\\:")}`));
   }
   assert.doesNotMatch(packageJson.scripts.check, /\|\|\s*true|--if-present/);
