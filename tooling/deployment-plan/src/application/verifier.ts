@@ -1,6 +1,6 @@
 import { canonicalJson, computePlanId, sha256Hex } from "../domain/identity.ts";
 import { calculateCosts, checkedAdd, fail, parseUint } from "../domain/model.ts";
-import type { FeeQuote, StablePlan } from "./builder.ts";
+import { validateTrustRootSafety, type FeeQuote, type StablePlan } from "./builder.ts";
 import type { ApprovedArtifact, DeploymentRpc, TrustRoots } from "./ports.ts";
 
 export interface ReadyMarker {
@@ -28,6 +28,7 @@ export interface RpcVerificationRequest {
 }
 
 export function independentlyVerify(request: VerificationRequest): void {
+  validateTrustRootSafety(request.roots);
   validatePlanSafety(request.plan);
   validatePlanTrust(request.plan, request.roots);
   validateBuildBindings(request.plan, request.expected);
@@ -107,6 +108,8 @@ function validatePlanTrust(plan: StablePlan, roots: TrustRoots): void {
     || identity.abiSha256 !== roots.abiSha256
     || identity.fixtureSha256 !== roots.fixtureSha256
     || identity.fixtureReadySha256 !== roots.fixtureReadySha256
+    || identity.constructorArgumentsHash !== roots.constructorArgumentsHash
+    || identity.creationInputHash !== roots.creationInputHash
   ) {
     fail("PLAN_ARTIFACT_MISMATCH", "plan artifact pins differ from trust roots");
   }
@@ -248,6 +251,7 @@ function validateRpcBlocks(
     || bound.hash !== quote.observation.blockHash
     || quantity(bound.timestamp).toString() !== quote.observation.blockTimestamp
     || quantity(bound.gasLimit).toString() !== quote.observation.blockGasLimit
+    || quantity(bound.baseFeePerGas).toString() !== quote.observation.baseFeePerGas
     || head.hash !== quote.observation.currentHeadHash
     || quantity(head.number).toString() !== quote.observation.currentHeadNumber
   ) {
@@ -260,7 +264,7 @@ function validateRpcFeeHistory(
   quote: FeeQuote,
 ): void {
   const fees = history.baseFeePerGas;
-  if (!Array.isArray(fees) || fees.length < 1) {
+  if (!Array.isArray(fees) || fees.length !== 2) {
     fail("RPC_VERIFY_INVALID", "RPC fee history is malformed");
   }
   if (
@@ -272,6 +276,7 @@ function validateRpcFeeHistory(
   ) {
     fail("RPC_FEE_HISTORY_CHANGED", "RPC fee-history facts changed or were forged");
   }
+  quantity(fees[1]);
 }
 
 function record(value: unknown): Record<string, unknown> {

@@ -25,6 +25,8 @@ const roots: TrustRoots = {
   abiSha256: hash,
   fixtureSha256: hash,
   fixtureReadySha256: hash,
+  constructorArgumentsHash: hash,
+  creationInputHash: hash,
   sourceDependencyClosure: {},
 };
 const artifact: ApprovedArtifact = {

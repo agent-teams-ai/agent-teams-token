@@ -31,6 +31,8 @@ export interface TrustRoots {
   readonly abiSha256: `0x${string}`;
   readonly fixtureSha256: `0x${string}`;
   readonly fixtureReadySha256: `0x${string}`;
+  readonly constructorArgumentsHash: `0x${string}`;
+  readonly creationInputHash: `0x${string}`;
   readonly sourceDependencyClosure: Readonly<Record<string, `0x${string}`>>;
 }
 

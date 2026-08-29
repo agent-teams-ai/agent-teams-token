@@ -38,6 +38,8 @@ const roots: TrustRoots = {
   abiSha256: hash,
   fixtureSha256: hash,
   fixtureReadySha256: hash,
+  constructorArgumentsHash: hash,
+  creationInputHash,
   sourceDependencyClosure: {},
 };
 const artifact: ApprovedArtifact = {
@@ -155,6 +157,7 @@ function fixtureRpc(): DeploymentRpc {
     hash,
     timestamp: "0x64",
     gasLimit: "0x3e8",
+    baseFeePerGas: "0x1",
   };
   return {
     async request(method: RpcMethod): Promise<unknown> {

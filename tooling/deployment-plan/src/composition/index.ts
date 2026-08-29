@@ -1,11 +1,21 @@
 import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat, open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { approveForgeArtifact } from "../adapters/artifact.ts";
 import { createLocalRpc, observeFees } from "../adapters/rpc.ts";
-import { claimOwnedOutputDirectory } from "../adapters/safe-output.ts";
+import {
+  claimOwnedOutputDirectory,
+  type OutputFaultInjection,
+} from "../adapters/safe-output.ts";
+import {
+  parseFeeQuote,
+  parseJsonWithoutDuplicates,
+  parseReadyMarker,
+  parseStablePlan,
+  parseTrustRoots,
+} from "../adapters/strict-json.ts";
 import { buildFeeQuote, buildStablePlan, type FeeQuote, type StablePlan } from "../application/builder.ts";
-import type { ApprovedArtifact, TrustRoots } from "../application/ports.ts";
+import type { ApprovedArtifact, DeploymentRpc, TrustRoots } from "../application/ports.ts";
 import {
   independentlyVerify,
   independentlyVerifyRpc,
@@ -27,6 +37,7 @@ export interface PublishRequest {
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
   readonly nowSeconds: bigint;
+  readonly outputFaultInjection?: OutputFaultInjection;
 }
 
 export interface VerifyBundleRequest {
@@ -34,6 +45,8 @@ export interface VerifyBundleRequest {
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
   readonly nowSeconds: bigint;
+  readonly rpc: DeploymentRpc;
+  readonly creationInput: `0x${string}`;
 }
 
 export interface PlannerInput {
@@ -64,12 +77,21 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
     creationInputHash: request.quote.creationInputHash,
   };
   independentlyVerify({ ...request, ready });
-  const output = await claimOwnedOutputDirectory(request.parent, request.bundleName);
+  const output = await claimOwnedOutputDirectory(
+    request.parent,
+    request.bundleName,
+    request.outputFaultInjection,
+  );
   try {
     await output.writeExclusive(PLAN, planBytes);
     await output.writeExclusive(QUOTE, quoteBytes);
     await output.writeExclusive(READY, jsonBytes(ready));
-    return output.path;
+    await assertExactBundle(output.path);
+    await assertPublishedContent(output.path, planBytes, quoteBytes, ready, request);
+    const published = await output.publish();
+    await assertExactBundle(published);
+    await assertPublishedContent(published, planBytes, quoteBytes, ready, request);
+    return published;
   } finally {
     await output.close();
   }
@@ -78,28 +100,69 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
 export async function verifyBundle(
   request: VerifyBundleRequest,
 ): Promise<{ plan: StablePlan; quote: FeeQuote }> {
+  await assertExactBundle(request.directory);
   const markerBytes = await safeRead(join(request.directory, READY));
   const planBytes = await safeRead(join(request.directory, PLAN));
   const quoteBytes = await safeRead(join(request.directory, QUOTE));
-  const ready = strictJson(markerBytes) as ReadyMarker;
-  const plan = strictJson(planBytes) as StablePlan;
-  const quote = strictJson(quoteBytes) as FeeQuote;
+  const ready = parseReadyMarker(markerBytes);
+  const plan = parseStablePlan(planBytes);
+  const quote = parseFeeQuote(quoteBytes);
   verifyReadyDigests(planBytes, quoteBytes, ready);
   independentlyVerify({ ...request, plan, quote, ready });
+  await independentlyVerifyRpc({
+    rpc: request.rpc,
+    plan,
+    quote,
+    creationInput: request.creationInput,
+  });
   return { plan, quote };
+}
+
+async function assertExactBundle(directory: string): Promise<void> {
+  const names = (await readdir(directory)).toSorted();
+  const expected = [PLAN, QUOTE, READY].toSorted();
+  if (names.length !== expected.length || names.some((name, index) => name !== expected[index])) {
+    fail("BUNDLE_FILES_INVALID", "bundle must contain exactly plan, quote, and READY");
+  }
+}
+
+async function assertPublishedContent(
+  directory: string,
+  expectedPlanBytes: Uint8Array,
+  expectedQuoteBytes: Uint8Array,
+  expectedReady: ReadyMarker,
+  request: PublishRequest,
+): Promise<void> {
+  const planBytes = await safeRead(join(directory, PLAN));
+  const quoteBytes = await safeRead(join(directory, QUOTE));
+  const readyBytes = await safeRead(join(directory, READY));
+  if (
+    !Buffer.from(planBytes).equals(expectedPlanBytes)
+    || !Buffer.from(quoteBytes).equals(expectedQuoteBytes)
+  ) {
+    fail("OUTPUT_CONTENT_SUBSTITUTED", "published bundle differs from verified staging bytes");
+  }
+  const ready = parseReadyMarker(readyBytes);
+  if (canonicalJson(ready) !== canonicalJson(expectedReady)) {
+    fail("OUTPUT_CONTENT_SUBSTITUTED", "published READY marker was substituted");
+  }
+  const plan = parseStablePlan(planBytes);
+  const quote = parseFeeQuote(quoteBytes);
+  verifyReadyDigests(planBytes, quoteBytes, ready);
+  independentlyVerify({ ...request, plan, quote, ready });
 }
 
 export async function runUnsignedPlanner(
   input: PlannerInput,
 ): Promise<{ directory: string; planId: string }> {
-  const roots = strictJson(await safeRead(input.trustRootsPath)) as TrustRoots;
+  const roots = parseTrustRoots(await safeRead(input.trustRootsPath));
   const fixtureBytes = await safeRead(input.fixturePath);
   const approved = approveForgeArtifact({
     buildInfoBytes: await safeRead(input.buildInfoPath),
     artifactBytes: await safeRead(input.artifactPath),
     abiBytes: await safeRead(input.abiPath),
     fixtureBytes,
-    constructorValues: strictJson(fixtureBytes),
+    constructorValues: parseJsonWithoutDuplicates(fixtureBytes),
   }, roots);
   const plan = buildStablePlan(approved, roots);
   const rpc = createLocalRpc(input.rpcUrl);
@@ -111,7 +174,6 @@ export async function runUnsignedPlanner(
     maxFeePerGas: input.maxFeePerGas,
   });
   const quote = buildFeeQuote(plan, observation, roots);
-  await independentlyVerifyRpc({ rpc, plan, quote, creationInput: approved.creationInput });
   const directory = await publishReadyLast({
     parent: input.outputParent,
     bundleName: input.bundleName,
@@ -120,6 +182,14 @@ export async function runUnsignedPlanner(
     roots,
     expected: approved,
     nowSeconds: input.nowSeconds,
+  });
+  await verifyBundle({
+    directory,
+    roots,
+    expected: approved,
+    nowSeconds: input.nowSeconds,
+    rpc,
+    creationInput: approved.creationInput,
   });
   return { directory, planId: plan.planId };
 }
@@ -144,14 +214,6 @@ async function safeRead(path: string): Promise<Uint8Array> {
     return bytes;
   } finally {
     await file.close();
-  }
-}
-
-function strictJson(bytes: Uint8Array): unknown {
-  try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    fail("BUNDLE_JSON_INVALID", "bundle JSON is malformed");
   }
 }
 

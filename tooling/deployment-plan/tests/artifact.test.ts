@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { approveForgeArtifact, encodeConstructor, type TrustRoots } from "../src/adapters/artifact.ts";
 import { sha256Hex } from "../src/domain/identity.ts";
+import { UINT256_MAX } from "../src/domain/model.ts";
 
 const source = "contract X {}";
 const settings = {
@@ -78,6 +79,8 @@ const roots: TrustRoots = {
   abiSha256: sha256Hex(inputs.abiBytes),
   fixtureSha256: sha256Hex(inputs.fixtureBytes),
   fixtureReadySha256: `0x${"0".repeat(64)}`,
+  constructorArgumentsHash: "0x9427b845cd0de51bf3d29fe925976e092cc2024522e96766241f685d43937c60",
+  creationInputHash: "0x5cc2acd863cd3616f9df0e39cbd0948358b18c0cd4322291b65a65ea68311cb6",
   sourceDependencyClosure: {
     "src/features/token-genesis/AGTMAIToken.sol": sha256Hex(source),
   },
@@ -92,6 +95,14 @@ test("golden constructor vector binds build, ABI, bytecode and exact initcode", 
   );
   assert.equal(approved.creationInputHash.length, 66);
   assert.equal(approved.buildInfoSolcVersion, "0.8.36");
+});
+
+test("constructor integers enforce the exact uint256 boundary", () => {
+  assert.doesNotThrow(() => encodeConstructor({ ...fixture, initialSupply: UINT256_MAX.toString() }));
+  assert.throws(
+    () => encodeConstructor({ ...fixture, initialSupply: (UINT256_MAX + 1n).toString() }),
+    /uint256/u,
+  );
 });
 
 test("build/artifact/ABI/constructor mismatches fail independently", () => {

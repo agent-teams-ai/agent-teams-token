@@ -64,6 +64,12 @@ export function buildStablePlan(
   roots: TrustRoots,
 ): StablePlan {
   validateTrustRootSafety(roots);
+  if (
+    approved.constructorArgumentsHash !== roots.constructorArgumentsHash
+    || approved.creationInputHash !== roots.creationInputHash
+  ) {
+    fail("GOLDEN_INPUT_MISMATCH", "creation input differs from independently pinned golden hashes");
+  }
   const identity: Record<string, unknown> = {
     contractFqn: roots.contractFqn,
     buildProfile: roots.buildProfile,
@@ -137,8 +143,10 @@ export function buildFeeQuote(
   };
 }
 
-function validateTrustRootSafety(roots: TrustRoots): void {
+export function validateTrustRootSafety(roots: TrustRoots): void {
   if (
+    roots.schemaVersion !== 1
+    ||
     roots.chainId !== LOCAL_CHAIN_ID
     || !roots.testOnly
     || roots.productionApproved
@@ -146,6 +154,25 @@ function validateTrustRootSafety(roots: TrustRoots): void {
   ) {
     fail("TRUST_ROOTS_UNSAFE", "trust roots are not local test-only roots");
   }
+  for (const [field, value] of [
+    ["artifactSha256", roots.artifactSha256],
+    ["abiSha256", roots.abiSha256],
+    ["fixtureSha256", roots.fixtureSha256],
+    ["fixtureReadySha256", roots.fixtureReadySha256],
+    ["constructorArgumentsHash", roots.constructorArgumentsHash],
+    ["creationInputHash", roots.creationInputHash],
+  ] as const) {
+    if (!/^0x[0-9a-f]{64}$/u.test(value)) {
+      fail("TRUST_ROOTS_INVALID", `${field} is not a SHA-256 hash`);
+    }
+  }
+  if (!/^0x[0-9a-f]{40}$/u.test(roots.from)) {
+    fail("TRUST_ROOTS_INVALID", "trusted deployer is malformed");
+  }
+  parseUint(roots.maximumWorstCaseWei, "maximumWorstCaseWei");
+  parseUint(roots.gasBufferBps, "gasBufferBps");
+  parseUint(roots.quoteTtlSeconds, "quoteTtlSeconds", false);
+  parseUint(roots.maximumHeadLag, "maximumHeadLag");
 }
 
 function parseQuoteTimes(observation: QuoteObservation, roots: TrustRoots): QuoteTimes {

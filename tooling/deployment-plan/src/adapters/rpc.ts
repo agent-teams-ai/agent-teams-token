@@ -15,6 +15,7 @@ interface RpcBlock {
   readonly hash: `0x${string}`;
   readonly timestamp: bigint;
   readonly gasLimit: bigint;
+  readonly baseFeePerGas: bigint;
 }
 
 export interface FeeObservationRequest {
@@ -69,6 +70,9 @@ export async function observeFees(
   const history = readFeeHistory(
     await rpc.request("eth_feeHistory", ["0x1", head.numberHex, []]),
   );
+  if (history.baseFee !== bound.baseFeePerGas) {
+    fail("BASE_FEE_MISMATCH", "block base fee differs from fee history");
+  }
   const gas = quantity(
     await rpc.request("eth_estimateGas", [
       { from: request.from, data: request.creationInput, value: "0x0" },
@@ -150,13 +154,18 @@ function readResult(body: unknown, id: number, method: RpcMethod): unknown {
   return body.result;
 }
 
-function readFeeHistory(value: unknown): { readonly newest: bigint; readonly baseFee: bigint } {
-  if (!isObject(value) || !Array.isArray(value.baseFeePerGas) || value.baseFeePerGas.length < 1) {
+function readFeeHistory(value: unknown): {
+  readonly newest: bigint;
+  readonly baseFee: bigint;
+  readonly nextBaseFee: bigint;
+} {
+  if (!isObject(value) || !Array.isArray(value.baseFeePerGas) || value.baseFeePerGas.length !== 2) {
     fail("FEE_HISTORY_INVALID", "fee history is malformed");
   }
   return {
     newest: quantity(value.oldestBlock, "oldestBlock"),
     baseFee: quantity(value.baseFeePerGas[0], "baseFeePerGas"),
+    nextBaseFee: quantity(value.baseFeePerGas[1], "nextBaseFeePerGas"),
   };
 }
 
@@ -175,6 +184,7 @@ function readBlock(value: unknown, name: string): RpcBlock {
     hash: value.hash as `0x${string}`,
     timestamp: quantity(value.timestamp, "timestamp"),
     gasLimit: quantity(value.gasLimit, "gasLimit"),
+    baseFeePerGas: quantity(value.baseFeePerGas, "baseFeePerGas"),
   };
 }
 

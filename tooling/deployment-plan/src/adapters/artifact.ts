@@ -4,7 +4,7 @@ import type {
   TrustRoots,
 } from "../application/ports.ts";
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
-import { fail } from "../domain/model.ts";
+import { fail, parseUint } from "../domain/model.ts";
 
 const SOURCE = "src/features/token-genesis/AGTMAIToken.sol";
 const CONTRACT = "AGTMAIToken";
@@ -55,7 +55,7 @@ export function approveForgeArtifact(
   const creationInput = `${creationBytecode}${constructorArguments.slice(2)}` as `0x${string}`;
   const constructorAbiBytes = utf8Hex(canonicalJson(constructor));
 
-  return {
+  const approved: ApprovedArtifact = {
     buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
     artifactSha256: parsed.artifactSha256,
     abiSha256: parsed.abiSha256,
@@ -72,6 +72,13 @@ export function approveForgeArtifact(
     creationInput,
     creationInputHash: hashHex(creationInput),
   };
+  if (
+    approved.constructorArgumentsHash !== roots.constructorArgumentsHash
+    || approved.creationInputHash !== roots.creationInputHash
+  ) {
+    fail("GOLDEN_INPUT_MISMATCH", "complete creation input differs from independently pinned golden hashes");
+  }
+  return approved;
 }
 
 function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
@@ -230,10 +237,11 @@ export function encodeConstructor(value: ConstructorValues): `0x${string}` {
 }
 
 function word(value: string): string {
-  if (!/^(0|[1-9][0-9]*)$/u.test(value)) {
-    fail("CONSTRUCTOR_INVALID", "constructor integer is malformed");
+  try {
+    return parseUint(value, "constructor integer").toString(16).padStart(64, "0");
+  } catch {
+    fail("CONSTRUCTOR_INVALID", "constructor integer is malformed or outside uint256");
   }
-  return BigInt(value).toString(16).padStart(64, "0");
 }
 
 function parseObject(bytes: Uint8Array, code: string): Record<string, unknown> {

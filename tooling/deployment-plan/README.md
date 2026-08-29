@@ -6,6 +6,9 @@ gas, fee and cap values are canonical decimal strings converted to `bigint`.
 
 The committed `trust-roots.v1.json` is test-only and explicitly disallows
 mainnet and production approval. The builder cannot promote its own output.
+It also pins independently generated hashes for the exact ABI constructor
+arguments and the complete creation input, so a coherent encoder defect cannot
+approve different constructor values.
 The `buildInfoSolcVersion` trust root binds Forge build-info's actual
 `solcVersion` field exactly as `0.8.36`. Forge 1.8.0 emits both `solcVersion`
 and `solcLongVersion` as that short value, so this feature does not claim that
@@ -16,10 +19,18 @@ The RPC port has four read-only methods, rejects redirects and final-URL
 changes, and cannot accept public hosts. There is deliberately no wallet,
 signer, key, raw-transaction, deploy, transaction-send, or broadcast surface.
 
+Bundles are assembled READY-last in an unguessable owned staging directory,
+validated there, and atomically renamed into place as a complete directory.
+No bundle leaf is written after publication. The held staging identity and the
+exact bytes are checked again after rename, so check/open, rename, substitution,
+and ABA races cannot produce a bundle that publication reports as accepted.
 Bundles contain `deployment-plan.v1.json`, `fee-quote.v1.json`, then `READY`.
 The independent verifier recomputes identity, fee math, cap and freshness and
-checks READY digests using no-follow file reads. A quote is expired when
-`now >= expiresAt`; failed cap or validation checks occur before publication.
+checks READY digests using no-follow file reads. The planner then performs a
+post-publication RPC reread of the block, one-block fee-history shape and base
+fee, and gas estimate against the reconstructed creation input. A quote is
+expired when `now >= expiresAt`; failed cap or validation checks occur before
+publication.
 
 Root command and TypeScript-project wiring are integrator-owned and therefore
 must be added separately. Tests can be run directly after the root build with:
