@@ -3,6 +3,12 @@ import { SlitherGateError } from "../domain/model.ts";
 
 type JsonObject = Record<string, unknown>;
 
+interface ValidationContext {
+  readonly root: unknown;
+  readonly path: string;
+  readonly errors: string[];
+}
+
 export async function assertSerializedAgainstSchema(
   serialized: string,
   schemaPath: string,
@@ -16,50 +22,98 @@ export async function assertSerializedAgainstSchema(
     throw new SlitherGateError("EVIDENCE_SCHEMA_INVALID", "evidence or its exact schema is malformed JSON");
   }
   const errors: string[] = [];
-  validate(value, schema, schema, "$", errors);
+  validate(value, schema, { root: schema, path: "$", errors });
   if (errors.length > 0) {
     throw new SlitherGateError("EVIDENCE_SCHEMA_INVALID", errors.slice(0, 5).join("; "));
   }
 }
 
-function validate(value: unknown, rawSchema: unknown, root: unknown, path: string, errors: string[]): void {
-  if (!isObject(rawSchema)) {errors.push(`${path}: schema node is not an object`); return;}
-  const schema = resolve(rawSchema, root, errors, path);
+function validate(value: unknown, rawSchema: unknown, context: ValidationContext): void {
+  if (!isObject(rawSchema)) {context.errors.push(`${context.path}: schema node is not an object`); return;}
+  const schema = resolve(rawSchema, context);
   if (!schema) {return;}
-  if ("const" in schema && !equal(value, schema.const)) {errors.push(`${path}: const mismatch`);}
-  if (Array.isArray(schema.enum) && !schema.enum.some((item) => equal(value, item))) {errors.push(`${path}: enum mismatch`);}
-  if (typeof schema.type === "string" && !hasType(value, schema.type)) {errors.push(`${path}: expected ${schema.type}`); return;}
-  if (typeof value === "string") {
-    if (typeof schema.pattern === "string" && !new RegExp(schema.pattern, "u").test(value)) {errors.push(`${path}: pattern mismatch`);}
-    if (typeof schema.minLength === "number" && value.length < schema.minLength) {errors.push(`${path}: too short`);}
-  }
-  if (typeof value === "number" && typeof schema.minimum === "number" && value < schema.minimum) {errors.push(`${path}: below minimum`);}
-  if (Array.isArray(value)) {
-    if (typeof schema.minItems === "number" && value.length < schema.minItems) {errors.push(`${path}: too few items`);}
-    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {errors.push(`${path}: too many items`);}
-    if (schema.uniqueItems === true && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) {errors.push(`${path}: duplicate items`);}
-    if (schema.items !== undefined) {value.forEach((item, index) => validate(item, schema.items, root, `${path}[${index}]`, errors));}
-  }
-  if (isObject(value)) {
-    const properties = isObject(schema.properties) ? schema.properties : {};
-    const required = Array.isArray(schema.required) ? schema.required : [];
-    for (const key of required) {if (typeof key === "string" && !(key in value)) {errors.push(`${path}: missing ${key}`);}}
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(value)) {if (!(key in properties)) {errors.push(`${path}: unexpected ${key}`);}}
-    }
-    for (const [key, childSchema] of Object.entries(properties)) {
-      if (key in value) {validate(value[key], childSchema, root, `${path}.${key}`, errors);}
-    }
-  }
-  if (isObject(schema.not) && matchesPatternOnly(value, schema.not)) {errors.push(`${path}: forbidden value`);}
+  if (!validateCommonKeywords(value, schema, context)) {return;}
+  validateString(value, schema, context);
+  validateNumber(value, schema, context);
+  validateArray(value, schema, context);
+  validateObject(value, schema, context);
+  validateForbiddenValue(value, schema, context);
 }
 
-function resolve(schema: JsonObject, root: unknown, errors: string[], path: string): JsonObject | undefined {
+function validateCommonKeywords(value: unknown, schema: JsonObject, context: ValidationContext): boolean {
+  if ("const" in schema && !equal(value, schema.const)) {context.errors.push(`${context.path}: const mismatch`);}
+  if (Array.isArray(schema.enum) && !schema.enum.some((item) => equal(value, item))) {context.errors.push(`${context.path}: enum mismatch`);}
+  if (typeof schema.type === "string" && !hasType(value, schema.type)) {
+    context.errors.push(`${context.path}: expected ${schema.type}`);
+    return false;
+  }
+  return true;
+}
+
+function validateString(value: unknown, schema: JsonObject, context: ValidationContext): void {
+  if (typeof value === "string") {
+    if (typeof schema.pattern === "string" && !new RegExp(schema.pattern, "u").test(value)) {context.errors.push(`${context.path}: pattern mismatch`);}
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) {context.errors.push(`${context.path}: too short`);}
+  }
+}
+
+function validateNumber(value: unknown, schema: JsonObject, context: ValidationContext): void {
+  if (typeof value === "number" && typeof schema.minimum === "number" && value < schema.minimum) {context.errors.push(`${context.path}: below minimum`);}
+}
+
+function validateArray(value: unknown, schema: JsonObject, context: ValidationContext): void {
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {context.errors.push(`${context.path}: too few items`);}
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {context.errors.push(`${context.path}: too many items`);}
+    if (schema.uniqueItems === true && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) {context.errors.push(`${context.path}: duplicate items`);}
+    if (schema.items !== undefined) {value.forEach((item, index) => validate(item, schema.items, childContext(context, `[${index}]`)));}
+  }
+}
+
+function validateObject(value: unknown, schema: JsonObject, context: ValidationContext): void {
+  if (isObject(value)) {
+    const properties = isObject(schema.properties) ? schema.properties : {};
+    validateRequiredProperties(value, schema.required, context);
+    validateAdditionalProperties(value, properties, schema.additionalProperties, context);
+    validateProperties(value, properties, context);
+  }
+}
+
+function validateRequiredProperties(value: JsonObject, rawRequired: unknown, context: ValidationContext): void {
+  const required = Array.isArray(rawRequired) ? rawRequired : [];
+  for (const key of required) {
+    if (typeof key === "string" && !(key in value)) {context.errors.push(`${context.path}: missing ${key}`);}
+  }
+}
+
+function validateAdditionalProperties(value: JsonObject, properties: JsonObject, additionalProperties: unknown, context: ValidationContext): void {
+  if (additionalProperties === false) {
+    for (const key of Object.keys(value)) {
+      if (!(key in properties)) {context.errors.push(`${context.path}: unexpected ${key}`);}
+    }
+  }
+}
+
+function validateProperties(value: JsonObject, properties: JsonObject, context: ValidationContext): void {
+  for (const [key, childSchema] of Object.entries(properties)) {
+    if (key in value) {validate(value[key], childSchema, childContext(context, `.${key}`));}
+  }
+}
+
+function validateForbiddenValue(value: unknown, schema: JsonObject, context: ValidationContext): void {
+  if (isObject(schema.not) && matchesPatternOnly(value, schema.not)) {context.errors.push(`${context.path}: forbidden value`);}
+}
+
+function childContext(context: ValidationContext, suffix: string): ValidationContext {
+  return { ...context, path: `${context.path}${suffix}` };
+}
+
+function resolve(schema: JsonObject, context: ValidationContext): JsonObject | undefined {
   if (typeof schema.$ref !== "string") {return schema;}
-  if (!schema.$ref.startsWith("#/") || !isObject(root)) {errors.push(`${path}: unsupported ref`); return undefined;}
-  let current: unknown = root;
+  if (!schema.$ref.startsWith("#/") || !isObject(context.root)) {context.errors.push(`${context.path}: unsupported ref`); return undefined;}
+  let current: unknown = context.root;
   for (const part of schema.$ref.slice(2).split("/")) {
-    if (!isObject(current) || !(part in current)) {errors.push(`${path}: missing ref`); return undefined;}
+    if (!isObject(current) || !(part in current)) {context.errors.push(`${context.path}: missing ref`); return undefined;}
     current = current[part];
   }
   return isObject(current) ? current : undefined;

@@ -71,7 +71,7 @@ test("a missing evidence variant is rejected", async () => {
 test("finalized failure evidence validates against its exact variant schema", async () => {
   const parent = await makeTestDirectory("bundle-failure-"); const output = join(parent, "bundle");
   try {
-    await writeEnvironmentFailure(output, sha, "preflight", "IMAGE_UNAVAILABLE", schemaDirectory, async () => {});
+    await writeEnvironmentFailure({ output, candidateSha: sha, stage: "preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory, assertReadyPrecondition: async () => {} });
     await validate(output);
   } finally {await rm(parent, { recursive: true, force: true });}
 });

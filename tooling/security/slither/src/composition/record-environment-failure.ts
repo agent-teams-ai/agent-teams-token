@@ -12,11 +12,11 @@ if (!/^[0-9a-f]{40}$/u.test(candidateSha)) {throw new Error("exact candidate SHA
 if (!/^[a-z0-9-]+$/u.test(stage) || !/^[A-Z0-9_]+$/u.test(errorCode)) {throw new Error("sanitised failure metadata is required");}
 const repository = new GitRepositoryState(root, new OwnedProcess());
 await repository.assertExactClean(candidateSha);
-await writeEnvironmentFailure(
+await writeEnvironmentFailure({
   output,
   candidateSha,
   stage,
   errorCode,
-  `${root}/tooling/security/slither`,
-  async () => await repository.assertExactClean(candidateSha),
-);
+  schemaDirectory: `${root}/tooling/security/slither`,
+  assertReadyPrecondition: async () => await repository.assertExactClean(candidateSha),
+});

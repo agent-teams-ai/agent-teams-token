@@ -18,7 +18,14 @@ async function main(): Promise<void> {
   const repository = new GitRepositoryState(root, new OwnedProcess());
   const failure = async (stage: string, code: string): Promise<void> => {
     await repository.assertExactClean(candidateSha);
-    await writeEnvironmentFailure(output, candidateSha, stage, code, `${root}/tooling/security/slither`, async () => await repository.assertExactClean(candidateSha));
+    await writeEnvironmentFailure({
+      output,
+      candidateSha,
+      stage,
+      errorCode: code,
+      schemaDirectory: `${root}/tooling/security/slither`,
+      assertReadyPrecondition: async () => await repository.assertExactClean(candidateSha),
+    });
   };
 
   try {

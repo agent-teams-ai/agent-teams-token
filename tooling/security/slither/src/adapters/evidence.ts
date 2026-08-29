@@ -44,6 +44,8 @@ interface FailureEvidenceRequest {
   readonly assertReadyPrecondition: () => Promise<void>;
 }
 
+type EnvironmentFailureRequest = Omit<FailureEvidenceRequest, "category" | "exitCode">;
+
 export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise<void> {
   const { output, candidateSha, manifest, input, decision, hashes } = request;
   await mkdir(output, { recursive: false, mode: 0o700 });
@@ -74,16 +76,11 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
   await writeFile(join(output, "READY"), "", { mode: 0o600, flag: "wx" });
 }
 
-export async function writeEnvironmentFailure(output: string, candidateSha: string, stage: string, errorCode: string, schemaDirectory: string, assertReadyPrecondition: () => Promise<void>): Promise<void> {
+export async function writeEnvironmentFailure(request: EnvironmentFailureRequest): Promise<void> {
   await writeFailureEvidence({
-    output,
-    candidateSha,
+    ...request,
     category: "environment-failure",
     exitCode: 50,
-    stage,
-    errorCode,
-    schemaDirectory,
-    assertReadyPrecondition,
   });
 }
 

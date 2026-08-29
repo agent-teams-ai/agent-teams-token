@@ -29,15 +29,16 @@ test("evidence is sanitised, exact-SHA-bound and READY-last", async () => {
 
 test("minimal environment failures also produce READY envelopes", async () => {
   const parent = await makeTestDirectory("failure-"); const output = join(parent, "bundle");
-  try { await writeEnvironmentFailure(output, "d".repeat(40), "preflight", "IMAGE_UNAVAILABLE", schemaDirectory, precondition); const value = JSON.parse(await readFile(join(output, "environment-failure.json"), "utf8")) as { exitCode: unknown }; assert.equal(value.exitCode, 50); assert.equal((await readFile(join(output, "READY"))).length, 0); }
+  try { await writeEnvironmentFailure({ output, candidateSha: "d".repeat(40), stage: "preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory, assertReadyPrecondition: precondition }); const value = JSON.parse(await readFile(join(output, "environment-failure.json"), "utf8")) as { exitCode: unknown }; assert.equal(value.exitCode, 50); assert.equal((await readFile(join(output, "READY"))).length, 0); }
   finally { await rm(parent, { recursive: true, force: true }); }
 });
 
 test("evidence writers reject stale or redirected output paths", async () => {
   const parent = await makeTestDirectory("redirect-"); const output = join(parent, "bundle");
   try {
-    await writeEnvironmentFailure(output, "d".repeat(40), "preflight", "IMAGE_UNAVAILABLE", schemaDirectory, precondition);
-    await assert.rejects(writeEnvironmentFailure(output, "d".repeat(40), "preflight", "IMAGE_UNAVAILABLE", schemaDirectory, precondition));
+    const request = { output, candidateSha: "d".repeat(40), stage: "preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory, assertReadyPrecondition: precondition };
+    await writeEnvironmentFailure(request);
+    await assert.rejects(writeEnvironmentFailure(request));
     await assert.rejects(writeReadyEvidence(readyRequest(output)));
   } finally { await rm(parent, { recursive: true, force: true }); }
 });

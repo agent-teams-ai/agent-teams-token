@@ -12,6 +12,13 @@ const VARIANTS = {
 type Variant = keyof typeof VARIANTS;
 type JsonObject = Record<string, unknown>;
 
+const EXPECTED_OUTCOMES: Readonly<Record<string, { readonly blocking: boolean; readonly errors: boolean }>> = {
+  clean: { blocking: false, errors: false },
+  "policy-failure": { blocking: true, errors: false },
+  "tool-failure": { blocking: false, errors: true },
+  "output-failure": { blocking: false, errors: true },
+};
+
 interface ValidationRequest {
   readonly output: string;
   readonly candidateSha: string;
@@ -50,6 +57,16 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
 
 export function assertAnalysisEvidenceSemantics(value: JsonObject): void {
   const result = object(value.result, "result");
+  const category = assertResultStatus(result);
+  const analysis = object(value.analysis, "analysis");
+  const policy = object(value.policy, "policy");
+  const findings = array(analysis.findings, "analysis.findings");
+  assertAnalysisClosure(analysis, findings);
+  const { blocking } = assertFindingClassifications(analysis, policy, findings);
+  assertPolicyOutcome(category, policy, blocking, findings.length);
+}
+
+function assertResultStatus(result: JsonObject): string {
   const category = result.category;
   const expectedExit: Readonly<Record<string, number>> = {
     clean: 0,
@@ -60,14 +77,22 @@ export function assertAnalysisEvidenceSemantics(value: JsonObject): void {
   if (typeof category !== "string" || expectedExit[category] !== result.exitCode) {
     throw invalid("analysis category and exit status matrix differ");
   }
-  const analysis = object(value.analysis, "analysis");
-  const policy = object(value.policy, "policy");
-  const findings = array(analysis.findings, "analysis.findings");
+  return category;
+}
+
+function assertAnalysisClosure(analysis: JsonObject, findings: unknown[]): void {
   if (analysis.findingCount !== findings.length) {throw invalid("finding count differs from findings");}
   if (!sameStringSet(analysis.expectedTargets, analysis.observedTargets)
     || !sameStringSet(analysis.expectedSources, analysis.observedSources)) {
     throw invalid("expected and observed analysis closure differ");
   }
+}
+
+function assertFindingClassifications(
+  analysis: JsonObject,
+  policy: JsonObject,
+  findings: unknown[],
+): { readonly blocking: number } {
   const suppressed = findings.filter((finding) => object(finding, "finding").suppressed === true).length;
   const blocking = findings.filter((finding) => object(finding, "finding").blocking === true).length;
   if (findings.some((finding) => {
@@ -76,13 +101,16 @@ export function assertAnalysisEvidenceSemantics(value: JsonObject): void {
   if (analysis.suppressions !== suppressed || policy.suppressed !== suppressed || policy.blocking !== blocking) {
     throw invalid("finding classifications differ from policy counts");
   }
-  if (typeof policy.visible !== "number" || policy.visible < blocking || policy.visible > findings.length) {
+  return { blocking };
+}
+
+function assertPolicyOutcome(category: string, policy: JsonObject, blocking: number, findingCount: number): void {
+  if (typeof policy.visible !== "number" || policy.visible < blocking || policy.visible > findingCount) {
     throw invalid("visible finding count is inconsistent");
   }
   const errors = array(policy.errors, "policy.errors");
-  const validOutcome = (category === "clean" && blocking === 0 && errors.length === 0)
-    || (category === "policy-failure" && blocking > 0 && errors.length === 0)
-    || ((category === "tool-failure" || category === "output-failure") && blocking === 0 && errors.length > 0);
+  const expected = EXPECTED_OUTCOMES[category]!;
+  const validOutcome = expected.blocking === (blocking > 0) && expected.errors === (errors.length > 0);
   if (!validOutcome) {throw invalid("analysis result contradicts policy semantics");}
 }
 
