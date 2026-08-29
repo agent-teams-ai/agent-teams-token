@@ -4,6 +4,12 @@ export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 export const FIXTURE_DECIMALS = 9;
 export const FIXTURE_AMOUNT_BASE_UNITS = 1_000_000_000_000n;
 
+/** Accepts only the canonical fixture URL shape on the IPv4 loopback host. */
+export function isExactLoopbackRpcUrl(value: string): boolean {
+  const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/$/u.exec(value);
+  return match !== null && Number(match[1]) <= 65_535;
+}
+
 export class LocalSolanaError extends Error {
   public readonly code: string;
   public constructor(code: string, message: string) {
@@ -116,6 +122,7 @@ export interface EvidenceReport {
   };
   readonly transactions: readonly TransactionFact[];
   readonly assertions: {
+    readonly exactLoopbackRpc: true;
     readonly productionAuthorityProven: false;
     readonly ccip: false;
     readonly publicNetwork: false;
@@ -143,6 +150,9 @@ export interface FailureEvidenceReport {
   readonly diagnosticCode: string;
   readonly mutationsMayHaveOccurred: true;
   readonly cleanupCompleted: boolean;
+  readonly validatorStopped: boolean;
+  readonly portLeaseReleased: boolean;
+  readonly privateDirectoryRemoved: boolean;
   readonly publicNetwork: false;
   readonly realAssetCostUsd: 0;
   readonly secretsRetained: boolean;

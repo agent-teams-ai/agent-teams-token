@@ -35,8 +35,8 @@ function validateTransactions(value: unknown): void {
 
 function validateAssertions(value: unknown): void {
   const assertions = record(value, "assertions");
-  exactKeys(assertions, ["productionAuthorityProven", "ccip", "publicNetwork", "realAssetCostUsd", "mintAuthorityRevoked", "authorityKeyRetained", "remintPossibleUntilTeardown", "productionHardCapProven", "signedRestoreReachedTokenProgramAndFailed", "signedFreezeReachedTokenProgramAndFailed"], "assertions");
-  assertValid(assertions.productionAuthorityProven === false && assertions.ccip === false && assertions.publicNetwork === false && assertions.realAssetCostUsd === 0
+  exactKeys(assertions, ["exactLoopbackRpc", "productionAuthorityProven", "ccip", "publicNetwork", "realAssetCostUsd", "mintAuthorityRevoked", "authorityKeyRetained", "remintPossibleUntilTeardown", "productionHardCapProven", "signedRestoreReachedTokenProgramAndFailed", "signedFreezeReachedTokenProgramAndFailed"], "assertions");
+  assertValid(assertions.exactLoopbackRpc === true && assertions.productionAuthorityProven === false && assertions.ccip === false && assertions.publicNetwork === false && assertions.realAssetCostUsd === 0
     && assertions.mintAuthorityRevoked === false && assertions.authorityKeyRetained === false && assertions.remintPossibleUntilTeardown === true
     && assertions.productionHardCapProven === false && assertions.signedRestoreReachedTokenProgramAndFailed === true && assertions.signedFreezeReachedTokenProgramAndFailed === true, "assertions");
 }

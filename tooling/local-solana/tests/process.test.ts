@@ -39,4 +39,20 @@ test("validator startup failure terminates the spawned child before rejecting", 
   } finally { if (childPid !== undefined && processAlive(childPid)) { process.kill(childPid, "SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
 });
 
+test("validator survives only after the supervisor receives post-registration acknowledgement", { skip: process.platform !== "linux" ? "test helper relies on Linux procfs identity" : false }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-validator-ack-")); await chmod(boundary, 0o700);
+  const executable = join(boundary, "validator"); const ledger = join(boundary, "ledger"); const config = join(boundary, "config.yml");
+  await writeFile(executable, "#!/bin/bash\nwhile :; do /bin/sleep 1; done\n", { mode: 0o700 }); await mkdir(ledger, { mode: 0o700 }); await writeFile(config, "fixture", { mode: 0o600 });
+  let childPid: number | undefined;
+  try {
+    const handle = await new OwnedValidatorAdapter().start({
+      executable, ledger, config, genesisMint: "5".repeat(32), tokenProgram: executable, associatedTokenProgram: executable,
+      rpcPort: 30_000, faucetPort: 30_002, gossipPort: 30_010, dynamicPortRange: "30010-30137", env: { PATH: "/usr/bin:/bin" },
+      signal: new AbortController().signal, leaseToken: "a".repeat(64), registerIdentity: async (identity) => { childPid = identity.pid; },
+    });
+    assert.equal(handle.pid, childPid); assert.ok(childPid); assert.equal(processAlive(childPid), true);
+    await handle.stop(); assert.equal(processAlive(childPid), false);
+  } finally { if (childPid !== undefined && processAlive(childPid)) { process.kill(childPid, "SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
+});
+
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }

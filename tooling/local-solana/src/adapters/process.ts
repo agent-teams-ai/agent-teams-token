@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { fork, spawn, type ChildProcess } from "node:child_process";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LocalSolanaError } from "../domain/model.ts";
 import type { CommandPort, CommandResult, ValidatorHandle, ValidatorPort, ValidatorStartRequest } from "../application/ports.ts";
@@ -35,7 +36,7 @@ export class NodeCommandAdapter implements CommandPort {
 export class OwnedValidatorAdapter implements ValidatorPort {
   public async start(request: ValidatorStartRequest): Promise<ValidatorHandle> {
     if (!request.executable.startsWith("/")) { throw new LocalSolanaError("SOLANA_VALIDATOR_ABSOLUTE", "validator executable must be absolute"); }
-    const child = spawn(request.executable, [
+    const args = [
       "--reset", "--ledger", request.ledger, "--config", request.config,
       "--bind-address", "127.0.0.1", "--rpc-port", String(request.rpcPort),
       "--faucet-port", String(request.faucetPort), "--gossip-port", String(request.gossipPort),
@@ -43,39 +44,101 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       "--mint", request.genesisMint, "--faucet-sol", "10", "--ticks-per-slot", "8", "--log",
       "--bpf-program", CLASSIC_TOKEN_PROGRAM, request.tokenProgram,
       "--bpf-program", ASSOCIATED_TOKEN_PROGRAM, request.associatedTokenProgram,
-    ], { env: { ...request.env, AGTMAI_LOCAL_SOLANA_LEASE_TOKEN: request.leaseToken }, stdio: ["ignore", "pipe", "pipe"] });
+    ];
+    const supervisor = fork(fileURLToPath(new URL("./validator-supervisor.ts", import.meta.url)), [], {
+      env: request.env, stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
     let output = "";
-    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { output = bounded(output, chunk); });
-    child.stderr.on("data", (chunk: string) => { output = bounded(output, chunk); });
-    if (child.pid === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_PID", "validator did not expose a PID"); }
-    const abort = (): void => { void stopChild(child); };
+    let validatorPid: number | undefined;
+    let validatorExit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
+    const waiters = new Set<() => void>();
+    const changed = (): void => { for (const waiter of waiters) { waiter(); } waiters.clear(); };
+    supervisor.on("message", (message: unknown) => {
+      if (typeof message !== "object" || message === null) { return; }
+      const value = message as Record<string, unknown>;
+      if (value.type === "output" && typeof value.value === "string") { output = bounded(output, value.value); }
+      if (value.type === "spawned" && typeof value.pid === "number") { validatorPid = value.pid; }
+      if (value.type === "exit") { validatorExit = { code: typeof value.code === "number" ? value.code : null, signal: typeof value.signal === "string" ? value.signal as NodeJS.Signals : null }; }
+      changed();
+    });
+    supervisor.once("error", changed); supervisor.once("exit", changed);
+    const abort = (): void => { void stopSupervisor(supervisor, validatorPid).catch(() => {}); };
     request.signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
-      await request.registerIdentity(await captureValidatorIdentity(child.pid, request.executable, request.ledger, request.leaseToken));
-      await assertSurvivedStartup(child, () => sanitizeValidatorOutput(output, request));
+      supervisor.send({ type: "start", executable: request.executable, args, env: request.env, leaseToken: request.leaseToken });
+      await waitFor(() => validatorPid !== undefined || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000);
+      if (validatorPid === undefined) { throw startupFailure(validatorExit, output, request); }
+      await request.registerIdentity(await captureValidatorIdentity(validatorPid, request.executable, request.ledger, request.leaseToken));
+      let acknowledged = false;
+      const acknowledgement = (message: unknown): void => { if ((message as { readonly type?: unknown } | null)?.type === "acknowledged") { acknowledged = true; changed(); } };
+      supervisor.on("message", acknowledgement);
+      supervisor.send({ type: "acknowledge" });
+      try { await waitFor(() => acknowledged || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000); }
+      finally { supervisor.removeListener("message", acknowledgement); }
+      if (!acknowledged) { throw startupFailure(validatorExit, output, request); }
+      await assertSurvivedStartup(() => validatorExit, () => sanitizeValidatorOutput(output, request));
     } catch (cause) {
       request.signal.removeEventListener("abort", abort);
-      await stopChild(child).catch(() => {});
+      await stopSupervisor(supervisor, validatorPid).catch(() => {});
       throw cause;
     }
-    let promise: Promise<void> | undefined;
-    return { pid: child.pid, stop: () => { request.signal.removeEventListener("abort", abort); promise ??= stopChild(child); return promise; } };
+    let inFlight: Promise<void> | undefined; let stopped = false;
+    return { pid: validatorPid, stop: () => {
+      request.signal.removeEventListener("abort", abort);
+      if (stopped) { return Promise.resolve(); }
+      inFlight ??= stopSupervisor(supervisor, validatorPid).then(() => { stopped = true; }).finally(() => { inFlight = undefined; });
+      return inFlight;
+    } };
   }
 }
 
-async function assertSurvivedStartup(child: ChildProcess, stderr: () => string): Promise<void> {
-  const exit = new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>((resolve) => {
-    child.once("exit", (code, signal) => { resolve({ code, signal }); });
-  });
-  const result = await Promise.race([exit, delay(500).then(() => null)]);
-  if (result !== null) {
+async function assertSurvivedStartup(exit: () => { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined, stderr: () => string): Promise<void> {
+  await delay(500);
+  const result = exit();
+  if (result !== undefined) {
     const output = redact(stderr());
     const code = /address already in use|os error 98|eaddrinuse/iu.test(output) ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
     throw new LocalSolanaError(code, `validator exited code=${result.code ?? "null"} signal=${result.signal ?? "none"}: ${output}`);
   }
 }
+
+function startupFailure(exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined, output: string, request: ValidatorStartRequest): LocalSolanaError {
+  const sanitized = sanitizeValidatorOutput(output, request);
+  const code = /address already in use|os error 98|eaddrinuse/iu.test(sanitized) ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
+  return new LocalSolanaError(code, `validator startup failed code=${exit?.code ?? "null"} signal=${exit?.signal ?? "none"}: ${sanitized}`);
+}
+
+async function waitFor(predicate: () => boolean, changed: () => void, waiters: Set<() => void>, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) { throw new LocalSolanaError("SOLANA_VALIDATOR_SUPERVISOR_TIMEOUT", "validator supervisor handshake timed out"); }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => { waiters.delete(wake); resolve(); }, remaining);
+      const wake = (): void => { clearTimeout(timer); resolve(); };
+      waiters.add(wake);
+    });
+  }
+  changed();
+}
+
+async function stopSupervisor(supervisor: ChildProcess, validatorPid: number | undefined): Promise<void> {
+  if (supervisorDead(supervisor)) {
+    if (validatorPid !== undefined && processAlive(validatorPid)) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", "validator supervisor exited without proving child termination"); }
+    return;
+  }
+  let stopFailed = false;
+  const failure = (message: unknown): void => { if ((message as { readonly type?: unknown } | null)?.type === "stopFailed") { stopFailed = true; } };
+  supervisor.on("message", failure);
+  const closed = new Promise<void>((resolve) => { supervisor.once("close", () => { resolve(); }); });
+  if (supervisor.connected) { supervisor.send({ type: "stop" }); }
+  const exited = await within(closed, 10_500);
+  supervisor.removeListener("message", failure);
+  if (!exited || stopFailed || (validatorPid !== undefined && processAlive(validatorPid))) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", "validator supervisor could not prove child termination"); }
+}
+
+function supervisorDead(supervisor: ChildProcess): boolean { return supervisor.exitCode !== null || supervisor.signalCode !== null; }
+function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; } }
 
 export async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) { return; }

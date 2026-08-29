@@ -39,8 +39,9 @@
     },
     "assertions": {
       "type": "object", "additionalProperties": false,
-      "required": ["productionAuthorityProven", "ccip", "publicNetwork", "realAssetCostUsd", "mintAuthorityRevoked", "authorityKeyRetained", "remintPossibleUntilTeardown", "productionHardCapProven", "signedRestoreReachedTokenProgramAndFailed", "signedFreezeReachedTokenProgramAndFailed"],
+      "required": ["exactLoopbackRpc", "productionAuthorityProven", "ccip", "publicNetwork", "realAssetCostUsd", "mintAuthorityRevoked", "authorityKeyRetained", "remintPossibleUntilTeardown", "productionHardCapProven", "signedRestoreReachedTokenProgramAndFailed", "signedFreezeReachedTokenProgramAndFailed"],
       "properties": {
+        "exactLoopbackRpc": { "const": true },
         "productionAuthorityProven": { "const": false }, "ccip": { "const": false }, "publicNetwork": { "const": false }, "realAssetCostUsd": { "const": 0 },
         "mintAuthorityRevoked": { "const": false }, "authorityKeyRetained": { "const": false }, "remintPossibleUntilTeardown": { "const": true }, "productionHardCapProven": { "const": false },
         "signedRestoreReachedTokenProgramAndFailed": { "const": true }, "signedFreezeReachedTokenProgramAndFailed": { "const": true }

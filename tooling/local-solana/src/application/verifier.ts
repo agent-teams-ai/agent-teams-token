@@ -5,6 +5,7 @@ import {
   FIXTURE_DECIMALS,
   LIFECYCLE,
   LocalSolanaError,
+  isExactLoopbackRpcUrl,
   parseUnsignedInteger,
   type EvidenceReport,
   type FixtureObservations,
@@ -17,6 +18,7 @@ const EXPECTED_DISABLED_FREEZE_ERROR = "Custom(16)";
 
 export function verifyObservations(value: FixtureObservations): EvidenceReport {
   if (value.schemaVersion !== 1) { fail("SOLANA_EVIDENCE_SCHEMA", "unsupported observation schema"); }
+  if (!isExactLoopbackRpcUrl(value.rpcUrl)) { fail("SOLANA_RPC_NOT_EXACT_LOOPBACK", "observations must come from the canonical loopback RPC boundary"); }
   if (value.genesisHashBefore !== value.genesisHashAfter) { fail("SOLANA_GENESIS_CHANGED", "validator genesis changed during the fixture"); }
   verifyMintStates(value);
   verifySupply(value);
@@ -176,7 +178,7 @@ function evidence(value: FixtureObservations): EvidenceReport {
     mintAuthority: value.mintAuthority, formerFreezeAuthority: value.freezeAuthority, genesisHash: value.genesisHashBefore, validatorVersion: value.validatorVersion,
     snapshots: { initialMint: value.initialMint, afterRevokeMint: value.afterRevokeMint, afterMint: value.afterMint, afterMintTokenAccount: value.afterMintTokenAccount, finalMint: value.finalMint, finalTokenAccount: value.finalTokenAccount },
     transactions: value.transactions,
-    assertions: { productionAuthorityProven: false, ccip: false, publicNetwork: false, realAssetCostUsd: 0, mintAuthorityRevoked: false, authorityKeyRetained: false, remintPossibleUntilTeardown: true, productionHardCapProven: false, signedRestoreReachedTokenProgramAndFailed: true, signedFreezeReachedTokenProgramAndFailed: true },
+    assertions: { exactLoopbackRpc: true, productionAuthorityProven: false, ccip: false, publicNetwork: false, realAssetCostUsd: 0, mintAuthorityRevoked: false, authorityKeyRetained: false, remintPossibleUntilTeardown: true, productionHardCapProven: false, signedRestoreReachedTokenProgramAndFailed: true, signedFreezeReachedTokenProgramAndFailed: true },
   };
 }
 

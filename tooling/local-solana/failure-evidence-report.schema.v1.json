@@ -4,7 +4,7 @@
   "title": "AGTMAI local Solana post-mutation failure evidence",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "status", "failedPhase", "diagnosticCode", "mutationsMayHaveOccurred", "cleanupCompleted", "publicNetwork", "realAssetCostUsd", "secretsRetained", "productionApproved"],
+  "required": ["schemaVersion", "status", "failedPhase", "diagnosticCode", "mutationsMayHaveOccurred", "cleanupCompleted", "validatorStopped", "portLeaseReleased", "privateDirectoryRemoved", "publicNetwork", "realAssetCostUsd", "secretsRetained", "productionApproved"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "status": { "const": "FAILED" },
@@ -12,6 +12,9 @@
     "diagnosticCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$" },
     "mutationsMayHaveOccurred": { "const": true },
     "cleanupCompleted": { "type": "boolean" },
+    "validatorStopped": { "type": "boolean" },
+    "portLeaseReleased": { "type": "boolean" },
+    "privateDirectoryRemoved": { "type": "boolean" },
     "publicNetwork": { "const": false },
     "realAssetCostUsd": { "const": 0 },
     "secretsRetained": { "type": "boolean" },
@@ -19,7 +22,19 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "cleanupCompleted": { "const": true } }, "required": ["cleanupCompleted"] },
+      "if": {
+        "properties": {
+          "validatorStopped": { "const": true },
+          "portLeaseReleased": { "const": true },
+          "privateDirectoryRemoved": { "const": true }
+        },
+        "required": ["validatorStopped", "portLeaseReleased", "privateDirectoryRemoved"]
+      },
+      "then": { "properties": { "cleanupCompleted": { "const": true } } },
+      "else": { "properties": { "cleanupCompleted": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "privateDirectoryRemoved": { "const": true } }, "required": ["privateDirectoryRemoved"] },
       "then": { "properties": { "secretsRetained": { "const": false } } },
       "else": { "properties": { "secretsRetained": { "const": true } } }
     }

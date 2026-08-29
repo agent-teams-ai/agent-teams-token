@@ -51,6 +51,16 @@ test("publication rejects a valid but observation-inconsistent report", async ()
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
 
+test("publication independently rejects observations moved to a non-loopback RPC", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-rpc-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
+  try {
+    const store = new PrivateRunStore(join(boundary, "runs"), output);
+    const observations = observationFixture();
+    await assert.rejects(store.publish({ ...observations, rpcUrl: "http://192.0.2.1:8899/" }, verifyObservations(observations)), /SOLANA_RPC_NOT_EXACT_LOOPBACK/u);
+    await assert.rejects(lstat(output));
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
 test("post-mutation failure publication is sanitized and READY-last", async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-failure-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
   try {
@@ -58,7 +68,7 @@ test("post-mutation failure publication is sanitized and READY-last", async () =
     const published = await store.publishFailure({
       schemaVersion: 1, status: "FAILED", failedPhase: "burn",
       diagnosticCode: "SOLANA_CLI_FAILED", mutationsMayHaveOccurred: true,
-      cleanupCompleted: true, publicNetwork: false, realAssetCostUsd: 0,
+      cleanupCompleted: true, validatorStopped: true, portLeaseReleased: true, privateDirectoryRemoved: true, publicNetwork: false, realAssetCostUsd: 0,
       secretsRetained: false, productionApproved: false,
     });
     const directory = join(published.jsonPath, "..");
@@ -167,6 +177,35 @@ test("real parent SIGKILL reclaim authenticates, terminates and awaits its valid
     assert.equal(await new PrivateRunStore(runRoot, outputRoot).reclaimStale(), 1);
     assert.equal(processAlive(ready.validatorPid), false); assert.equal(processAlive(neighbour.pid!), true); await assert.rejects(lstat(ready.runDirectory));
   } finally { if (parent.exitCode === null) { parent.kill("SIGKILL"); } if (neighbour.exitCode === null) { neighbour.kill("SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("pre-registration SIGKILL cannot orphan an unregistered validator", { skip: process.platform !== "linux" ? "fault injector uses a Linux validator shim" : false }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-preregister-sigkill-")); await chmod(boundary, 0o700);
+  const runRoot = join(boundary, "runs"); const outputRoot = join(boundary, "out"); const readyPath = join(boundary, "spawned-before-registration.json");
+  const executable = join(boundary, "validator");
+  await writeFile(executable, "#!/bin/bash\nwhile :; do /bin/sleep 1; done\n", { mode: 0o700 });
+  const fixture = spawn(process.execPath, [join(import.meta.dirname, "helpers/start-unregistered-validator.ts"), runRoot, outputRoot, readyPath, executable], { stdio: ["ignore", "pipe", "pipe"] });
+  let diagnostics = ""; fixture.stdout.on("data", (chunk) => { diagnostics += String(chunk); }); fixture.stderr.on("data", (chunk) => { diagnostics += String(chunk); });
+  let validatorPid: number | undefined;
+  try {
+    let ready: { readonly validatorPid: number; readonly runDirectory: string } | undefined;
+    for (let attempt = 0; attempt < 200 && ready === undefined && fixture.exitCode === null; attempt += 1) {
+      try { ready = JSON.parse(await readFile(readyPath, "utf8")); } catch { await new Promise((resolve) => { setTimeout(resolve, 25); }); }
+    }
+    assert.ok(ready, `fixture did not enter the injected pre-registration window: ${diagnostics}`);
+    validatorPid = ready.validatorPid;
+    const lease = JSON.parse(await readFile(join(ready.runDirectory, ".agtmai-local-solana-lease.json"), "utf8"));
+    assert.equal(lease.validator, null, "fault must occur before durable validator registration");
+    fixture.kill("SIGKILL"); await new Promise<void>((resolve) => { fixture.once("close", () => { resolve(); }); });
+    for (let attempt = 0; attempt < 200 && processAlive(validatorPid); attempt += 1) { await new Promise((resolve) => { setTimeout(resolve, 25); }); }
+    assert.equal(processAlive(validatorPid), false, "supervisor must terminate the validator when the unacknowledged control channel closes");
+    assert.equal(await new PrivateRunStore(runRoot, outputRoot).reclaimStale(), 1);
+    await assert.rejects(lstat(ready.runDirectory));
+  } finally {
+    if (fixture.exitCode === null) { fixture.kill("SIGKILL"); }
+    if (validatorPid !== undefined && processAlive(validatorPid)) { process.kill(validatorPid, "SIGKILL"); }
+    await rm(boundary, { recursive: true, force: true });
+  }
 });
 
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }

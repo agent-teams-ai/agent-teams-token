@@ -41,6 +41,7 @@ export class PrivateRunStore implements RunStorePort {
     if (lease.token !== paths.leaseToken) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before cleanup"); }
     if (lease.validator !== null && processAlive(lease.validator.pid)) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
     await rm(paths.directory, { recursive: true, force: false, maxRetries: 2 });
+    if (await exists(paths.directory)) { throw new LocalSolanaError("SOLANA_CLEANUP_INCOMPLETE", "private run directory still exists after cleanup"); }
   }
   public async reclaimStale(): Promise<number> {
     const root = await ensurePrivateRoot(this.root);
@@ -190,15 +191,17 @@ async function exists(path: string): Promise<boolean> { try { await stat(path); 
 function markdown(report: EvidenceReport): string { return `# Local Solana SPL fixture evidence\n\n- Status: READY\n- Mint: ${report.mintAddress}\n- Program: ${report.programId}\n- Decimals: ${report.decimals}\n- Supply: ${report.initialSupply} -> ${report.intermediateSupply} -> ${report.finalSupply}\n- Freeze authority: None\n- Signed restore/freeze attempts: reached Token Program and failed\n- Public network: false\n- Real asset cost USD: 0\n- Mint authority revoked: false\n- Authority key retained: false\n- Remint possible until teardown: true\n- Production hard cap proven: false\n`; }
 function assertFailureEvidence(value: FailureEvidenceReport): void {
   const keys = Object.keys(value).toSorted().join(",");
-  const expected = "cleanupCompleted,diagnosticCode,failedPhase,mutationsMayHaveOccurred,productionApproved,publicNetwork,realAssetCostUsd,schemaVersion,secretsRetained,status";
+  const expected = "cleanupCompleted,diagnosticCode,failedPhase,mutationsMayHaveOccurred,portLeaseReleased,privateDirectoryRemoved,productionApproved,publicNetwork,realAssetCostUsd,schemaVersion,secretsRetained,status,validatorStopped";
   const valid = keys === expected && value.schemaVersion === 1 && value.status === "FAILED"
     && FAILURE_PHASES.includes(value.failedPhase) && /^[A-Z][A-Z0-9_]{2,95}$/u.test(value.diagnosticCode)
     && value.mutationsMayHaveOccurred === true && typeof value.cleanupCompleted === "boolean"
+    && typeof value.validatorStopped === "boolean" && typeof value.portLeaseReleased === "boolean" && typeof value.privateDirectoryRemoved === "boolean"
     && value.publicNetwork === false && value.realAssetCostUsd === 0
-    && value.secretsRetained === !value.cleanupCompleted && value.productionApproved === false;
+    && value.cleanupCompleted === (value.validatorStopped && value.portLeaseReleased && value.privateDirectoryRemoved)
+    && value.secretsRetained === !value.privateDirectoryRemoved && value.productionApproved === false;
   if (!valid) { throw new LocalSolanaError("SOLANA_FAILURE_EVIDENCE_SCHEMA", "failure evidence fields are invalid"); }
 }
-function failureMarkdown(report: FailureEvidenceReport): string { return `# Local Solana SPL fixture failure evidence\n\n- Status: FAILED\n- Failed phase: ${report.failedPhase}\n- Diagnostic: ${report.diagnosticCode}\n- Mutation may have occurred: true\n- Cleanup completed: ${report.cleanupCompleted}\n- Public network: false\n- Real asset cost USD: 0\n- Secrets retained: ${report.secretsRetained}\n- Production approved: false\n`; }
+function failureMarkdown(report: FailureEvidenceReport): string { return `# Local Solana SPL fixture failure evidence\n\n- Status: FAILED\n- Failed phase: ${report.failedPhase}\n- Diagnostic: ${report.diagnosticCode}\n- Mutation may have occurred: true\n- Cleanup completed: ${report.cleanupCompleted}\n- Validator stopped: ${report.validatorStopped}\n- Port lease released: ${report.portLeaseReleased}\n- Private directory removed: ${report.privateDirectoryRemoved}\n- Public network: false\n- Real asset cost USD: 0\n- Secrets retained: ${report.secretsRetained}\n- Production approved: false\n`; }
 function stableValue(value: unknown): string {
   if (Array.isArray(value)) { return `[${value.map(stableValue).join(",")}]`; }
   if (value !== null && typeof value === "object") {

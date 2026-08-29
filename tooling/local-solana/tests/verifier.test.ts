@@ -9,6 +9,14 @@ test("verifier reconstructs an exact seven-step mint/ATA/burn/authority lifecycl
   const report = verifyObservations(observationFixture());
   assert.equal(report.transactions.length, 7); assert.equal(report.transactions[2]?.operation, "createAta"); assert.equal(report.snapshots.finalTokenAccount.amount, "0");
   assert.equal(report.mintAddress, mintAddress); assert.equal(report.tokenAccountAddress, ata); assert.equal(report.formerFreezeAuthority, mintAddress);
+  assert.equal(report.assertions.exactLoopbackRpc, true);
+  assert.equal("rpcUrl" in report, false);
+});
+
+test("verifier binds observations to an exact loopback RPC without publishing its URL", () => {
+  for (const rpcUrl of ["http://127.0.0.2:8899/", "http://localhost:8899/", "https://127.0.0.1:8899/", "http://127.0.0.1:8899/path", "http://127.0.0.1:65536/"]) {
+    assert.throws(() => verifyObservations({ ...observationFixture(), rpcUrl }), /SOLANA_RPC_NOT_EXACT_LOOPBACK/u);
+  }
 });
 
 test("verifier rejects caller-style relabels, duplicate signatures and nonmonotonic slots", () => {

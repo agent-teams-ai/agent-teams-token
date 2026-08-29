@@ -51,8 +51,63 @@ test("a post-mutation exception publishes sanitized failure evidence after clean
   assert.deepEqual(failure, {
     schemaVersion: 1, status: "FAILED", failedPhase: "createMint",
     diagnosticCode: "SOLANA_INJECTED_FAILURE", mutationsMayHaveOccurred: true,
-    cleanupCompleted: true, publicNetwork: false, realAssetCostUsd: 0,
+    cleanupCompleted: true, validatorStopped: true, portLeaseReleased: true, privateDirectoryRemoved: true, publicNetwork: false, realAssetCostUsd: 0,
     secretsRetained: false, productionApproved: false,
   });
   assert.doesNotMatch(JSON.stringify(failure), /sensitive|\/tmp|key path/iu);
 });
+
+type CleanupTarget = "validator" | "port" | "directory";
+
+function cleanupFailureFixture(target: CleanupTarget): { readonly deps: FixtureDependencies; readonly attempts: Record<CleanupTarget, number>; failure: FailureEvidenceReport | undefined } {
+  const state: { attempts: Record<CleanupTarget, number>; failure: FailureEvidenceReport | undefined } = {
+    attempts: { validator: 0, port: 0, directory: 0 }, failure: undefined,
+  };
+  const fail = (resource: CleanupTarget): void => { state.attempts[resource] += 1; if (resource === target) { throw new Error(`raw ${resource} cleanup /private/key.json http://127.0.0.1:8899/`); } };
+  const deps = {
+    environment: {},
+    tools: { async resolve() { return { solana: "/tools/solana", keygen: "/tools/keygen", validator: "/tools/validator", splToken: "/tools/spl-token", tokenProgram: "/tools/token.so", associatedTokenProgram: "/tools/ata.so" }; } },
+    command: { run: unsupported },
+    validator: { async start() { return { pid: 123, async stop() { fail("validator"); } }; } },
+    rpc: {
+      async waitReady() { return { version: "test", genesisHash: "1".repeat(32) }; }, async waitProgramsReady() {},
+      genesisHash: unsupported, mintAccount: unsupported, tokenAccount: unsupported, tokenAccountAddress: unsupported,
+      finalizedTransaction: unsupported, sendSignedTransaction: unsupported, latestBlockhash: unsupported,
+    },
+    cli: {
+      async createKeys() { return { payer: "1".repeat(32), mint: "2".repeat(32), owner: "3".repeat(32) }; }, async verifyFunded() {},
+      async createMint() { throw new LocalSolanaError("SOLANA_INJECTED_FAILURE", "raw mutation failure /private/key.json"); },
+      revokeFreeze: unsupported, createTokenAccount: unsupported, associatedAddress: unsupported, mint: unsupported, burn: unsupported,
+    },
+    store: {
+      async reclaimStale() { return 0; },
+      async create() { return { directory: "/private/run", ledger: "/private/run/ledger", config: "/private/run/config", payerKey: "/private/run/payer", mintKey: "/private/run/mint", ownerKey: "/private/run/owner", leaseToken: "a".repeat(64) }; },
+      async registerValidator() {}, async cleanup() { fail("directory"); }, publish: unsupported,
+      async publishFailure(value: FailureEvidenceReport) {
+        assert.equal(state.attempts[target], 2, "failure evidence must follow final bounded cleanup attempt");
+        state.failure = value; return { jsonPath: "/evidence/failure.json", markdownPath: "/evidence/failure.md" };
+      },
+    },
+    ports: { async allocate() { return { rpcPort: 20_000, faucetPort: 20_002, gossipPort: 19_900, dynamicPortRange: "19900-19999", async release() { fail("port"); } }; } },
+    authorityTransactions: { restoreFreeze: unsupported, freezeAccount: unsupported },
+  } as unknown as FixtureDependencies;
+  return { deps, attempts: state.attempts, get failure() { return state.failure; } };
+}
+
+for (const target of ["validator", "port", "directory"] as const) {
+  test(`${target} cleanup failure is independently retried and reported truthfully`, async () => {
+    const fixture = cleanupFailureFixture(target);
+    await assert.rejects(runFixture(fixture.deps), /SOLANA_INJECTED_FAILURE/u);
+    assert.equal(fixture.attempts[target], 2);
+    const failure = fixture.failure; assert.ok(failure);
+    assert.equal(failure.validatorStopped, target !== "validator");
+    assert.equal(failure.portLeaseReleased, target !== "port");
+    assert.equal(failure.privateDirectoryRemoved, target !== "directory");
+    assert.equal(failure.cleanupCompleted, false);
+    assert.equal(failure.secretsRetained, target === "directory");
+    assert.doesNotMatch(JSON.stringify(failure), /\/private\/|http:\/\/|raw mutation|raw validator|raw port|raw directory/iu);
+    for (const resource of ["validator", "port", "directory"] as const) {
+      assert.equal(fixture.attempts[resource], resource === target ? 2 : 1);
+    }
+  });
+}
