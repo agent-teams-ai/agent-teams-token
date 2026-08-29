@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,7 +14,7 @@ import { main as estimateLocalMain } from "../../../scripts/deployment/estimate-
 const hash = `0x${"a".repeat(64)}` as const;
 const inputHash = sha256Hex(Buffer.from("0103", "hex"));
 const roots: TrustRoots = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   testOnly: true,
   productionApproved: false,
   mainnetAllowed: false,
@@ -298,10 +298,20 @@ test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substi
     /estimate changed/u,
   );
   assert.deepEqual((await readdir(directory)).toSorted(), [
-    "READY", "deployment-plan.v1.json", "fee-quote.v1.json",
+    "READY", "deployment-plan.v2.json", "fee-quote.v2.json",
   ]);
 
-  const planPath = join(directory, "deployment-plan.v1.json");
+  const legacyNames = await publishReadyLast({ ...publish, bundleName: "legacy-names" });
+  await rename(
+    join(legacyNames, "deployment-plan.v2.json"),
+    join(legacyNames, "deployment-plan.v1.json"),
+  );
+  await assert.rejects(
+    verifyBundle({ directory: legacyNames, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+    /exactly plan, quote, and READY/u,
+  );
+
+  const planPath = join(directory, "deployment-plan.v2.json");
   await writeFile(planPath, Buffer.concat([await readFile(planPath), Buffer.from(" ")]));
   await assert.rejects(
     verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
@@ -311,7 +321,7 @@ test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substi
   const fresh = await publishReadyLast({ ...publish, bundleName: "bundle2" });
   const other = join(parent, "other");
   await writeFile(other, "{}");
-  const quotePath = join(fresh, "fee-quote.v1.json");
+  const quotePath = join(fresh, "fee-quote.v2.json");
   await unlink(quotePath);
   await symlink(other, quotePath);
   await assert.rejects(
@@ -322,7 +332,7 @@ test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substi
 
 function readyFor(planId: `0x${string}`) {
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     planSha256: hash,
     quoteSha256: hash,
     planId,

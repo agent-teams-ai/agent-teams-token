@@ -4,8 +4,13 @@ This feature creates a deterministic stable plan and a separate volatile fee
 quote for an exact AGTMAIToken creation input on loopback Anvil (`31337`). All
 gas, fee and cap values are canonical decimal strings converted to `bigint`.
 
-The committed `trust-roots.v1.json` is test-only and explicitly disallows
+The committed `trust-roots.v2.json` is test-only and explicitly disallows
 mainnet and production approval. The builder cannot promote its own output.
+V2 is the first format whose canonical decimal fields are all required to fit
+`uint256`. Legacy V1 files remain only as migration fixtures: every V1 trust
+root, plan, quote, and READY marker fails closed with an instruction to
+regenerate the complete bundle. V2 also uses a distinct plan-ID domain and
+distinct artifact filenames, so V1 bytes cannot be relabelled or cross-swapped.
 It also pins independently generated hashes for the exact ABI constructor
 arguments and the complete creation input, so a coherent encoder defect cannot
 approve different constructor values.
@@ -39,10 +44,17 @@ Before rename the held staging directory is synchronised to durable storage;
 after rename its owned parent directory is synchronised as well. A failure at
 either durability boundary fails closed and is covered by injected-failure
 tests.
+If publication cannot durably sync the parent after rename, the target is
+rolled back before failure is returned, so no READY path can be accepted.
+Unpublished staging directories are reclaimed on close only while their held
+filesystem identity and each created leaf identity still match. Cleanup first
+quarantines those identities and never recursively removes a substituted or
+foreign tree; close reports those paths as rejected rather than hiding a failed
+reclamation.
 No bundle leaf is written after publication. The held staging identity and the
 exact bytes are checked again after rename, so check/open, rename, substitution,
 and ABA races cannot produce a bundle that publication reports as accepted.
-Bundles contain `deployment-plan.v1.json`, `fee-quote.v1.json`, then `READY`.
+Bundles contain `deployment-plan.v2.json`, `fee-quote.v2.json`, then `READY`.
 The independent verifier recomputes identity, fee math, cap and freshness and
 checks READY digests using no-follow file reads. The planner independently
 rereads the RPC facts before any output claim, applies the trusted-clock check
@@ -81,3 +93,6 @@ resulting artifact and build-info into the actual unsigned planner. Supplying
 only a subset is a configuration failure, not a skip. Anvil selects its owned
 listener atomically with `--port 0`; the test parses that exact loopback
 listener instead of probing and releasing a port before process startup.
+Both temporary trees are removed in the E2E `finally` path. Forge execution and
+Anvil shutdown have explicit deadlines; a child that ignores the bounded
+SIGTERM grace period is deterministically sent SIGKILL.

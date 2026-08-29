@@ -1,6 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import { lstat, mkdir, open, realpath, rename, type FileHandle } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  rmdir,
+  unlink,
+  type FileHandle,
+} from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fail } from "../domain/model.ts";
 
@@ -21,12 +31,15 @@ export interface ClaimedOutputDirectory {
 export interface OutputFaultInjection {
   readonly beforeStagingLeafOpen?: () => Promise<void>;
   readonly afterStagingLeafOpen?: () => Promise<void>;
+  readonly afterStagingDirectoryCreate?: () => Promise<void>;
   readonly beforeStagingDirectorySync?: () => Promise<void>;
   readonly afterStagingDirectorySync?: () => Promise<void>;
   readonly beforePublishRename?: () => Promise<void>;
   readonly afterPublishRename?: () => Promise<void>;
   readonly beforeParentDirectorySync?: () => Promise<void>;
   readonly afterParentDirectorySync?: () => Promise<void>;
+  /** Replaces the parent fsync operation for deterministic failure injection. */
+  readonly parentDirectorySync?: () => Promise<void>;
 }
 
 export async function claimOwnedOutputDirectory(
@@ -50,21 +63,27 @@ export async function claimOwnedOutputDirectory(
   assertSameIdentity(parentMetadata, parentIdentity, "OUTPUT_PARENT_SUBSTITUTED");
   const target = join(parent, bundleName);
   const staging = join(parent, `.${bundleName}.staging-${randomBytes(16).toString("hex")}`);
+  let stagingIdentity: DirectoryIdentity | undefined;
   try {
     await assertMissing(target);
     await mkdir(staging, { mode: 0o700 });
     const stagingMetadata = await lstat(staging);
     assertOwnedPrivateDirectory(stagingMetadata, "OUTPUT_TARGET_UNSAFE");
+    stagingIdentity = identity(stagingMetadata);
+    await faultInjection.afterStagingDirectoryCreate?.();
     const stagingHandle = await openDirectory(staging);
-    const stagingIdentity = identity(await stagingHandle.stat());
-    assertSameIdentity(stagingMetadata, stagingIdentity, "OUTPUT_TARGET_SUBSTITUTED");
+    const openedStagingIdentity = identity(await stagingHandle.stat());
+    assertSameIdentity(stagingMetadata, openedStagingIdentity, "OUTPUT_TARGET_SUBSTITUTED");
     const claimed = new LocalClaimedOutputDirectory({
       parent, parentHandle, parentIdentity, staging, stagingHandle,
-      stagingIdentity, target, faultInjection,
+      stagingIdentity: openedStagingIdentity, target, faultInjection,
     });
     await claimed.assertStagingStable();
     return claimed;
   } catch (error) {
+    if (stagingIdentity !== undefined) {
+      await removeEmptyOwnedDirectory(parent, staging, stagingIdentity).catch(() => {});
+    }
     await parentHandle.close().catch(() => {});
     throw error;
   }
@@ -79,6 +98,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   private readonly stagingIdentity: DirectoryIdentity;
   private readonly target: string;
   private readonly faultInjection: OutputFaultInjection;
+  private readonly leaves = new Map<string, DirectoryIdentity>();
   private published = false;
 
   constructor(input: {
@@ -118,6 +138,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     let fileIdentity: DirectoryIdentity;
     try {
       fileIdentity = identity(await file.stat());
+      this.leaves.set(name, fileIdentity);
       await this.faultInjection.afterStagingLeafOpen?.();
       await file.chmod(0o600);
       await file.writeFile(bytes);
@@ -151,17 +172,22 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     await this.faultInjection.afterStagingDirectorySync?.();
     await this.faultInjection.beforePublishRename?.();
     await rename(this.path, this.target);
-    this.published = true;
-    await this.faultInjection.afterPublishRename?.();
-    await this.assertParentStable();
-    await assertDirectoryIdentity(this.target, this.stagingIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-    assertSameIdentity(
-      await this.stagingHandle.stat(), this.stagingIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED",
-    );
-    await this.faultInjection.beforeParentDirectorySync?.();
-    await this.parentHandle.sync();
-    await this.faultInjection.afterParentDirectorySync?.();
-    return this.target;
+    try {
+      await this.faultInjection.afterPublishRename?.();
+      await this.assertParentStable();
+      await assertDirectoryIdentity(this.target, this.stagingIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+      assertSameIdentity(
+        await this.stagingHandle.stat(), this.stagingIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED",
+      );
+      await this.faultInjection.beforeParentDirectorySync?.();
+      await (this.faultInjection.parentDirectorySync?.() ?? this.parentHandle.sync());
+      await this.faultInjection.afterParentDirectorySync?.();
+      this.published = true;
+      return this.target;
+    } catch (error) {
+      await this.rollbackUndurablePublication().catch(() => {});
+      throw error;
+    }
   }
 
   async assertStagingStable(): Promise<void> {
@@ -186,8 +212,97 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled([this.stagingHandle.close(), this.parentHandle.close()]);
+    let cleanupError: unknown;
+    try {
+      if (!this.published) {
+        await this.cleanupStaging();
+      }
+    } catch (error) {
+      cleanupError = error;
+    }
+    const closed = await Promise.allSettled([this.stagingHandle.close(), this.parentHandle.close()]);
+    if (cleanupError !== undefined) {
+      throw cleanupError;
+    }
+    const closeFailure = closed.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (closeFailure !== undefined) {
+      throw closeFailure.reason;
+    }
   }
+
+  private async rollbackUndurablePublication(): Promise<void> {
+    await this.assertParentStable();
+    await assertDirectoryIdentity(this.target, this.stagingIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+    await assertMissing(this.path);
+    await rename(this.target, this.path);
+    await this.parentHandle.sync().catch(() => {});
+  }
+
+  private async cleanupStaging(): Promise<void> {
+    await this.assertStagingStable();
+    await this.assertCleanupLeaves(this.path);
+    const quarantine = join(
+      this.parent,
+      `.${randomBytes(16).toString("hex")}.cleanup`,
+    );
+    await rename(this.path, quarantine);
+    await assertDirectoryIdentity(
+      quarantine,
+      this.stagingIdentity,
+      "OUTPUT_CLEANUP_SUBSTITUTED",
+    );
+    await this.assertCleanupLeaves(quarantine);
+    for (const [name, expected] of this.leaves) {
+      const leaf = join(quarantine, name);
+      const quarantinedLeaf = join(
+        quarantine,
+        `.${randomBytes(16).toString("hex")}.cleanup-leaf`,
+      );
+      const metadata = await lstat(leaf);
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
+        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted");
+      }
+      assertSameIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+      await rename(leaf, quarantinedLeaf);
+      const moved = await lstat(quarantinedLeaf);
+      assertSameIdentity(moved, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+      await unlink(quarantinedLeaf);
+    }
+    await rmdir(quarantine);
+    await this.parentHandle.sync();
+  }
+
+  private async assertCleanupLeaves(directory: string): Promise<void> {
+    const names = (await readdir(directory)).toSorted();
+    const expectedNames = [...this.leaves.keys()].toSorted();
+    if (
+      names.length !== expectedNames.length
+      || names.some((name, index) => name !== expectedNames[index])
+    ) {
+      fail("OUTPUT_CLEANUP_FOREIGN_ENTRY", "cleanup directory contains a foreign entry");
+    }
+    for (const [name, expected] of this.leaves) {
+      const metadata = await lstat(join(directory, name));
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
+        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted");
+      }
+      assertSameIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+    }
+  }
+}
+
+async function removeEmptyOwnedDirectory(
+  parent: string,
+  staging: string,
+  expected: DirectoryIdentity,
+): Promise<void> {
+  const quarantine = join(parent, `.${randomBytes(16).toString("hex")}.cleanup`);
+  await assertDirectoryIdentity(staging, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+  await rename(staging, quarantine);
+  await assertDirectoryIdentity(quarantine, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+  await rmdir(quarantine);
 }
 
 async function assertDirectoryIdentity(

@@ -66,7 +66,7 @@ const inputs = {
   constructorValues: fixture,
 };
 const roots: TrustRoots = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   testOnly: true,
   productionApproved: false,
   mainnetAllowed: false,

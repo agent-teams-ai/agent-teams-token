@@ -26,8 +26,8 @@ import {
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
 
-const PLAN = "deployment-plan.v1.json";
-const QUOTE = "fee-quote.v1.json";
+const PLAN = "deployment-plan.v2.json";
+const QUOTE = "fee-quote.v2.json";
 const READY = "READY";
 
 export interface PublishRequest {
@@ -69,7 +69,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
   const planBytes = jsonBytes(request.plan);
   const quoteBytes = jsonBytes(request.quote);
   const ready: ReadyMarker = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     planSha256: sha256Hex(planBytes),
     quoteSha256: sha256Hex(quoteBytes),
     planId: request.plan.planId,

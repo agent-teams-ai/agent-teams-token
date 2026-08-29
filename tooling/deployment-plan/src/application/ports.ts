@@ -18,7 +18,7 @@ export interface ArtifactInputs {
 }
 
 export interface TrustRoots {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly testOnly: true;
   readonly productionApproved: false;
   readonly mainnetAllowed: false;

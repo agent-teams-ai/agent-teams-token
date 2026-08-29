@@ -9,7 +9,7 @@ import { validateTrustRootSafety, type FeeQuote, type StablePlan } from "./build
 import type { ApprovedArtifact, DeploymentRpc, TrustRoots } from "./ports.ts";
 
 export interface ReadyMarker {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly planSha256: string;
   readonly quoteSha256: string;
   readonly planId: string;
@@ -91,7 +91,7 @@ export async function independentlyVerifyRpc(request: RpcVerificationRequest): P
 
 function validatePlanSafety(plan: StablePlan): void {
   if (
-    plan.schemaVersion !== 1
+    plan.schemaVersion !== 2
     || plan.kind !== "deployment-plan"
     || plan.broadcastAllowed !== false
     || !plan.testOnly

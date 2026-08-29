@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, readdir, realpath } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import test from "node:test";
@@ -12,17 +12,24 @@ const solcBinary = process.env.AGTMAI_SOLC_BINARY;
 const anyE2eConfiguration = [anvilBinary, forgeBinary, solcBinary].some(
   (value) => value !== undefined,
 );
+const noOperation = (): void => {};
 
 test(
   "real loopback Anvil estimates freshly built exact AGTMAIToken initcode within tolerance",
   { skip: !anyE2eConfiguration, timeout: 30_000 },
   async () => {
     const binaries = requireCompleteConfiguration();
-    const build = await freshForgeBuild(binaries.forge, binaries.solc);
-    const { child, rpcUrl } = await startAnvil(binaries.anvil);
+    let build: FreshBuild | undefined;
+    let child: ChildProcess | undefined;
+    let outputParent: string | undefined;
+    let testFailure: unknown;
     try {
+      build = await freshForgeBuild(binaries.forge, binaries.solc);
+      const started = await startAnvil(binaries.anvil);
+      child = started.child;
+      const { rpcUrl } = started;
       await waitUntilReady(rpcUrl);
-      const outputParent = await realpath(
+      outputParent = await realpath(
         await mkdtemp(join(tmpdir(), "deployment-plan-anvil-")),
       );
       const result = await runUnsignedPlanner({
@@ -31,14 +38,14 @@ test(
         artifactPath: build.artifactPath,
         abiPath: resolvePath("contracts/evm/abi/AGTMAIToken.abi.json"),
         fixturePath: resolvePath("contracts/evm/evidence/shared-test-vector.json"),
-        trustRootsPath: resolvePath("tooling/deployment-plan/trust-roots.v1.json"),
+        trustRootsPath: resolvePath("tooling/deployment-plan/trust-roots.v2.json"),
         outputParent,
         bundleName: "estimate",
         maxPriorityFeePerGas: 1_000_000_000n,
         maxFeePerGas: 3_000_000_000n,
       });
       const plan = JSON.parse(
-        await readFile(join(result.directory, "deployment-plan.v1.json"), "utf8"),
+        await readFile(join(result.directory, "deployment-plan.v2.json"), "utf8"),
       ) as { planId: string; identity: {
         buildInfoSolcVersion: string;
         creationInputHash: string;
@@ -46,7 +53,7 @@ test(
         expectedCreateAddress: string;
       } };
       const quote = JSON.parse(
-        await readFile(join(result.directory, "fee-quote.v1.json"), "utf8"),
+        await readFile(join(result.directory, "fee-quote.v2.json"), "utf8"),
       ) as { creationInputHash: string; observation: { gasEstimate: string } };
       assert.equal(plan.identity.buildInfoSolcVersion, "0.8.36");
       assert.equal(plan.identity.senderNonce, "0");
@@ -63,14 +70,14 @@ test(
         artifactPath: build.artifactPath,
         abiPath: resolvePath("contracts/evm/abi/AGTMAIToken.abi.json"),
         fixturePath: resolvePath("contracts/evm/evidence/shared-test-vector.json"),
-        trustRootsPath: resolvePath("tooling/deployment-plan/trust-roots.v1.json"),
+        trustRootsPath: resolvePath("tooling/deployment-plan/trust-roots.v2.json"),
         outputParent,
         bundleName: "estimate-nonce-one",
         maxPriorityFeePerGas: 1_000_000_000n,
         maxFeePerGas: 3_000_000_000n,
       });
       const nonceOnePlan = JSON.parse(
-        await readFile(join(nonceOneResult.directory, "deployment-plan.v1.json"), "utf8"),
+        await readFile(join(nonceOneResult.directory, "deployment-plan.v2.json"), "utf8"),
       ) as { planId: string; identity: { senderNonce: string; expectedCreateAddress: string } };
       assert.equal(nonceOnePlan.identity.senderNonce, "1");
       assert.equal(
@@ -78,8 +85,29 @@ test(
         "0x535b3d7a252fa034ed71f0c53ec0c6f784cb64e1",
       );
       assert.notEqual(nonceOnePlan.planId, plan.planId);
-    } finally {
-      await stop(child);
+    } catch (error) {
+      testFailure = error;
+    }
+    const cleanup = await Promise.allSettled([
+      child === undefined ? Promise.resolve() : stop(child),
+      outputParent === undefined
+        ? Promise.resolve()
+        : rm(outputParent, { recursive: true, force: true }),
+      build === undefined
+        ? Promise.resolve()
+        : rm(build.directory, { recursive: true, force: true }),
+    ]);
+    const cleanupFailure = cleanup.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (testFailure !== undefined && cleanupFailure !== undefined) {
+      throw new AggregateError([testFailure, cleanupFailure.reason], "E2E and cleanup failed");
+    }
+    if (testFailure !== undefined) {
+      throw testFailure;
+    }
+    if (cleanupFailure !== undefined) {
+      throw cleanupFailure.reason;
     }
   },
 );
@@ -91,6 +119,7 @@ interface E2eBinaries {
 }
 
 interface FreshBuild {
+  readonly directory: string;
   readonly artifactPath: string;
   readonly buildInfoPath: string;
 }
@@ -108,35 +137,46 @@ async function freshForgeBuild(forge: string, solc: string): Promise<FreshBuild>
   const output = join(directory, "out");
   const cache = join(directory, "cache");
   const buildInfo = join(directory, "build-info");
-  await runProcess(forge, [
-    "build",
-    "--root",
-    resolvePath("contracts/evm"),
-    "--use",
-    resolvePath(solc),
-    "--out",
-    output,
-    "--cache-path",
-    cache,
-    "--build-info",
-    "--build-info-path",
-    buildInfo,
-    "--no-lint",
-    "src/features/token-genesis/AGTMAIToken.sol",
-  ]);
-  const buildInfoFiles = (await readdir(buildInfo)).filter((name) => name.endsWith(".json"));
-  assert.equal(
-    buildInfoFiles.length,
-    1,
-    `fresh Forge build produced ${buildInfoFiles.length} build-info files instead of one`,
-  );
-  return {
-    artifactPath: join(output, "AGTMAIToken.sol", "AGTMAIToken.json"),
-    buildInfoPath: join(buildInfo, buildInfoFiles[0] as string),
-  };
+  try {
+    await runProcess(forge, [
+      "build",
+      "--root",
+      resolvePath("contracts/evm"),
+      "--use",
+      resolvePath(solc),
+      "--out",
+      output,
+      "--cache-path",
+      cache,
+      "--build-info",
+      "--build-info-path",
+      buildInfo,
+      "--no-lint",
+      "src/features/token-genesis/AGTMAIToken.sol",
+    ]);
+    const buildInfoFiles = (await readdir(buildInfo)).filter((name) => name.endsWith(".json"));
+    assert.equal(
+      buildInfoFiles.length,
+      1,
+      `fresh Forge build produced ${buildInfoFiles.length} build-info files instead of one`,
+    );
+    return {
+      directory,
+      artifactPath: join(output, "AGTMAIToken.sol", "AGTMAIToken.json"),
+      buildInfoPath: join(buildInfo, buildInfoFiles[0] as string),
+    };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
-async function runProcess(binary: string, arguments_: string[]): Promise<void> {
+async function runProcess(
+  binary: string,
+  arguments_: string[],
+  timeoutMs = 15_000,
+  shutdownGraceMs = 1_000,
+): Promise<void> {
   const child = spawn(binary, arguments_, {
     stdio: ["ignore", "ignore", "pipe"],
     env: {},
@@ -148,8 +188,26 @@ async function runProcess(binary: string, arguments_: string[]): Promise<void> {
   });
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
     (resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code, signal) => resolve({ code, signal }));
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        stop(child, shutdownGraceMs)
+          .then((escalated) => reject(new Error(
+            `process timed out after ${timeoutMs}ms${escalated ? " and escalated to SIGKILL" : ""}`,
+          )), reject);
+      }, timeoutMs);
+      child.once("error", (error) => {
+        clearTimeout(timeout);
+        if (!timedOut) {
+          reject(error);
+        }
+      });
+      child.once("exit", (code, signal) => {
+        clearTimeout(timeout);
+        if (!timedOut) {
+          resolve({ code, signal });
+        }
+      });
     },
   );
   assert.equal(
@@ -242,12 +300,63 @@ async function testOnlyRpc(url: string, method: string, params: readonly unknown
   assert.equal(body.error, undefined, `test-only Anvil RPC ${method} failed`);
 }
 
-async function stop(child: ChildProcess): Promise<void> {
+async function stop(
+  child: ChildProcess,
+  graceMs = 1_000,
+  killWaitMs = 1_000,
+): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) {
-    return;
+    return false;
   }
   child.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
-  });
+  if (await waitForExit(child, graceMs)) {
+    return false;
+  }
+  child.kill("SIGKILL");
+  if (!await waitForExit(child, killWaitMs)) {
+    throw new Error("child did not exit after SIGKILL");
+  }
+  return true;
 }
+
+async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true;
+  }
+  let onExit: () => void = noOperation;
+  const exited = new Promise<boolean>((resolve) => {
+    onExit = () => resolve(true);
+    child.once("exit", onExit);
+  });
+  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Promise<boolean>((resolve) => {
+    timeout = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const result = await Promise.race([exited, deadline]);
+  clearTimeout(timeout);
+  child.removeListener("exit", onExit);
+  return result;
+}
+
+test("bounded shutdown escalates a SIGTERM-resistant child to SIGKILL", async () => {
+  const child = spawn(process.execPath, [
+    "-e",
+    "process.on('SIGTERM',()=>{});process.stdout.write('ready\\n');setInterval(()=>{},1000)",
+  ], { stdio: ["ignore", "pipe", "ignore"], env: {} });
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.stdout?.once("data", () => resolve());
+  });
+  assert.equal(await stop(child, 50), true);
+  assert.equal(child.signalCode, "SIGKILL");
+});
+
+test("process execution timeout is bounded", async () => {
+  await assert.rejects(
+    runProcess(process.execPath, [
+      "-e",
+      "setInterval(()=>{},1000)",
+    ], 100, 50),
+    /timed out/u,
+  );
+});

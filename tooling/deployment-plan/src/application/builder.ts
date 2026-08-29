@@ -9,7 +9,7 @@ import {
 } from "../domain/model.ts";
 
 export interface StablePlan {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly kind: "deployment-plan";
   readonly planId: `0x${string}`;
   readonly identity: Record<string, unknown>;
@@ -37,7 +37,7 @@ export interface QuoteObservation {
 }
 
 export interface FeeQuote {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly kind: "fee-quote";
   readonly planId: `0x${string}`;
   readonly creationInputHash: string;
@@ -106,7 +106,7 @@ export function buildStablePlan(
     broadcastAllowed: false,
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "deployment-plan",
     planId: computePlanId(identity),
     identity,
@@ -141,7 +141,7 @@ export function buildFeeQuote(
     maximumWorstCaseWei: parseUint(roots.maximumWorstCaseWei, "maximumWorstCaseWei"),
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "fee-quote",
     planId: plan.planId,
     creationInputHash: String(plan.identity.creationInputHash),
@@ -157,7 +157,7 @@ export function buildFeeQuote(
 
 export function validateTrustRootSafety(roots: TrustRoots): void {
   if (
-    roots.schemaVersion !== 1
+    roots.schemaVersion !== 2
     ||
     roots.chainId !== LOCAL_CHAIN_ID
     || !roots.testOnly

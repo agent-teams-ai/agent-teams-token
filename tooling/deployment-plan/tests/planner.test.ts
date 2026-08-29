@@ -64,7 +64,7 @@ const abiBytes = json(abi);
 const fixtureBytes = json(fixture);
 const hash = `0x${"a".repeat(64)}`;
 const roots: TrustRoots = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   testOnly: true,
   productionApproved: false,
   mainnetAllowed: false,

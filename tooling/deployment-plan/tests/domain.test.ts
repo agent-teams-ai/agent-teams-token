@@ -7,7 +7,7 @@ import { calculateCosts, ceilDiv, UINT256_MAX, type CostInput } from "../src/dom
 
 const hash = `0x${"1".repeat(64)}` as const;
 const roots: TrustRoots = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   testOnly: true,
   productionApproved: false,
   mainnetAllowed: false,
@@ -134,7 +134,7 @@ test("malformed fee relations and overflow fail closed", () => {
 
 test("gas estimate changes quote but not stable plan identity", () => {
   const plan = buildStablePlan(artifact, roots, observation);
-  assert.equal(plan.planId, "0xd89550765c467336db2e06951bc6bccd807d0fb436fb83d49a39f49a905f6733");
+  assert.equal(plan.planId, "0xb052b1aeb47c808ebb482e5c3ee1841c6eaf71a6ec85dec0e7232badff9850ed");
   const first = buildFeeQuote(plan, observation, roots);
   const second = buildFeeQuote(plan, { ...observation, gasEstimate: "1000001" }, roots);
   assert.equal(first.planId, second.planId);

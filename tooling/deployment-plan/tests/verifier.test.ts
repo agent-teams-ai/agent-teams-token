@@ -20,7 +20,7 @@ const otherHash = `0x${"b".repeat(64)}` as const;
 const creationInput = "0x0103" as const;
 const creationInputHash = sha256Hex(Buffer.from(creationInput.slice(2), "hex"));
 const roots: TrustRoots = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   testOnly: true,
   productionApproved: false,
   mainnetAllowed: false,
@@ -188,7 +188,7 @@ function withObservation(
 
 function readyFor(planId: `0x${string}`) {
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     planSha256: hash,
     quoteSha256: hash,
     planId,

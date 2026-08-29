@@ -1,7 +1,7 @@
 import type { FeeQuote, StablePlan } from "../application/builder.ts";
 import type { TrustRoots } from "../application/ports.ts";
 import type { ReadyMarker } from "../application/verifier.ts";
-import { fail } from "../domain/model.ts";
+import { fail, parseUint } from "../domain/model.ts";
 
 const HASH = /^0x[0-9a-f]{64}$/u;
 const ADDRESS = /^0x[0-9a-f]{40}$/u;
@@ -47,9 +47,10 @@ const READY_KEYS = [
 
 export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
   const root = object(parseJsonWithoutDuplicates(bytes), "TRUST_ROOTS_SCHEMA");
+  requireV2(root, "TRUST_ROOTS_SCHEMA");
   exactKeys(root, ROOT_KEYS, "TRUST_ROOTS_SCHEMA");
   constants(root, {
-    schemaVersion: 1, testOnly: true, productionApproved: false,
+    schemaVersion: 2, testOnly: true, productionApproved: false,
     mainnetAllowed: false, chainId: "31337",
   }, "TRUST_ROOTS_SCHEMA");
   strings(root, ["contractFqn", "buildProfile", "buildInfoSolcVersion"]);
@@ -63,9 +64,10 @@ export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
 
 export function parseStablePlan(bytes: Uint8Array): StablePlan {
   const plan = object(parseJsonWithoutDuplicates(bytes), "PLAN_SCHEMA");
+  requireV2(plan, "PLAN_SCHEMA");
   exactKeys(plan, PLAN_KEYS, "PLAN_SCHEMA");
   constants(plan, {
-    schemaVersion: 1, kind: "deployment-plan", broadcastAllowed: false,
+    schemaVersion: 2, kind: "deployment-plan", broadcastAllowed: false,
     testOnly: true, productionApproved: false, mainnetAllowed: false,
   }, "PLAN_SCHEMA");
   match(plan.planId, HASH, "PLAN_SCHEMA", "planId");
@@ -87,7 +89,7 @@ export function parseStablePlan(bytes: Uint8Array): StablePlan {
   hashMap(identity.sourceDependencyClosure, "PLAN_IDENTITY_SCHEMA");
   const cap = object(identity.capPolicy, "PLAN_CAP_SCHEMA");
   exactKeys(cap, ["maximumWorstCaseWei", "testOnly"], "PLAN_CAP_SCHEMA");
-  match(cap.maximumWorstCaseWei, DECIMAL, "PLAN_CAP_SCHEMA", "maximumWorstCaseWei");
+  decimal(cap.maximumWorstCaseWei, "PLAN_CAP_SCHEMA", "maximumWorstCaseWei");
   if (cap.testOnly !== true) {
     fail("PLAN_CAP_SCHEMA", "cap testOnly must be true");
   }
@@ -96,8 +98,9 @@ export function parseStablePlan(bytes: Uint8Array): StablePlan {
 
 export function parseFeeQuote(bytes: Uint8Array): FeeQuote {
   const quote = object(parseJsonWithoutDuplicates(bytes), "QUOTE_SCHEMA");
+  requireV2(quote, "QUOTE_SCHEMA");
   exactKeys(quote, QUOTE_KEYS, "QUOTE_SCHEMA");
-  constants(quote, { schemaVersion: 1, kind: "fee-quote" }, "QUOTE_SCHEMA");
+  constants(quote, { schemaVersion: 2, kind: "fee-quote" }, "QUOTE_SCHEMA");
   hashes(quote, ["planId", "creationInputHash"]);
   decimals(quote, ["bufferBps", "gasLimit", "effectiveFeePerGas", "estimatedWei", "worstCaseWei", "expiresAt"]);
   const observation = object(quote.observation, "QUOTE_OBSERVATION_SCHEMA");
@@ -109,8 +112,9 @@ export function parseFeeQuote(bytes: Uint8Array): FeeQuote {
 
 export function parseReadyMarker(bytes: Uint8Array): ReadyMarker {
   const ready = object(parseJsonWithoutDuplicates(bytes), "READY_SCHEMA");
+  requireV2(ready, "READY_SCHEMA");
   exactKeys(ready, READY_KEYS, "READY_SCHEMA");
-  constants(ready, { schemaVersion: 1 }, "READY_SCHEMA");
+  constants(ready, { schemaVersion: 2 }, "READY_SCHEMA");
   hashes(ready, ["planSha256", "quoteSha256", "planId", "creationInputHash"]);
   return ready as unknown as ReadyMarker;
 }
@@ -270,6 +274,11 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
     fail(code, "object has missing or unknown members");
   }
 }
+function requireV2(value: Record<string, unknown>, code: string): void {
+  if (value.schemaVersion === 1) {
+    fail("V1_UNSUPPORTED", `${code} V1 uses legacy numeric semantics; regenerate as V2`);
+  }
+}
 function constants(value: Record<string, unknown>, expected: Record<string, unknown>, code: string): void {
   for (const [key, wanted] of Object.entries(expected)) {
     if (value[key] !== wanted) {
@@ -296,8 +305,14 @@ function hashes(value: Record<string, unknown>, keys: readonly string[]): void {
 }
 function decimals(value: Record<string, unknown>, keys: readonly string[]): void {
   for (const key of keys) {
-    match(value[key], DECIMAL, "SCHEMA_INVALID", key);
+    decimal(value[key], "SCHEMA_INVALID", key);
   }
+}
+function decimal(value: unknown, code: string, field: string): void {
+  if (typeof value !== "string" || !DECIMAL.test(value)) {
+    fail(code, `${field} is malformed`);
+  }
+  parseUint(value, field);
 }
 function hashMap(value: unknown, code: string): void {
   const map = object(value, code);

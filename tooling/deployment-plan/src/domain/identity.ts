@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { fail } from "./model.ts";
-export const PLAN_ID_DOMAIN = "AGTMAI_UNSIGNED_DEPLOYMENT_PLAN_V1";
+export const PLAN_ID_DOMAIN = "AGTMAI_UNSIGNED_DEPLOYMENT_PLAN_V2";
 
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "string") {
