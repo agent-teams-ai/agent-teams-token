@@ -73,13 +73,17 @@ export function parseStablePlan(bytes: Uint8Array): StablePlan {
   match(identity.constructorAbiBytes, HEX, "PLAN_IDENTITY_SCHEMA", "constructorAbiBytes");
   match(identity.constructorArguments, HEX, "PLAN_IDENTITY_SCHEMA", "constructorArguments");
   match(identity.from, ADDRESS, "PLAN_IDENTITY_SCHEMA", "from");
-  if (identity.broadcastAllowed !== false) fail("PLAN_IDENTITY_SCHEMA", "identity broadcastAllowed must be false");
+  if (identity.broadcastAllowed !== false) {
+    fail("PLAN_IDENTITY_SCHEMA", "identity broadcastAllowed must be false");
+  }
   object(identity.compilerSettings, "PLAN_IDENTITY_SCHEMA");
   hashMap(identity.sourceDependencyClosure, "PLAN_IDENTITY_SCHEMA");
   const cap = object(identity.capPolicy, "PLAN_CAP_SCHEMA");
   exactKeys(cap, ["maximumWorstCaseWei", "testOnly"], "PLAN_CAP_SCHEMA");
   match(cap.maximumWorstCaseWei, DECIMAL, "PLAN_CAP_SCHEMA", "maximumWorstCaseWei");
-  if (cap.testOnly !== true) fail("PLAN_CAP_SCHEMA", "cap testOnly must be true");
+  if (cap.testOnly !== true) {
+    fail("PLAN_CAP_SCHEMA", "cap testOnly must be true");
+  }
   return plan as unknown as StablePlan;
 }
 
@@ -125,16 +129,24 @@ class Parser {
   parse(): unknown {
     const result = this.value();
     this.space();
-    if (this.index !== this.source.length) this.invalid();
+    if (this.index !== this.source.length) {
+      this.invalid();
+    }
     return result;
   }
 
   private value(): unknown {
     this.space();
     const character = this.source[this.index];
-    if (character === "{") return this.object();
-    if (character === "[") return this.array();
-    if (character === '"') return this.string();
+    if (character === "{") {
+      return this.object();
+    }
+    if (character === "[") {
+      return this.array();
+    }
+    if (character === '"') {
+      return this.string();
+    }
     for (const [token, value] of [["true", true], ["false", false], ["null", null]] as const) {
       if (this.source.startsWith(token, this.index)) {
         this.index += token.length;
@@ -145,7 +157,9 @@ class Parser {
     if (number) {
       this.index += number[0].length;
       const parsed = Number(number[0]);
-      if (!Number.isFinite(parsed)) this.invalid();
+      if (!Number.isFinite(parsed)) {
+        this.invalid();
+      }
       return parsed;
     }
     return this.invalid();
@@ -156,19 +170,31 @@ class Parser {
     const result: Record<string, unknown> = {};
     const keys = new Set<string>();
     this.space();
-    if (this.take("}")) return result;
+    if (this.take("}")) {
+      return result;
+    }
     while (true) {
       this.space();
-      if (this.source[this.index] !== '"') this.invalid();
+      if (this.source[this.index] !== '"') {
+        this.invalid();
+      }
       const key = this.string();
-      if (keys.has(key)) fail("JSON_DUPLICATE_KEY", `duplicate JSON member: ${key}`);
+      if (keys.has(key)) {
+        fail("JSON_DUPLICATE_KEY", `duplicate JSON member: ${key}`);
+      }
       keys.add(key);
       this.space();
-      if (!this.take(":")) this.invalid();
+      if (!this.take(":")) {
+        this.invalid();
+      }
       result[key] = this.value();
       this.space();
-      if (this.take("}")) return result;
-      if (!this.take(",")) this.invalid();
+      if (this.take("}")) {
+        return result;
+      }
+      if (!this.take(",")) {
+        this.invalid();
+      }
     }
   }
 
@@ -176,12 +202,18 @@ class Parser {
     this.index += 1;
     const result: unknown[] = [];
     this.space();
-    if (this.take("]")) return result;
+    if (this.take("]")) {
+      return result;
+    }
     while (true) {
       result.push(this.value());
       this.space();
-      if (this.take("]")) return result;
-      if (!this.take(",")) this.invalid();
+      if (this.take("]")) {
+        return result;
+      }
+      if (!this.take(",")) {
+        this.invalid();
+      }
     }
   }
 
@@ -194,15 +226,24 @@ class Parser {
         try { return JSON.parse(this.source.slice(start, this.index)) as string; }
         catch { return this.invalid(); }
       }
-      if (character === "\\") this.index += 1;
-      else if (character.charCodeAt(0) < 0x20) this.invalid();
+      if (character === "\\") {
+        this.index += 1;
+      } else if (character.charCodeAt(0) < 0x20) {
+        this.invalid();
+      }
     }
     return this.invalid();
   }
 
-  private space(): void { while (/\s/u.test(this.source[this.index] ?? "")) this.index += 1; }
+  private space(): void {
+    while (/\s/u.test(this.source[this.index] ?? "")) {
+      this.index += 1;
+    }
+  }
   private take(character: string): boolean {
-    if (this.source[this.index] !== character) return false;
+    if (this.source[this.index] !== character) {
+      return false;
+    }
     this.index += 1;
     return true;
   }
@@ -210,7 +251,9 @@ class Parser {
 }
 
 function object(value: unknown, code: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(code, "expected object");
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail(code, "expected object");
+  }
   return value as Record<string, unknown>;
 }
 function exactKeys(value: Record<string, unknown>, expected: readonly string[], code: string): void {
@@ -221,24 +264,40 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   }
 }
 function constants(value: Record<string, unknown>, expected: Record<string, unknown>, code: string): void {
-  for (const [key, wanted] of Object.entries(expected)) if (value[key] !== wanted) fail(code, `${key} is invalid`);
+  for (const [key, wanted] of Object.entries(expected)) {
+    if (value[key] !== wanted) {
+      fail(code, `${key} is invalid`);
+    }
+  }
 }
 function strings(value: Record<string, unknown>, keys: readonly string[]): void {
-  for (const key of keys) if (typeof value[key] !== "string" || value[key].length === 0) fail("SCHEMA_INVALID", `${key} must be a nonempty string`);
+  for (const key of keys) {
+    if (typeof value[key] !== "string" || value[key].length === 0) {
+      fail("SCHEMA_INVALID", `${key} must be a nonempty string`);
+    }
+  }
 }
 function match(value: unknown, pattern: RegExp, code: string, field: string): void {
-  if (typeof value !== "string" || !pattern.test(value)) fail(code, `${field} is malformed`);
+  if (typeof value !== "string" || !pattern.test(value)) {
+    fail(code, `${field} is malformed`);
+  }
 }
 function hashes(value: Record<string, unknown>, keys: readonly string[]): void {
-  for (const key of keys) match(value[key], HASH, "SCHEMA_INVALID", key);
+  for (const key of keys) {
+    match(value[key], HASH, "SCHEMA_INVALID", key);
+  }
 }
 function decimals(value: Record<string, unknown>, keys: readonly string[]): void {
-  for (const key of keys) match(value[key], DECIMAL, "SCHEMA_INVALID", key);
+  for (const key of keys) {
+    match(value[key], DECIMAL, "SCHEMA_INVALID", key);
+  }
 }
 function hashMap(value: unknown, code: string): void {
   const map = object(value, code);
   for (const [key, digest] of Object.entries(map)) {
-    if (key.length === 0) fail(code, "empty source path");
+    if (key.length === 0) {
+      fail(code, "empty source path");
+    }
     match(digest, HASH, code, key);
   }
 }

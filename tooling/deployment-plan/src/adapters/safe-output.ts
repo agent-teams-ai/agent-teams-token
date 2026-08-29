@@ -98,7 +98,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   }
 
   async writeExclusive(name: string, bytes: Uint8Array): Promise<void> {
-    if (this.published) fail("OUTPUT_ALREADY_PUBLISHED", "bundle is already published");
+    if (this.published) {
+      fail("OUTPUT_ALREADY_PUBLISHED", "bundle is already published");
+    }
     if (!/^[a-zA-Z0-9._-]+$/u.test(name)) {
       fail("OUTPUT_FILE_NAME_INVALID", "output file name is invalid");
     }
@@ -135,7 +137,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   }
 
   async publish(): Promise<string> {
-    if (this.published) fail("OUTPUT_ALREADY_PUBLISHED", "bundle is already published");
+    if (this.published) {
+      fail("OUTPUT_ALREADY_PUBLISHED", "bundle is already published");
+    }
     await this.assertStagingStable();
     await assertMissing(this.target);
     await this.faultInjection.beforePublishRename?.();
@@ -185,7 +189,9 @@ async function assertDirectoryIdentity(
   const metadata = await lstat(path);
   assertOwnedPrivateDirectory(metadata, code);
   assertSameIdentity(metadata, expected, code);
-  if (await realpath(path) !== path) fail(code, "output directory path changed");
+  if (await realpath(path) !== path) {
+    fail(code, "output directory path changed");
+  }
 }
 
 function assertNormalizedAbsolute(path: string): void {
@@ -200,7 +206,9 @@ async function assertNoSymlinkComponents(path: string): Promise<void> {
   for (const segment of relative(root, path).split(sep).filter(Boolean)) {
     current = join(current, segment);
     const metadata = await lstat(current);
-    if (metadata.isSymbolicLink()) fail("OUTPUT_PATH_SYMLINK", "output path contains a symbolic link");
+    if (metadata.isSymbolicLink()) {
+      fail("OUTPUT_PATH_SYMLINK", "output path contains a symbolic link");
+    }
   }
 }
 
@@ -221,7 +229,9 @@ async function assertMissing(path: string): Promise<void> {
   try {
     await lstat(path);
   } catch (error) {
-    if (nodeErrorCode(error) === "ENOENT") return;
+    if (nodeErrorCode(error) === "ENOENT") {
+      return;
+    }
     throw error;
   }
   fail("OUTPUT_TARGET_EXISTS", "output target already exists");
