@@ -1,7 +1,6 @@
 # AGTMAI: план трёх следующих локальных zero-cost slices
 
-Status: amended after four independent hosted critiques, awaiting owner approval,
-2026-08-29.
+Status: owner-approved and in implementation, 2026-08-29.
 
 Этот документ описывает только три независимо полезных блока:
 
@@ -205,12 +204,14 @@ remediation-worker не может ревьюить собственный scope
 
 ```text
 tooling/local-solana/
-  model.ts                 # typed facts/errors/report contracts
-  process.ts               # owned child lifecycle only
-  rpc.ts                   # narrow JSON-RPC reads
-  cli.ts                   # explicit Solana/SPL CLI adapter
-  runner.ts                # application orchestration
-  verifier.ts              # independent read-only verification
+  src/domain/model.ts      # typed facts/errors/report contracts
+  src/application/ports.ts
+  src/application/runner.ts
+  src/application/verifier.ts
+  src/adapters/process.ts
+  src/adapters/rpc.ts
+  src/adapters/cli.ts
+  src/composition/index.ts
   evidence-report.schema.v1.json
   tests/
 scripts/solana/local-fixture.ts   # integrator-owned thin composition entrypoint
@@ -309,12 +310,15 @@ fixture. Linux CI repeats the same lifecycle on exact SHA.
 
 ```text
 tooling/deployment-plan/
-  domain.ts                # bigint fee/cap rules, no RPC/filesystem
-  artifact.ts              # exact Forge build/constructor identity
-  rpc.ts                   # narrow estimate/fee adapter
+  src/domain/model.ts      # bigint fee/cap rules, no RPC/filesystem
+  src/domain/identity.ts
+  src/application/ports.ts
+  src/application/builder.ts
+  src/application/verifier.ts
+  src/adapters/artifact.ts # exact Forge build/constructor identity
+  src/adapters/rpc.ts      # narrow allowlisted estimate/fee adapter
+  src/composition/index.ts
   schema.v1.json
-  builder.ts               # stable plan + volatile quote
-  verify.ts                # independent checks
   tests/
 scripts/deployment/estimate-local.ts # integrator-owned thin composition entrypoint
 ```
@@ -416,13 +420,16 @@ explicitly approved slice in `OPEN_QUESTIONS.md`.
    solc `0.8.36+commit.8a079791`, Foundry `1.8.0` and the vendored OpenZeppelin
    subset. Compare normalized compiler settings and creation-bytecode identity
    with a fresh pinned-Foundry build.
-3. Prefer the official Trail of Bits Ethereum Security Toolbox image pinned to
-   an immutable dated tag and `linux/amd64` digest. Record official registry,
-   upstream provenance, selected platform manifest/image ID and exact version
-   outputs for Slither, crytic-compile, solc and Forge. Tag is only a readable
-   locator; digest is the integrity authority. If the official image cannot
-   satisfy the complete tuple, stop and amend the plan rather than creating an
-   unreviewed custom Python image.
+3. Use official Trail of Bits Ethereum Security Toolbox
+   `nightly-20260824@sha256:9c5836...82d0`, with source revision `8cad443...`,
+   pinned to `linux/amd64`. The image supplies Slither `0.11.6` and
+   crytic-compile `0.4.2`; its embedded Forge `1.7.1` is intentionally not used.
+   Exact official project pins Forge `1.8.0` and solc
+   `0.8.36+commit.8a079791` are checksum-verified and mounted read-only at fixed
+   paths. The runner forces those paths and verifies all four versions before
+   analysis. This preserves the official image and avoids a custom Python image.
+   Any tag, digest, platform, source revision, mounted hash or version mismatch
+   remains a hard blocker.
 4. Run as explicit non-root UID/GID with read-only root filesystem,
    `no-new-privileges`, all capabilities dropped, bounded PID/memory/CPU/time,
    controlled HOME/tmp, environment cleared to an explicit minimal allowlist,
@@ -522,7 +529,8 @@ checkout; tool/policy/environment failures remain distinguishable and nonzero.
 - integrator verifies Agave/SPL cold bootstrap on macOS arm64 and Linux x64 and
   commits immutable URLs, archive/binary hashes, paths and versions;
 - integrator verifies the complete official Slither/crytic-compile/solc/Forge
-  container tuple, tag, `linux/amd64` digest and Foundry bytecode parity;
+  container tuple, tag, `linux/amd64` digest, read-only project tool overrides
+  and Foundry bytecode parity;
 - all three `tooling/**` roots enter Foundation/source policy and full-scan
   paths; dependency direction and forbidden imports have negative fixtures;
 - prerequisite checks pass from a clean checkout and the resulting SHA is

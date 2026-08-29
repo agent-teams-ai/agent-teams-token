@@ -32,10 +32,11 @@ function brokenDownloader(_url, part) {
   return 0;
 }
 
-test("committed lock schema covers both platforms and keeps future tools out of Core", () => {
+test("committed lock schema covers Core, Solana fixture and future tools separately", () => {
   const lock = loadLock(join(repositoryRoot, "tooling/toolchain.lock.json"));
   assert.deepEqual(lock.platforms, ["darwin-arm64", "linux-x64"]);
   assert.deepEqual(lock.coreTools, ["node", "foundry", "solc"]);
+  assert.deepEqual(lock.fixtureTools, ["agave"]);
   assert.equal(lock.tools.pnpm.version, "11.24.0");
   assert.equal(lock.tools.pnpm.source, "https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz");
   assert.equal(lock.tools.pnpm.sha256, "d1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f");
@@ -50,7 +51,20 @@ test("committed lock schema covers both platforms and keeps future tools out of 
       ["forge", "cast", "anvil", "chisel"],
     );
   }
-  for (const name of ["agave", "ccipSdk", "ccipSolanaPrograms"]) {
+  assert.equal(lock.tools.agave.scope, "local-solana-fixture");
+  assert.equal(lock.tools.agave.version, "4.2.1");
+  assert.equal(lock.tools.agave.splTokenVersion, "5.6.1");
+  for (const platform of lock.platforms) {
+    assert.equal(lock.tools.agave.platforms[platform].archive, "tar.bz2");
+    assert.deepEqual(
+      Object.keys(lock.tools.agave.platforms[platform].expectedFileSha256),
+      lock.tools.agave.platforms[platform].expectedFiles,
+    );
+  }
+  assert.equal(lock.securityImages.slither.versions.slither, "0.11.6");
+  assert.equal(lock.securityImages.slither.versions.forge, "1.8.0");
+  assert.match(lock.securityImages.slither.manifestDigest, /^sha256:[a-f0-9]{64}$/);
+  for (const name of ["ccipSdk", "ccipSolanaPrograms"]) {
     assert.equal(lock.tools[name].scope, "future-non-core");
     assert.equal(lock.tools[name].enabledForCore, false);
   }
@@ -61,6 +75,44 @@ test("committed lock schema covers both platforms and keeps future tools out of 
   const floating = structuredClone(lock);
   floating.tools.node.platforms["linux-x64"].url = "https://fixtures.invalid/latest/node.tar.xz";
   assert.throws(() => validateLock(floating), /TOOLCHAIN_LOCK_FLOATING/);
+});
+
+test("Solana scope installs exact Agave and rejects a tampered inner binary", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({
+    lock: fixture.lock,
+    platform: "linux-x64",
+    toolsRoot: fixture.toolsRoot,
+    downloader: fixture.downloader,
+    scope: "solana",
+  });
+  installArtifacts({
+    lock: fixture.lock,
+    platform: "linux-x64",
+    toolsRoot: fixture.toolsRoot,
+    offline: true,
+    scope: "solana",
+  });
+  verifyCache({
+    lock: fixture.lock,
+    platform: "linux-x64",
+    toolsRoot: fixture.toolsRoot,
+    offline: true,
+    scope: "solana",
+  });
+  const validator = join(fixture.toolsRoot, "agave-test-linux-x64", "bin", "solana-test-validator");
+  writeFileSync(validator, "tampered\n");
+  assert.throws(
+    () => verifyCache({
+      lock: fixture.lock,
+      platform: "linux-x64",
+      toolsRoot: fixture.toolsRoot,
+      offline: true,
+      scope: "solana",
+    }),
+    /TOOLCHAIN_INSTALL_INVALID tool=agave.*file-checksum:bin\/solana-test-validator/,
+  );
 });
 
 test("unsupported hosts fail closed", () => {
@@ -334,6 +386,20 @@ function makeFixture() {
   const solcArchive = join(artifacts, "solc-test");
   writeExecutable(solcArchive, "#!/bin/sh\necho 'Version: 0.8.36+commit.8a079791.Linux.g++'\n");
 
+  const agavePayload = join(root, "agave-payload", "solana-release", "bin");
+  mkdirSync(agavePayload, { recursive: true });
+  const agaveVersions = {
+    solana: "solana-cli 4.2.1 (src:test; feat:test, client:Agave)",
+    "solana-keygen": "solana-keygen 4.2.1 (src:test; feat:test, client:Agave)",
+    "solana-test-validator": "solana-test-validator 4.2.1 (src:test; feat:test, client:Agave)",
+    "spl-token": "spl-token-cli 5.6.1",
+  };
+  for (const [command, version] of Object.entries(agaveVersions)) {
+    writeExecutable(join(agavePayload, command), `#!/bin/sh\necho '${version}'\n`);
+  }
+  const agaveArchive = join(artifacts, "agave-test.tar.bz2");
+  execFileSync("tar", ["-cjf", agaveArchive, "-C", join(root, "agave-payload"), "solana-release"]);
+
   const pnpmPayload = join(root, "pnpm-payload", "package");
   mkdirSync(join(pnpmPayload, "bin"), { recursive: true });
   writeFileSync(join(pnpmPayload, "bin", "pnpm.cjs"), "process.stdout.write('11.24.0\\n');\n");
@@ -345,11 +411,32 @@ function makeFixture() {
     node: artifact({ name: "node-test.tar.gz", path: nodeArchive, archive: "tar.gz", installDirectory: "node-test-linux-x64", expectedFiles: ["bin/node"], versionPath: "bin/node", pattern: "^v24\\.20\\.0$" }),
     foundry: artifact({ name: "foundry-test.tar.gz", path: foundryArchive, archive: "tar.gz", installDirectory: "foundry-test-linux-x64", expectedFiles: ["forge", "cast", "anvil", "chisel"], versionPath: "forge", pattern: "^forge Version: 1\\.8\\.0$" }),
     solc: artifact({ name: "solc-test", path: solcArchive, archive: "executable", installDirectory: "solc-test-linux-x64", expectedFiles: ["solc"], versionPath: "solc", pattern: "Version: 0\\.8\\.36\\+commit\\.8a079791\\." }),
+    agave: artifact({
+      name: "agave-test.tar.bz2",
+      path: agaveArchive,
+      archive: "tar.bz2",
+      installDirectory: "agave-test-linux-x64",
+      expectedFiles: Object.keys(agaveVersions).map((name) => `bin/${name}`),
+      versionPath: "bin/solana",
+      pattern: "^solana-cli 4\\.2\\.1 .*client:Agave\\)$",
+    }),
   };
+  definitions.agave.versionChecks = Object.keys(agaveVersions).map((name) => ({
+    name,
+    path: `bin/${name}`,
+    args: ["--version"],
+    pattern: name === "spl-token"
+      ? "^spl-token-cli 5\\.6\\.1$"
+      : `^${name === "solana" ? "solana-cli" : name} 4\\.2\\.1 .*client:Agave\\)$`,
+  }));
+  definitions.agave.expectedFileSha256 = Object.fromEntries(
+    Object.keys(agaveVersions).map((name) => [`bin/${name}`, digest(join(agavePayload, name))]),
+  );
   const lock = {
     schemaVersion: 2,
     platforms: ["darwin-arm64", "linux-x64"],
     coreTools: ["node", "foundry", "solc"],
+    fixtureTools: ["agave"],
     tools: {
       node: coreTool("24.20.0", definitions.node),
       foundry: coreTool("1.8.0", definitions.foundry),
@@ -358,10 +445,18 @@ function makeFixture() {
       typescript: packageTool("7.0.2"),
       oxlint: packageTool("1.80.0"),
       engineeringFoundation: packageTool("0.20.0"),
-      agave: futureTool(),
+      agave: {
+        scope: "local-solana-fixture",
+        enabledForCore: false,
+        version: "4.2.1",
+        splTokenVersion: "5.6.1",
+        sourceRelease: "https://github.com/anza-xyz/agave/releases/tag/v4.2.1",
+        platforms: { "darwin-arm64": definitions.agave, "linux-x64": definitions.agave },
+      },
       ccipSdk: futureTool(),
       ccipSolanaPrograms: futureTool(),
     },
+    securityImages: { slither: securityImage() },
   };
   validateLock(lock);
   return {
@@ -391,11 +486,9 @@ function artifact({ name, path, archive, installDirectory, expectedFiles, versio
 function coreTool(version, definition) {
   return { scope: "genesis-core", version, platforms: { "darwin-arm64": definition, "linux-x64": definition } };
 }
-
 function packageTool(version) {
   return { version, source: `https://registry.invalid/package-${version}.tgz` };
 }
-
 function packageManagerTool(path) {
   return {
     scope: "genesis-core-package-manager",
@@ -408,11 +501,28 @@ function packageManagerTool(path) {
     expectedFiles: ["bin/pnpm.cjs", "package.json"],
   };
 }
-
 function futureTool() {
   return { scope: "future-non-core", enabledForCore: false };
 }
-
+function securityImage() {
+  return {
+    scope: "solidity-security", repository: "ghcr.io/trailofbits/eth-security-toolbox",
+    sourceRepository: "https://github.com/trailofbits/eth-security-toolbox", sourceRevision: "8cad443280f7eeb5920a901b5f58f5a91872d9aa",
+    tag: "nightly-20260824",
+    indexDigest: "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8", platform: "linux/amd64",
+    manifestDigest: "sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0",
+    versions: {
+      slither: "0.11.6",
+      cryticCompile: "0.4.2",
+      solc: "0.8.36+commit.8a079791.Linux.g++",
+      forge: "1.8.0",
+    },
+    toolOverrides: {
+      forge: "tools.foundry.platforms.linux-x64",
+      solc: "tools.solc.platforms.linux-x64",
+    },
+    compatibilityMode: "official-image-with-read-only-pinned-project-tool-overrides" };
+}
 function digest(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }

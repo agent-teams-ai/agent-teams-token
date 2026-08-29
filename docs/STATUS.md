@@ -82,11 +82,12 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 ## In progress
 
-- The three local zero-cost slices require plan acceptance and explicit owner
-  authorization to start, but do not depend on unresolved tokenomics, vesting,
-  governance, CCIP or liquidity decisions. Concrete GitHub run IDs, exact SHAs
-  and hosted verdicts remain part of immutable workflow/review evidence; a local
-  workflow-definition check is never called remote CI.
+- The three local zero-cost slices were explicitly owner-approved for E2E
+  implementation on 2026-08-29. Barrier 0 is closed; Barrier 0.5 toolchain and
+  architecture prerequisite is in progress. They do not depend on unresolved
+  tokenomics, vesting, governance, CCIP or liquidity decisions. Concrete GitHub
+  run IDs, exact SHAs and hosted verdicts remain part of immutable workflow/
+  review evidence; a local workflow-definition check is never called remote CI.
 - Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
   constructor gas, every additional contract, live fees, total-cost guard and
   unsigned-plan review must be completed before any public broadcast. The

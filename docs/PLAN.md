@@ -1604,6 +1604,15 @@ Tests/checks:
 - Playwright smoke tests;
 - transaction simulation directly before signing.
 
+Подтверждённое уточнение Slither environment от 29 августа 2026: официальный
+Trail of Bits toolbox `nightly-20260824` содержит Slither `0.11.6`,
+crytic-compile `0.4.2` и solc `0.8.36`, но встроенный Forge имеет версию `1.7.1`,
+а проект закреплён на Forge `1.8.0`. Поэтому security gate не доверяет
+встроенным Forge/solc: он checksum-проверяет official Linux binaries из
+`tooling/toolchain.lock.json`, монтирует их read-only в digest-pinned toolbox и
+принудительно использует exact paths. Custom Python image, floating tag и
+системный fallback запрещены.
+
 Deterministic economic scenarios:
 
 - 100% of an airdrop pilot is sold immediately;

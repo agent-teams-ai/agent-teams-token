@@ -17,6 +17,13 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertExpectedFileHashes,
+  inspectExpectedFile,
+  validateExpectedFileHashes,
+  validateFixtureToolShape,
+  validateSecurityImage,
+} from "./toolchain-policy.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const provenanceFile = ".agtmai-toolchain-install.json";
@@ -43,9 +50,14 @@ export function validateLock(lock) {
   if (JSON.stringify(lock.coreTools) !== JSON.stringify(["node", "foundry", "solc"])) {
     throw new Error("TOOLCHAIN_LOCK_CORE_TOOLS expected=node,foundry,solc");
   }
+  if (JSON.stringify(lock.fixtureTools) !== JSON.stringify(["agave"])) {
+    throw new Error("TOOLCHAIN_LOCK_FIXTURE_TOOLS expected=agave");
+  }
   for (const name of lock.coreTools) {
     validateCoreTool(lock, name);
   }
+  validateFixtureTool(lock, "agave");
+  validateSecurityImage(lock.securityImages?.slither);
   validatePackageManager(lock.tools?.pnpm);
   for (const name of ["pnpm", "typescript", "oxlint", "engineeringFoundation"]) {
     const tool = lock.tools?.[name];
@@ -53,10 +65,18 @@ export function validateLock(lock) {
       throw new Error(`TOOLCHAIN_LOCK_PACKAGE tool=${name}`);
     }
   }
-  for (const name of ["agave", "ccipSdk", "ccipSolanaPrograms"]) {
+  for (const name of ["ccipSdk", "ccipSolanaPrograms"]) {
     if (lock.tools?.[name]?.scope !== "future-non-core" || lock.tools[name].enabledForCore !== false) {
       throw new Error(`TOOLCHAIN_LOCK_FUTURE_SCOPE tool=${name}`);
     }
+  }
+}
+
+function validateFixtureTool(lock, name) {
+  const tool = lock.tools?.[name];
+  validateFixtureToolShape(tool, name);
+  for (const platform of lock.platforms) {
+    validateArtifact(name, platform, tool.platforms?.[platform], { requireInnerHashes: true });
   }
 }
 
@@ -85,9 +105,9 @@ function validateCoreTool(lock, name) {
   }
 }
 
-function validateArtifact(name, platform, artifact) {
+function validateArtifact(name, platform, artifact, { requireInnerHashes = false } = {}) {
   if (!artifact) {throw new Error(`TOOLCHAIN_LOCK_COVERAGE tool=${name} platform=${platform}`);}
-  if (!["executable", "tar.gz", "tar.xz"].includes(artifact.archive)) {
+  if (!["executable", "tar.bz2", "tar.gz", "tar.xz"].includes(artifact.archive)) {
     throw new Error(`TOOLCHAIN_LOCK_ARCHIVE tool=${name} platform=${platform}`);
   }
   for (const field of ["url", "checksumSource"]) {
@@ -107,6 +127,7 @@ function validateArtifact(name, platform, artifact) {
     throw new Error(`TOOLCHAIN_LOCK_EXPECTED_FILES tool=${name} platform=${platform}`);
   }
   for (const expected of artifact.expectedFiles) {assertRelativePath(name, platform, expected);}
+  if (requireInnerHashes) {validateExpectedFileHashes(name, platform, artifact);}
   validateVersionChecks(name, platform, artifact);
   if (/\b(?:latest|nightly|master|main)\b/i.test(`${artifact.url} ${artifact.installDirectory}`)) {
     throw new Error(`TOOLCHAIN_LOCK_FLOATING tool=${name} platform=${platform}`);
@@ -149,18 +170,27 @@ function coreDownloadableTools(lock) {
   return lock.coreTools.map((name) => [name, lock.tools[name]]);
 }
 
-function downloadableTools(lock, platform) {
-  return [
+function downloadableTools(lock, platform, scope = "core") {
+  const tools = [
     ...coreDownloadableTools(lock).map(([name, tool]) => [name, tool, tool.platforms[platform]]),
     ["pnpm", lock.tools.pnpm, lock.tools.pnpm],
   ];
+  if (scope === "solana") {
+    for (const name of lock.fixtureTools) {
+      const tool = lock.tools[name];
+      tools.push([name, tool, tool.platforms[platform]]);
+    }
+  } else if (scope !== "core") {
+    throw new Error(`TOOLCHAIN_SCOPE_UNSUPPORTED scope=${scope}`);
+  }
+  return tools;
 }
 
-export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl }) {
+export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl, scope = "core" }) {
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(downloads, { recursive: true });
-  for (const [name, _tool, artifact] of downloadableTools(lock, platform)) {
+  for (const [name, _tool, artifact] of downloadableTools(lock, platform, scope)) {
     const target = join(downloads, artifact.archiveName);
     if (existsSync(target) && sha256(target) === artifact.sha256) {
       process.stdout.write(`FETCH_CACHED tool=${name} platform=${platform} sha256=${artifact.sha256}\n`);
@@ -192,12 +222,12 @@ function downloadWithCurl(url, part) {
   ).status ?? 1;
 }
 
-export function installArtifacts({ lock, platform, toolsRoot, offline }) {
+export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "core" }) {
   if (!offline) {throw new Error("TOOLCHAIN_INSTALL_REQUIRES_OFFLINE use=install --offline");}
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(toolsRoot, { recursive: true });
-  for (const [name, tool, artifact] of downloadableTools(lock, platform)) {
+  for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = join(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_OFFLINE_CACHE_MISS" });
     const destination = join(toolsRoot, artifact.installDirectory);
@@ -242,7 +272,9 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
     } else {
       const args = artifact.archive === "tar.xz"
         ? ["-xJf", archive, "-C", staged]
-        : ["-xzf", archive, "-C", staged];
+        : artifact.archive === "tar.bz2"
+          ? ["-xjf", archive, "-C", staged]
+          : ["-xzf", archive, "-C", staged];
       execFileSync("/usr/bin/tar", args, { stdio: "pipe" });
     }
     const entries = readdirSync(staged);
@@ -256,6 +288,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       }
       return [path, sha256(target)];
     }));
+    assertExpectedFileHashes({ name, platform, artifact, files });
     if (name === "pnpm") {
       executePnpmVersionCheck({
         root: source,
@@ -311,12 +344,16 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
   }
   for (const path of artifact.expectedFiles) {
     const target = join(destination, path);
-    if (!existsSync(target) || !lstatSync(target).isFile()) {
-      return { ok: false, code: `file-missing:${path}`, actualVersion: "unknown" };
-    }
-    if (provenance.files?.[path] !== sha256(target)) {
-      return { ok: false, code: `file-checksum:${path}`, actualVersion: "unknown" };
-    }
+    const exists = existsSync(target);
+    const code = inspectExpectedFile({
+      artifact: { ...artifact, provenanceFiles: provenance.files },
+      path,
+      target,
+      exists,
+      isFile: exists && lstatSync(target).isFile(),
+      sha256,
+    });
+    if (code) {return { ok: false, code, actualVersion: "unknown" };}
   }
   let actualVersion;
   try {
@@ -392,11 +429,11 @@ function singleLine(value) {
   return String(value).replaceAll(/\s+/g, " ").trim();
 }
 
-export function verifyCache({ lock, platform, toolsRoot, offline }) {
+export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core" }) {
   if (!offline) {throw new Error("TOOLCHAIN_VERIFY_REQUIRES_OFFLINE use=verify --offline");}
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
-  for (const [name, tool, artifact] of downloadableTools(lock, platform)) {
+  for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = join(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_CACHE_MISSING" });
     const installation = inspectInstallation({
@@ -424,6 +461,8 @@ function assertSupported(lock, platform) {
 function cli() {
   const [command = "help", ...args] = process.argv.slice(2);
   const offline = args.includes("--offline");
+  const scopeArgument = args.find((value) => value.startsWith("--scope="));
+  const scope = scopeArgument ? scopeArgument.slice("--scope=".length) : "core";
   const testMode = process.env.TOKEN_BOOTSTRAP_TEST_MODE === "1";
   const platformArgument = args.find((value) => value.startsWith("--platform="));
   if (platformArgument && !testMode) {
@@ -437,10 +476,13 @@ function cli() {
     ? resolve(process.env.TOKEN_TOOLS_ROOT)
     : join(repositoryRoot, ".tools");
   const lock = loadLock(lockPath);
-  if (command === "fetch") {return fetchArtifacts({ lock, platform, toolsRoot });}
-  if (command === "install") {return installArtifacts({ lock, platform, toolsRoot, offline });}
-  if (command === "verify") {return verifyCache({ lock, platform, toolsRoot, offline });}
-  throw new Error("Usage: ./dev bootstrap fetch | install --offline | verify --offline");
+  if (command === "fetch") {return fetchArtifacts({ lock, platform, toolsRoot, scope });}
+  if (command === "install") {return installArtifacts({ lock, platform, toolsRoot, offline, scope });}
+  if (command === "verify") {return verifyCache({ lock, platform, toolsRoot, offline, scope });}
+  throw new Error(
+    "Usage: ./dev bootstrap fetch [--scope=solana] | install --offline [--scope=solana]"
+    + " | verify --offline [--scope=solana]",
+  );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -5,6 +5,9 @@ workspace:
 governedRoots:
   - packages/domain/src
   - packages/contexts/supply/src
+  - tooling/local-solana/src
+  - tooling/deployment-plan/src
+  - tooling/security/slither/src
 boundaries:
   - id: token.domain
     roots:
@@ -73,4 +76,146 @@ boundaries:
       builtins:
         - node:fs/promises
         - node:path
+      runtimeReferences: []
+  - id: tooling.local-solana.domain
+    roots:
+      - tooling/local-solana/src/domain
+    entrypoints: []
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.local-solana.application
+    roots:
+      - tooling/local-solana/src/application
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.local-solana.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.local-solana.adapters
+    roots:
+      - tooling/local-solana/src/adapters
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.local-solana.application
+        - tooling.local-solana.domain
+      packages: []
+      builtins:
+        - node:child_process
+        - node:crypto
+        - node:fs
+        - node:fs/promises
+        - node:net
+        - node:os
+        - node:path
+      runtimeReferences: []
+  - id: tooling.local-solana.composition
+    roots:
+      - tooling/local-solana/src/composition
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.local-solana.adapters
+        - tooling.local-solana.application
+        - tooling.local-solana.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.deployment-plan.domain
+    roots:
+      - tooling/deployment-plan/src/domain
+    entrypoints: []
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.deployment-plan.application
+    roots:
+      - tooling/deployment-plan/src/application
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.deployment-plan.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.deployment-plan.adapters
+    roots:
+      - tooling/deployment-plan/src/adapters
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.deployment-plan.application
+        - tooling.deployment-plan.domain
+      packages: []
+      builtins:
+        - node:crypto
+        - node:fs/promises
+        - node:path
+      runtimeReferences: []
+  - id: tooling.deployment-plan.composition
+    roots:
+      - tooling/deployment-plan/src/composition
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.deployment-plan.adapters
+        - tooling.deployment-plan.application
+        - tooling.deployment-plan.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.slither.domain
+    roots:
+      - tooling/security/slither/src/domain
+    entrypoints: []
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.slither.application
+    roots:
+      - tooling/security/slither/src/application
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.slither.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.slither.adapters
+    roots:
+      - tooling/security/slither/src/adapters
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.slither.application
+        - tooling.slither.domain
+      packages: []
+      builtins:
+        - node:child_process
+        - node:crypto
+        - node:fs
+        - node:fs/promises
+        - node:os
+        - node:path
+      runtimeReferences: []
+  - id: tooling.slither.composition
+    roots:
+      - tooling/security/slither/src/composition
+    entrypoints: []
+    allow:
+      boundaries:
+        - tooling.slither.adapters
+        - tooling.slither.application
+        - tooling.slither.domain
+      packages: []
+      builtins: []
       runtimeReferences: []
