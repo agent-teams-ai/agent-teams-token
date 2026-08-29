@@ -35,7 +35,7 @@ The exact raw Slither status/JSON matrix is:
 - status `0`, `success=true`, no analysis errors, zero findings: complete
   finding-free analysis, then policy;
 - status `255`, `success=true`, no analysis errors, one or more findings:
-  complete analysis under explicit `--fail-on pedantic`, then policy;
+  complete analysis under explicit `--fail-pedantic`, then policy;
 - status `255`, `success=false`, at least one analysis error: tool failure;
 - every other combination, including signal-derived `137`/`143`, is malformed
   output and fails with gate exit `40`.

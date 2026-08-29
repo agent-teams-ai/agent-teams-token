@@ -28,9 +28,9 @@ const securityPrelude = [
   "/tools/solc --version > /work/gate-output/solc.version 2>&1",
   "test \"$(command -v forge)\" = /tools/forge",
   "test \"$(command -v solc)\" = /tools/solc",
-  "slither --fail-on pedantic --version > /work/gate-output/slither.version 2>&1",
+  "slither --fail-pedantic --version > /work/gate-output/slither.version 2>&1",
   "crytic-compile --version > /work/gate-output/crytic-compile.version 2>&1",
-  "slither --fail-on pedantic --list-detectors > /work/gate-output/detectors.txt 2>&1",
+  "slither --fail-pedantic --list-detectors > /work/gate-output/detectors.txt 2>&1",
 ];
 
 export function dockerRunArguments(paths: ContainerPaths): readonly string[] {
@@ -40,7 +40,7 @@ export function dockerRunArguments(paths: ContainerPaths): readonly string[] {
     "test -n \"$targets\"",
     "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc /tools/forge build --skip test --skip script --use /tools/solc $targets",
     "set +e",
-    "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc slither . --fail-on pedantic --foundry-ignore-compile --foundry-out-directory /work/out --foundry-build-info-directory /work/out/build-info --config-file /input/tooling/security/slither/slither.config.json --json /work/gate-output/slither.json",
+    "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc slither . --fail-pedantic --foundry-ignore-compile --foundry-out-directory /work/out --foundry-build-info-directory /work/out/build-info --config-file /input/tooling/security/slither/slither.config.json --json /work/gate-output/slither.json",
     "slither_status=$?",
     "set -e",
     "printf '%s\\n' \"$slither_status\" > /work/gate-output/slither.exit",
@@ -63,7 +63,7 @@ export function dockerVulnerableFixtureArguments(paths: ContainerPaths): readonl
     ...securityPrelude,
     "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc /tools/forge build --skip test --skip script --use /tools/solc src/Vulnerable.sol",
     "set +e",
-    "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc slither . --fail-on pedantic --foundry-ignore-compile --foundry-out-directory /work/out --foundry-build-info-directory /work/out/build-info --config-file /input/tooling/security/slither/slither.config.json --json /work/gate-output/slither.json",
+    "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc slither . --fail-pedantic --foundry-ignore-compile --foundry-out-directory /work/out --foundry-build-info-directory /work/out/build-info --config-file /input/tooling/security/slither/slither.config.json --json /work/gate-output/slither.json",
     "slither_status=$?",
     "set -e",
     "printf '%s\\n' \"$slither_status\" > /work/gate-output/slither.exit",
