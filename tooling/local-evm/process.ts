@@ -117,24 +117,35 @@ export async function startOwnedAnvil(
     await listeningUrl(child);
     throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
   }
+  // Subscribe to exit/output immediately. A fast-failing executable can leave
+  // Linux /proc before its process-start identity is read; keeping this
+  // observer armed preserves the stable early-exit diagnostic in that race.
+  const startup = listeningUrl(child).then(
+    (rpcUrl) => ({ status: "ready" as const, rpcUrl }),
+    (cause: unknown) => ({ status: "failed" as const, cause }),
+  );
   try {
     const identity = { pid: child.pid, processStart: await processStartIdentity(child.pid) };
     await registerIdentity?.(identity);
   } catch (cause) {
+    if (!processAlive(child.pid) || child.exitCode !== null || child.signalCode !== null) {
+      const outcome = await startup;
+      await stopExactChild(child);
+      if (outcome.status === "failed") { throw outcome.cause; }
+      throw new LocalEvmError("LOCAL_EVM_ANVIL_EARLY_EXIT", "Anvil exited before listening identity registration");
+    }
     await stopExactChild(child);
     throw cause;
   }
-  let rpcUrl: string;
-  try {
-    rpcUrl = await listeningUrl(child);
-  } catch (cause) {
+  const outcome = await startup;
+  if (outcome.status === "failed") {
     await stopExactChild(child);
-    throw cause;
+    throw outcome.cause;
   }
   let stopPromise: Promise<void> | undefined;
   return {
     pid: child.pid,
-    rpcUrl,
+    rpcUrl: outcome.rpcUrl,
     stop(): Promise<void> {
       stopPromise ??= stopExactChild(child);
       return stopPromise;
