@@ -48,7 +48,12 @@ test("well-formed Slither analysis errors remain tool failures, not malformed ou
 });
 
 test("malformed Slither results.errors fail closed", async () => {
-  for (const errors of [null, "compile failed", { message: "compile failed" }]) {
+  const canonicalAbsence = await parseSlitherJson(
+    JSON.stringify({ success: true, error: null, results: { detectors: [], errors: null } }),
+    process.cwd(),
+  );
+  assert.deepEqual(canonicalAbsence.errors, []);
+  for (const errors of ["compile failed", { message: "compile failed" }]) {
     await assert.rejects(
       parseSlitherJson(JSON.stringify({ success: true, results: { detectors: [], errors } }), process.cwd()),
       { code: "MALFORMED_JSON" },
@@ -61,7 +66,7 @@ test("malformed Slither results.errors fail closed", async () => {
 });
 
 test("malformed root.error fails closed while valid error strings are preserved", async () => {
-  for (const error of [null, "", { message: "compile failed" }, ["compile failed"]]) {
+  for (const error of ["", { message: "compile failed" }, ["compile failed"]]) {
     await assert.rejects(
       parseSlitherJson(JSON.stringify({ success: false, error }), process.cwd()),
       { code: "MALFORMED_JSON" },

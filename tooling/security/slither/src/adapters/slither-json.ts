@@ -33,7 +33,7 @@ export async function parseSlitherJson(raw: string, repositoryRoot: string): Pro
       await parseFinding(rawDetector, index, repositoryRoot)),
   );
   const errors = optionalErrorArray(results.errors, "results.errors");
-  if (Object.hasOwn(root, "error")) {errors.push(string(root.error, "error"));}
+  if (root.error !== undefined && root.error !== null) {errors.push(string(root.error, "error"));}
   return {
     success: root.success,
     findings: findings.toSorted((left, right) => left.fingerprint.localeCompare(right.fingerprint)),
@@ -42,7 +42,10 @@ export async function parseSlitherJson(raw: string, repositoryRoot: string): Pro
 }
 
 function optionalErrorArray(value: unknown, label: string): string[] {
-  if (value === undefined) {return [];}
+  // Slither 0.11.6 emits JSON null for an absent error collection. Treat only
+  // that pinned canonical sentinel (and an omitted optional field) as empty;
+  // every other non-array shape still fails closed.
+  if (value === undefined || value === null) {return [];}
   if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.length > 0)) {
     throw new SlitherGateError("MALFORMED_JSON", `${label} must be an array of non-empty strings`);
   }
