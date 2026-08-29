@@ -82,24 +82,29 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 ## In progress
 
-- The next implementation slice remains intentionally unstarted until its
-  product decisions are approved. Concrete GitHub run IDs, exact SHAs and hosted
-  verdicts remain part of the immutable workflow/review evidence; a local
+- The three local zero-cost slices require plan acceptance and explicit owner
+  authorization to start, but do not depend on unresolved tokenomics, vesting,
+  governance, CCIP or liquidity decisions. Concrete GitHub run IDs, exact SHAs
+  and hosted verdicts remain part of immutable workflow/review evidence; a local
   workflow-definition check is never called remote CI.
 - Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
   constructor gas, every additional contract, live fees, total-cost guard and
   unsigned-plan review must be completed before any public broadcast. The
   current cheap local core estimate is not a whole-launch estimate.
 - The three zero-cost follow-up slices (local SPL fixture, unsigned Ethereum
-  deployment-cost plan and Slither/Linux security evidence) now have a proposed
-  executable plan in `docs/NEXT_ZERO_COST_SLICES_PLAN.md`. Implementation has
-  not started; hosted xhigh planners review the plan first without fast mode.
+  deployment-cost plan and Slither/Linux security evidence) have an amended
+  executable plan in `docs/NEXT_ZERO_COST_SLICES_PLAN.md`. Four independent
+  hosted `gpt-5.6-sol xhigh` critics reviewed exact draft SHA `1cd5515` without
+  fast mode; all returned AMEND, none found P0, and accepted P1/P2 are recorded
+  in `docs/research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md` and folded
+  into the plan. Implementation has not started.
 
 ## Designed, not implemented
 
-- Vesting, local SPL and mocked cross-chain accounting remain later independent
-  slices. Production manifest approval is intentionally not simulated by a
-  self-declared status or integrity hash.
+- Vesting and mocked cross-chain accounting remain later independent slices.
+  Local SPL is now the first proposed zero-cost follow-up slice but remains
+  unimplemented. Production manifest approval is intentionally not simulated by
+  a self-declared status or integrity hash.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
   two-context topology is recorded in the independently reviewed and amended
   ADR-0004 and awaits explicit product-owner acceptance. Acceptance records the

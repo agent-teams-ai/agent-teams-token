@@ -1,6 +1,7 @@
 # AGTMAI: план трёх следующих локальных zero-cost slices
 
-Status: proposed implementation plan, 2026-08-29.
+Status: amended after four independent hosted critiques, awaiting owner approval,
+2026-08-29.
 
 Этот документ описывает только три независимо полезных блока:
 
@@ -12,6 +13,25 @@ Status: proposed implementation plan, 2026-08-29.
 CCIP protocol line или Mainnet deployment. Все операции используют только
 локальные сети и синтетические ключи без ценности. Реальные ETH, SOL, LINK,
 USDC, faucet assets, public RPC и transaction broadcast запрещены.
+
+## Исполнительный план в трёх пунктах
+
+1. **Зафиксировать инструменты и архитектурные границы.** Интегратор проверяет
+   Agave/SPL и Slither/solc/Forge в целевых средах, фиксирует версии, checksums,
+   OCI digest и расширяет Engineering Foundation на новые `tooling/**` roots.
+   До green preflight coding-workers не стартуют. 🎯 10/10  🛡️ 10/10  🧠 5/10,
+   около `400-700` строк конфигурации, контрактных тестов и evidence.
+2. **Параллельно реализовать три независимых vertical slices.** Три hosted
+   implementation-worker на `gpt-5.6-sol medium`, без fast, работают в отдельных
+   worktree и не меняют shared-файлы: W1 делает local SPL lifecycle, W2 -
+   unsigned deployment plan, W3 - Slither policy/tooling. 🎯 9/10  🛡️ 9/10
+   🧠 7/10, около `3 200-5 000` строк рабочего кода и тестов.
+3. **Интегрировать и критиковать exact SHA.** Интегратор по одному принимает
+   scoped commits, подключает root/CI wiring, получает green local и GitHub
+   evidence, затем запускает четыре независимых specialist-review и только
+   после их общего frozen ledger - последовательный holistic review. Все P0/P1
+   исправляются отдельными remediation jobs и проверяются повторно. 🎯 9/10
+   🛡️ 10/10  🧠 6/10, около `300-500` строк wiring/evidence сверх slices.
 
 ## 1. Цель и Definition of Done
 
@@ -32,8 +52,12 @@ USDC, faucet assets, public RPC и transaction broadcast запрещены.
 - независимые hosted reviews, закрытые P0/P1 и повторный holistic review после
   любых исправлений.
 
-Оценка authored changes: `1 450-2 400` строк. Generated lock/report files не
-считаются целью и не должны коммититься без необходимости.
+Реалистичная оценка authored changes: `3 900-6 200` строк. Для сравнения, уже
+реализованный аналогичный local-EVM slice занимает около `2 468` строк. Generated
+lock/report files не считаются целью и не должны коммититься без необходимости.
+Срок около недели реалистичен только при green toolchain preflight, трёх
+параллельных implementation-workers и отдельном интеграторе; acceptance нельзя
+сокращать ради календаря.
 
 ## 2. Зафиксированные границы
 
@@ -45,8 +69,9 @@ USDC, faucet assets, public RPC и transaction broadcast запрещены.
 - Solana fixture использует classic SPL Token Program;
 - Solana fixture начинает и заканчивает с supply `0`;
 - freeze authority должна стать `None` и не восстанавливаться;
-- local mint authority является одноразовой test authority. Её наличие не
-  доказывает production hard cap или будущую CCIP authority model;
+- local mint authority является временной test authority. До удаления run-dir
+  она технически может допечатать токены, поэтому evidence не называет её
+  production hard cap или будущей CCIP authority model;
 - public networks disabled by default;
 - Engineering Foundation `0.20.0` остаётся exact dev-only dependency;
 - feature-module structure, Clean Architecture, SOLID, DDD и semantic DRY
@@ -74,7 +99,8 @@ USDC, faucet assets, public RPC и transaction broadcast запрещены.
   официальный `solana-release-x86_64-unknown-linux-gnu.tar.bz2` SHA256
   `7f35f92c15861263bc540c001466678d2da228149a107b51d5b65ce497603074`.
 - Slither `0.11.6` является текущим stable release. Перед добавлением gate
-  выполняется compatibility preflight с solc `0.8.36` и текущим Foundry layout.
+  выполняется compatibility preflight с solc `0.8.36+commit.8a079791`, Foundry
+  `1.8.0`, exact `crytic-compile` и текущим Foundry layout.
 - Текущий AGTMAIToken runtime занимает `1 945` bytes. Локально измерены
   `540 495` gas для трёх allocations и `1 420 877` для предельных 32.
 - Текущие root, Foundry, local-EVM и exact-SHA Linux gates уже green; новые
@@ -100,8 +126,9 @@ installer и network fallback в CI запрещены.
 - каждый job имеет отдельный isolated worktree, job ID и scoped ownership;
 - одна account identity может обслуживать параллельные jobs, если runtime это
   допускает, но workspace, job, branch и output у них всегда разные;
-- network disabled для planning/review. Implementation получает только доступ,
-  необходимый для pinned dependency fetch; public-chain RPC запрещён.
+- planning/review работают read-only с `networkAccess=restricted` и не получают
+  public-chain RPC. Implementation получает сеть только для заранее разрешённой
+  загрузки pinned dependencies; после проверки hashes runtime работает offline.
 
 ### 4.2 Planning wave до coding
 
@@ -118,6 +145,9 @@ installer и network fallback в CI запрещены.
 после final plan review создаёт implementation briefs. План не принимается
 простым голосованием.
 
+Фактически выполненная критика draft SHA и принятые изменения записаны в
+[`NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md`](research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md).
+
 ### 4.3 Implementation ownership
 
 После plan acceptance три workers стартуют параллельно от одного clean base SHA:
@@ -126,13 +156,18 @@ installer и network fallback в CI запрещены.
 | --- | --- | --- | --- |
 | W1 Solana | `tooling/local-solana/**` | EVM contract, deployment tooling, root/CI/docs | isolated validator runner, SPL cycle, verifier, tests, report schema |
 | W2 Deploy plan | `tooling/deployment-plan/**` | Solana, Solidity source, root/CI/docs | pure cost model, artifact builder, local estimator, guards, tests |
-| W3 Security | `tooling/security/slither/**`, выделенный новый security workflow/job | token semantics, Solana/deployment features, root package/docs | pinned Slither execution, parser/policy, tests, Linux gate |
+| W3 Security | `tooling/security/slither/**` | token semantics, Solana/deployment features, root package/docs и `.github/workflows/**` | pinned Slither execution, parser/policy, tests, CI wiring request |
 | Integrator | root scripts/config, toolchain lock, TS references, Foundation config, global docs | не переписывает worker feature без подтверждённого defect | dependency pins, commands, integration ledger |
 
 Workers не меняют `package.json`, root `tsconfig`, `pnpm-lock.yaml`,
 `tooling/toolchain.lock.json`, `scripts/toolchain.mjs`, общие документы или
 существующие workflow jobs. Они возвращают dependency/root-wiring request в
 handoff; интегратор применяет его один раз после проверки.
+
+До старта W1-W3 интегратор коммитит отдельный prerequisite SHA с green
+compatibility preflight, всеми платформенными pins и расширенной Foundation
+policy. Именно этот SHA становится общим `baseSha`; worker не выбирает версии
+или контейнер самостоятельно.
 
 Branch names: `feat/local-solana-fixture`, `feat/deployment-cost-plan` и
 `ci/slither-security-gate`. Префикс `codex/` запрещён. Каждый worker делает
@@ -156,9 +191,13 @@ dependencyRequests[], limitations[], residualRisks[]
 Dirty workspace, изменение чужих paths, отсутствие scoped commit или результат
 от другого base SHA запрещают интеграцию.
 
+Для review-result дополнительно обязательны `reviewerJobId`, `reviewedSha`,
+`reviewScope`, `authorJobIds[]` и декларация независимости. Автор, интегратор или
+remediation-worker не может ревьюить собственный scope.
+
 ## 5. Slice A - local Solana SPL fixture
 
-🎯 10/10  🛡️ 9/10  🧠 5/10. Около `700-1 100` authored lines.
+🎯 10/10  🛡️ 9/10  🧠 6/10. Около `1 300-2 000` authored lines.
 
 ### 5.1 Architecture
 
@@ -174,8 +213,13 @@ tooling/local-solana/
   verifier.ts              # independent read-only verification
   evidence-report.schema.v1.json
   tests/
-scripts/solana/local-fixture.ts   # thin composition entrypoint
+scripts/solana/local-fixture.ts   # integrator-owned thin composition entrypoint
 ```
+
+Foundation и локальная topology-проверка включают весь новый root. Направление
+зависимостей фиксируется как `domain <- application <- adapters <- composition`:
+модель и verifier не импортируют CLI/process/filesystem adapters, а composition
+получает их через узкие ports. Negative fixtures доказывают запрещённые импорты.
 
 Не импортировать `tooling/local-evm` как generic utility. После второго green
 consumer отдельный refactor может извлечь только действительно одинаковые
@@ -183,58 +227,83 @@ process/safe-filesystem semantics.
 
 ### 5.2 Lifecycle
 
-1. Verify exact Agave/Solana/SPL binaries and hashes before process start.
+1. Bootstrap только из platform-specific lock: immutable official URL, archive
+   SHA256, формат `.tar.bz2`, ожидаемые относительные binary paths, их hashes и
+   exact versions для Agave/Solana и SPL CLI. Используются абсолютные binary
+   paths; PATH/system/global fallback запрещён. Если SPL CLI не входит в
+   проверенный Agave artifact, он получает отдельный version+integrity pin.
 2. Create an owned mode-`0700` run directory outside tracked source. Create
    ledger, temporary config and payer/mint/owner keypairs with mode `0600`.
+   Key generation выполняется без mnemonic/stdout leakage: child output
+   удерживается в памяти, наружу проходят только allowlisted diagnostics.
 3. Select an owned localhost RPC/dynamic-port range. Start
    `solana-test-validator` with explicit ledger, `127.0.0.1`, reset and no
-   dependency on global Solana config. Retry only pre-mutation port collision.
+   dependency on global Solana config. Каждая CLI/RPC операция получает exact
+   loopback URL, absolute binary и allowlisted environment. Retry only
+   pre-mutation port collision.
 4. Wait for bounded RPC readiness and record version/genesis identity. Reject
    any non-localhost RPC URL.
 5. Fund only the ephemeral local payer using local validator facilities.
-6. Create a classic SPL Token mint with decimals `9`, initial supply `0` and
-   explicit test mint authority. If freeze is initially enabled to exercise
-   revocation, disable it with `authorize ... freeze --disable` before minting.
+6. Create a classic SPL Token mint under exact program
+   `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`, decimals `9`, initial supply
+   `0`, explicit ephemeral mint authority and explicit ephemeral freeze
+   authority. Finalize `SetAuthority(FreezeAccount, None)` before minting; эта
+   transition обязательна, а не опциональна.
 7. Create the test owner's associated token account. Mint an exact integer-safe
-   test amount, read state, burn `ALL`, then read final state.
+   test amount, read state, burn the exact base-unit amount, then read final
+   state. После create/revoke/mint/burn ждать finalized checkpoint.
 8. The independent verifier reads RPC/structured CLI JSON and proves:
    program owner is classic Token Program, decimals `9`, initial/final supply
    `0`, expected intermediate supply/balance, mint authority equals ephemeral
    test pubkey, freeze authority is `None`, and all recorded transactions belong
-   to the owned local genesis.
-9. Attempting to re-enable or use freeze after revocation must fail. This is a
-   regression test, not only a state read.
+   to the owned local genesis. Evidence retains sanitised signatures, finalized
+   slots, `meta.err`, decoded program/instruction/amount facts, state snapshots
+   and genesis before/after; verifier reconstructs the lifecycle instead of
+   trusting the runner summary.
+9. Submit fully signed attempts to restore freeze authority and to freeze an
+   account after revocation. Both must reach the classic Token program and fail;
+   a local CLI validation error does not count as proof.
 10. Write READY-last machine JSON and concise Markdown evidence without secret
     bytes or key paths. Mark `productionAuthorityProven=false`, `ccip=false`,
-    `publicNetwork=false` and `realAssetCostUsd=0`.
+    `publicNetwork=false`, `realAssetCostUsd=0`, `mintAuthorityRevoked=false`,
+    `authorityKeyRetained=false`, `remintPossibleUntilTeardown=true` and
+    `productionHardCapProven=false`.
 11. On success, failure, interrupt or timeout, terminate only the owned child,
     delete every private key and ledger, and retain only explicitly selected
-    sanitised report output.
+    sanitised report output. Synchronous cleanup after `SIGKILL` is impossible:
+    an owned marker/lease lets the next invocation or outer job safely reclaim a
+    stale run without touching neighbouring runs.
 
 ### 5.3 Required tests
 
 - unit: strict JSON parsing, bigint/base-unit rules, wrong/missing fields,
   unexpected Token-2022 program, decimals, authority and supply;
+- bootstrap: cold/warm cache, tampered/missing/wrong archive or binary, hostile
+  PATH and no network fallback after verified install;
 - process: startup timeout, early exit, SIGINT/SIGTERM, owned PID cleanup and no
-  neighbour kill;
+  neighbour kill; SIGKILL followed by safe stale-run reclamation;
 - filesystem: symlink/redirection rejection, permissions and READY-last writes;
 - integration: clean mint -> burn -> zero on real local validator;
 - adversarial: forged CLI output is rejected by independent RPC reads; stale
-  ledger/config and non-local URL fail closed;
+  ledger/config, hostile global Solana config, decoy PATH and non-local URL fail
+  closed; decoy binaries receive zero calls;
 - concurrency: two isolated runs use distinct ports/directories and finish
   without shared cleanup;
-- negative authority: freeze cannot be restored after `None`;
-- evidence: no seed/private key/path material in tracked or retained output.
+- negative authority: signed restore/freeze instructions reach the Token program
+  and fail after `None`;
+- evidence: lifecycle reconstruction from finalized transactions; no seed,
+  mnemonic, private key, secret-bearing raw error or host path in output.
 
 ### 5.4 Acceptance
 
 `pnpm solana:fixture:local` must work from a clean bootstrap, cost `$0`, leave
 the checkout clean, return final supply `0`, delete secrets and emit a validated
-sanitised report. Linux CI repeats the same lifecycle on exact SHA.
+sanitised report. A second run must reclaim an intentionally SIGKILLed owned
+fixture. Linux CI repeats the same lifecycle on exact SHA.
 
 ## 6. Slice B - deployment cost estimator and unsigned plan
 
-🎯 9/10  🛡️ 10/10  🧠 5/10. Около `350-650` authored lines.
+🎯 9/10  🛡️ 10/10  🧠 7/10. Около `900-1 400` authored lines.
 
 ### 6.1 Architecture
 
@@ -247,50 +316,83 @@ tooling/deployment-plan/
   builder.ts               # stable plan + volatile quote
   verify.ts                # independent checks
   tests/
-scripts/deployment/estimate-local.ts
+scripts/deployment/estimate-local.ts # integrator-owned thin composition entrypoint
 ```
 
 The domain has no wallet, signer, private key, transaction sender or generic
 `execute` function.
 
+Foundation применяет к этому root то же направление
+`domain <- application <- adapters <- composition`; forbidden-import fixtures
+не позволяют pure cost/identity model зависеть от RPC, clock или filesystem.
+
 ### 6.2 Two-artifact model
 
 Separate:
 
-1. `deployment-plan.v1.json` - stable exact identity: chain policy, source and
-   artifact digests, compiler/settings, creation bytecode hash, constructor ABI
-   bytes/hash, token identity, value=`0`, deployer public address if supplied,
-   `broadcastAllowed=false`;
+1. `deployment-plan.v1.json` - immutable stable identity: domain-separated
+   canonical `planId`, contract FQN, build profile, source dependency closure,
+   build-info/artifact/ABI/fixture digests, compiler/settings, creation bytecode
+   hash, constructor ABI bytes/hash, full `creationInputHash`, chain ID, explicit
+   `from`, value=`0`, cap policy and `broadcastAllowed=false`;
 2. `fee-quote.v1.json` - volatile snapshot: observed chain/block/time, gas
    estimate, base/priority/max fee, chosen gas buffer, expected and worst-case
-   wei, optional informational USD conversion and expiry.
+   wei, optional informational USD conversion and expiry. Quote обязательно
+   содержит `planId` и `creationInputHash`; quote от другого plan отвергается.
 
 Changing market price must not change bytecode/constructor approval identity.
 USD is display-only; all hard limits use integer wei/gas values.
+
+Доверенные основания коммитятся отдельно от builder output: chain ID `31337`,
+localhost-only RPC policy, test-only maximum wei cap, exact fixture/READY digest,
+contract FQN, compiler profile и source/artifact/ABI pins. Они маркируются
+`testOnly=true`, `productionApproved=false`, `mainnetAllowed=false`; builder не
+может сам объявить собственный output доверенным.
 
 ### 6.3 Calculation and guards
 
 - encode exact creation input from pinned build-info and constructor values;
 - estimate against local Anvil by default. Public RPC remains disabled in this
   slice; tests use deterministic fake fee histories;
-- use bigint only. Worst-case cost is `gasLimit * maxFeePerGas + value`;
-- record the buffer formula explicitly and test rounding/overflow boundaries;
+- use bigint only and следующие точные формулы:
+  `gasLimit = ceilDiv(gasEstimate * (10_000 + bufferBps), 10_000)`,
+  `effectiveFee = min(maxFeePerGas, baseFeePerGas + maxPriorityFeePerGas)`,
+  `estimatedWei = gasEstimate * effectiveFee + value`,
+  `worstCaseWei = gasLimit * maxFeePerGas + value`;
+- hard cap применяется к `worstCaseWei`. Проверяются uint256 bounds,
+  `maxFeePerGas >= baseFeePerGas`, `maxPriorityFeePerGas <= maxFeePerGas`,
+  `gasLimit >= gasEstimate` и `gasLimit <= blockGasLimit`;
 - reject wrong chain, absent/mismatched artifact, unexpected value, stale quote,
   zero/absurd gas, negative/malformed fee data and cost above configured cap;
 - cap check occurs before any output can be marked reviewable;
-- artifact contains no signed raw transaction and no method capable of sending
-  `eth_sendRawTransaction` or `eth_sendTransaction`;
-- independent verifier recomputes creation input and all totals from trusted
-  inputs rather than trusting builder summaries.
+- quote freshness binds decimal block number, block hash, block timestamp,
+  fee-history newest block, fixed TTL and maximum head lag. Timestamp-only
+  freshness запрещена;
+- RPC adapter exposes a fixed typed allowlist only: `eth_chainId`, required block
+  reads, `eth_feeHistory` and `eth_estimateGas` with exact `{from,data,value}` at
+  the bound block. Any other method fails before transport;
+- package contains no wallet/signing dependency, private-key environment read,
+  transaction CLI, signed raw transaction or send RPC method;
+- independent verifier separately parses approved build inputs, encodes and
+  cross-checks initcode, recomputes expected `planId`, totals and freshness, and
+  performs its own allowlisted RPC reads. Builder helpers are not its authority;
+- plan bundle and quote are written into a fresh owned directory, validated,
+  then published transactionally with READY last. Failed runs cannot leave a
+  reviewable partial bundle.
 
 ### 6.4 Required tests
 
 - golden current AGTMAIToken artifact and constructor vector;
-- property tests for bigint formula, rounding and cap boundaries;
+- property tests for exact bigint formulas, ceil rounding, uint256 overflow and
+  every fee/gas relation boundary;
 - tampered bytecode/build-info/ABI/constructor/deployer/chain rejection;
-- EIP-1559 fee-history edge cases and stale snapshot;
+- mutation tests prove each plan identity input changes `planId`; golden vector
+  fixes expected ID independently; swapping quotes between plans is rejected;
+- EIP-1559 fee-history edge cases, reorged block hash, head lag, future block,
+  exact expiry boundary and stale snapshot;
 - gas estimate changes only volatile quote, not stable plan identity;
-- codebase scan proving broadcast RPC methods and secret inputs are absent;
+- transport/import-graph tests prove fixed RPC allowlist and absence of wallet,
+  signing, secret and broadcast capabilities; string scan is defense in depth;
 - local Anvil integration estimate compared with measured Foundry gas within a
   documented tolerance; exact equality is not assumed across estimators;
 - schema and independent verifier reject forged totals or `broadcastAllowed`.
@@ -299,48 +401,75 @@ USD is display-only; all hard limits use integer wei/gas values.
 
 The command produces a reviewable, unsigned, non-broadcastable local plan and a
 separate quote. It fails before success when any exact-artifact or total-cost
-guard is violated. Mainnet quoting/signing remains a later explicitly approved
-slice in `OPEN_QUESTIONS.md`.
+guard is violated. The verifier accepts only a READY-last bundle bound to its
+independently expected `planId`. Mainnet quoting/signing remains a later
+explicitly approved slice in `OPEN_QUESTIONS.md`.
 
 ## 7. Slice C - Slither/security matrix and Linux evidence
 
-🎯 9/10  🛡️ 9/10  🧠 5/10. Около `400-700` authored lines.
+🎯 9/10  🛡️ 10/10  🧠 7/10. Около `1 000-1 600` authored lines.
 
 ### 7.1 Preflight and pin
 
 1. Verify official current stable Slither release again (`0.11.6` at plan time).
-2. Run an isolated compatibility spike against solc `0.8.36`, Foundry `1.8.0`
-   and the vendored OpenZeppelin subset.
+2. Run an isolated compatibility spike against exact Slither, crytic-compile,
+   solc `0.8.36+commit.8a079791`, Foundry `1.8.0` and the vendored OpenZeppelin
+   subset. Compare normalized compiler settings and creation-bytecode identity
+   with a fresh pinned-Foundry build.
 3. Prefer the official Trail of Bits Ethereum Security Toolbox image pinned to
-   an immutable dated tag and digest. Assert exact `slither --version` and
-   `solc --version` inside it. If the image does not contain the required stable
-   versions or lacks usable arm64/Linux parity, stop and record a blocker rather
-   than float dependencies or add an unreviewed Python stack.
-4. Run container with repository read-only, network disabled, tmpfs writable
-   paths, no host secrets and no Docker socket mount.
+   an immutable dated tag and `linux/amd64` digest. Record official registry,
+   upstream provenance, selected platform manifest/image ID and exact version
+   outputs for Slither, crytic-compile, solc and Forge. Tag is only a readable
+   locator; digest is the integrity authority. If the official image cannot
+   satisfy the complete tuple, stop and amend the plan rather than creating an
+   unreviewed custom Python image.
+4. Run as explicit non-root UID/GID with read-only root filesystem,
+   `no-new-privileges`, all capabilities dropped, bounded PID/memory/CPU/time,
+   controlled HOME/tmp, environment cleared to an explicit minimal allowlist,
+   network disabled, no host secrets, credentials or Docker socket.
+5. Keep checkout read-only. Copy only exact tracked inputs into a fresh tmpfs
+   work area; redirect Forge out/cache/build-info and Slither output to fresh
+   tmpfs paths. Pass pinned solc explicitly, reuse no analysis cache, and hash
+   source/config/vendor closure before and after execution.
 
 ### 7.2 Gate behavior
 
-- analyse only production Solidity under `contracts/evm/src`, not test helpers;
+- check in an expected target/source-closure manifest containing AGTMAIToken and
+  its vendored OpenZeppelin production imports, while excluding tests/scripts
+  from policy results;
+- require the exact nonzero compiled/analyzed targets, source hashes, normalized
+  compiler settings and complete detector inventory. Zero/omitted targets,
+  missing or unexpected detectors and broad exclude flags fail closed;
 - emit deterministic JSON plus a short human summary;
-- P0/P1-equivalent high/medium findings fail the gate;
+- every High/Medium impact finding fails regardless of confidence;
 - low/informational findings remain visible and require triage, but do not
   silently become blockers;
-- suppressions are exact detector/path/fingerprint records with reason, owner,
-  expiry/review date and regression evidence. Broad detector disable and inline
-  unexplained ignore are forbidden;
-- `--warn-unused-ignores` or equivalent stale-suppression detection is enabled;
+- suppression schema has a versioned canonical fingerprint over detector ID,
+  repository-relative POSIX path, source offsets, source/snippet hash and
+  normalized finding identity, plus reason, owner, expiry/review date and
+  regression evidence. Matching is one-to-one after complete analysis;
+  duplicate, expired, unused, unmatched or multiply matched suppressions fail;
 - output separates tool findings, policy decisions and environment failure;
 - the existing Foundry unit/fuzz/invariant/gas-size gates remain authoritative
   complementary checks. Slither is not called an audit.
 
 ### 7.3 CI layout
 
-Add a separate `solidity-security` Linux job after the ordinary Solidity build.
-It checks out exact SHA without credentials, verifies the pinned image digest,
-runs offline after pull, uploads only sanitised reports on failure and asserts a
-clean checkout. A missing image/tool/version is a hard environment failure, not
-an automatic pass.
+Интегратор, не W3, добавляет `solidity-security` в существующий Linux workflow с
+теми же PR/push triggers, без path filter, permissive `if` или
+`continue-on-error`, и с `needs: [solidity]`. Job checks out exact SHA without
+credentials, verifies the pinned image digest and runs offline after pull.
+Shell boundary uses fail-closed pipeline semantics. Distinct exit classes cover
+clean result, policy finding, malformed output and environment failure; timeout,
+cancellation, missing image/tool/report or skipped job never count as success.
+
+Schema-valid evidence создаётся с READY last и загружается на success и failure
+action-ом, pinned на полный commit SHA. Evidence содержит candidate SHA, run ID
+и attempt, event/platform, image tag+digest, exact tool versions, input/config/
+policy hashes, expected/observed targets, detector inventory, finding and
+suppression counts, result category и exit status. Если анализ не стартовал,
+создаётся минимальный environment-failure envelope. Отсутствие или ошибка
+загрузки evidence блокирует acceptance.
 
 Local command uses the same image/digest and config. Do not insert a large image
 pull into `check:fast`; expose it through `security:solidity` and include it in
@@ -352,20 +481,54 @@ the full release/security gate.
 - detector/path/fingerprint suppression exactness and expiry;
 - unused/broad suppression rejection;
 - wrong image digest/version/solc fails closed;
-- secrets and writable checkout are unavailable in the container;
-- workflow structure test proves exact checkout, timeout, network policy,
-  digest pin and clean-postcondition;
+- tag-only/wrong-platform pin, missing Forge/crytic-compile и любой version
+  mismatch fail container-contract tests;
+- read-only checkout integration ignores injected stale out/cache sentinels,
+  writes only fresh tmpfs and proves unchanged input closure/postcondition;
+- zero contracts, omitted AGTMAIToken/inherited source, source hash drift,
+  missing/unexpected detector and every impact/confidence class fail as defined;
+- suppression mutation by detector/path/range/source/finding invalidates waiver,
+  while absolute worktree change does not; duplicate/broad/expired/unused fail;
+- runtime probes prove non-root, zero effective capabilities, resource limits,
+  absent secrets/socket and unwritable source/root filesystem;
+- workflow structure test proves exact checkout, same triggers, `needs`, timeout,
+  permissions, network policy, digest pin, READY-last upload on all outcomes and
+  absence of skip/continue constructs;
+- integration fixtures prove container failure, broken pipeline, timeout,
+  image-pull failure and missing/malformed evidence all fail the job;
 - one synthetic vulnerable contract fixture demonstrates that the gate fails;
   it never enters production source or shipped artifacts.
+
+### 7.5 Acceptance
+
+`pnpm security:solidity` must execute the exact pinned tuple on a clean checkout,
+analyse the complete expected production closure and emit schema-valid evidence.
+The existing GitHub workflow must invoke the same command on exact candidate SHA.
+Success requires clean policy result, immutable evidence upload and unchanged
+checkout; tool/policy/environment failures remain distinguishable and nonzero.
 
 ## 8. Integration barriers
 
 ### Barrier 0 - reviewed plan
 
-- four planning workers completed on exact draft SHA;
+- four planning workers completed on exact draft SHA using independent hosted
+  jobs, `gpt-5.6-sol xhigh`, read-only and no fast mode;
 - every finding has accepted/rejected/deferred rationale;
 - owner confirms implementation may start;
-- clean baseline commit and exact worker briefs exist.
+- amended plan and critique ledger are committed on a clean SHA.
+
+### Barrier 0.5 - toolchain and architecture prerequisite
+
+- integrator verifies Agave/SPL cold bootstrap on macOS arm64 and Linux x64 and
+  commits immutable URLs, archive/binary hashes, paths and versions;
+- integrator verifies the complete official Slither/crytic-compile/solc/Forge
+  container tuple, tag, `linux/amd64` digest and Foundry bytecode parity;
+- all three `tooling/**` roots enter Foundation/source policy and full-scan
+  paths; dependency direction and forbidden imports have negative fixtures;
+- prerequisite checks pass from a clean checkout and the resulting SHA is
+  frozen as the shared W1/W2/W3 base;
+- if any compatibility tuple is unavailable, implementation pauses at this
+  barrier instead of inventing an unreviewed fallback.
 
 ### Barrier 1 - scoped workers
 
@@ -377,24 +540,36 @@ the full release/security gate.
 ### Barrier 2 - integrated candidate
 
 - integrate one worker at a time with targeted checks after each;
-- add root commands/toolchain pins/TS references and regenerate only necessary
-  lock data;
+- apply one root-wiring commit per slice. A genuinely shared prerequisite must
+  already exist in the Barrier 0.5 commit; commit DAG and ownership are recorded
+  in the integration ledger so each slice can be independently reverted;
+- add root commands/TS references and regenerate only necessary lock data;
 - run Foundation, lint, TS, package, Foundry, local EVM, local Solana,
   deployment-plan and Slither gates;
 - run parallel/interrupt cleanup tests;
-- push candidate and obtain green GitHub CI for that exact SHA;
+- push candidate and obtain green GitHub CI for that exact SHA. Structural
+  evidence records repository, candidate SHA, workflow, run ID, attempt, event,
+  remote `head_sha` and every required job conclusion;
 - freeze SHA before reviewers start.
 
 ### Barrier 3 - hosted review
 
-Five parallel read-only reviewers use `gpt-5.6-sol xhigh`, no fast mode and
-isolated clean worktrees:
+Сначала четыре parallel read-only specialist reviewers используют
+`gpt-5.6-sol xhigh`, no fast mode и isolated clean worktrees:
 
 1. Solana/SPL authority and lifecycle security;
 2. deployment-plan math, artifact binding and broadcast absence;
 3. Slither/supply-chain/CI isolation;
 4. Architecture/Foundation/MVP scope;
-5. holistic plan compliance and evidence honesty.
+
+После завершения specialists интегратор замораживает единый immutable findings
+ledger. Затем отдельный fifth reviewer последовательно выполняет holistic plan
+compliance/evidence-honesty review на том же SHA и уже видит полный specialist
+ledger. Параллельный holistic review до завершения specialists запрещён.
+
+Reviewer job identity должна отличаться от всех author/integrator/remediation
+job identities её scope. Holistic reviewer не может быть участником реализации,
+интеграции или исправлений кандидата.
 
 Every finding requires verdict `ACCEPT/AMEND/REJECT`, severity `P0/P1/P2`, exact
 `file:line`, reproducible scenario, violated invariant, minimal fix and a test
@@ -418,8 +593,9 @@ on the new exact SHA. Old reviews never prove a changed SHA.
 - Uncertain GitHub push/run: read remote state with `git`/`gh` before retry.
 - Security tool false positive: triage explicitly; never globally disable a
   detector to make CI green.
-- Each slice is a separate conventional commit group and can be reverted without
-  removing the already proven Genesis Core.
+- Each slice and its root/CI wiring are a separate conventional commit group.
+  Integration acceptance explicitly tests revertability of each group without
+  removing Genesis Core or breaking the two surviving slices.
 
 ## 10. Final acceptance checklist
 
@@ -434,4 +610,5 @@ on the new exact SHA. Old reviews never prove a changed SHA.
 - Foundation and full exact-SHA CI pass;
 - all accepted P0/P1 are closed with regression tests;
 - final holistic hosted review returns `ACCEPT` on exact candidate SHA;
+- reviewer authorship and exact-SHA independence are proven in the ledger;
 - `STATUS.md` separates proven, simulated, deferred and not-proven claims.
