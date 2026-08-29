@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { assertLoopbackRpcUrl, integer, LocalSolanaError, object, parseAccountState, parseTokenAccountState, string, type TransactionFact } from "../domain/model.ts";
+import { LocalSolanaError } from "../domain/model.ts";
 import type { RpcPort } from "../application/ports.ts";
+import { array, assertLoopbackRpcUrl, integer, object, parseAccountState, parseFinalizedTransaction, parseTokenAccountState, string } from "./rpc-parsers.ts";
 
 export class JsonRpcAdapter implements RpcPort {
   private id = 0;
@@ -62,23 +63,10 @@ export class JsonRpcAdapter implements RpcPort {
     await this.waitSignature(rpcUrl, signature);
     return signature;
   }
-  public async finalizedTransaction(rpcUrl: string, kind: TransactionFact["kind"], signature: string, genesisHash: string): Promise<TransactionFact> {
+  public async finalizedTransaction(rpcUrl: string, signature: string) {
     await this.waitSignature(rpcUrl, signature);
     const raw = await this.call(rpcUrl, "getTransaction", [signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
-    if (raw === null) { throw new LocalSolanaError("SOLANA_TRANSACTION_MISSING", `${kind} transaction is missing`); }
-    const tx = object(raw, "transaction");
-    const meta = object(tx.meta, "transaction meta");
-    const message = object(object(tx.transaction, "transaction envelope").message, "transaction message");
-    const instructions = array(message.instructions, "transaction instructions");
-    const inner = meta.innerInstructions === null ? [] : array(meta.innerInstructions, "inner instructions").flatMap((entry) => array(object(entry, "inner instruction group").instructions, "inner instruction list"));
-    const decoded = [...instructions, ...inner].map((entry) => decodeInstruction(entry));
-    const blockTime = tx.blockTime;
-    if (blockTime !== null) { integer(blockTime, "block time"); }
-    return {
-      kind, signature, slot: String(integer(tx.slot, "transaction slot")), confirmationStatus: "finalized", err: meta.err,
-      programIds: [...new Set(decoded.map((item) => item.programId))], instructionKinds: decoded.map((item) => item.kind),
-      amountBaseUnits: decoded.find((item) => item.amount !== null)?.amount ?? null, genesisHash,
-    };
+    return parseFinalizedTransaction(raw, signature, await this.genesisHash(rpcUrl));
   }
 
   private async waitSignature(rpcUrl: string, signature: string): Promise<void> {
@@ -108,16 +96,3 @@ export class JsonRpcAdapter implements RpcPort {
     } finally { clearTimeout(timer); }
   }
 }
-
-function decodeInstruction(value: unknown): { readonly programId: string; readonly kind: string; readonly amount: string | null } {
-  const instruction = object(value, "instruction");
-  const programId = string(instruction.programId, "instruction program ID");
-  if (instruction.parsed === undefined) { return { programId, kind: "raw", amount: null }; }
-  const parsed = object(instruction.parsed, "parsed instruction");
-  const info = object(parsed.info, "instruction info");
-  const amountValue = info.amount ?? (typeof info.tokenAmount === "object" && info.tokenAmount !== null ? object(info.tokenAmount, "instruction token amount").amount : undefined);
-  const amount = typeof amountValue === "string" && /^(?:0|[1-9][0-9]*)$/u.test(amountValue) ? amountValue : null;
-  return { programId, kind: string(parsed.type, "instruction type"), amount };
-}
-
-function array(value: unknown, label: string): readonly unknown[] { if (!Array.isArray(value)) { throw new LocalSolanaError("SOLANA_JSON_ARRAY", `${label} must be an array`); } return value; }

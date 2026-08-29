@@ -1,6 +1,7 @@
 import { chmod } from "node:fs/promises";
-import { CLASSIC_TOKEN_PROGRAM, FIXTURE_DECIMALS, LocalSolanaError, object, parseUnsignedInteger, string } from "../domain/model.ts";
+import { CLASSIC_TOKEN_PROGRAM, FIXTURE_DECIMALS, LocalSolanaError, parseUnsignedInteger } from "../domain/model.ts";
 import type { CliExecutionContext, CliPort, CommandPort, ToolPaths } from "../application/ports.ts";
+import { object, string } from "./rpc-parsers.ts";
 
 export class SolanaCliAdapter implements CliPort {
   private readonly commands: CommandPort;
@@ -8,13 +9,13 @@ export class SolanaCliAdapter implements CliPort {
 
   public async createKeys(context: CliExecutionContext) {
     const { paths, tools, env, signal } = context;
-    for (const path of [paths.payerKey, paths.mintKey, paths.ownerKey, paths.freezeKey]) {
+    for (const path of [paths.payerKey, paths.mintKey, paths.ownerKey]) {
       await this.checked(tools.keygen, ["new", "--no-bip39-passphrase", "--silent", "--force", "--outfile", path], env, signal);
       await chmod(path, 0o600);
     }
     return {
       payer: await this.pubkey(tools, paths.payerKey, env, signal), mint: await this.pubkey(tools, paths.mintKey, env, signal),
-      owner: await this.pubkey(tools, paths.ownerKey, env, signal), freeze: await this.pubkey(tools, paths.freezeKey, env, signal),
+      owner: await this.pubkey(tools, paths.ownerKey, env, signal),
     };
   }
   public async verifyFunded(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly payer: string }): Promise<void> {
@@ -24,13 +25,12 @@ export class SolanaCliAdapter implements CliPort {
     const lamports = extractLamports(result.stdout);
     if (lamports < 1_000_000_000n) { throw new LocalSolanaError("SOLANA_PAYER_BALANCE", "local genesis payer has insufficient test funds"); }
   }
-  public async createMint(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly publicKeys: { readonly payer: string; readonly mint: string; readonly freeze: string } }): Promise<{ readonly createSignature: string; readonly assignFreezeSignature: string }> {
+  public async createMint(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly publicKeys: { readonly payer: string; readonly mint: string; readonly owner: string } }): Promise<string> {
     const created = await this.spl(context, request.rpcUrl, ["create-token", "--decimals", String(FIXTURE_DECIMALS), "--mint-authority", request.publicKeys.mint, "--enable-freeze", context.paths.mintKey]);
-    const assigned = await this.spl(context, request.rpcUrl, ["authorize", request.publicKeys.mint, "freeze", request.publicKeys.freeze, "--authority", context.paths.mintKey]);
-    return { createSignature: extractSignature(created.stdout, "create token"), assignFreezeSignature: extractSignature(assigned.stdout, "assign freeze authority") };
+    return extractSignature(created.stdout, "create token");
   }
   public async revokeFreeze(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string }): Promise<string> {
-    const result = await this.spl(context, request.rpcUrl, ["authorize", request.mint, "freeze", "--disable", "--authority", context.paths.freezeKey]);
+    const result = await this.spl(context, request.rpcUrl, ["authorize", request.mint, "freeze", "--disable", "--authority", context.paths.mintKey]);
     return extractSignature(result.stdout, "revoke freeze");
   }
   public async createTokenAccount(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string; readonly owner: string }): Promise<string> {

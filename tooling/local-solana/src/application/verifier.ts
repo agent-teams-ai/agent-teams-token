@@ -1,11 +1,15 @@
 import {
+  ASSOCIATED_TOKEN_PROGRAM,
   CLASSIC_TOKEN_PROGRAM,
   FIXTURE_AMOUNT_BASE_UNITS,
   FIXTURE_DECIMALS,
+  LIFECYCLE,
   LocalSolanaError,
   parseUnsignedInteger,
   type EvidenceReport,
   type FixtureObservations,
+  type InstructionFact,
+  type LifecycleKind,
   type TransactionFact,
 } from "../domain/model.ts";
 
@@ -26,7 +30,7 @@ function verifyMintStates(value: FixtureObservations): void {
     if (state.mintAuthority !== value.mintAuthority) { fail("SOLANA_MINT_AUTHORITY", "ephemeral mint authority changed"); }
   }
   if (value.initialMint.supply !== "0") { fail("SOLANA_INITIAL_SUPPLY", "mint did not begin at zero"); }
-  if (value.initialMint.freezeAuthority !== value.freezeAuthority) { fail("SOLANA_INITIAL_FREEZE", "mint was not assigned to the explicit ephemeral freeze authority"); }
+  if (value.initialMint.freezeAuthority !== value.freezeAuthority || value.freezeAuthority !== value.mintAuthority) { fail("SOLANA_INITIAL_FREEZE", "mint creation did not bind the explicit ephemeral freeze authority"); }
   if (value.afterRevokeMint.freezeAuthority !== null || value.afterMint.freezeAuthority !== null || value.finalMint.freezeAuthority !== null) {
     fail("SOLANA_FREEZE_AUTHORITY", "freeze authority was not permanently disabled before minting");
   }
@@ -47,49 +51,101 @@ function verifyTokenAccountIdentity(value: FixtureObservations): void {
 }
 
 function verifyTransactions(value: FixtureObservations): void {
-  const amount = FIXTURE_AMOUNT_BASE_UNITS.toString();
-  const expected: readonly TransactionFact["kind"][] = ["create", "assignFreeze", "revokeFreeze", "mint", "burn", "restoreFreezeAttempt", "freezeAttempt"];
-  if (value.transactions.length !== expected.length) { fail("SOLANA_TRANSACTION_COUNT", "lifecycle transaction set is incomplete"); }
+  if (value.transactions.length !== LIFECYCLE.length) { fail("SOLANA_TRANSACTION_COUNT", "exact seven-step lifecycle is incomplete"); }
+  const signatures = new Set<string>(); let previousSlot = -1n;
   for (const [index, fact] of value.transactions.entries()) {
-    if (fact.kind !== expected[index]) { fail("SOLANA_TRANSACTION_ORDER", `expected ${expected[index]} at lifecycle index ${index}`); }
+    const expected = LIFECYCLE[index] as LifecycleKind;
+    if (fact.operation !== expected) { fail("SOLANA_TRANSACTION_ORDER", `decoded ${fact.operation} at lifecycle index ${index}; expected ${expected}`); }
+    if (signatures.has(fact.signature)) { fail("SOLANA_TRANSACTION_DUPLICATE", "lifecycle signatures must be unique"); }
+    signatures.add(fact.signature);
     if (fact.genesisHash !== value.genesisHashBefore || fact.confirmationStatus !== "finalized") { fail("SOLANA_TRANSACTION_FINALITY", "transaction is not finalized on the owned genesis"); }
-    parseUnsignedInteger(fact.slot, "transaction slot");
-    if (!fact.programIds.includes(CLASSIC_TOKEN_PROGRAM)) { fail("SOLANA_TRANSACTION_PROGRAM", `${fact.kind} did not reach classic Token Program`); }
-    const shouldFail = fact.kind === "restoreFreezeAttempt" || fact.kind === "freezeAttempt";
-    if (shouldFail ? fact.err === null : fact.err !== null) { fail("SOLANA_TRANSACTION_RESULT", `${fact.kind} has an unexpected transaction result`); }
-    if ((fact.kind === "mint" || fact.kind === "burn") && fact.amountBaseUnits !== amount) { fail("SOLANA_TRANSACTION_AMOUNT", `${fact.kind} amount is wrong`); }
+    const slot = parseUnsignedInteger(fact.slot, "transaction slot");
+    if (slot <= previousSlot) { fail("SOLANA_TRANSACTION_SLOT_ORDER", "lifecycle slots must be strictly increasing"); }
+    previousSlot = slot;
+    verifyTransactionSemantics(fact, value);
   }
 }
+
+function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObservations): void {
+  const relevant = relevantInstruction(fact);
+  const shouldFail = fact.operation === "restoreFreezeAttempt" || fact.operation === "freezeAttempt";
+  if (shouldFail) {
+    if (fact.error === null || fact.error.instructionIndex !== relevant.instructionIndex || relevant.innerInstructionIndex !== null) {
+      fail("SOLANA_TRANSACTION_ERROR_INDEX", `${fact.operation} did not fail at its exact outer Token instruction`);
+    }
+  } else if (fact.error !== null) { fail("SOLANA_TRANSACTION_RESULT", `${fact.operation} unexpectedly failed`); }
+
+  switch (fact.operation) {
+    case "createMint":
+      requireKind(relevant, ["initializeMint", "initializeMint2"]);
+      require(relevant.mint === value.mintAddress && relevant.authority === value.mintAuthority && relevant.newAuthority === value.freezeAuthority && relevant.decimals === FIXTURE_DECIMALS,
+        "SOLANA_CREATE_SEMANTICS", "mint initialization does not bind mint, authorities and decimals");
+      requireSigners(fact, [value.payerAddress, value.mintAddress]);
+      break;
+    case "revokeFreeze":
+      requireKind(relevant, ["setAuthority"]);
+      require(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
+        "SOLANA_REVOKE_SEMANTICS", "freeze revocation does not bind mint and former authority");
+      requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
+      break;
+    case "createAta": {
+      require(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && relevant.kind === "raw", "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
+      const expectedPrefix = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress];
+      require(expectedPrefix.every((address, index) => relevant.accounts[index] === address) && relevant.accounts.includes(CLASSIC_TOKEN_PROGRAM), "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
+      requireSigners(fact, [value.payerAddress]);
+      break;
+    }
+    case "mint":
+      requireKind(relevant, ["mintTo", "mintToChecked"]);
+      require(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.mintAuthority && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
+        "SOLANA_MINT_SEMANTICS", "mint instruction does not bind mint, ATA, authority and amount");
+      requireSigners(fact, [value.payerAddress, value.mintAuthority]);
+      break;
+    case "burn":
+      requireKind(relevant, ["burn", "burnChecked"]);
+      require(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.ownerAddress && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
+        "SOLANA_BURN_SEMANTICS", "burn instruction does not bind mint, ATA, owner and amount");
+      requireSigners(fact, [value.payerAddress, value.ownerAddress]);
+      break;
+    case "restoreFreezeAttempt":
+      requireKind(relevant, ["setAuthority"]);
+      require(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
+        "SOLANA_RESTORE_SEMANTICS", "restore attempt does not bind mint and former authority");
+      requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
+      break;
+    case "freezeAttempt":
+      requireKind(relevant, ["freezeAccount"]);
+      require(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.freezeAuthority,
+        "SOLANA_FREEZE_SEMANTICS", "freeze attempt does not bind ATA, mint and former authority");
+      requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
+      break;
+  }
+}
+
+function relevantInstruction(fact: TransactionFact): InstructionFact {
+  const candidates = fact.operation === "createAta"
+    ? fact.instructions.filter((item) => item.programId === ASSOCIATED_TOKEN_PROGRAM)
+    : fact.instructions.filter((item) => item.programId === CLASSIC_TOKEN_PROGRAM);
+  if (candidates.length !== 1) { fail("SOLANA_TRANSACTION_INSTRUCTION_COUNT", `${fact.operation} must contain exactly one relevant instruction`); }
+  return candidates[0] as InstructionFact;
+}
+
+function requireKind(instruction: InstructionFact, kinds: readonly string[]): void { require(kinds.includes(instruction.kind), "SOLANA_INSTRUCTION_KIND", `unexpected instruction ${instruction.kind}`); }
+function requireSigners(fact: TransactionFact, expected: readonly string[]): void {
+  require(new Set(fact.signers).size === fact.signers.length && fact.signers.length === expected.length && expected.every((signer) => fact.signers.includes(signer)), "SOLANA_TRANSACTION_SIGNERS", `${fact.operation} does not have the exact signer set`);
+}
+function require(condition: boolean, code: string, message: string): asserts condition { if (!condition) { fail(code, message); } }
 
 function evidence(value: FixtureObservations): EvidenceReport {
   const amount = FIXTURE_AMOUNT_BASE_UNITS.toString();
   return {
-    schemaVersion: 1,
-    status: "READY",
-    identity: { name: "Agent Teams AI", symbol: "AGTMAI" },
-    programId: CLASSIC_TOKEN_PROGRAM,
-    decimals: 9,
-    testAmountBaseUnits: amount,
-    initialSupply: "0",
-    intermediateSupply: amount,
-    finalSupply: "0",
-    freezeAuthority: null,
-    mintAuthority: value.mintAuthority,
-    genesisHash: value.genesisHashBefore,
-    validatorVersion: value.validatorVersion,
+    schemaVersion: 1, status: "READY", identity: { name: "Agent Teams AI", symbol: "AGTMAI" }, programId: CLASSIC_TOKEN_PROGRAM, decimals: 9,
+    testAmountBaseUnits: amount, initialSupply: "0", intermediateSupply: amount, finalSupply: "0", freezeAuthority: null,
+    payerAddress: value.payerAddress, mintAddress: value.mintAddress, tokenAccountAddress: value.tokenAccountAddress, ownerAddress: value.ownerAddress,
+    mintAuthority: value.mintAuthority, formerFreezeAuthority: value.freezeAuthority, genesisHash: value.genesisHashBefore, validatorVersion: value.validatorVersion,
+    snapshots: { initialMint: value.initialMint, afterRevokeMint: value.afterRevokeMint, afterMint: value.afterMint, afterMintTokenAccount: value.afterMintTokenAccount, finalMint: value.finalMint, finalTokenAccount: value.finalTokenAccount },
     transactions: value.transactions,
-    assertions: {
-      productionAuthorityProven: false,
-      ccip: false,
-      publicNetwork: false,
-      realAssetCostUsd: 0,
-      mintAuthorityRevoked: false,
-      authorityKeyRetained: false,
-      remintPossibleUntilTeardown: true,
-      productionHardCapProven: false,
-      signedRestoreReachedTokenProgramAndFailed: true,
-      signedFreezeReachedTokenProgramAndFailed: true,
-    },
+    assertions: { productionAuthorityProven: false, ccip: false, publicNetwork: false, realAssetCostUsd: 0, mintAuthorityRevoked: false, authorityKeyRetained: false, remintPossibleUntilTeardown: true, productionHardCapProven: false, signedRestoreReachedTokenProgramAndFailed: true, signedFreezeReachedTokenProgramAndFailed: true },
   };
 }
 

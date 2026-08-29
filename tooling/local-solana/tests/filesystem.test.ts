@@ -3,16 +3,14 @@ import { chmod, link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { spawn } from "node:child_process";
 import { PrivateRunStore, ensurePrivateRoot } from "../src/adapters/filesystem.ts";
-import { CLASSIC_TOKEN_PROGRAM, type EvidenceReport } from "../src/domain/model.ts";
+import { verifyObservations } from "../src/application/verifier.ts";
+import type { EvidenceReport } from "../src/domain/model.ts";
+import { observationFixture } from "./helpers/observations.ts";
 
 function report(): EvidenceReport {
-  return {
-    schemaVersion: 1, status: "READY", identity: { name: "Agent Teams AI", symbol: "AGTMAI" }, programId: CLASSIC_TOKEN_PROGRAM, decimals: 9,
-    testAmountBaseUnits: "1000000000000", initialSupply: "0", intermediateSupply: "1000000000000", finalSupply: "0", freezeAuthority: null,
-    mintAuthority: "1".repeat(32), genesisHash: "1".repeat(32), validatorVersion: "4.2.1", transactions: [],
-    assertions: { productionAuthorityProven: false, ccip: false, publicNetwork: false, realAssetCostUsd: 0, mintAuthorityRevoked: false, authorityKeyRetained: false, remintPossibleUntilTeardown: true, productionHardCapProven: false, signedRestoreReachedTokenProgramAndFailed: true, signedFreezeReachedTokenProgramAndFailed: true },
-  };
+  return verifyObservations(observationFixture());
 }
 
 test("private store deletes keys and ledger while retaining READY-last sanitized evidence", async () => {
@@ -28,6 +26,15 @@ test("private store deletes keys and ledger while retaining READY-last sanitized
     assert.equal((await readFile(published.markdownPath, "utf8")).includes("SENTINEL_SECRET"), false);
     const ready = await lstat(join(directory, "READY")); const json = await lstat(published.jsonPath); const markdown = await lstat(published.markdownPath);
     assert.equal(ready.mtimeMs >= json.mtimeMs && ready.mtimeMs >= markdown.mtimeMs, true);
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("publication rejects schema drift before creating READY", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-schema-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
+  try {
+    const store = new PrivateRunStore(join(boundary, "runs"), output); const invalid = { ...report(), transactions: report().transactions.slice(1) };
+    await assert.rejects(store.publish({} as never, invalid), /SOLANA_EVIDENCE_SCHEMA/u);
+    await assert.rejects(lstat(output));
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
 
@@ -58,3 +65,32 @@ test("a subsequent invocation reclaims only a valid dead owned lease", async () 
     assert.equal(await store.reclaimStale(), 1); await assert.rejects(lstat(paths.directory));
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
+
+test("normal cleanup refuses to delete state beneath a registered live validator", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "validator leases support Linux and Darwin" }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-active-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  try {
+    const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const lease = JSON.parse(await readFile(marker, "utf8"));
+    lease.validator = { pid: process.pid, platform: process.platform, startTime: process.platform === "linux" ? "linux:1" : "darwin:61", executable: "/bin/validator", ledger: paths.ledger, commandHash: "a".repeat(64) };
+    await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
+    await assert.rejects(store.cleanup(paths), /SOLANA_VALIDATOR_ACTIVE/u); assert.equal((await lstat(paths.directory)).isDirectory(), true);
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("real parent SIGKILL reclaim authenticates, terminates and awaits its validator child", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "authenticated stale-child reclaim requires Linux procfs or native Darwin ps identity" }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-sigkill-")); await chmod(boundary, 0o700);
+  const runRoot = join(boundary, "runs"); const outputRoot = join(boundary, "out"); const readyPath = join(boundary, "ready.json"); const fakeValidator = join(boundary, "fake-validator");
+  await writeFile(fakeValidator, "#!/bin/bash\nwhile :; do /bin/sleep 1; done\n", { mode: 0o700 });
+  const parent = spawn(process.execPath, [join(import.meta.dirname, "helpers/start-owned-validator.ts"), runRoot, outputRoot, fakeValidator, readyPath], { stdio: ["ignore", "pipe", "pipe"] });
+  let diagnostics = ""; parent.stdout.on("data", (chunk) => { diagnostics += String(chunk); }); parent.stderr.on("data", (chunk) => { diagnostics += String(chunk); });
+  const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  try {
+    let ready: { readonly validatorPid: number; readonly runDirectory: string } | undefined;
+    for (let attempt = 0; attempt < 600 && ready === undefined && parent.exitCode === null; attempt += 1) { try { ready = JSON.parse(await readFile(readyPath, "utf8")); } catch { await new Promise((resolve) => setTimeout(resolve, 50)); } }
+    assert.ok(ready, `validator helper did not become ready: ${diagnostics}`); parent.kill("SIGKILL"); await new Promise<void>((resolve) => parent.once("close", () => resolve()));
+    assert.equal(processAlive(ready.validatorPid), true);
+    assert.equal(await new PrivateRunStore(runRoot, outputRoot).reclaimStale(), 1);
+    assert.equal(processAlive(ready.validatorPid), false); assert.equal(processAlive(neighbour.pid!), true); await assert.rejects(lstat(ready.runDirectory));
+  } finally { if (parent.exitCode === null) { parent.kill("SIGKILL"); } if (neighbour.exitCode === null) { neighbour.kill("SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
+});
+
+function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }

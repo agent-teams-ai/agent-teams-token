@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertLoopbackRpcUrl, CLASSIC_TOKEN_PROGRAM, parseAccountState, parseTokenAccountState, parseUnsignedInteger } from "../src/domain/model.ts";
+import { CLASSIC_TOKEN_PROGRAM, parseUnsignedInteger } from "../src/domain/model.ts";
+import { assertLoopbackRpcUrl, parseAccountState, parseTokenAccountState } from "../src/adapters/rpc-parsers.ts";
 
 test("canonical bigint parser accepts only unsigned decimal strings", () => {
   assert.equal(parseUnsignedInteger("100000000000000000000", "amount"), 100000000000000000000n);

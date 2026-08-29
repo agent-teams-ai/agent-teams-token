@@ -1,76 +1,254 @@
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import { createServer } from "node:net";
+import { basename, dirname, join, resolve } from "node:path";
 import { LocalSolanaError } from "../domain/model.ts";
 import type { PortAllocator, PortLease } from "../application/ports.ts";
 
-const RANGE_WIDTH = 128;
-const claimedRanges = new Set<number>();
-const claimedPorts = new Set<number>();
+const DYNAMIC_WIDTH = 128;
+const BLOCK_WIDTH = 132;
+const FIRST_PORT = 20_000;
+const BLOCK_COUNT = Math.floor((60_000 - FIRST_PORT) / BLOCK_WIDTH);
+const MARKER = "lease.json";
+const KIND = "agtmai-local-solana-port-lease";
 
+interface EntryIdentity { readonly dev: bigint; readonly ino: bigint; }
+interface LeaseRoot { readonly path: string; readonly identity: EntryIdentity; }
+interface LeaseRecord {
+  readonly schemaVersion: 1; readonly kind: typeof KIND; readonly pid: number; readonly processStart: string; readonly token: string;
+  readonly rootDevice: string; readonly rootInode: string; readonly directoryDevice: string; readonly directoryInode: string; readonly markerDevice: string; readonly markerInode: string;
+}
+interface AcquiredLease { readonly directory: string; readonly token: string; readonly rootIdentity: EntryIdentity; readonly directoryIdentity: EntryIdentity; readonly markerIdentity: EntryIdentity; }
+
+/** Cross-process lease directories serialize every fixture-owned port block. */
 export class LoopbackPortAllocator implements PortAllocator {
+  private readonly root: string;
+  public constructor(root = defaultLeaseRoot()) { this.root = resolve(root); }
+
   public async allocate(): Promise<PortLease> {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const rangeStart = randomInt(20_000, 60_000 - RANGE_WIDTH);
-      if (rangeCollides(rangeStart)) { continue; }
-      const rpcPort = await availablePort();
-      const faucetPort = await availablePortExcluding(new Set([rpcPort, rpcPort + 1]));
-      const reservedPorts = [rpcPort, rpcPort + 1, faucetPort];
-      if (new Set(reservedPorts).size !== reservedPorts.length
-        || reservedPorts.some((port) => port > 65_535 || claimedPorts.has(port) || inRange(port, rangeStart))
-        || !await canListen(rpcPort + 1)) { continue; }
-      claimedRanges.add(rangeStart);
-      for (const port of reservedPorts) { claimedPorts.add(port); }
-      let released = false;
-      return {
-        rpcPort,
-        faucetPort,
-        gossipPort: rangeStart,
-        dynamicPortRange: `${rangeStart}-${rangeStart + RANGE_WIDTH}`,
-        release: () => {
-          if (released) { return; }
-          released = true; claimedRanges.delete(rangeStart);
-          for (const port of reservedPorts) { claimedPorts.delete(port); }
-        },
-      };
+    const leaseRoot = await ensureLeaseRoot(this.root); const root = leaseRoot.path;
+    await reclaimStaleLeases(root, leaseRoot.identity);
+    const processStart = await currentProcessStart(process.pid);
+    const offset = randomInt(0, BLOCK_COUNT);
+    for (let attempt = 0; attempt < Math.min(BLOCK_COUNT, 40); attempt += 1) {
+      const index = (offset + attempt) % BLOCK_COUNT;
+      const start = FIRST_PORT + index * BLOCK_WIDTH;
+      const directory = join(root, `block-${index}`);
+      let acquired = await acquire(directory, processStart, leaseRoot.identity);
+      if (acquired === null) {
+        await reclaimStale(root, leaseRoot.identity, directory);
+        acquired = await acquire(directory, processStart, leaseRoot.identity);
+        if (acquired === null) { continue; }
+      }
+      const held = acquired;
+      try {
+        for (let port = start; port < start + BLOCK_WIDTH; port += 1) {
+          if (!await canListen(port)) { throw new LocalSolanaError("SOLANA_PORT_BUSY", `leased loopback block contains unavailable port ${port}`); }
+        }
+        let released = false;
+        return {
+          gossipPort: start,
+          dynamicPortRange: `${start}-${start + DYNAMIC_WIDTH - 1}`,
+          rpcPort: start + DYNAMIC_WIDTH,
+          faucetPort: start + DYNAMIC_WIDTH + 2,
+          release: async () => {
+            if (released) { return; }
+            await releaseAcquired(root, held);
+            released = true;
+          },
+        };
+      } catch (cause) {
+        await releaseAcquired(root, held).catch(() => {});
+        if (!(cause instanceof LocalSolanaError) || cause.code !== "SOLANA_PORT_BUSY") { throw cause; }
+      }
     }
-    throw new LocalSolanaError("SOLANA_PORT_ALLOCATION", "could not allocate distinct private loopback ports");
+    throw new LocalSolanaError("SOLANA_PORT_ALLOCATION", "could not acquire a distinct cross-process loopback port block");
   }
 }
 
-function inRange(port: number, start: number): boolean { return port >= start && port < start + RANGE_WIDTH; }
-
-function rangeCollides(start: number): boolean {
-  for (const claimedStart of claimedRanges) {
-    if (start < claimedStart + RANGE_WIDTH && claimedStart < start + RANGE_WIDTH) { return true; }
-  }
-  for (const port of claimedPorts) { if (inRange(port, start)) { return true; } }
-  return false;
+function defaultLeaseRoot(): string {
+  const uid = process.getuid?.() ?? 0;
+  return process.platform === "darwin" ? `/private/tmp/agtmai-local-solana-port-leases-${uid}` : `/tmp/agtmai-local-solana-port-leases-${uid}`;
 }
 
-async function availablePort(): Promise<number> {
-  return await listenOn(0);
+async function ensureLeaseRoot(path: string): Promise<LeaseRoot> {
+  const absolute = resolve(path);
+  const parent = await realpath(dirname(absolute)).catch(() => null);
+  if (parent === null) { throw new LocalSolanaError("SOLANA_PORT_LEASE_PARENT", "port lease parent is absent or substituted"); }
+  const canonical = join(parent, basename(absolute));
+  try { await mkdir(canonical, { mode: 0o700 }); } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "EEXIST") { throw cause; } }
+  const entry = await lstat(canonical, { bigint: true });
+  const expectedUid = process.getuid?.();
+  const unsafe = !entry.isDirectory() || entry.isSymbolicLink() || await realpath(canonical) !== canonical
+    || (entry.mode & 0o077n) !== 0n || (expectedUid !== undefined && entry.uid !== BigInt(expectedUid));
+  if (unsafe) { throw new LocalSolanaError("SOLANA_PORT_LEASE_ROOT_UNSAFE", "port lease root must be owned mode-0700 with no symlink substitution"); }
+  return { path: canonical, identity: identity(entry) };
 }
 
-async function availablePortExcluding(excluded: ReadonlySet<number>): Promise<number> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const port = await availablePort();
-    if (!excluded.has(port)) { return port; }
+async function acquire(directory: string, processStart: string, rootIdentity: EntryIdentity): Promise<AcquiredLease | null> {
+  try { await mkdir(directory, { mode: 0o700 }); } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") { return null; }
+    throw cause;
   }
-  throw new LocalSolanaError("SOLANA_PORT_DISTINCT", "operating system did not provide a distinct loopback port");
+  const directoryIdentity = await privateDirectoryIdentity(directory);
+  const token = randomBytes(32).toString("hex");
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(join(directory, MARKER), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+    const markerStat = await handle.stat({ bigint: true });
+    const markerIdentity = identity(markerStat);
+    const record: LeaseRecord = {
+      schemaVersion: 1, kind: KIND, pid: process.pid, processStart, token,
+      rootDevice: `${rootIdentity.dev}`, rootInode: `${rootIdentity.ino}`,
+      directoryDevice: `${directoryIdentity.dev}`, directoryInode: `${directoryIdentity.ino}`,
+      markerDevice: `${markerIdentity.dev}`, markerInode: `${markerIdentity.ino}`,
+    };
+    await handle.writeFile(`${JSON.stringify(record)}\n`);
+    await handle.sync();
+    if (!markerStat.isFile() || markerStat.nlink !== 1n) { throw new LocalSolanaError("SOLANA_PORT_LEASE_MARKER_UNSAFE", "port lease marker must be singly linked"); }
+    return { directory, token, rootIdentity, directoryIdentity, markerIdentity };
+  } catch (cause) {
+    await handle?.close().catch(() => {});
+    await rollbackEmptyDirectory(directory, directoryIdentity);
+    throw cause;
+  } finally { await handle?.close().catch(() => {}); }
+}
+
+async function releaseAcquired(root: string, acquired: AcquiredLease): Promise<void> {
+  await assertRootIdentity(root, acquired.rootIdentity);
+  const record = await validateLease(acquired.directory, acquired.directoryIdentity, acquired.markerIdentity, acquired.token);
+  if (record.pid !== process.pid || record.processStart !== await currentProcessStart(process.pid)) {
+    throw new LocalSolanaError("SOLANA_PORT_LEASE_OWNER", "port lease no longer belongs to this process identity");
+  }
+  await quarantineAndDelete(root, acquired.rootIdentity, acquired.directory, acquired.directoryIdentity, acquired.markerIdentity, acquired.token);
+}
+
+async function reclaimStale(root: string, rootIdentity: EntryIdentity, directory: string): Promise<void> {
+  let directoryIdentity: EntryIdentity;
+  let markerIdentity: EntryIdentity;
+  let record: LeaseRecord;
+  try {
+    directoryIdentity = await privateDirectoryIdentity(directory);
+    const snapshot = await readMarker(directory);
+    markerIdentity = snapshot.identity;
+    record = snapshot.record;
+  } catch { return; }
+  const currentStart = await currentProcessStart(record.pid).catch(() => null);
+  if (currentStart === record.processStart) { return; }
+  await assertRootIdentity(root, rootIdentity);
+  await quarantineAndDelete(root, rootIdentity, directory, directoryIdentity, markerIdentity, record.token);
+}
+
+async function reclaimStaleLeases(root: string, rootIdentity: EntryIdentity): Promise<void> {
+  for (const name of await readdir(root)) {
+    if (/^block-[0-9]+$/u.test(name)) { await reclaimStale(root, rootIdentity, join(root, name)).catch(() => {}); }
+  }
+}
+
+async function quarantineAndDelete(root: string, rootIdentity: EntryIdentity, directory: string, directoryIdentity: EntryIdentity, markerIdentity: EntryIdentity, token: string): Promise<void> {
+  await assertRootIdentity(root, rootIdentity);
+  await validateLease(directory, directoryIdentity, markerIdentity, token);
+  const quarantine = join(root, `.release-${token}`);
+  try { await rename(directory, quarantine); } catch (cause) {
+    throw new LocalSolanaError("SOLANA_PORT_LEASE_SUBSTITUTION", `port lease changed before quarantine: ${cause instanceof Error ? cause.message : "rename failed"}`);
+  }
+  try {
+    await assertRootIdentity(root, rootIdentity);
+    await validateLease(quarantine, directoryIdentity, markerIdentity, token);
+  } catch (cause) {
+    await rename(quarantine, directory).catch(() => {});
+    throw cause;
+  }
+  const names = await readdir(quarantine);
+  if (names.length !== 1 || names[0] !== MARKER) {
+    await rename(quarantine, directory).catch(() => {});
+    throw new LocalSolanaError("SOLANA_PORT_LEASE_CONTENTS", "port lease directory contains unexpected entries");
+  }
+  await unlink(join(quarantine, MARKER));
+  await rmdir(quarantine);
+}
+
+async function validateLease(directory: string, expectedDirectory: EntryIdentity, expectedMarker: EntryIdentity, token: string): Promise<LeaseRecord> {
+  const actualDirectory = await privateDirectoryIdentity(directory);
+  if (!sameIdentity(actualDirectory, expectedDirectory)) { throw new LocalSolanaError("SOLANA_PORT_LEASE_SUBSTITUTION", "port lease directory was substituted"); }
+  const snapshot = await readMarker(directory);
+  if (!sameIdentity(snapshot.identity, expectedMarker) || snapshot.record.token !== token) {
+    throw new LocalSolanaError("SOLANA_PORT_LEASE_SUBSTITUTION", "port lease marker identity or token changed");
+  }
+  return snapshot.record;
+}
+
+async function readMarker(directory: string): Promise<{ readonly identity: EntryIdentity; readonly record: LeaseRecord }> {
+  const marker = join(directory, MARKER);
+  const entry = await lstat(marker, { bigint: true });
+  const expectedUid = process.getuid?.();
+  if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n || (entry.mode & 0o077n) !== 0n || (expectedUid !== undefined && entry.uid !== BigInt(expectedUid))) {
+    throw new LocalSolanaError("SOLANA_PORT_LEASE_MARKER_UNSAFE", "port lease marker must be owned, private and singly linked");
+  }
+  let raw: unknown;
+  try { raw = JSON.parse(await readFile(marker, "utf8")); } catch { throw new LocalSolanaError("SOLANA_PORT_LEASE_INVALID", "port lease marker is invalid JSON"); }
+  const record = parseRecord(raw); const markerIdentity = identity(entry); const directoryIdentity = await privateDirectoryIdentity(directory); const rootIdentity = await privateDirectoryIdentity(dirname(directory));
+  const bound = record.rootDevice === `${rootIdentity.dev}` && record.rootInode === `${rootIdentity.ino}`
+    && record.directoryDevice === `${directoryIdentity.dev}` && record.directoryInode === `${directoryIdentity.ino}`
+    && record.markerDevice === `${markerIdentity.dev}` && record.markerInode === `${markerIdentity.ino}`;
+  if (!bound) { throw new LocalSolanaError("SOLANA_PORT_LEASE_SUBSTITUTION", "port lease marker is not bound to the exact filesystem identities"); }
+  return { identity: markerIdentity, record };
+}
+
+function parseRecord(raw: unknown): LeaseRecord {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) { throw new LocalSolanaError("SOLANA_PORT_LEASE_INVALID", "port lease marker is invalid"); }
+  const value = raw as Record<string, unknown>;
+  const exactKeys = Object.keys(value).sort().join(",") === "directoryDevice,directoryInode,kind,markerDevice,markerInode,pid,processStart,rootDevice,rootInode,schemaVersion,token";
+  const valid = exactKeys && value.schemaVersion === 1 && value.kind === KIND && typeof value.pid === "number" && Number.isSafeInteger(value.pid) && value.pid >= 1
+    && typeof value.processStart === "string" && /^[a-z0-9:-]{1,128}$/u.test(value.processStart)
+    && typeof value.token === "string" && /^[a-f0-9]{64}$/u.test(value.token)
+    && [value.rootDevice, value.rootInode, value.directoryDevice, value.directoryInode, value.markerDevice, value.markerInode].every((item) => typeof item === "string" && /^(?:0|[1-9][0-9]*)$/u.test(item));
+  if (!valid) { throw new LocalSolanaError("SOLANA_PORT_LEASE_INVALID", "port lease marker fields are invalid"); }
+  return value as unknown as LeaseRecord;
+}
+
+async function privateDirectoryIdentity(directory: string): Promise<EntryIdentity> {
+  const entry = await lstat(directory, { bigint: true });
+  const expectedUid = process.getuid?.();
+  const unsafe = !entry.isDirectory() || entry.isSymbolicLink() || await realpath(directory) !== directory
+    || (entry.mode & 0o077n) !== 0n || (expectedUid !== undefined && entry.uid !== BigInt(expectedUid));
+  if (unsafe) { throw new LocalSolanaError("SOLANA_PORT_LEASE_DIRECTORY_UNSAFE", "port lease directory was substituted or is not private"); }
+  return identity(entry);
+}
+
+async function assertRootIdentity(root: string, expected: EntryIdentity): Promise<void> {
+  let actual: EntryIdentity;
+  try { actual = await privateDirectoryIdentity(root); } catch { throw new LocalSolanaError("SOLANA_PORT_LEASE_ROOT_UNSAFE", "port lease root was substituted"); }
+  if (!sameIdentity(actual, expected)) { throw new LocalSolanaError("SOLANA_PORT_LEASE_ROOT_UNSAFE", "port lease root identity changed"); }
+}
+async function rollbackEmptyDirectory(directory: string, expected: EntryIdentity): Promise<void> {
+  try { if (sameIdentity(await privateDirectoryIdentity(directory), expected) && (await readdir(directory)).length === 0) { await rmdir(directory); } } catch { /* Never delete an entry that failed identity validation. */ }
+}
+function identity(entry: { readonly dev: bigint; readonly ino: bigint }): EntryIdentity { return { dev: entry.dev, ino: entry.ino }; }
+function sameIdentity(left: EntryIdentity, right: EntryIdentity): boolean { return left.dev === right.dev && left.ino === right.ino; }
+
+async function currentProcessStart(pid: number): Promise<string> {
+  if (process.platform === "linux") {
+    const raw = await readFile(`/proc/${pid}/stat`, "utf8");
+    const end = raw.lastIndexOf(")"); const field = end < 0 ? undefined : raw.slice(end + 2).trim().split(/\s+/u)[19];
+    if (field === undefined || !/^[0-9]+$/u.test(field)) { throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "process start identity is unavailable"); }
+    return `linux:${field}`;
+  }
+  // On Darwin PID plus the kernel-reported start timestamp distinguishes a recycled PID.
+  if (process.platform === "darwin") {
+    const { execFile } = await import("node:child_process");
+    const output = await new Promise<string>((resolvePromise, reject) => execFile("/bin/ps", ["-o", "lstart=", "-p", `${pid}`], { encoding: "utf8" }, (cause, stdout) => cause ? reject(cause) : resolvePromise(stdout.trim())));
+    if (output.length === 0) { throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "Darwin process start identity is unavailable"); }
+    return `darwin:${Buffer.from(output).toString("hex")}`;
+  }
+  if (pid === process.pid) { return `runtime:${process.pid}`; }
+  throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "cross-process identity is unsupported on this platform");
 }
 
 async function canListen(port: number): Promise<boolean> {
-  try { await listenOn(port); return true; } catch { return false; }
-}
-
-async function listenOn(port: number): Promise<number> {
-  return await new Promise((resolve, reject) => {
-    const server = createServer(); server.unref();
-    server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
-      const address = server.address();
-      if (typeof address === "string" || address === null) { server.close(); reject(new LocalSolanaError("SOLANA_PORT_ADDRESS", "loopback allocator returned no TCP port")); return; }
-      server.close((cause) => { if (cause) { reject(cause); } else { resolve(address.port); } });
-    });
+  return await new Promise((resolvePromise) => {
+    const server = createServer(); server.unref(); server.once("error", () => resolvePromise(false));
+    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => { server.close((cause) => resolvePromise(cause === undefined)); });
   });
 }

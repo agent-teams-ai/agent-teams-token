@@ -1,4 +1,4 @@
-import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, FIXTURE_AMOUNT_BASE_UNITS, LocalSolanaError, type FixtureObservations, type TransactionFact } from "../domain/model.ts";
+import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, FIXTURE_AMOUNT_BASE_UNITS, LocalSolanaError, type FixtureObservations } from "../domain/model.ts";
 import { verifyObservations } from "./verifier.ts";
 import type { AuthorityTransactionPort, CliPort, CommandPort, PortAllocator, PortLease, RpcPort, RunStorePort, ToolResolverPort, ValidatorPort } from "./ports.ts";
 
@@ -30,22 +30,16 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
     const env = allowlistedEnvironment(deps.environment ?? process.env, paths.directory);
     const cliContext = { paths, tools, env, signal };
     const keys = await deps.cli.createKeys(cliContext);
-    portLease = await deps.ports.allocate();
+    ({ validator, portLease } = await startValidatorWithPortRetry(deps, paths, tools, env, signal, keys.payer));
     const rpcUrl = `http://127.0.0.1:${portLease.rpcPort}/`;
-    validator = await deps.validator.start({
-      executable: tools.validator, ledger: paths.ledger, config: paths.config, genesisMint: keys.payer,
-      tokenProgram: tools.tokenProgram, associatedTokenProgram: tools.associatedTokenProgram,
-      rpcPort: portLease.rpcPort, faucetPort: portLease.faucetPort, gossipPort: portLease.gossipPort,
-      dynamicPortRange: portLease.dynamicPortRange, env, signal,
-    });
     const ready = await deps.rpc.waitReady(rpcUrl, 30_000, signal);
     await deps.rpc.waitProgramsReady(rpcUrl, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 30_000, signal);
     await deps.cli.verifyFunded(cliContext, { rpcUrl, payer: keys.payer });
-    const createMint = await deps.cli.createMint(cliContext, { rpcUrl, publicKeys: keys });
+    const createSignature = await deps.cli.createMint(cliContext, { rpcUrl, publicKeys: keys });
     const initialMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
     const revokeSignature = await deps.cli.revokeFreeze(cliContext, { rpcUrl, mint: keys.mint });
     const afterRevokeMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
-    await deps.cli.createTokenAccount(cliContext, { rpcUrl, mint: keys.mint, owner: keys.owner });
+    const ataSignature = await deps.cli.createTokenAccount(cliContext, { rpcUrl, mint: keys.mint, owner: keys.owner });
     const tokenAccountAddress = await deps.rpc.tokenAccountAddress(rpcUrl, keys.owner, keys.mint);
     const expectedTokenAccountAddress = await deps.cli.associatedAddress(cliContext, { rpcUrl, mint: keys.mint, owner: keys.owner });
     if (tokenAccountAddress !== expectedTokenAccountAddress) { throw new LocalSolanaError("SOLANA_ASSOCIATED_ADDRESS", "created token account is not the derived associated address"); }
@@ -56,38 +50,61 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
     const finalMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
     const finalTokenAccount = await deps.rpc.tokenAccount(rpcUrl, tokenAccountAddress);
 
-    const authorityContext = { rpc: deps.rpc, rpcUrl, payerPath: paths.payerKey, authorityPath: paths.freezeKey };
-    const restoreBytes = await deps.authorityTransactions.restoreFreeze({ ...authorityContext, mint: keys.mint, newAuthority: keys.freeze });
+    const authorityContext = { rpc: deps.rpc, rpcUrl, payerPath: paths.payerKey, authorityPath: paths.mintKey };
+    const restoreBytes = await deps.authorityTransactions.restoreFreeze({ ...authorityContext, mint: keys.mint, newAuthority: keys.mint });
     const restoreSignature = await deps.rpc.sendSignedTransaction(rpcUrl, restoreBytes);
     const freezeBytes = await deps.authorityTransactions.freezeAccount({ ...authorityContext, account: tokenAccountAddress, mint: keys.mint });
     const freezeSignature = await deps.rpc.sendSignedTransaction(rpcUrl, freezeBytes);
     const genesisAfter = await deps.rpc.genesisHash(rpcUrl);
-    const transactionInputs: readonly [TransactionFact["kind"], string][] = [
-      ["create", createMint.createSignature], ["assignFreeze", createMint.assignFreezeSignature],
-      ["revokeFreeze", revokeSignature], ["mint", mintSignature], ["burn", burnSignature],
-      ["restoreFreezeAttempt", restoreSignature], ["freezeAttempt", freezeSignature],
-    ];
-    const transactions = await Promise.all(transactionInputs.map(async ([kind, signature]) => await deps.rpc.finalizedTransaction(rpcUrl, kind, signature, ready.genesisHash)));
+    const transactionSignatures = [createSignature, revokeSignature, ataSignature, mintSignature, burnSignature, restoreSignature, freezeSignature] as const;
+    const transactions = await Promise.all(transactionSignatures.map(async (signature) => await deps.rpc.finalizedTransaction(rpcUrl, signature)));
     const observations: FixtureObservations = {
       schemaVersion: 1, rpcUrl, genesisHashBefore: ready.genesisHash, genesisHashAfter: genesisAfter,
-      validatorVersion: ready.version, mintAddress: keys.mint, mintAuthority: keys.mint, freezeAuthority: keys.freeze,
+      validatorVersion: ready.version, payerAddress: keys.payer, mintAddress: keys.mint, mintAuthority: keys.mint, freezeAuthority: keys.mint,
       ownerAddress: keys.owner, tokenAccountAddress, initialMint, afterRevokeMint,
       afterMint, afterMintTokenAccount, finalMint, finalTokenAccount, transactions,
     };
     const report = verifyObservations(observations);
     await validator.stop();
     validator = undefined;
-    portLease.release();
+    await portLease.release();
     portLease = undefined;
     await deps.store.cleanup(paths);
     return await deps.store.publish(observations, report);
   } finally {
     controller.abort();
     await validator?.stop().catch(() => {});
-    portLease?.release();
+    await portLease?.release().catch(() => {});
     await deps.store.cleanup(paths).catch(() => {});
     externalSignal?.removeEventListener("abort", abort);
   }
+}
+
+async function startValidatorWithPortRetry(
+  deps: FixtureDependencies,
+  paths: Awaited<ReturnType<RunStorePort["create"]>>,
+  tools: Awaited<ReturnType<ToolResolverPort["resolve"]>>,
+  env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
+  genesisMint: string,
+): Promise<{ readonly validator: Awaited<ReturnType<ValidatorPort["start"]>>; readonly portLease: PortLease }> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const portLease = await deps.ports.allocate();
+    try {
+      const validator = await deps.validator.start({
+        executable: tools.validator, ledger: paths.ledger, config: paths.config, genesisMint,
+        tokenProgram: tools.tokenProgram, associatedTokenProgram: tools.associatedTokenProgram,
+        rpcPort: portLease.rpcPort, faucetPort: portLease.faucetPort, gossipPort: portLease.gossipPort,
+        dynamicPortRange: portLease.dynamicPortRange, env, signal, leaseToken: paths.leaseToken,
+        registerIdentity: async (identity) => await deps.store.registerValidator(paths, identity),
+      });
+      return { validator, portLease };
+    } catch (cause) {
+      await portLease.release();
+      if (!(cause instanceof LocalSolanaError) || cause.code !== "SOLANA_VALIDATOR_PORT_COLLISION" || attempt === 2) { throw cause; }
+    }
+  }
+  throw new LocalSolanaError("SOLANA_VALIDATOR_PORT_RETRY", "validator port retry exhausted before mutation");
 }
 
 export function allowlistedEnvironment(source: NodeJS.ProcessEnv, runDirectory: string): NodeJS.ProcessEnv {

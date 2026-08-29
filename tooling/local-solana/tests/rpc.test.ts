@@ -4,6 +4,7 @@ import test from "node:test";
 import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
 
+const payer = "1".repeat(32); const mint = "2".repeat(32); const ata = "3".repeat(32);
 async function listen(handler: RequestListener): Promise<{ readonly server: Server; readonly url: string }> {
   const server = createServer(handler); await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
   const address = server.address(); if (typeof address === "string" || address === null) { throw new Error("test server missing port"); }
@@ -11,48 +12,49 @@ async function listen(handler: RequestListener): Promise<{ readonly server: Serv
 }
 async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => { server.close((cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); }
 
-test("RPC adapter independently decodes finalized Token Program facts", async () => {
-  const signature = "2".repeat(64);
+test("RPC adapter derives finalized Token semantics without a caller label", async () => {
+  const signature = "4".repeat(64);
   const fixture = await listen((request, response) => {
     let body = ""; request.setEncoding("utf8"); request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
       const call = JSON.parse(body); let result: unknown;
       if (call.method === "getSignatureStatuses") { result = { value: [{ confirmationStatus: "finalized", err: null }] }; }
-      else if (call.method === "getTransaction") { result = { slot: 42, blockTime: 1, meta: { err: null, innerInstructions: [] }, transaction: { message: { instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "mintTo", info: { amount: "1000000000000" } } }] } } }; }
+      else if (call.method === "getGenesisHash") { result = payer; }
+      else if (call.method === "getTransaction") { result = { slot: 42, blockTime: 1, meta: { err: null, innerInstructions: [] }, transaction: { message: { accountKeys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: mint, signer: true, writable: false }, { pubkey: ata, signer: false, writable: true }], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "mintTo", info: { mint, account: ata, mintAuthority: mint, amount: "1000000000000" } } }] } } }; }
       else { result = null; }
       response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
     });
   });
   try {
-    const fact = await new JsonRpcAdapter().finalizedTransaction(fixture.url, "mint", signature, "genesis");
-    assert.equal(fact.slot, "42"); assert.equal(fact.amountBaseUnits, "1000000000000"); assert.deepEqual(fact.programIds, [CLASSIC_TOKEN_PROGRAM]);
+    const fact = await new JsonRpcAdapter().finalizedTransaction(fixture.url, signature);
+    assert.equal(fact.operation, "mint"); assert.equal(fact.slot, "42"); assert.equal(fact.instructions[0]?.amountBaseUnits, "1000000000000"); assert.deepEqual(fact.signers, [payer, mint]);
   } finally { await close(fixture.server); }
+});
+
+test("RPC parser rejects unrelated Token instructions and malformed failure indices", async () => {
+  const signature = "4".repeat(64);
+  for (const transaction of [
+    { slot: 1, meta: { err: null, innerInstructions: [] }, transaction: { message: { accountKeys: [], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "transfer", info: { amount: "1" } } }] } } },
+    { slot: 1, meta: { err: { InstructionError: [] }, innerInstructions: [] }, transaction: { message: { accountKeys: [], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "freezeAccount", info: { account: ata, mint, authority: mint } } }] } } },
+  ]) {
+    const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSignatureStatuses" ? { value: [{ confirmationStatus: "finalized" }] } : call.method === "getGenesisHash" ? payer : transaction; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); });
+    try { await assert.rejects(new JsonRpcAdapter().finalizedTransaction(fixture.url, signature), /SOLANA_TRANSACTION_/u); } finally { await close(fixture.server); }
+  }
 });
 
 test("RPC transport rejects redirects and non-loopback targets", async () => {
   const fixture = await listen((_request, response) => { response.writeHead(302, { location: "http://example.com/" }); response.end(); });
-  try {
-    await assert.rejects(new JsonRpcAdapter().genesisHash(fixture.url));
-    await assert.rejects(new JsonRpcAdapter().genesisHash("http://localhost:8899/"), /SOLANA_RPC_NON_LOOPBACK/u);
-  } finally { await close(fixture.server); }
+  try { await assert.rejects(new JsonRpcAdapter().genesisHash(fixture.url)); await assert.rejects(new JsonRpcAdapter().genesisHash("http://localhost:8899/"), /SOLANA_RPC_NON_LOOPBACK/u); }
+  finally { await close(fixture.server); }
 });
 
 test("RPC readiness proves pinned local programs at a finalized post-genesis slot", async () => {
-  const fixture = await listen((request, response) => {
-    let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
-      const call = JSON.parse(body); const result = call.method === "getSlot" ? 2 : { value: { executable: true, owner: "BPFLoaderUpgradeab1e11111111111111111111111", data: ["", "base64"] } };
-      response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
-    });
-  });
+  const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSlot" ? 2 : { value: { executable: true, owner: "BPFLoaderUpgradeab1e11111111111111111111111", data: ["", "base64"] } }; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); });
   try { await new JsonRpcAdapter().waitProgramsReady(fixture.url, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 1_000, new AbortController().signal); }
   finally { await close(fixture.server); }
 });
 
 test("RPC structured account reads reject forged Token-2022 ownership", async () => {
-  const fixture = await listen((request, response) => {
-    let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
-      const call = JSON.parse(body); response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { value: { owner: "Token2022", data: { parsed: { type: "mint", info: { decimals: 9, supply: "0", mintAuthority: "x", freezeAuthority: null } } } } } }));
-    });
-  });
+  const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { value: { owner: "Token2022", data: { parsed: { type: "mint", info: { decimals: 9, supply: "0", mintAuthority: "x", freezeAuthority: null } } } } } })); }); });
   try { await assert.rejects(new JsonRpcAdapter().mintAccount(fixture.url, "mint"), /SOLANA_MINT_PROGRAM/u); }
   finally { await close(fixture.server); }
 });

@@ -13,10 +13,10 @@ Bootstrap the checksum-pinned Agave 4.2.1 / SPL CLI 5.6.1 tuple using the integr
 
 Agave 4.2.1 does not place the classic SPL Token and associated-token programs in an empty local genesis. The fixture therefore loads the two read-only SBF artifacts under `programs/` with upgrades disabled. Their exact source repositories, release tags, commits, build toolchain, paths and SHA-256 digests are frozen in `tooling/toolchain.lock.json`: SPL Token `9.0.0` at `dfb260231c761be7d9c8b63728e770a102b86495`, and Associated Token Account `8.0.0` at `0b867b5340cd001e5980d8ca7928effc4e10015c`. The resolver rejects missing, modified, linked or substituted artifacts before starting the validator.
 
-Run the feature directly until the integrator adds `pnpm solana:fixture:local`:
+Run the supported root command:
 
 ```text
-node tooling/local-solana/src/composition/index.ts --output /tmp/agtmai-solana-evidence
+pnpm solana:fixture:local -- --output /tmp/agtmai-solana-evidence
 ```
 
-The output root and every run root must be owned mode `0700`. Evidence is written atomically as JSON and Markdown before `READY`; no key path, key bytes, mnemonic, ledger, or raw secret-bearing error is retained. On normal exit and signals, only the owned validator and run directory are removed. A lease permits a later invocation to reclaim a run orphaned by `SIGKILL` without touching neighbouring directories.
+The output root and every run root must be owned mode `0700`. The exact seven-step evidence tuple and retained mint/token-account snapshots are runtime-validated before JSON and Markdown are written and `READY` is published last; no key path, key bytes, mnemonic, ledger, or raw secret-bearing error is retained. On normal exit and signals, only the owned validator and run directory are removed. An authenticated child identity lets a later invocation terminate and await a validator orphaned by `SIGKILL` before deleting its run, without touching neighbouring directories. Cross-process leases reserve the complete validator port block through binding.

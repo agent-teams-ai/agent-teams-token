@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { LocalSolanaError, object, string } from "../domain/model.ts";
+import { LocalSolanaError } from "../domain/model.ts";
+import { object, string } from "./rpc-parsers.ts";
 import type { CommandPort, ToolPaths, ToolResolverPort } from "../application/ports.ts";
 
 export class PinnedToolResolver implements ToolResolverPort {

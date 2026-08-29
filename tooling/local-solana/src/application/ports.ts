@@ -28,6 +28,16 @@ export interface ValidatorStartRequest {
   readonly dynamicPortRange: string;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
+  readonly leaseToken: string;
+  readonly registerIdentity: (identity: ValidatorIdentity) => Promise<void>;
+}
+export interface ValidatorIdentity {
+  readonly pid: number;
+  readonly platform: "linux" | "darwin";
+  readonly startTime: string;
+  readonly executable: string;
+  readonly ledger: string;
+  readonly commandHash: string;
 }
 export interface ValidatorPort {
   start(request: ValidatorStartRequest): Promise<ValidatorHandle>;
@@ -40,7 +50,7 @@ export interface RpcPort {
   mintAccount(rpcUrl: string, address: string): Promise<AccountState>;
   tokenAccount(rpcUrl: string, address: string): Promise<TokenAccountState>;
   tokenAccountAddress(rpcUrl: string, owner: string, mint: string): Promise<string>;
-  finalizedTransaction(rpcUrl: string, kind: TransactionFact["kind"], signature: string, genesisHash: string): Promise<TransactionFact>;
+  finalizedTransaction(rpcUrl: string, signature: string): Promise<TransactionFact>;
   sendSignedTransaction(rpcUrl: string, bytes: Uint8Array): Promise<string>;
   latestBlockhash(rpcUrl: string): Promise<string>;
 }
@@ -52,12 +62,13 @@ export interface RunPaths {
   readonly payerKey: string;
   readonly mintKey: string;
   readonly ownerKey: string;
-  readonly freezeKey: string;
+  readonly leaseToken: string;
 }
 
 export interface RunStorePort {
   create(): Promise<RunPaths>;
   cleanup(paths: RunPaths): Promise<void>;
+  registerValidator(paths: RunPaths, identity: ValidatorIdentity): Promise<void>;
   reclaimStale(): Promise<number>;
   publish(report: FixtureObservations, verified: unknown): Promise<{ readonly jsonPath: string; readonly markdownPath: string }>;
 }
@@ -70,9 +81,9 @@ export interface CliExecutionContext {
 }
 
 export interface CliPort {
-  createKeys(context: CliExecutionContext): Promise<{ payer: string; mint: string; owner: string; freeze: string }>;
+  createKeys(context: CliExecutionContext): Promise<{ payer: string; mint: string; owner: string }>;
   verifyFunded(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly payer: string }): Promise<void>;
-  createMint(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly publicKeys: { readonly payer: string; readonly mint: string; readonly freeze: string } }): Promise<{ readonly createSignature: string; readonly assignFreezeSignature: string }>;
+  createMint(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly publicKeys: { readonly payer: string; readonly mint: string; readonly owner: string } }): Promise<string>;
   revokeFreeze(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string }): Promise<string>;
   createTokenAccount(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string; readonly owner: string }): Promise<string>;
   associatedAddress(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string; readonly owner: string }): Promise<string>;
@@ -86,7 +97,7 @@ export interface PortLease {
   readonly faucetPort: number;
   readonly gossipPort: number;
   readonly dynamicPortRange: string;
-  release(): void;
+  release(): Promise<void>;
 }
 export interface PortAllocator { allocate(): Promise<PortLease>; }
 export interface AuthorityTransactionPort {

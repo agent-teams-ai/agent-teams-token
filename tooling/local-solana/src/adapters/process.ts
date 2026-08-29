@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LocalSolanaError } from "../domain/model.ts";
 import type { CommandPort, CommandResult, ValidatorHandle, ValidatorPort, ValidatorStartRequest } from "../application/ports.ts";
+import { captureValidatorIdentity } from "./process-identity.ts";
 
 export class NodeCommandAdapter implements CommandPort {
   public async run(executable: string, args: readonly string[], options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}): Promise<CommandResult> {
@@ -42,7 +43,7 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       "--mint", request.genesisMint, "--faucet-sol", "10", "--ticks-per-slot", "8", "--log",
       "--bpf-program", CLASSIC_TOKEN_PROGRAM, request.tokenProgram,
       "--bpf-program", ASSOCIATED_TOKEN_PROGRAM, request.associatedTokenProgram,
-    ], { env: request.env, stdio: ["ignore", "pipe", "pipe"] });
+    ], { env: { ...request.env, AGTMAI_LOCAL_SOLANA_LEASE_TOKEN: request.leaseToken }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { output = bounded(output, chunk); });
@@ -50,8 +51,15 @@ export class OwnedValidatorAdapter implements ValidatorPort {
     if (child.pid === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_PID", "validator did not expose a PID"); }
     const abort = (): void => { void stopChild(child); };
     request.signal.addEventListener("abort", abort, { once: true });
-    await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
-    await assertSurvivedStartup(child, () => sanitizeValidatorOutput(output, request));
+    try {
+      await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+      await request.registerIdentity(await captureValidatorIdentity(child.pid, request.executable, request.ledger, request.leaseToken));
+      await assertSurvivedStartup(child, () => sanitizeValidatorOutput(output, request));
+    } catch (cause) {
+      request.signal.removeEventListener("abort", abort);
+      await stopChild(child).catch(() => {});
+      throw cause;
+    }
     let promise: Promise<void> | undefined;
     return { pid: child.pid, stop: () => { request.signal.removeEventListener("abort", abort); promise ??= stopChild(child); return promise; } };
   }
@@ -63,7 +71,9 @@ async function assertSurvivedStartup(child: ChildProcess, stderr: () => string):
   });
   const result = await Promise.race([exit, delay(500).then(() => null)]);
   if (result !== null) {
-    throw new LocalSolanaError("SOLANA_VALIDATOR_EARLY_EXIT", `validator exited code=${result.code ?? "null"} signal=${result.signal ?? "none"}: ${redact(stderr())}`);
+    const output = redact(stderr());
+    const code = /address already in use|os error 98|eaddrinuse/iu.test(output) ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
+    throw new LocalSolanaError(code, `validator exited code=${result.code ?? "null"} signal=${result.signal ?? "none"}: ${output}`);
   }
 }
 
