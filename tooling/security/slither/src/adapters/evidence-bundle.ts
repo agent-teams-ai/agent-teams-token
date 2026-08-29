@@ -394,13 +394,14 @@ export function renderAnalysisSummary(value: JsonObject): string {
 }
 
 function assertExecution(value: JsonObject, mode: "local" | "ci"): void {
+  if (mode === "local") {return;}
+  if (process.env.GITHUB_ACTIONS !== "true") {throw invalid("CI finalization mode requires GitHub Actions");}
   const execution = object(value.execution, "execution");
   const bindings = { event: "GITHUB_EVENT_NAME", repository: "GITHUB_REPOSITORY", workflow: "GITHUB_WORKFLOW", job: "GITHUB_JOB", runId: "GITHUB_RUN_ID", runAttempt: "GITHUB_RUN_ATTEMPT" } as const;
   for (const [field, name] of Object.entries(bindings)) {
     const current = process.env[name];
-    if ((mode === "ci" && !current) || (current && execution[field] !== current)) {throw invalid(`execution ${field} differs from current CI environment`);}
+    if (!current || execution[field] !== current) {throw invalid(`execution ${field} differs from current CI environment`);}
   }
-  if (mode === "ci" && process.env.GITHUB_ACTIONS !== "true") {throw invalid("CI finalization mode requires GitHub Actions");}
 }
 
 function uniqueSortedStrings(value: unknown, label: string): string[] {

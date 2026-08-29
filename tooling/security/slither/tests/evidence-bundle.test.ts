@@ -16,7 +16,7 @@ const findings: readonly Finding[] = [golden.finding];
 const manifest: GateManifest = { schemaVersion: 1, targets: [{ path: "contracts/evm/src/A.sol", contract: "A" }], expectedContracts: ["A"], sources: [{ path: "contracts/evm/src/A.sol", sha256: "2".repeat(64) }], config: [], compiler: { version: "0.8.36+commit.8a079791", evmVersion: "paris", optimizerEnabled: true, optimizerRuns: 200, bytecodeHash: "ipfs", cborMetadata: true, useLiteralContent: false, viaIR: false, experimental: false, remappings: ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/", "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"] }, tools: { forgeArchiveSha256: "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57", forgeBinarySha256: "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f", solcBinarySha256: "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6" }, creationBytecodeSha256: bytecode, detectorInventory: { path: "detectors.json", sha256: "d".repeat(64) } };
 const input: AnalysisInput = { success: true, findings, analyzedContracts: ["A"], analyzedSources: ["src/A.sol"], closure: [], detectorInventory: [...Array.from({ length: 100 }, (_, index) => `d-${index}`), "fixture-detector"].toSorted(), compiler: manifest.compiler, creationBytecodeSha256: bytecode, freshFoundryCreationBytecodeSha256: bytecode, analysisErrors: [], forgeBinarySha256: manifest.tools.forgeBinarySha256, solcBinarySha256: manifest.tools.solcBinarySha256 };
 const decision: PolicyDecision = { category: "clean", exitCode: 0, blocking: [], visible: findings, suppressed: [], errors: [] };
-const validate = async (output: string, candidateSha = sha): Promise<void> => await validateFinalizedEvidenceBundle({ output, candidateSha, schemaDirectory, canonicalDirectory: join(dirname(output), "canonical") });
+const validate = async (output: string, candidateSha = sha): Promise<void> => await validateFinalizedEvidenceBundle({ output, candidateSha, schemaDirectory, canonicalDirectory: join(dirname(output), "canonical"), finalizationMode: "local" });
 
 async function makeBundle(output: string): Promise<void> {
   const canonicalDirectory = join(dirname(output), "canonical");
@@ -118,11 +118,16 @@ test("evidence bound to a different candidate SHA is rejected", async () => {
 
 test("CI finalization rejects evidence without the current complete GitHub execution identity", async () => {
   const parent = await makeTestDirectory("bundle-ci-identity-"); const output = join(parent, "bundle");
+  const runAttempt = process.env.GITHUB_RUN_ATTEMPT;
   try {
     await makeBundle(output);
+    delete process.env.GITHUB_RUN_ATTEMPT;
     await assert.rejects(validateFinalizedEvidenceBundle({ output, candidateSha: sha, schemaDirectory,
       canonicalDirectory: join(parent, "canonical"), finalizationMode: "ci" }), /current CI environment|requires GitHub Actions/u);
-  } finally {await rm(parent, { recursive: true, force: true });}
+  } finally {
+    if (runAttempt === undefined) {delete process.env.GITHUB_RUN_ATTEMPT;} else {process.env.GITHUB_RUN_ATTEMPT = runAttempt;}
+    await rm(parent, { recursive: true, force: true });
+  }
 });
 
 test("an extra evidence variant is rejected as ambiguous", async () => {
