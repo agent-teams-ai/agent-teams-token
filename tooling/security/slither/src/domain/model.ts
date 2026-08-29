@@ -2,6 +2,23 @@ export const IMPACTS = ["High", "Medium", "Low", "Informational", "Optimization"
 export type Impact = (typeof IMPACTS)[number];
 export type ResultCategory = "clean" | "policy-failure" | "tool-failure" | "output-failure" | "environment-failure";
 
+/** Closed set of failures that may cross the serialized gate boundary. */
+export type GateErrorCode =
+  | "ABSOLUTE_PATH_REQUIRED" | "ANALYZER_RUNTIME_FAILED" | "ARTIFACT_EXPORT_FAILED"
+  | "BUILD_INFO_INVALID" | "BYTECODE_MISSING" | "CANDIDATE_SHA_MISMATCH"
+  | "CANDIDATE_SHA_INVALID" | "CI_PREREQUISITE_FAILED" | "COMPILER_BUILD_FAILED"
+  | "COMPILER_SETTINGS_MISMATCH" | "CONTAINER_FAILED" | "CONTAINER_TIMEOUT"
+  | "DETECTOR_INVENTORY_INVALID" | "DOCKER_CLI_INVALID" | "EVIDENCE_BUNDLE_INVALID"
+  | "EVIDENCE_INSIDE_REPOSITORY" | "EVIDENCE_SCHEMA_INVALID" | "FORGE_PIN_MISMATCH"
+  | "GIT_STATE_UNAVAILABLE" | "IMAGE_ENVIRONMENT_INVALID" | "IMAGE_METADATA_INVALID"
+  | "IMAGE_PIN_MISMATCH" | "IMAGE_PREPARATION_FAILED" | "IMAGE_PULL_FAILED"
+  | "IMAGE_UNAVAILABLE" | "INPUT_CLOSURE_MUTATED" | "INPUT_HASH_MISMATCH"
+  | "MALFORMED_JSON" | "POLICY_SHAPE_INVALID" | "PRODUCTION_SOURCE_UNASSIGNED"
+  | "SLITHER_EXIT_INVALID" | "SLITHER_INVENTORY_EMPTY" | "SOLC_PIN_MISMATCH"
+  | "SUPPRESSION_SHAPE_INVALID" | "TARGET_MANIFEST_INVALID" | "TOOLCHAIN_LOCK_INVALID"
+  | "TOOL_VERSION_MISMATCH" | "UNEXPECTED_ENVIRONMENT_FAILURE"
+  | "VULNERABLE_FIXTURE_NOT_BLOCKED" | "WORKTREE_NOT_CLEAN";
+
 export interface SourceLocation {
   readonly path: string;
   readonly start: number;
@@ -105,8 +122,8 @@ export interface PolicyDecision {
 }
 
 export class SlitherGateError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) { super(message); this.code = code; this.name = "SlitherGateError"; }
+  readonly code: GateErrorCode;
+  constructor(code: GateErrorCode, message: string) { super(message); this.code = code; this.name = "SlitherGateError"; }
 }
 
 const COMPILER_PROFILE: GateManifest["compiler"] = {

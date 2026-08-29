@@ -51,9 +51,14 @@ Gate exit classes are `0` clean, `20` policy findings,
 failure. The composition boundary always tries to retain a sanitised failure
 envelope; raw Slither/build output stays in an owned temporary directory.
 
-Immediately before artifact upload, CI must independently reopen the finalized
-bundle and validate its exact variant, schema, internal counts, READY marker,
-and candidate binding. The integrator-owned upload step should be preceded by:
+Analysis publication includes canonical sanitized `slither.json`,
+`slither-inventory.json`, detector inventory and status inputs plus every
+normalized identity/location/hash tuple. Publication is built and independently
+validated in disposable staging, then atomically renamed with READY last.
+
+Immediately before artifact upload, CI independently reopens the finalized
+bundle and validates its exact variant, schema, raw inputs, READY marker,
+candidate and current GitHub execution identity. The upload step is preceded by:
 
 ```text
 SLITHER_REPOSITORY_ROOT="$GITHUB_WORKSPACE" \
@@ -66,16 +71,17 @@ The validator accepts exactly one of the analysis, tool-failure,
 output-failure, or environment-failure variants and rejects extra files,
 symlinks, nonempty READY markers, schema-invalid content, inconsistent result
 semantics, and a SHA that does not match the upload candidate. For successful
-analysis it derives every severity, blocking/suppressed/visible count, accepted
-policy and triage digest, and the exact human summary again from the machine
-findings. Supplied aggregate fields are never trusted. This is deliberately a
-separate process from evidence creation so CI upload does not trust the
-producer's validation.
+analysis it loads the canonical production manifest, detector inventory,
+suppression/triage ledgers and toolchain lock, then independently derives
+targets, sources, detectors, normalized fingerprints, per-impact and
+blocking/suppressed/visible/triaged counts, closure hash and exact human summary
+from the bundled raw inputs. Supplied aggregate fields are never trusted.
 
-Container stages write one exact failure marker. Compiler-build and
-artifact-export failures are incomplete output (`40`), an analyzer runtime
-failure is a tool failure (`30`), and host/preflight failures are environment
-failures (`50`). `.github/workflows/ci.yml#solidity-security` is the sole
+Container stages write the exact stable registry stage before each fallible
+phase. Compiler-build and artifact-validation failures are incomplete output
+(`40`), an analysis-runtime failure is a tool failure (`30`), and
+host/preflight failures are environment failures (`50`).
+`.github/workflows/ci.yml#solidity-security` is the sole
 authoritative CI definition; the feature-owned wiring request points to it and
 no duplicate workflow fragment is retained.
 

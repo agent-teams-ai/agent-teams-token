@@ -237,6 +237,12 @@
         "forge": "tools.foundry.platforms.linux-x64",
         "solc": "tools.solc.platforms.linux-x64"
       },
+      "runtime": {
+        "containerUser": "1000:1000",
+        "pythonPath": "/home/ethsec/.local/lib/python3.10/site-packages",
+        "forgeMountPath": "/tools/forge",
+        "solcMountPath": "/tools/solc"
+      },
       "embeddedForgeVersion": "1.7.1",
       "compatibilityMode": "official-image-with-read-only-pinned-project-tool-overrides",
       "verifiedAt": "2026-08-29T00:00:00Z"

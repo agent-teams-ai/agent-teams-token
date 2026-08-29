@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { Finding, Impact } from "../domain/model.ts";
 import { IMPACTS, SlitherGateError } from "../domain/model.ts";
 import { findingFingerprint, normalizedIdentityHash, normalizeIdentity, normalizeRepositoryPath, sourceLocation } from "./fingerprint.ts";
+import { parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
 
 type JsonObject = Record<string, unknown>;
 const object = (value: unknown, label: string): JsonObject => {
@@ -22,7 +23,7 @@ export interface SlitherInventory { readonly success: boolean; readonly contract
 
 export async function parseSlitherJson(raw: string, repositoryRoot: string): Promise<ParsedSlither> {
   let decoded: unknown;
-  try { decoded = JSON.parse(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither output is not JSON"); }
+  try { decoded = parseJsonWithoutDuplicateKeys(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither output is not unambiguous JSON"); }
   const root = object(decoded, "output");
   if (typeof root.success !== "boolean") {throw new SlitherGateError("MALFORMED_JSON", "success must be boolean");}
   const results = root.results === undefined && root.success === false ? {} : object(root.results, "results");
@@ -54,7 +55,7 @@ function optionalErrorArray(value: unknown, label: string): string[] {
 
 export function parseSlitherInventory(raw: string): SlitherInventory {
   let decoded: unknown;
-  try { decoded = JSON.parse(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither inventory is not JSON"); }
+  try { decoded = parseJsonWithoutDuplicateKeys(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither inventory is not unambiguous JSON"); }
   const root = object(decoded, "inventory");
   if (typeof root.success !== "boolean") {throw new SlitherGateError("MALFORMED_JSON", "inventory success must be boolean");}
   const contracts = exactStringArray(root.contracts, "inventory contracts");

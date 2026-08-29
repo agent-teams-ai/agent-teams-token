@@ -16,8 +16,8 @@ export async function assertSerializedAgainstSchema(
   let value: unknown;
   let schema: unknown;
   try {
-    value = JSON.parse(serialized);
-    schema = JSON.parse(await readFile(schemaPath, "utf8"));
+    value = parseJsonWithoutDuplicateKeys(serialized);
+    schema = parseJsonWithoutDuplicateKeys(await readFile(schemaPath, "utf8"));
   } catch {
     throw new SlitherGateError("EVIDENCE_SCHEMA_INVALID", "evidence or its exact schema is malformed JSON");
   }
@@ -28,10 +28,67 @@ export async function assertSerializedAgainstSchema(
   }
 }
 
+/** JSON.parse silently accepts duplicate keys. Evidence and policy inputs must not. */
+export function parseJsonWithoutDuplicateKeys(serialized: string): unknown {
+  let offset = 0;
+  const whitespace = (): void => { while (/\s/u.test(serialized[offset] ?? "")) {offset += 1;} };
+  const stringToken = (): string => {
+    if (serialized[offset] !== '"') {throw new Error("expected JSON string");}
+    const start = offset++;
+    while (offset < serialized.length) {
+      const character = serialized[offset++]!;
+      if (character === '"') {return JSON.parse(serialized.slice(start, offset)) as string;}
+      if (character === "\\") {offset += 1;}
+      else if (character.charCodeAt(0) < 0x20) {throw new Error("invalid JSON string");}
+    }
+    throw new Error("unterminated JSON string");
+  };
+  const value = (): void => {
+    whitespace();
+    const character = serialized[offset];
+    if (character === '"') {stringToken(); return;}
+    if (character === "{") {
+      offset += 1; whitespace();
+      const keys = new Set<string>();
+      if (serialized[offset] === "}") {offset += 1; return;}
+      while (true) {
+        whitespace(); const key = stringToken();
+        if (keys.has(key)) {throw new Error(`duplicate JSON key: ${key}`);} keys.add(key);
+        whitespace(); if (serialized[offset++] !== ":") {throw new Error("expected colon");}
+        value(); whitespace();
+        const delimiter = serialized[offset++];
+        if (delimiter === "}") {return;}
+        if (delimiter !== ",") {throw new Error("expected object delimiter");}
+      }
+    }
+    if (character === "[") {
+      offset += 1; whitespace();
+      if (serialized[offset] === "]") {offset += 1; return;}
+      while (true) {
+        value(); whitespace();
+        const delimiter = serialized[offset++];
+        if (delimiter === "]") {return;}
+        if (delimiter !== ",") {throw new Error("expected array delimiter");}
+      }
+    }
+    const remainder = serialized.slice(offset);
+    const token = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u.exec(remainder)?.[0];
+    if (!token) {throw new Error("invalid JSON value");}
+    offset += token.length;
+  };
+  value(); whitespace();
+  if (offset !== serialized.length) {throw new Error("trailing JSON data");}
+  return JSON.parse(serialized) as unknown;
+}
+
 function validate(value: unknown, rawSchema: unknown, context: ValidationContext): void {
   if (!isObject(rawSchema)) {context.errors.push(`${context.path}: schema node is not an object`); return;}
   const schema = resolve(rawSchema, context);
   if (!schema) {return;}
+  if (Array.isArray(schema.oneOf)) {
+    const matches = schema.oneOf.filter((candidate) => schemaMatches(value, candidate, context.root)).length;
+    if (matches !== 1) {context.errors.push(`${context.path}: expected exactly one variant`); return;}
+  }
   if (!validateCommonKeywords(value, schema, context)) {return;}
   validateString(value, schema, context);
   validateNumber(value, schema, context);
@@ -54,7 +111,22 @@ function validateString(value: unknown, schema: JsonObject, context: ValidationC
   if (typeof value === "string") {
     if (typeof schema.pattern === "string" && !new RegExp(schema.pattern, "u").test(value)) {context.errors.push(`${context.path}: pattern mismatch`);}
     if (typeof schema.minLength === "number" && value.length < schema.minLength) {context.errors.push(`${context.path}: too short`);}
+    if (schema.format === "date-time" && !validDateTime(value)) {context.errors.push(`${context.path}: invalid date-time`);}
   }
+}
+
+function validDateTime(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$/u.exec(value);
+  if (!match) {return false;}
+  const normalized = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${match[7] ?? "000"}Z`;
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === normalized;
+}
+
+function schemaMatches(value: unknown, schema: unknown, root: unknown): boolean {
+  const errors: string[] = [];
+  validate(value, schema, { root, path: "$", errors });
+  return errors.length === 0;
 }
 
 function validateNumber(value: unknown, schema: JsonObject, context: ValidationContext): void {

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "description": "Independently authored normalized raw-input fixture for a complete evidence bundle.",
+  "finding": {
+    "detectorId": "fixture-detector",
+    "impact": "Informational",
+    "confidence": "High",
+    "identity": "independent golden fixture finding",
+    "findingIdentityHash": "sha256:0965bde53b49ba8601aff512f7a3b4f1778844f1909059568026f339520e4313",
+    "location": {
+      "path": "contracts/evm/src/A.sol",
+      "start": 1,
+      "length": 1,
+      "sourceHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "snippetHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "fingerprint": "sha256:38a7767b043a8f2b699cf20d4287f5c9a68400d17c4745a2c6de6e3b1771bcca"
+  }
+}

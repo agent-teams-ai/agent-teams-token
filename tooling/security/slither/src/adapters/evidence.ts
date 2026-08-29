@@ -1,9 +1,10 @@
-import { lstat, mkdir, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import type { AnalysisInput, GateManifest, PolicyDecision } from "../domain/model.ts";
+import { lstat, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import type { AnalysisInput, GateErrorCode, GateManifest, PolicyDecision } from "../domain/model.ts";
+import { classifyGateFailure } from "../application/failure.ts";
 import { sha256 } from "./fingerprint.ts";
 import { IMAGE, IMAGE_REVISION } from "./container-contract.ts";
-import { assertAnalysisEvidenceSemantics, renderAnalysisSummary } from "./evidence-bundle.ts";
+import { assertAnalysisEvidenceSemantics, renderAnalysisSummary, validateFinalizedEvidenceBundle } from "./evidence-bundle.ts";
 import { assertSerializedAgainstSchema } from "./json-schema.ts";
 
 function canonical(value: unknown): unknown {
@@ -30,6 +31,7 @@ interface ReadyEvidenceRequest {
   readonly hashes: { readonly config: string; readonly policy: string };
   readonly triageHash: string;
   readonly schemaDirectory: string;
+  readonly canonicalDirectory?: string;
   readonly assertReadyPrecondition: () => Promise<void>;
 }
 
@@ -39,7 +41,7 @@ interface FailureEvidenceRequest {
   readonly category: "tool-failure" | "output-failure" | "environment-failure";
   readonly exitCode: 30 | 40 | 50;
   readonly stage: string;
-  readonly errorCode: string;
+  readonly errorCode: GateErrorCode;
   readonly schemaDirectory: string;
   readonly assertReadyPrecondition: () => Promise<void>;
 }
@@ -48,31 +50,45 @@ type EnvironmentFailureRequest = Omit<FailureEvidenceRequest, "category" | "exit
 
 export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise<void> {
   const { output, candidateSha, manifest, input, decision, hashes } = request;
-  await mkdir(output, { recursive: false, mode: 0o700 });
-  const info = await lstat(output); if (!info.isDirectory() || info.isSymbolicLink()) {throw new Error("evidence output is not an owned directory");}
-  const suppressed = new Set(decision.suppressed.map(({ fingerprint }) => fingerprint));
-  const blocking = new Set(decision.blocking.map(({ fingerprint }) => fingerprint));
-  const findings = input.findings.map((finding) => ({ detectorId: finding.detectorId, impact: finding.impact, confidence: finding.confidence, fingerprint: finding.fingerprint, path: finding.location.path, start: finding.location.start, length: finding.location.length, blocking: blocking.has(finding.fingerprint), suppressed: suppressed.has(finding.fingerprint) }));
-  const evidence = {
+  await publish(output, async (staging) => {
+    const suppressed = new Set(decision.suppressed.map(({ fingerprint }) => fingerprint));
+    const blocking = new Set(decision.blocking.map(({ fingerprint }) => fingerprint));
+    const findings = input.findings.map((finding) => ({
+      detectorId: finding.detectorId, impact: finding.impact, confidence: finding.confidence,
+      identity: finding.identity, findingIdentityHash: finding.findingIdentityHash,
+      fingerprint: finding.fingerprint, path: finding.location.path, start: finding.location.start,
+      length: finding.location.length, sourceHash: finding.location.sourceHash,
+      snippetHash: finding.location.snippetHash, blocking: blocking.has(finding.fingerprint),
+      suppressed: suppressed.has(finding.fingerprint),
+    }));
+    const perImpact = Object.fromEntries(["High", "Medium", "Low", "Informational", "Optimization"]
+      .map((impact) => [impact, findings.filter((finding) => finding.impact === impact).length]));
+    const evidence = {
     schemaVersion: 1, ready: true, candidateSha,
-    execution: { platform: "linux/amd64", event: process.env.GITHUB_EVENT_NAME ?? "local", repository: process.env.GITHUB_REPOSITORY ?? "local", workflow: process.env.GITHUB_WORKFLOW ?? "local", job: process.env.GITHUB_JOB ?? "local", runId: process.env.GITHUB_RUN_ID ?? "local", runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1" },
+    execution: executionIdentity(),
     tools: { image: IMAGE, imageRevision: IMAGE_REVISION, slither: "0.11.6", cryticCompile: "0.4.2", forge: "1.8.0", forgeBinarySha256: `sha256:${input.forgeBinarySha256}`, solc: "0.8.36+commit.8a079791", solcBinarySha256: `sha256:${input.solcBinarySha256}` },
     inputs: { closureHash: `sha256:${sha256(JSON.stringify([...manifest.sources, ...manifest.config, manifest.detectorInventory]))}`, configHash: `sha256:${hashes.config}`, policyHash: `sha256:${hashes.policy}`, triageHash: `sha256:${request.triageHash}` },
-    analysis: { expectedTargets: manifest.expectedContracts, observedTargets: input.analyzedContracts, expectedSources: manifest.sources.map(({ path }) => path.replace(/^contracts\/evm\//u, "")), observedSources: input.analyzedSources, creationBytecodeSha256: `sha256:${input.creationBytecodeSha256}`, detectors: input.detectorInventory, findingCount: input.findings.length, findings, suppressions: decision.suppressed.length, triaged: request.triageHash.length > 0 ? decision.visible.filter(({ impact }) => impact === "Low" || impact === "Informational" || impact === "Optimization").length : 0 },
+    analysis: { expectedTargets: manifest.expectedContracts, observedTargets: input.analyzedContracts, expectedSources: manifest.sources.map(({ path }) => path.replace(/^contracts\/evm\//u, "")), observedSources: input.analyzedSources, creationBytecodeSha256: `sha256:${input.creationBytecodeSha256}`, detectors: input.detectorInventory, findingCount: input.findings.length, perImpact, findings, suppressions: decision.suppressed.length, triaged: request.triageHash.length > 0 ? decision.visible.filter(({ impact }) => impact === "Low" || impact === "Informational" || impact === "Optimization").length : 0 },
     policy: { blocking: decision.blocking.length, visible: decision.visible.length, suppressed: decision.suppressed.length, errors: decision.errors },
     result: { category: decision.category, exitCode: decision.exitCode }, sanitised: true,
   };
-  const serialized = stable(evidence);
-  await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, "evidence-report.schema.v1.json"));
-  assertAnalysisEvidenceSemantics(evidence);
-  const partial = join(output, "evidence.json.partial");
-  await writeFile(partial, serialized, { mode: 0o600, flag: "wx" });
-  await rename(partial, join(output, "evidence.json"));
-  const summary = renderAnalysisSummary(evidence);
-  await writeFile(join(output, "summary.md.partial"), summary, { mode: 0o600, flag: "wx" });
-  await rename(join(output, "summary.md.partial"), join(output, "summary.md"));
-  await request.assertReadyPrecondition();
-  await writeFile(join(output, "READY"), "", { mode: 0o600, flag: "wx" });
+    const serialized = stable(evidence);
+    await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, "evidence-report.schema.v1.json"));
+    assertAnalysisEvidenceSemantics(evidence);
+    await writeFile(join(staging, "evidence.json"), serialized, { mode: 0o600, flag: "wx" });
+    await writeFile(join(staging, "summary.md"), renderAnalysisSummary(evidence), { mode: 0o600, flag: "wx" });
+    const rawFindings = input.findings.map((finding) => ({
+      detectorId: finding.detectorId, impact: finding.impact, confidence: finding.confidence,
+      identity: finding.identity, path: finding.location.path, start: finding.location.start,
+      length: finding.location.length, sourceHash: finding.location.sourceHash,
+      snippetHash: finding.location.snippetHash,
+    }));
+    await writeFile(join(staging, "slither.json"), stable({ schemaVersion: 1, success: input.success, errors: input.analysisErrors, findings: rawFindings }), { mode: 0o600, flag: "wx" });
+    await writeFile(join(staging, "slither-inventory.json"), stable({ schemaVersion: 1, success: input.success, contracts: input.analyzedContracts, sources: input.analyzedSources, errors: input.analysisErrors }), { mode: 0o600, flag: "wx" });
+    await writeFile(join(staging, "detector-inventory.json"), stable({ schemaVersion: 1, detectors: input.detectorInventory }), { mode: 0o600, flag: "wx" });
+    await writeFile(join(staging, "slither-status.json"), stable({ schemaVersion: 1, analysisExit: input.findings.length === 0 ? 0 : 255, inventoryExit: 0 }), { mode: 0o600, flag: "wx" });
+    await request.assertReadyPrecondition();
+  }, async (staging) => await validateFinalizedEvidenceBundle({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory, canonicalDirectory: request.canonicalDirectory }));
 }
 
 export async function writeEnvironmentFailure(request: EnvironmentFailureRequest): Promise<void> {
@@ -87,14 +103,39 @@ export async function writeFailureEvidence(request: FailureEvidenceRequest): Pro
   const { output, candidateSha, category, exitCode, stage, errorCode } = request;
   const expectedExit = { "tool-failure": 30, "output-failure": 40, "environment-failure": 50 } as const;
   if (expectedExit[category] !== exitCode) {throw new Error("failure category and exit code differ");}
-  await mkdir(output, { recursive: false, mode: 0o700 });
-  const info = await lstat(output); if (!info.isDirectory() || info.isSymbolicLink()) {throw new Error("evidence output is not an owned directory");}
-  const value = { schemaVersion: 1, ready: true, candidateSha, execution: { platform: "linux/amd64", event: process.env.GITHUB_EVENT_NAME ?? "local", repository: process.env.GITHUB_REPOSITORY ?? "local", workflow: process.env.GITHUB_WORKFLOW ?? "local", job: process.env.GITHUB_JOB ?? "local", runId: process.env.GITHUB_RUN_ID ?? "local", runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1" }, image: IMAGE, category, exitCode, stage, errorCode, sanitised: true };
+  const registered = classifyGateFailure(errorCode);
+  if (registered.category !== category || registered.exitCode !== exitCode || registered.stage !== stage) {
+    throw new Error("failure evidence differs from the exhaustive registry");
+  }
+  const value = { schemaVersion: 1, ready: true, candidateSha, execution: executionIdentity(), image: IMAGE, category, exitCode, stage, errorCode, sanitised: true };
   const name = `${category}.json`;
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
   await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, `${category}.schema.v1.json`));
-  await writeFile(join(output, `${name}.partial`), serialized, { mode: 0o600, flag: "wx" });
-  await rename(join(output, `${name}.partial`), join(output, name));
-  await request.assertReadyPrecondition();
-  await writeFile(join(output, "READY"), "", { mode: 0o600, flag: "wx" });
+  await publish(output, async (staging) => {
+    await writeFile(join(staging, name), serialized, { mode: 0o600, flag: "wx" });
+    await request.assertReadyPrecondition();
+  }, async (staging) => await validateFinalizedEvidenceBundle({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory }));
+}
+
+function executionIdentity(): Record<string, string> {
+  const names = ["GITHUB_EVENT_NAME", "GITHUB_REPOSITORY", "GITHUB_WORKFLOW", "GITHUB_JOB", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"] as const;
+  if (process.env.GITHUB_ACTIONS === "true" && names.some((name) => !process.env[name])) {
+    throw new Error("complete GitHub execution identity is required in CI finalization mode");
+  }
+  return { platform: "linux/amd64", event: process.env.GITHUB_EVENT_NAME ?? "local", repository: process.env.GITHUB_REPOSITORY ?? "local", workflow: process.env.GITHUB_WORKFLOW ?? "local", job: process.env.GITHUB_JOB ?? "local", runId: process.env.GITHUB_RUN_ID ?? "local", runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1" };
+}
+
+async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>): Promise<void> {
+  const staging = await mkdtemp(join(dirname(output), `.${basename(output)}.staging-`));
+  try {
+    const info = await lstat(staging);
+    if (!info.isDirectory() || info.isSymbolicLink()) {throw new Error("evidence staging is not an owned directory");}
+    await build(staging);
+    await writeFile(join(staging, "READY"), "", { mode: 0o600, flag: "wx" });
+    await finalize(staging);
+    await rename(staging, output);
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true });
+    throw error;
+  }
 }
