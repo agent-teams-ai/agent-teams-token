@@ -11,13 +11,13 @@
   "gasBufferBps": "2000",
   "quoteTtlSeconds": "60",
   "maximumHeadLag": "2",
-  "solcVersion": "0.8.36+commit.8a079791",
+  "buildInfoSolcVersion": "0.8.36",
   "compilerSettings": {
     "optimizer": { "enabled": true, "runs": 200 },
     "evmVersion": "paris",
     "metadata": { "bytecodeHash": "ipfs", "appendCBOR": true }
   },
-  "artifactSha256": "0x0eab21f9aa412c52aff557eeaf8a802306b57e21067c02748c9b6f9f7a87cb7c",
+  "artifactSha256": "0x007b59a80bee113a7270bd5360207934042537620c214fa5dc2d3c648c5764c6",
   "abiSha256": "0x437d23540c29545d78a654ffe3df8c45136eee6d9954fb7ebdce34ba922b4645",
   "fixtureSha256": "0x91f81679ae94d51fd73d4d1d1a4c914b0aa01a54c95b7266007cd74d64bcc90e",
   "fixtureReadySha256": "0x1a5c8647212a264368c1f9223d7edf6fdf3018278ea48fe505f7252071e518bd",

@@ -13,7 +13,7 @@
     "plan": {
       "type": "object", "additionalProperties": false,
       "required": ["schemaVersion", "kind", "planId", "identity", "broadcastAllowed", "testOnly", "productionApproved", "mainnetAllowed"],
-      "properties": { "schemaVersion": { "const": 1 }, "kind": { "const": "deployment-plan" }, "planId": { "$ref": "#/$defs/hash" }, "identity": { "type": "object" }, "broadcastAllowed": { "const": false }, "testOnly": { "const": true }, "productionApproved": { "const": false }, "mainnetAllowed": { "const": false } }
+      "properties": { "schemaVersion": { "const": 1 }, "kind": { "const": "deployment-plan" }, "planId": { "$ref": "#/$defs/hash" }, "identity": { "type": "object", "required": ["buildInfoSolcVersion"], "properties": { "buildInfoSolcVersion": { "const": "0.8.36" } } }, "broadcastAllowed": { "const": false }, "testOnly": { "const": true }, "productionApproved": { "const": false }, "mainnetAllowed": { "const": false } }
     },
     "quote": {
       "type": "object", "additionalProperties": false,
