@@ -78,9 +78,8 @@ test("normal cleanup refuses to delete state beneath a registered live validator
 
 test("real parent SIGKILL reclaim authenticates, terminates and awaits its validator child", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "authenticated stale-child reclaim requires Linux procfs or native Darwin ps identity" }, async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-sigkill-")); await chmod(boundary, 0o700);
-  const runRoot = join(boundary, "runs"); const outputRoot = join(boundary, "out"); const readyPath = join(boundary, "ready.json"); const fakeValidator = join(boundary, "fake-validator");
-  await writeFile(fakeValidator, "#!/bin/bash\nwhile :; do /bin/sleep 1; done\n", { mode: 0o700 });
-  const parent = spawn(process.execPath, [join(import.meta.dirname, "helpers/start-owned-validator.ts"), runRoot, outputRoot, fakeValidator, readyPath], { stdio: ["ignore", "pipe", "pipe"] });
+  const runRoot = join(boundary, "runs"); const outputRoot = join(boundary, "out"); const readyPath = join(boundary, "ready.json");
+  const parent = spawn(process.execPath, [join(import.meta.dirname, "helpers/start-owned-validator.ts"), runRoot, outputRoot, readyPath], { stdio: ["ignore", "pipe", "pipe"] });
   let diagnostics = ""; parent.stdout.on("data", (chunk) => { diagnostics += String(chunk); }); parent.stderr.on("data", (chunk) => { diagnostics += String(chunk); });
   const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   try {
