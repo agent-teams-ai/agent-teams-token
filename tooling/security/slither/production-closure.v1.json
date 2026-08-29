@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "target": "contracts/evm/src/features/token-genesis/AGTMAIToken.sol:AGTMAIToken",
+  "expectedContracts": ["AGTMAIToken", "Context", "ERC20", "IERC1155Errors", "IERC20", "IERC20Errors", "IERC20Metadata", "IERC721Errors"],
+  "sources": [
+    {"path":"contracts/evm/src/features/token-genesis/AGTMAIToken.sol","sha256":"eae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989"},
+    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol","sha256":"50f34ae16a067a41c2c1091445d11d63788e54c717677cb6d6b0e4cdea2ad21d"},
+    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol","sha256":"01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c"},
+    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol","sha256":"0b7132f17d14d1d84b41b0bb429be62dafdff00fd3470f68724d8018eb07f57a"},
+    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/utils/Context.sol","sha256":"847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6"},
+    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol","sha256":"fa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30"}
+  ],
+  "config": [
+    {"path":"contracts/evm/foundry.toml","sha256":"0b51698e8636e4b29c0de9b427dc4649cfaf603f85996f9ae3ebbd28a0a9db92"},
+    {"path":"contracts/evm/remappings.txt","sha256":"c785eebf11718ba3e656056f1fa1b940912c6d72c532e32b73a77d411441af81"},
+    {"path":"contracts/evm/lib/openzeppelin-contracts/PINNED_VERSION","sha256":"3a1c9fbbf1233e552070cfac330a40acfb727ef14eb5ff3051548842870e7d79"},
+    {"path":"tooling/security/slither/slither.config.json","sha256":"ff9706dac47ce7a116e2e42c68e8bdf8fbb8da761c0d476f6d5ed2959c222370"}
+  ],
+  "compiler": {"version":"0.8.36+commit.8a079791","evmVersion":"paris","optimizerEnabled":true,"optimizerRuns":200,"bytecodeHash":"ipfs","cborMetadata":true,"useLiteralContent":false,"viaIR":false,"experimental":false,"remappings":["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"]},
+  "tools": {"forgeArchiveSha256":"8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57","forgeBinarySha256":"c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f","solcBinarySha256":"c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6"},
+  "creationBytecodeSha256": "56d021ec13df6cccbc5d330ccad2acd567f5b4cb75665a0d9982604306c92493",
+  "detectorCount": 102,
+  "requiredDetectors": ["arbitrary-send-eth", "controlled-delegatecall", "reentrancy-eth", "suicidal", "tx-origin", "unchecked-lowlevel", "uninitialized-state", "unprotected-upgrade"]
+}
