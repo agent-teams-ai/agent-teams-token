@@ -125,6 +125,7 @@ test("a later run reclaims a killed markerless initializer", {timeout: 120_000},
   const [directory] = await runDirectories();
   assert(directory);
   await assert.rejects(readFile(join(privateRoot, directory, "lease.v1.json")));
+  assert.equal(processExists(killed.pid), true);
   assert.equal(killed.child.kill("SIGKILL"), true);
   assert.notEqual((await killed.result).exitCode, 0);
 

@@ -155,7 +155,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
 async function faultPause(point: string, details: Record<string, unknown> = {}): Promise<void> {
   if (process.env.AGTMAI_LOCAL_EVM_FAULT !== point) {return;}
   process.stdout.write(`${JSON.stringify({faultPoint: point, pid: process.pid, ...details})}\n`);
-  await new Promise<void>(() => {});
+  await new Promise<void>((resolve) => {setTimeout(resolve, 2_147_483_647);});
 }
 
 export function privateRunRoot(repositoryRoot: string): string {
