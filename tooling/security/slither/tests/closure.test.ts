@@ -1,0 +1,27 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+import type { GateManifest } from "../src/domain/model.ts";
+import { sha256 } from "../src/adapters/fingerprint.ts";
+
+test("committed production closure has exact source and config hashes", async () => {
+  const root = process.cwd();
+  const manifest = JSON.parse(await readFile(`${root}/tooling/security/slither/production-closure.v1.json`, "utf8")) as GateManifest;
+  for (const entry of [...manifest.sources, ...manifest.config]) assert.equal(sha256(await readFile(`${root}/${entry.path}`)), entry.sha256, entry.path);
+  assert.equal(manifest.sources.some(({ path }) => path.includes("/test/") || path.includes("/script/")), false);
+  assert.equal(manifest.sources.some(({ path }) => path.endsWith("AGTMAIToken.sol")), true);
+  assert.equal(manifest.detectorCount, 102);
+  assert.equal(manifest.creationBytecodeSha256, "56d021ec13df6cccbc5d330ccad2acd567f5b4cb75665a0d9982604306c92493");
+});
+
+test("synthetic vulnerable fixture is outside the production closure", async () => {
+  const manifest = JSON.parse(await readFile("tooling/security/slither/production-closure.v1.json", "utf8")) as GateManifest;
+  const vulnerable = await readFile("tooling/security/slither/tests/fixtures/Vulnerable.sol", "utf8");
+  assert.match(vulnerable, /selfdestruct/u);
+  assert.equal(manifest.sources.some(({ path }) => path.includes("Vulnerable.sol")), false);
+});
+
+test("Slither configuration contains no detector or path exclusions", async () => {
+  const config = JSON.parse(await readFile("tooling/security/slither/slither.config.json", "utf8")) as Record<string, unknown>;
+  assert.equal(config.exclude_dependencies, false); assert.equal("detectors_to_exclude" in config, false); assert.equal("filter_paths" in config, false);
+});

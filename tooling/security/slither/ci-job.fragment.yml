@@ -1,0 +1,60 @@
+solidity-security:
+  runs-on: ubuntu-24.04
+  timeout-minutes: 20
+  needs: [solidity]
+  permissions:
+    contents: read
+  env:
+    SLITHER_REPOSITORY_ROOT: ${{ github.workspace }}
+    SLITHER_CANDIDATE_SHA: ${{ github.sha }}
+    SLITHER_EVIDENCE_DIRECTORY: /tmp/slither-evidence-${{ github.sha }}
+    SLITHER_FORGE_PATH: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge
+    SLITHER_SOLC_PATH: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - name: Assert exact clean checkout
+      shell: bash
+      run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+    - name: Fetch, install and verify pinned Linux toolchain
+      shell: bash
+      run: |
+        ./dev bootstrap fetch
+        ./dev bootstrap install --offline
+        source scripts/env.sh
+        ./dev bootstrap verify --offline
+        ./dev doctor --scope=core
+    - name: Install frozen workspace
+      shell: bash
+      run: source scripts/env.sh && pnpm install --frozen-lockfile
+    - name: Pull exact toolbox platform manifest
+      shell: bash
+      run: source scripts/env.sh && pnpm security:solidity:prepare-image
+    - name: Run exact Slither policy gate
+      shell: bash
+      run: source scripts/env.sh && pnpm security:solidity
+    - name: Assert gate kept the exact checkout clean
+      if: ${{ always() }}
+      shell: bash
+      run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+    - name: Create minimal prerequisite-failure evidence
+      if: ${{ failure() }}
+      shell: bash
+      env:
+        SLITHER_FAILURE_STAGE: ci-prerequisite
+        SLITHER_FAILURE_CODE: CI_PREREQUISITE_FAILED
+      run: |
+        if ! test -f "$SLITHER_EVIDENCE_DIRECTORY/READY"; then
+          source scripts/env.sh
+          node tooling/security/slither/src/composition/record-environment-failure.ts
+        fi
+    - name: Upload immutable Slither evidence
+      if: ${{ always() }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: slither-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: /tmp/slither-evidence-${{ github.sha }}
+        if-no-files-found: error
+        retention-days: 14

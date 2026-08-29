@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
+  "required":["schemaVersion","suppressions"],"properties":{
+    "schemaVersion":{"const":1},"suppressions":{"type":"array","items":{"$ref":"#/$defs/suppression"}}
+  },
+  "$defs":{"hash":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"suppression":{"type":"object","additionalProperties":false,
+    "required":["schemaVersion","fingerprint","detectorId","path","start","length","sourceHash","snippetHash","findingIdentityHash","reason","owner","expiresAt","reviewAt","regressionEvidence"],
+    "properties":{"schemaVersion":{"const":1},"fingerprint":{"$ref":"#/$defs/hash"},"detectorId":{"type":"string","pattern":"^[a-z0-9-]+$"},"path":{"type":"string","pattern":"^contracts/evm/","not":{"pattern":"(?:^|/)[.][.](?:/|$)"}},"start":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":1},"sourceHash":{"$ref":"#/$defs/hash"},"snippetHash":{"$ref":"#/$defs/hash"},"findingIdentityHash":{"$ref":"#/$defs/hash"},"reason":{"type":"string","minLength":10},"owner":{"type":"string","minLength":1},"expiresAt":{"type":"string","format":"date-time"},"reviewAt":{"type":"string","format":"date-time"},"regressionEvidence":{"type":"string","minLength":1}}
+  }}
+}
