@@ -1,7 +1,7 @@
 # AGTMAI zero-cost slices: implementation ledger
 
-Status: Barriers 0, 0.5 and 1 closed; Barrier 2 exact-SHA integration evidence
-in progress, 2026-08-29.
+Status: Barriers 0, 0.5 and 1 closed; Barrier 2 is blocked by accepted
+implementation-review findings and remediation is in progress, 2026-08-29.
 
 This ledger is append-only evidence for
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](../NEXT_ZERO_COST_SLICES_PLAN.md). A changed
@@ -119,13 +119,20 @@ path. Green unit tests alone were deliberately not accepted as E2E evidence.
 - W2 feature commits: `9bba062`, `66dcd22`;
 - W3 feature commits: `d55f2ac`, `dda858c`;
 - shared root/Foundation/CI wiring commit: `fc834c5`;
-- current pre-full-gate candidate SHA:
-  `fc834c5212628c715edde25487f524d8dfe7c0a6`;
+- first reviewed candidate SHA:
+  `881f1bed74692cd70986240cbba076500ab401e9`;
 - targeted local evidence: Foundation full coverage with zero diagnostics;
   deployment plan 24/24 with real Anvil; Slither 41/41 plus real pinned-image
   clean policy result with 101 detectors and 11 visible informational findings;
-- local full gate: pending;
-- GitHub workflow/run/attempt/head/jobs evidence: pending.
+- local full gate: passed on the first reviewed candidate, including real Agave,
+  real Anvil and the exact pinned Slither container;
+- exact-head GitHub Actions run
+  [`33242942132`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33242942132),
+  workflow `CI`, event `workflow_dispatch`, attempt `1`, head
+  `881f1bed74692cd70986240cbba076500ab401e9`: all six required jobs passed;
+- the green execution evidence did not detect thirteen P1 code/evidence defects
+  accepted by the independent review. It is superseded for final acceptance;
+  remediation requires a new candidate and complete exact-SHA gate.
 
 ## Independent hosted review
 
@@ -136,15 +143,34 @@ review evidence.
 
 | Review | Reviewer job | Reviewed SHA | Verdict | Findings |
 | --- | --- | --- | --- | --- |
-| Solana/SPL lifecycle | pending | pending | pending | pending |
-| Deployment-plan safety | pending | pending | pending | pending |
-| Slither/supply chain/CI | pending | pending | pending | pending |
-| Architecture/Foundation/MVP | pending | pending | pending | pending |
-| Holistic plan/evidence | pending | pending | pending | pending |
+| Solana/SPL lifecycle | `agtmai-review881-solana-r2` | `881f1be` | AMEND | schema, semantic decoding, SIGKILL ownership and cross-process ports |
+| Deployment-plan safety | `agtmai-review881-deployment-r2` | `881f1be` | AMEND | verifier independence, publication, filesystem, roots and strict parsing |
+| Slither/supply chain/CI | `agtmai-review881-slither-r2` | `881f1be` | AMEND | clean-tree binding, complete targets, real fixture and exit matrix |
+| Architecture/Foundation/MVP | `agtmai-review881-architecture-r2` | `881f1be` | AMEND | confirmed cross-lane findings and two layer-boundary P2s |
+| Holistic plan/evidence | `agtmai-review881-holistic-r1` | `881f1be` | AMEND | no P0; thirteen deduplicated P1 root causes |
+
+The immutable input hashes, complete adjudication and mandatory recheck are in
+[`NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`](NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md).
+
+## Review remediation jobs
+
+All remediation jobs start from `881f1be`, use `gpt-5.6-sol` with `medium`
+reasoning and the default service tier, and own non-overlapping paths.
+
+| Lane | Job | Result |
+| --- | --- | --- |
+| Deployment | `agtmai-remed881-deployment-r1` | in progress |
+| Solana | `agtmai-remed881-solana-r1` | in progress |
+| Slither | `agtmai-remed881-slither-r1` | in progress |
+
+Acceptance still requires integrating the three reviewed commits, running all
+local and exact-head CI gates on one new SHA, four fresh specialist reviews and
+one subsequent holistic adjudication with no P0/P1 findings.
 
 ## Model-split delivery metrics
 
 - time from W1/W2/W3 dispatch to first working patch: pending;
 - targeted tests passing on first submitted worker commit: pending;
-- review defects by severity: pending;
+- review defects by severity: first holistic round found `0` P0 and `13`
+  deduplicated P1 root causes, plus visible P2/P3 follow-ups;
 - remediation iterations to stable exact SHA: pending.

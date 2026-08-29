@@ -105,12 +105,17 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 - The three local zero-cost slices were explicitly owner-approved for E2E
   implementation on 2026-08-29. Barriers 0, 0.5 and targeted implementation are
-  closed. Solana, the deployment planner and Slither are integrated locally;
-  the exact full repository gate, GitHub CI and mandatory four-specialist plus
-  one holistic hosted critique remain open. These slices do not depend on unresolved
-  tokenomics, vesting, governance, CCIP or liquidity decisions. Concrete GitHub
-  run IDs, exact SHAs and hosted verdicts remain part of immutable workflow/
-  review evidence; a local workflow-definition check is never called remote CI.
+  closed. Solana, the deployment planner and Slither were integrated locally;
+  exact SHA `881f1bed74692cd70986240cbba076500ab401e9` passed the full local gate
+  and all six jobs in GitHub Actions run `33242942132`. Four specialist critics
+  and one subsequent holistic critic nevertheless confirmed thirteen P1
+  code/evidence defects, so that green candidate is not accepted. Three isolated
+  remediation jobs are active; a new full local gate, exact-head CI, four fresh
+  specialist reviews and a subsequent holistic review remain mandatory. The
+  complete ledger is in
+  `docs/research/NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`. These slices
+  do not depend on unresolved tokenomics, vesting, governance, CCIP or liquidity
+  decisions.
 - Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
   constructor gas, every additional contract, live fees, total-cost guard and
   unsigned-plan review must be completed before any public broadcast. The
@@ -121,8 +126,8 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   hosted `gpt-5.6-sol xhigh` critics reviewed exact draft SHA `1cd5515` without
   fast mode; all returned AMEND, none found P0, and accepted P1/P2 are recorded
   in `docs/research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md` and folded
-  into the plan. Implementation and exact-SHA evidence collection are in
-  progress.
+  into the plan. Initial implementation is complete, but review remediation and
+  replacement exact-SHA evidence collection are in progress.
 
 ## Designed, not implemented
 
