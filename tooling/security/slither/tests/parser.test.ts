@@ -47,6 +47,33 @@ test("well-formed Slither analysis errors remain tool failures, not malformed ou
   assert.equal(parsed.success, false); assert.deepEqual(parsed.findings, []); assert.deepEqual(parsed.errors, ["compile failed"]);
 });
 
+test("malformed Slither results.errors fail closed", async () => {
+  for (const errors of [null, "compile failed", { message: "compile failed" }]) {
+    await assert.rejects(
+      parseSlitherJson(JSON.stringify({ success: true, results: { detectors: [], errors } }), process.cwd()),
+      { code: "MALFORMED_JSON" },
+    );
+  }
+  await assert.rejects(
+    parseSlitherJson(JSON.stringify({ success: false, results: { errors: [{ message: "compile failed" }] } }), process.cwd()),
+    { code: "MALFORMED_JSON" },
+  );
+});
+
+test("malformed root.error fails closed while valid error strings are preserved", async () => {
+  for (const error of [null, "", { message: "compile failed" }, ["compile failed"]]) {
+    await assert.rejects(
+      parseSlitherJson(JSON.stringify({ success: false, error }), process.cwd()),
+      { code: "MALFORMED_JSON" },
+    );
+  }
+  const parsed = await parseSlitherJson(
+    JSON.stringify({ success: false, error: "root failure", results: { errors: ["result failure"] } }),
+    process.cwd(),
+  );
+  assert.deepEqual(parsed.errors, ["result failure", "root failure"]);
+});
+
 test("detector inventory rejects empty and duplicate tables", () => {
   assert.deepEqual(parseDetectorInventory("| 1 | suicidal | High | High |"), ["suicidal"]);
   assert.throws(() => parseDetectorInventory(""));

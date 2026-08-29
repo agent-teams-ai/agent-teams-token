@@ -223,12 +223,12 @@ function assertContainerResult(result: { readonly timedOut: boolean; readonly ex
   }
 }
 
-function parseSlitherExit(raw: string | Buffer): number {
-  const status = Number.parseInt(raw.toString().trim(), 10);
-  if (!Number.isSafeInteger(status) || status < 0 || status > 255) {
+export function parseSlitherExit(raw: string | Buffer): number {
+  const serialized = raw.toString();
+  if (!/^(?:0|255)\n?$/u.test(serialized)) {
     throw new SlitherGateError("SLITHER_EXIT_INVALID", "Slither exit status is missing or malformed");
   }
-  return status;
+  return serialized.startsWith("0") ? 0 : 255;
 }
 
 export function assertSlitherStatus(

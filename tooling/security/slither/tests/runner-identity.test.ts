@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   decodeCreationBytecode,
   assertSlitherStatus,
+  parseSlitherExit,
   parseOfficialImageEnvironment,
 } from "../src/adapters/runner.ts";
 import {
@@ -73,4 +74,16 @@ test("Slither JSON, errors, exact finding count and exit obey the exhaustive sta
 
 test("real Slither 0.11.6 production semantics accept successful JSON with findings and exit 255", () => {
   assert.doesNotThrow(() => assertSlitherStatus(true, [], 11, 255));
+});
+
+test("Slither exit files accept only canonical 0 or 255 with an optional trailing LF", () => {
+  for (const [raw, expected] of [["0", 0], ["0\n", 0], ["255", 255], ["255\n", 255]] as const) {
+    assert.equal(parseSlitherExit(raw), expected);
+  }
+  for (const raw of [
+    "", "\n", " ", "0junk", "0\n255", "255\n0", "+0", "-0", "+255", "-255",
+    "0.0", "255.0", "00", "0255", " 0", "0 ", "0\r\n", "255\n\n", "1", "254", "256",
+  ]) {
+    assert.throws(() => parseSlitherExit(raw), { code: "SLITHER_EXIT_INVALID" });
+  }
 });

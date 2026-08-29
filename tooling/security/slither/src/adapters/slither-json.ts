@@ -32,13 +32,21 @@ export async function parseSlitherJson(raw: string, repositoryRoot: string): Pro
     (results.detectors ?? []).map(async (rawDetector, index) =>
       await parseFinding(rawDetector, index, repositoryRoot)),
   );
-  const errors = Array.isArray(results.errors) ? results.errors.map((item) => typeof item === "string" ? item : JSON.stringify(item)) : [];
-  if (typeof root.error === "string" && root.error.length > 0) {errors.push(root.error);}
+  const errors = optionalErrorArray(results.errors, "results.errors");
+  if (Object.hasOwn(root, "error")) {errors.push(string(root.error, "error"));}
   return {
     success: root.success,
     findings: findings.toSorted((left, right) => left.fingerprint.localeCompare(right.fingerprint)),
     errors: errors.toSorted(),
   };
+}
+
+function optionalErrorArray(value: unknown, label: string): string[] {
+  if (value === undefined) {return [];}
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.length > 0)) {
+    throw new SlitherGateError("MALFORMED_JSON", `${label} must be an array of non-empty strings`);
+  }
+  return [...value];
 }
 
 export function parseSlitherInventory(raw: string): SlitherInventory {
