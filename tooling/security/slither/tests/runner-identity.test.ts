@@ -53,12 +53,27 @@ test("creation bytecode identity rejects empty, odd, linked or non-hex values", 
   for (const value of ["", "0x", "0x1", "0xzz", "__$library$__", null]) {assert.throws(() => decodeCreationBytecode(value));}
 });
 
-test("Slither JSON and exit status obey the exact documented matrix", () => {
-  assert.doesNotThrow(() => assertSlitherStatus(true, [], 0));
-  assert.doesNotThrow(() => assertSlitherStatus(false, ["compile failed"], 255));
-  for (const status of [1, 20, 30, 40, 50, 125, 137, 143, 254, 255]) {
-    assert.throws(() => assertSlitherStatus(true, [], status), /0\/success or 255\/failure/u);
+test("Slither JSON, errors, exact finding count and exit obey the exhaustive status matrix", () => {
+  const booleans = [false, true] as const;
+  const errorSets = [[], ["compile failed"]] as const;
+  const findingCounts = [-1, 0, 1, 11, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.POSITIVE_INFINITY] as const;
+  const statuses = [-1, ...Array.from({ length: 256 }, (_, status) => status), 256];
+  for (const success of booleans) {
+    for (const errors of errorSets) {
+      for (const findingCount of findingCounts) {
+        for (const status of statuses) {
+          const valid = Number.isSafeInteger(findingCount) && findingCount >= 0 && (success
+            ? errors.length === 0 && ((findingCount === 0 && status === 0) || (findingCount > 0 && status === 255))
+            : errors.length > 0 && status === 255);
+          const invocation = () => assertSlitherStatus(success, errors, findingCount, status);
+          if (valid) {assert.doesNotThrow(invocation);}
+          else {assert.throws(invocation, /success, errors, finding count and exit status/u);}
+        }
+      }
+    }
   }
-  assert.throws(() => assertSlitherStatus(false, [], 255));
-  assert.throws(() => assertSlitherStatus(true, ["incomplete"], 0));
+});
+
+test("real Slither 0.11.6 production semantics accept successful JSON with findings and exit 255", () => {
+  assert.doesNotThrow(() => assertSlitherStatus(true, [], 11, 255));
 });

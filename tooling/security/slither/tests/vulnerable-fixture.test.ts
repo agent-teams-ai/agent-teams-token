@@ -7,7 +7,7 @@ import type { Finding } from "../src/domain/model.ts";
 
 test("vulnerable fixture uses the same pinned hardened container contract", () => {
   const joined = dockerVulnerableFixtureArguments({ input: "/tmp/input", output: "/tmp/output", forge: "/tmp/forge", solc: "/tmp/solc", imagePath: "/official/bin:/usr/bin:/bin", pythonPath: "/official/python", containerName: "agtmai-slither-vulnerable" }).join(" ");
-  for (const required of [IMAGE, "--network none", "--read-only", "--user 1000:1000", "--cap-drop ALL", "dst=/input,readonly", "src/Vulnerable.sol", "slither .", "slither.exit"]) {
+  for (const required of [IMAGE, "--network none", "--read-only", "--user 1000:1000", "--cap-drop ALL", "dst=/input,readonly", "src/Vulnerable.sol", "slither . --fail-on pedantic --foundry-ignore-compile", "slither.exit"]) {
     assert.match(joined, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
   }
   assert.doesNotMatch(joined, /JSON\.stringify|manufactured|mock/u);

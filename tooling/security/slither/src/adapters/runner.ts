@@ -87,10 +87,10 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
     }
     const parsed = await parseSlitherJson(await readFile(join(rawOutput, "slither.json"), "utf8"), repositoryRoot);
     const slitherExit = parseSlitherExit(await readFile(join(rawOutput, "slither.exit"), "utf8"));
-    assertSlitherStatus(parsed.success, parsed.errors, slitherExit);
+    assertSlitherStatus(parsed.success, parsed.errors, parsed.findings.length, slitherExit);
     const inventory = parseSlitherInventory(await readFile(join(rawOutput, "slither-inventory.json"), "utf8"));
     const inventoryExit = parseSlitherExit(await readFile(join(rawOutput, "slither-inventory.exit"), "utf8"));
-    assertSlitherStatus(inventory.success, inventory.errors, inventoryExit);
+    assertSlitherStatus(inventory.success, inventory.errors, 0, inventoryExit);
     const detectorInventory = parseDetectorInventory(await readFile(join(rawOutput, "detectors.txt"), "utf8"));
     const compiled = await parseCompiledOutput(rawOutput);
     const input: AnalysisInput = {
@@ -166,7 +166,7 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
   await verifyVersions(output);
   const parsed = await parseSlitherJson(await readFile(join(output, "slither.json"), "utf8"), input);
   const status = parseSlitherExit(await readFile(join(output, "slither.exit"), "utf8"));
-  assertSlitherStatus(parsed.success, parsed.errors, status);
+  assertSlitherStatus(parsed.success, parsed.errors, parsed.findings.length, status);
   const observedDetectors = parseDetectorInventory(await readFile(join(output, "detectors.txt"), "utf8"));
   if (JSON.stringify(observedDetectors) !== JSON.stringify(request.expectedDetectors)) {
     throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "vulnerable fixture used a different detector inventory");
@@ -234,14 +234,17 @@ function parseSlitherExit(raw: string | Buffer): number {
 export function assertSlitherStatus(
   success: boolean,
   errors: readonly string[],
+  findingCount: number,
   status: number,
 ): void {
-  const cleanOutput = success && errors.length === 0 && status === 0;
-  const reportedFailure = !success && errors.length > 0 && status === 255;
-  if (!cleanOutput && !reportedFailure) {
+  const exactFindingCount = Number.isSafeInteger(findingCount) && findingCount >= 0;
+  const cleanOutput = exactFindingCount && success && errors.length === 0 && findingCount === 0 && status === 0;
+  const findingsOutput = exactFindingCount && success && errors.length === 0 && findingCount > 0 && status === 255;
+  const reportedFailure = exactFindingCount && !success && errors.length > 0 && status === 255;
+  if (!cleanOutput && !findingsOutput && !reportedFailure) {
     throw new SlitherGateError(
       "SLITHER_EXIT_INVALID",
-      "Slither JSON and exit status violate the documented 0/success or 255/failure matrix",
+      "Slither JSON success, errors, finding count and exit status violate the documented matrix",
     );
   }
 }
