@@ -118,7 +118,7 @@ function validateBuildInfoCompiler(
 
 function readBuildContract(build: Record<string, unknown>, roots: TrustRoots): BuildContract {
   const input = object(build.input, "BUILD_INPUT_INVALID");
-  const compilerInputSha256 = sha256Hex(canonicalJson(input));
+  const compilerInputSha256 = portableCompilerInputSha256(input);
   if (compilerInputSha256 !== roots.compilerInputSha256) {
     fail("COMPILER_INPUT_MISMATCH", "full canonical Solidity compiler input differs from trust root");
   }
@@ -136,6 +136,63 @@ function readBuildContract(build: Record<string, unknown>, roots: TrustRoots): B
   const sourceContracts = object(contracts[SOURCE], "BUILD_SOURCE_CONTRACT_INVALID");
   const outputContract = object(sourceContracts[CONTRACT], "BUILD_CONTRACT_INVALID");
   return { outputContract, compilerInputSha256, normalizedSettings, sourceDependencyClosure };
+}
+
+const PORTABLE_ROOT = "$AGTMAI_EVM_ROOT";
+
+/**
+ * Forge records the absolute checkout path in three build-info transport fields.
+ * Those values are not Solidity sources or settings and necessarily differ
+ * between macOS, Linux and CI. Validate their exact Forge shape, replace only
+ * the owned root with a domain token, and bind every other compiler-input value.
+ */
+export function portableCompilerInputSha256(
+  input: Record<string, unknown>,
+): `0x${string}` {
+  return sha256Hex(canonicalJson(portableCompilerInput(input)));
+}
+
+function portableCompilerInput(input: Record<string, unknown>): Record<string, unknown> {
+  const hasForgePaths = ["basePath", "allowPaths", "includePaths"]
+    .some((key) => Object.hasOwn(input, key));
+  if (!hasForgePaths) {
+    return input;
+  }
+
+  const basePath = input.basePath;
+  if (
+    typeof basePath !== "string"
+    || !isCanonicalAbsolutePosixPath(basePath)
+    || !exactStringArray(input.allowPaths, [basePath, `${basePath}/lib`])
+    || !exactStringArray(input.includePaths, [basePath])
+  ) {
+    fail(
+      "COMPILER_INPUT_PATHS_INVALID",
+      "compiler input Forge paths do not match the exact portable root shape",
+    );
+  }
+
+  return {
+    ...input,
+    allowPaths: [PORTABLE_ROOT, `${PORTABLE_ROOT}/lib`],
+    basePath: PORTABLE_ROOT,
+    includePaths: [PORTABLE_ROOT],
+  };
+}
+
+function isCanonicalAbsolutePosixPath(value: string): boolean {
+  return value.startsWith("/")
+    && value !== "/"
+    && !value.endsWith("/")
+    && !value.includes("//")
+    && !value.includes("\\")
+    && !value.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+function exactStringArray(value: unknown, expected: readonly string[]): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((item, index) => item === expected[index]);
 }
 
 function readSourceClosure(value: unknown): Record<string, `0x${string}`> {

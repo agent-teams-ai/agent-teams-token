@@ -17,9 +17,13 @@ checksum-verified Forge/solc toolchain boundary enforces that long compiler
 identity before a fresh build is admitted.
 The trust roots also bind the SHA-256 of the complete canonical Solidity
 compiler input, including every source body, remapping, library map, optimizer
-detail, metadata option, IR flag and output selection. The smaller normalized
-settings object remains a readable policy view, but it cannot replace the full
-compiler-input identity.
+detail, metadata option, IR flag and output selection. Forge additionally puts
+the machine-specific absolute checkout root in `basePath`, `allowPaths` and
+`includePaths`. Their exact expected shape is validated and only that root is
+replaced with the fixed `$AGTMAI_EVM_ROOT` token before hashing, so macOS and
+Linux bind the same portable input without ignoring an extra search path. The
+smaller normalized settings object remains a readable policy view, but it
+cannot replace the full compiler-input identity.
 The RPC port has five read-only methods, rejects redirects and final-URL
 changes, and cannot accept public hosts. There is deliberately no wallet,
 signer, key, raw-transaction, deploy, transaction-send, or broadcast surface.

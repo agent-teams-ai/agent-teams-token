@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approveForgeArtifact, encodeConstructor, type TrustRoots } from "../src/adapters/artifact.ts";
+import {
+  approveForgeArtifact,
+  encodeConstructor,
+  portableCompilerInputSha256,
+  type TrustRoots,
+} from "../src/adapters/artifact.ts";
 import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
 import { UINT256_MAX } from "../src/domain/model.ts";
 
@@ -120,6 +125,35 @@ test("full canonical compiler input is an immutable trust root", () => {
       /compiler input/u,
     );
   }
+});
+
+test("compiler input identity is portable but validates Forge root paths exactly", () => {
+  const firstRoot = "/Users/example/project/contracts/evm";
+  const secondRoot = "/home/runner/work/project/contracts/evm";
+  const withRoot = (basePath: string) => ({
+    ...build.input,
+    allowPaths: [basePath, `${basePath}/lib`],
+    basePath,
+    includePaths: [basePath],
+  });
+  assert.equal(
+    portableCompilerInputSha256(withRoot(firstRoot)),
+    portableCompilerInputSha256(withRoot(secondRoot)),
+  );
+  assert.throws(
+    () => portableCompilerInputSha256({
+      ...withRoot(firstRoot),
+      allowPaths: [firstRoot, "/tmp/untrusted"],
+    }),
+    /compiler input Forge paths/u,
+  );
+  assert.throws(
+    () => portableCompilerInputSha256({
+      ...withRoot(firstRoot),
+      basePath: `${firstRoot}/../evm`,
+    }),
+    /compiler input Forge paths/u,
+  );
 });
 
 test("constructor integers enforce the exact uint256 boundary", () => {
