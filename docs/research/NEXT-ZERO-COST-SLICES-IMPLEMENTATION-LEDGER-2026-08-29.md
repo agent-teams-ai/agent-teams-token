@@ -205,10 +205,21 @@ no analysis errors and non-empty findings. The earlier matrix incorrectly
 treated this documented finding outcome as a tool crash. Commit `7e7f330`
 passes `--fail-on pedantic` explicitly, accepts only the exact finding-aware
 status matrix and keeps every unknown/signal-derived combination fail-closed.
-Commit `0e81e87` flattens the exhaustive 7,224-case regression without reducing
-coverage. Strict lint, TypeScript 7 and all 58 Slither tests pass locally. The
-real pinned-container rerun and replacement exact-head CI remain acceptance
-gates; run `33252045534` is superseded and is not success evidence.
+coverage. Strict lint, TypeScript 7 and all 58 Slither tests pass locally. A
+real-image check then found that Slither `0.11.6` spells the explicit option
+`--fail-pedantic`, not `--fail-on pedantic`; commit `7915bc6` corrects every
+invocation and pins the supported spelling in contract tests.
+
+Candidate `7915bc6b7294e3551f70e2be3e163a6d059698b0` passed the real pinned
+Linux container gate: 101 detectors, 8 observed targets, 11 visible
+informational findings, 0 blocking findings and 0 suppressions. The finalized
+evidence bundle validated independently; `evidence.json` SHA-256 is
+`cd492a5550721264ff0408641c09dc82eb6bf29bad4adcba86d80982882db9b5`.
+The same candidate passed complete `pnpm check`, including real Agave and two
+parallel fixture processes, plus the separately enabled real loopback Anvil
+test 1/1. Updating this ledger creates the final documentation candidate, so
+one exact-SHA local recheck and replacement CI/review evidence remain required;
+run `33252045534` is superseded and is not success evidence.
 
 ## Model-split delivery metrics
 

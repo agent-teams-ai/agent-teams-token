@@ -127,11 +127,19 @@ bundle. Exact-image diagnosis showed a real acceptance defect: Slither `0.11.6`
 returns `255` for a completed pedantic analysis containing findings, even when
 its JSON says `success=true` and contains no analysis error.
 
-The focused corrections are `7e7f330` and `0e81e87`. They explicitly pin
-pedantic behavior and exhaustively test 7,224 combinations of JSON success,
-errors, finding counts and process statuses. Lower-impact findings still flow
-to visible per-fingerprint triage; High and Medium findings still block; tool
-errors and all unrecognized outcomes still fail closed. Local strict lint,
-TypeScript 7 and 58/58 Slither tests pass. This is a remediation checkpoint,
-not a replacement review verdict: real-container, full local, exact-head CI and
-fresh four-plus-one review evidence are still required.
+The focused corrections are `7e7f330`, `0e81e87` and `7915bc6`. They explicitly
+pin the supported `--fail-pedantic` behavior and exhaustively test 7,224
+combinations of JSON success, errors, finding counts and process statuses.
+Lower-impact findings still flow to visible per-fingerprint triage; High and
+Medium findings still block; tool errors and all unrecognized outcomes still
+fail closed.
+
+Candidate `7915bc6b7294e3551f70e2be3e163a6d059698b0` passed strict lint,
+TypeScript 7, 58/58 Slither tests and the real pinned Linux image with 101
+detectors, 11 visible informational findings, 0 blocking findings and 0
+suppressions. Its independently validated `evidence.json` SHA-256 is
+`cd492a5550721264ff0408641c09dc82eb6bf29bad4adcba86d80982882db9b5`.
+Complete `pnpm check` and the separately enabled real Anvil test also passed.
+This remains a remediation checkpoint, not a replacement review verdict: the
+documentation commit requires exact-head CI and fresh four-plus-one review
+evidence.
