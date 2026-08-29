@@ -128,6 +128,7 @@ boundaries:
         - node:os
         - node:path
         - node:timers/promises
+        - node:url
       runtimeReferences: []
   - id: tooling.local-solana.composition
     roots:
