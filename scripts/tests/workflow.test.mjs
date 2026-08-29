@@ -134,8 +134,12 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   const commands = runs("solidity-security").join("\n");
   assert.match(commands, /pnpm security:solidity:prepare-image/);
   assert.match(commands, /pnpm security:solidity/);
+  assert.match(commands, /node tooling\/security\/slither\/src\/composition\/validate-evidence\.ts/);
+  const validation = job.steps.find((step) => step.name === "Validate finalized Slither evidence");
+  assert.equal(validation.id, "validate-slither-evidence");
+  assert.equal(validation.if, "${{ always() }}");
   const upload = job.steps.find((step) => step.name === "Upload immutable Slither evidence");
-  assert.equal(upload.if, "${{ always() }}");
+  assert.equal(upload.if, "${{ always() && steps.validate-slither-evidence.outcome == 'success' }}");
   assert.equal(upload.uses, "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
   assert.equal(upload.with["if-no-files-found"], "error");
   assert.equal(upload.with["retention-days"], 14);

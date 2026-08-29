@@ -243,8 +243,15 @@ jobs:
             source scripts/env.sh
             node tooling/security/slither/src/composition/record-environment-failure.ts
           fi
-      - name: Upload immutable Slither evidence
+      - name: Validate finalized Slither evidence
+        id: validate-slither-evidence
         if: ${{ always() }}
+        shell: bash
+        run: |
+          source scripts/env.sh
+          node tooling/security/slither/src/composition/validate-evidence.ts
+      - name: Upload immutable Slither evidence
+        if: ${{ always() && steps.validate-slither-evidence.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: slither-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

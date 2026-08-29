@@ -91,6 +91,7 @@ boundaries:
     roots:
       - tooling/local-solana/src/application
     entrypoints:
+      - tooling/local-solana/src/application/evidence.ts
       - tooling/local-solana/src/application/ports.ts
       - tooling/local-solana/src/application/runner.ts
     allow:
@@ -106,7 +107,9 @@ boundaries:
       - tooling/local-solana/src/adapters/cli.ts
       - tooling/local-solana/src/adapters/filesystem.ts
       - tooling/local-solana/src/adapters/ports.ts
+      - tooling/local-solana/src/adapters/process-identity.ts
       - tooling/local-solana/src/adapters/process.ts
+      - tooling/local-solana/src/adapters/rpc-parsers.ts
       - tooling/local-solana/src/adapters/rpc.ts
       - tooling/local-solana/src/adapters/toolchain.ts
       - tooling/local-solana/src/adapters/transaction.ts
@@ -172,12 +175,14 @@ boundaries:
       - tooling/deployment-plan/src/adapters/artifact.ts
       - tooling/deployment-plan/src/adapters/rpc.ts
       - tooling/deployment-plan/src/adapters/safe-output.ts
+      - tooling/deployment-plan/src/adapters/strict-json.ts
     allow:
       boundaries:
         - tooling.deployment-plan.application
         - tooling.deployment-plan.domain
       packages: []
       builtins:
+        - node:crypto
         - node:fs
         - node:fs/promises
         - node:path
@@ -212,8 +217,11 @@ boundaries:
     roots:
       - tooling/security/slither/src/application
     entrypoints:
+      - tooling/security/slither/src/application/coverage.ts
+      - tooling/security/slither/src/application/gate.ts
       - tooling/security/slither/src/application/policy.ts
       - tooling/security/slither/src/application/ports.ts
+      - tooling/security/slither/src/application/triage.ts
     allow:
       boundaries:
         - tooling.slither.domain
@@ -226,10 +234,13 @@ boundaries:
     entrypoints:
       - tooling/security/slither/src/adapters/container-contract.ts
       - tooling/security/slither/src/adapters/evidence.ts
+      - tooling/security/slither/src/adapters/evidence-bundle.ts
       - tooling/security/slither/src/adapters/executable.ts
       - tooling/security/slither/src/adapters/fingerprint.ts
       - tooling/security/slither/src/adapters/image-preflight.ts
+      - tooling/security/slither/src/adapters/json-schema.ts
       - tooling/security/slither/src/adapters/process.ts
+      - tooling/security/slither/src/adapters/repository.ts
       - tooling/security/slither/src/adapters/runner.ts
       - tooling/security/slither/src/adapters/slither-json.ts
     allow:
@@ -252,6 +263,7 @@ boundaries:
       - tooling/security/slither/src/composition/cli.ts
       - tooling/security/slither/src/composition/prepare-image.ts
       - tooling/security/slither/src/composition/record-environment-failure.ts
+      - tooling/security/slither/src/composition/validate-evidence.ts
     allow:
       boundaries:
         - tooling.slither.adapters
