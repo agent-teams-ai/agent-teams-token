@@ -80,7 +80,8 @@ boundaries:
   - id: tooling.local-solana.domain
     roots:
       - tooling/local-solana/src/domain
-    entrypoints: []
+    entrypoints:
+      - tooling/local-solana/src/domain/model.ts
     allow:
       boundaries: []
       packages: []
@@ -89,7 +90,9 @@ boundaries:
   - id: tooling.local-solana.application
     roots:
       - tooling/local-solana/src/application
-    entrypoints: []
+    entrypoints:
+      - tooling/local-solana/src/application/ports.ts
+      - tooling/local-solana/src/application/runner.ts
     allow:
       boundaries:
         - tooling.local-solana.domain
@@ -99,7 +102,14 @@ boundaries:
   - id: tooling.local-solana.adapters
     roots:
       - tooling/local-solana/src/adapters
-    entrypoints: []
+    entrypoints:
+      - tooling/local-solana/src/adapters/cli.ts
+      - tooling/local-solana/src/adapters/filesystem.ts
+      - tooling/local-solana/src/adapters/ports.ts
+      - tooling/local-solana/src/adapters/process.ts
+      - tooling/local-solana/src/adapters/rpc.ts
+      - tooling/local-solana/src/adapters/toolchain.ts
+      - tooling/local-solana/src/adapters/transaction.ts
     allow:
       boundaries:
         - tooling.local-solana.application
@@ -113,18 +123,22 @@ boundaries:
         - node:net
         - node:os
         - node:path
+        - node:timers/promises
       runtimeReferences: []
   - id: tooling.local-solana.composition
     roots:
       - tooling/local-solana/src/composition
-    entrypoints: []
+    entrypoints:
+      - tooling/local-solana/src/composition/index.ts
     allow:
       boundaries:
         - tooling.local-solana.adapters
         - tooling.local-solana.application
         - tooling.local-solana.domain
       packages: []
-      builtins: []
+      builtins:
+        - node:path
+        - node:url
       runtimeReferences: []
   - id: tooling.deployment-plan.domain
     roots:

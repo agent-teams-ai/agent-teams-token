@@ -122,3 +122,37 @@ jobs:
       - name: Assert gates kept the exact checkout clean
         shell: bash
         run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+
+  local-solana-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch checksum-pinned Solana fixture toolchain
+        shell: bash
+        run: ./dev bootstrap fetch --scope=solana
+      - name: Install and verify without network fallback
+        shell: bash
+        run: |
+          ./dev bootstrap install --offline --scope=solana
+          source scripts/env.sh
+          ./dev bootstrap verify --offline --scope=solana
+      - name: Install frozen workspace
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Run isolated SPL lifecycle and independent verifier
+        shell: bash
+        env:
+          SOLANA_EVIDENCE_DIRECTORY: /tmp/agtmai-solana-evidence-${{ github.sha }}
+        run: |
+          source scripts/env.sh
+          pnpm test:local-solana
+          pnpm solana:fixture:local -- --output "$SOLANA_EVIDENCE_DIRECTORY"
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"

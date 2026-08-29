@@ -11,12 +11,13 @@ const workflowPath = join(repositoryRoot, ".github/workflows/ci.yml");
 const workflowText = readFileSync(workflowPath, "utf8");
 const workflow = parse(workflowText);
 
-test("workflow syntax has only the three exact-scope Barrier 1 jobs", () => {
+test("workflow syntax has the four integrated exact-scope jobs", () => {
   assert.equal(workflow.name, "CI");
   assert.deepEqual(Object.keys(workflow.jobs), [
     "foundation-and-typescript",
     "solidity",
     "local-evm-e2e",
+    "local-solana-e2e",
   ]);
   assert.deepEqual(workflow.permissions, { contents: "read" });
   assert.equal(workflow.concurrency["cancel-in-progress"], true);
@@ -25,7 +26,7 @@ test("workflow syntax has only the three exact-scope Barrier 1 jobs", () => {
     assert.ok(Number.isInteger(job["timeout-minutes"]));
     assert.ok(job["timeout-minutes"] <= 20);
   }
-  assert.doesNotMatch(workflowText, /\b(?:agave|slither|ccip)\b/i);
+  assert.doesNotMatch(workflowText, /\b(?:slither|ccip)\b/i);
 });
 
 test("all third-party actions use immutable full commit SHAs without package-manager setup", () => {
@@ -92,6 +93,18 @@ test("local EVM job exposes the narrow W3 command seam without mocked delivery",
   assert.doesNotMatch(JSON.stringify(job), /mock|public-rpc|sepolia|mainnet/i);
 });
 
+test("local Solana job installs the pinned fixture tools and proves the real zero-supply lifecycle", () => {
+  const job = workflow.jobs["local-solana-e2e"];
+  assert.equal(job.needs, undefined);
+  const commands = runs("local-solana-e2e").join("\n");
+  assert.match(commands, /bootstrap fetch --scope=solana/);
+  assert.match(commands, /bootstrap install --offline --scope=solana/);
+  assert.match(commands, /bootstrap verify --offline --scope=solana/);
+  assert.match(commands, /pnpm test:local-solana/);
+  assert.match(commands, /pnpm solana:fixture:local -- --output/);
+  assert.doesNotMatch(JSON.stringify(job), /public-rpc|devnet|mainnet|continue-on-error/i);
+});
+
 test("Compose is digest-pinned, local-only and hardened", () => {
   const composeText = readFileSync(join(repositoryRoot, "compose.yaml"), "utf8");
   const compose = parse(composeText);
@@ -140,7 +153,7 @@ test("package-manager policy disables implicit downloads and the final check has
   assert.match(npmrc, /^registry=https:\/\/registry\.npmjs\.org\/$/m);
   assert.match(lock, /^  autoInstallPeers: false$/m);
   assert.equal(packageJson.packageManager, "pnpm@11.24.0");
-  for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built"]) {
+  for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built", "test:local-solana"]) {
     assert.match(packageJson.scripts.check, new RegExp(`pnpm ${command.replaceAll(":", "\\:")}`));
   }
   assert.doesNotMatch(packageJson.scripts.check, /\|\|\s*true|--if-present/);
