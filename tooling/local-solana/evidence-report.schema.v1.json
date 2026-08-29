@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentteams.ai/schemas/local-solana-evidence-report.v1.json",
+  "title": "AGTMAI local Solana SPL fixture evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "identity", "programId", "decimals", "testAmountBaseUnits", "initialSupply", "intermediateSupply", "finalSupply", "freezeAuthority", "mintAuthority", "genesisHash", "validatorVersion", "transactions", "assertions"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": { "const": "READY" },
+    "identity": { "const": { "name": "Agent Teams AI", "symbol": "AGTMAI" } },
+    "programId": { "const": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
+    "decimals": { "const": 9 },
+    "testAmountBaseUnits": { "const": "1000000000000" },
+    "initialSupply": { "const": "0" },
+    "intermediateSupply": { "const": "1000000000000" },
+    "finalSupply": { "const": "0" },
+    "freezeAuthority": { "type": "null" },
+    "mintAuthority": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "genesisHash": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "validatorVersion": { "type": "string", "minLength": 1 },
+    "transactions": { "type": "array", "minItems": 6, "maxItems": 6, "items": { "$ref": "#/$defs/transaction" } },
+    "assertions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["productionAuthorityProven", "ccip", "publicNetwork", "realAssetCostUsd", "mintAuthorityRevoked", "authorityKeyRetained", "remintPossibleUntilTeardown", "productionHardCapProven", "signedRestoreReachedTokenProgramAndFailed", "signedFreezeReachedTokenProgramAndFailed"],
+      "properties": {
+        "productionAuthorityProven": { "const": false }, "ccip": { "const": false }, "publicNetwork": { "const": false }, "realAssetCostUsd": { "const": 0 },
+        "mintAuthorityRevoked": { "const": false }, "authorityKeyRetained": { "const": false }, "remintPossibleUntilTeardown": { "const": true }, "productionHardCapProven": { "const": false },
+        "signedRestoreReachedTokenProgramAndFailed": { "const": true }, "signedFreezeReachedTokenProgramAndFailed": { "const": true }
+      }
+    }
+  },
+  "$defs": {
+    "transaction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "signature", "slot", "confirmationStatus", "err", "programIds", "instructionKinds", "amountBaseUnits", "genesisHash"],
+      "properties": {
+        "kind": { "enum": ["create", "revokeFreeze", "mint", "burn", "restoreFreezeAttempt", "freezeAttempt"] },
+        "signature": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,88}$" }, "slot": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+        "confirmationStatus": { "const": "finalized" }, "err": {}, "programIds": { "type": "array", "items": { "type": "string" } },
+        "instructionKinds": { "type": "array", "items": { "type": "string" } }, "amountBaseUnits": { "type": ["string", "null"], "pattern": "^(0|[1-9][0-9]*)$" },
+        "genesisHash": { "type": "string" }
+      }
+    }
+  }
+}
