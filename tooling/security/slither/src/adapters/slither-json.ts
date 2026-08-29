@@ -18,6 +18,7 @@ const integer = (value: unknown, label: string): number => {
 };
 
 export interface ParsedSlither { readonly success: boolean; readonly findings: readonly Finding[]; readonly errors: readonly string[] }
+export interface SlitherInventory { readonly success: boolean; readonly contracts: readonly string[]; readonly sources: readonly string[]; readonly errors: readonly string[] }
 
 export async function parseSlitherJson(raw: string, repositoryRoot: string): Promise<ParsedSlither> {
   let decoded: unknown;
@@ -38,6 +39,34 @@ export async function parseSlitherJson(raw: string, repositoryRoot: string): Pro
     findings: findings.toSorted((left, right) => left.fingerprint.localeCompare(right.fingerprint)),
     errors: errors.toSorted(),
   };
+}
+
+export function parseSlitherInventory(raw: string): SlitherInventory {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither inventory is not JSON"); }
+  const root = object(decoded, "inventory");
+  if (typeof root.success !== "boolean") {throw new SlitherGateError("MALFORMED_JSON", "inventory success must be boolean");}
+  const contracts = exactStringArray(root.contracts, "inventory contracts");
+  const sources = exactStringArray(root.sources, "inventory sources");
+  const errors = exactStringArray(root.errors, "inventory errors");
+  if (Object.keys(root).toSorted().join(",") !== "contracts,errors,sources,success") {
+    throw new SlitherGateError("MALFORMED_JSON", "inventory contains missing or unexpected fields");
+  }
+  if (root.success && (contracts.length === 0 || sources.length === 0)) {
+    throw new SlitherGateError("SLITHER_INVENTORY_EMPTY", "Slither printer omitted analyzed contracts or sources");
+  }
+  return { success: root.success, contracts, sources, errors };
+}
+
+function exactStringArray(value: unknown, label: string): readonly string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.length > 0)) {
+    throw new SlitherGateError("MALFORMED_JSON", `${label} must be a string array`);
+  }
+  const sorted = [...value].toSorted();
+  if (new Set(value).size !== value.length || value.some((item, index) => item !== sorted[index])) {
+    throw new SlitherGateError("MALFORMED_JSON", `${label} must be unique and sorted`);
+  }
+  return value;
 }
 
 async function parseFinding(

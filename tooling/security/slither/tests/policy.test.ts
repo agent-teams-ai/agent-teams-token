@@ -8,7 +8,7 @@ import { parseCompilerProfile } from "../src/domain/model.ts";
 const expectedDetectors = ["suicidal", "tx-origin"];
 const manifest: GateManifest = {
   schemaVersion: 1,
-  target: "contracts/evm/A.sol:A",
+  targets: [{ path: "contracts/evm/A.sol", contract: "A" }],
   expectedContracts: ["A"],
   sources: [{ path: "contracts/evm/A.sol", sha256: "a".repeat(64) }],
   config: [],
@@ -55,8 +55,8 @@ function input(findings: readonly Finding[]): AnalysisInput {
   return {
     success: true,
     findings,
-    contracts: ["A"],
-    compiledSources: ["A.sol"],
+    analyzedContracts: ["A"],
+    analyzedSources: ["A.sol"],
     closure: [...manifest.sources, manifest.detectorInventory],
     detectorInventory: expectedDetectors,
     compiler: manifest.compiler,
@@ -166,8 +166,8 @@ test("exact detector inventory rejects missing, extra, duplicate, and renamed na
 
 test("closure, targets, bytecode, compiler and analysis errors fail closed", () => {
   const cases: readonly [AnalysisInput, "output-failure" | "tool-failure"][] = [
-    [{ ...input([]), contracts: [] }, "output-failure"],
-    [{ ...input([]), compiledSources: [] }, "output-failure"],
+    [{ ...input([]), analyzedContracts: [] }, "output-failure"],
+    [{ ...input([]), analyzedSources: [] }, "output-failure"],
     [{ ...input([]), closure: [] }, "output-failure"],
     [{ ...input([]), creationBytecodeSha256: "different" }, "output-failure"],
     [{ ...input([]), forgeBinarySha256: "0".repeat(64) }, "output-failure"],

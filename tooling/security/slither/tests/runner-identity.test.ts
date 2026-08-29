@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   decodeCreationBytecode,
-  deriveAnalysisErrors,
+  assertSlitherStatus,
   parseOfficialImageEnvironment,
 } from "../src/adapters/runner.ts";
 import {
@@ -53,8 +53,12 @@ test("creation bytecode identity rejects empty, odd, linked or non-hex values", 
   for (const value of ["", "0x", "0x1", "0xzz", "__$library$__", null]) {assert.throws(() => decodeCreationBytecode(value));}
 });
 
-test("nonzero Slither status with complete success JSON is not a tool failure", () => {
-  assert.deepEqual(deriveAnalysisErrors(true, [], 255), []);
-  assert.deepEqual(deriveAnalysisErrors(false, [], 1), ["slither-exit-1"]);
-  assert.deepEqual(deriveAnalysisErrors(true, ["incomplete analysis"], 0), ["incomplete analysis"]);
+test("Slither JSON and exit status obey the exact documented matrix", () => {
+  assert.doesNotThrow(() => assertSlitherStatus(true, [], 0));
+  assert.doesNotThrow(() => assertSlitherStatus(false, ["compile failed"], 255));
+  for (const status of [1, 20, 30, 40, 50, 125, 137, 143, 254, 255]) {
+    assert.throws(() => assertSlitherStatus(true, [], status), /0\/success or 255\/failure/u);
+  }
+  assert.throws(() => assertSlitherStatus(false, [], 255));
+  assert.throws(() => assertSlitherStatus(true, ["incomplete"], 0));
 });

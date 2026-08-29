@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "target": "contracts/evm/src/features/token-genesis/AGTMAIToken.sol:AGTMAIToken",
+  "targets": [{"path":"contracts/evm/src/features/token-genesis/AGTMAIToken.sol","contract":"AGTMAIToken"}],
   "expectedContracts": ["AGTMAIToken", "Context", "ERC20", "IERC1155Errors", "IERC20", "IERC20Errors", "IERC20Metadata", "IERC721Errors"],
   "sources": [
     {"path":"contracts/evm/src/features/token-genesis/AGTMAIToken.sol","sha256":"eae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989"},
@@ -14,7 +14,15 @@
     {"path":"contracts/evm/foundry.toml","sha256":"0b51698e8636e4b29c0de9b427dc4649cfaf603f85996f9ae3ebbd28a0a9db92"},
     {"path":"contracts/evm/remappings.txt","sha256":"c785eebf11718ba3e656056f1fa1b940912c6d72c532e32b73a77d411441af81"},
     {"path":"contracts/evm/lib/openzeppelin-contracts/PINNED_VERSION","sha256":"3a1c9fbbf1233e552070cfac330a40acfb727ef14eb5ff3051548842870e7d79"},
-    {"path":"tooling/security/slither/slither.config.json","sha256":"ff9706dac47ce7a116e2e42c68e8bdf8fbb8da761c0d476f6d5ed2959c222370"}
+    {"path":"tooling/security/slither/slither.config.json","sha256":"ff9706dac47ce7a116e2e42c68e8bdf8fbb8da761c0d476f6d5ed2959c222370"},
+    {"path":"tooling/security/slither/slither-inventory.py","sha256":"c3c6d98c6e6e73e51195dd9f0591da184d2c561eb541301a0653a05226dac566"},
+    {"path":"tooling/security/slither/suppressions.v1.json","sha256":"2721471bedaf3d0ae3e0a600a7bac4a2d150d0c8f0929afbe69a0fd050d7a3dc"},
+    {"path":"tooling/security/slither/suppression-ledger.schema.v1.json","sha256":"7ed9bfe880d078500da9697982189d80cc3a3e1ab4b54df2239e656f3de63386"},
+    {"path":"tooling/security/slither/triage.v1.json","sha256":"08fbbf45216153268c68b838ace1e89a02ae207d81fd42986f0e08fc466caebe"},
+    {"path":"tooling/security/slither/triage-ledger.schema.v1.json","sha256":"9800595693b0578607c9422022bcf7be989ef1626a05472afb882f371d676087"},
+    {"path":"tooling/security/slither/evidence-report.schema.v1.json","sha256":"65f9eb1980f8aea30230b9cdd4cf27d4e3b91272f218c4ec6c343370c6060f3e"},
+    {"path":"tooling/security/slither/output-failure.schema.v1.json","sha256":"6e54ad1eec051480dfd044d08ac458c83ba902afd3974fca911702f075d9ac93"},
+    {"path":"tooling/security/slither/environment-failure.schema.v1.json","sha256":"1f6f8e57eeb667242a4d6a968f98a05e752d7fc85ffd8705f40d5b93406370a1"}
   ],
   "compiler": {"version":"0.8.36+commit.8a079791","evmVersion":"paris","optimizerEnabled":true,"optimizerRuns":200,"bytecodeHash":"ipfs","cborMetadata":true,"useLiteralContent":false,"viaIR":false,"experimental":false,"remappings":["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"]},
   "tools": {"forgeArchiveSha256":"8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57","forgeBinarySha256":"c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f","solcBinarySha256":"c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6"},

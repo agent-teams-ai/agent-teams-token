@@ -1,18 +1,20 @@
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { ProcessPort } from "../application/ports.ts";
-import type { AnalysisInput, ClosureEntry, DetectorInventoryDocument, GateManifest, PolicyDecision, Suppression } from "../domain/model.ts";
+import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
+import type { AnalysisInput, ClosureEntry, DetectorInventoryDocument, FindingTriage, GateManifest, Suppression } from "../domain/model.ts";
 import { parseCompilerProfile, SlitherGateError } from "../domain/model.ts";
 import { sha256 } from "./fingerprint.ts";
-import { parseDetectorInventory, parseSlitherJson } from "./slither-json.ts";
+import { assertSerializedAgainstSchema } from "./json-schema.ts";
+import { parseDetectorInventory, parseSlitherInventory, parseSlitherJson } from "./slither-json.ts";
 import {
   dockerRunArguments,
+  dockerVulnerableFixtureArguments,
   IMAGE,
   IMAGE_REVISION,
   PINNED_PYTHONPATH,
 } from "./container-contract.ts";
-import { evaluatePolicy } from "../application/policy.ts";
+import { evaluateVulnerableFixture } from "../application/policy.ts";
 
 interface ToolchainLock {
   readonly tools: {
@@ -33,10 +35,8 @@ interface BuildInfo {
   readonly input?: { readonly sources?: Record<string, unknown>; readonly settings?: { readonly evmVersion?: unknown; readonly optimizer?: { readonly enabled?: unknown; readonly runs?: unknown }; readonly metadata?: { readonly bytecodeHash?: unknown; readonly appendCBOR?: unknown; readonly useLiteralContent?: unknown }; readonly viaIR?: unknown; readonly experimental?: unknown; readonly remappings?: unknown; readonly libraries?: unknown } };
   readonly output?: { readonly contracts?: Record<string, Record<string, { readonly evm?: { readonly bytecode?: { readonly object?: unknown } } }>> };
 }
-export interface RunResult { readonly input: AnalysisInput; readonly decision: PolicyDecision; readonly manifest: GateManifest; readonly configHash: string; readonly policyHash: string }
 interface RunGateRequest {
   readonly repositoryRoot: string;
-  readonly candidateSha: string;
   readonly processPort: ProcessPort;
   readonly forgePath: string;
   readonly solcPath: string;
@@ -47,17 +47,19 @@ interface PreparedGate {
   readonly manifest: GateManifest;
   readonly suppressions: readonly Suppression[];
   readonly expectedDetectors: readonly string[];
+  readonly triage: readonly FindingTriage[];
   readonly forgeBinarySha256: string;
   readonly solcBinarySha256: string;
   readonly imageEnvironment: OfficialImageEnvironment;
 }
 
-export async function runGate(request: RunGateRequest): Promise<RunResult> {
+export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
   const { repositoryRoot, processPort, forgePath, solcPath, dockerPath } = request;
   const prepared = await prepareGate(request);
   const { base, manifest, imageEnvironment, forgeBinarySha256, solcBinarySha256 } = prepared;
   const scratch = await mkdtemp(join(tmpdir(), "agtmai-slither-"));
   const containerName = basename(scratch);
+  const fixtureContainerName = `${containerName}-fixture`;
   const inputDirectory = join(scratch, "input");
   const rawOutput = join(scratch, "raw");
   await chmod(scratch, 0o755);
@@ -69,6 +71,12 @@ export async function runGate(request: RunGateRequest): Promise<RunResult> {
     for (const entry of productionClosure) {
       await copyPinned(repositoryRoot, inputDirectory, entry);
     }
+    const targetsPath = join(inputDirectory, "tooling/security/slither/targets.txt");
+    await writeFile(
+      targetsPath,
+      `${manifest.targets.map(({ path }) => path.replace(/^contracts\/evm\//u, "")).join("\n")}\n`,
+      { mode: 0o444, flag: "wx" },
+    );
     const before = await closure(repositoryRoot, productionClosure);
     const result = await processPort.run(dockerPath, dockerRunArguments({ input: inputDirectory, output: rawOutput, forge: forgePath, solc: solcPath, containerName, ...imageEnvironment }), 600_000);
     assertContainerResult(result);
@@ -79,36 +87,107 @@ export async function runGate(request: RunGateRequest): Promise<RunResult> {
     }
     const parsed = await parseSlitherJson(await readFile(join(rawOutput, "slither.json"), "utf8"), repositoryRoot);
     const slitherExit = parseSlitherExit(await readFile(join(rawOutput, "slither.exit"), "utf8"));
+    assertSlitherStatus(parsed.success, parsed.errors, slitherExit);
+    const inventory = parseSlitherInventory(await readFile(join(rawOutput, "slither-inventory.json"), "utf8"));
+    const inventoryExit = parseSlitherExit(await readFile(join(rawOutput, "slither-inventory.exit"), "utf8"));
+    assertSlitherStatus(inventory.success, inventory.errors, inventoryExit);
     const detectorInventory = parseDetectorInventory(await readFile(join(rawOutput, "detectors.txt"), "utf8"));
     const compiled = await parseCompiledOutput(rawOutput);
     const input: AnalysisInput = {
-      success: parsed.success, findings: parsed.findings, contracts: compiled.contracts, compiledSources: compiled.sources, closure: after,
+      success: parsed.success && inventory.success, findings: parsed.findings, analyzedContracts: inventory.contracts, analyzedSources: inventory.sources, closure: after,
       detectorInventory, compiler: compiled.compiler, creationBytecodeSha256: compiled.artifactBytecode,
       freshFoundryCreationBytecodeSha256: compiled.buildInfoBytecode,
-      analysisErrors: deriveAnalysisErrors(parsed.success, parsed.errors, slitherExit),
+      analysisErrors: [...parsed.errors, ...inventory.errors].toSorted(),
       forgeBinarySha256, solcBinarySha256,
     };
-    const decision = evaluatePolicy({
+    await assertRealVulnerableFixture({
+      repositoryRoot,
+      scratch,
+      processPort,
+      dockerPath,
+      forgePath,
+      solcPath,
+      containerName: fixtureContainerName,
+      imageEnvironment,
+      expectedDetectors: prepared.expectedDetectors,
+    });
+    return {
       input,
       manifest,
       expectedDetectors: prepared.expectedDetectors,
       suppressions: prepared.suppressions,
-    });
-    return { input, decision, manifest, configHash: sha256(await readFile(join(base, "slither.config.json"))), policyHash: sha256(await readFile(join(base, "suppressions.v1.json"))) };
+      triage: prepared.triage,
+      configHash: sha256(await readFile(join(base, "slither.config.json"))),
+      policyHash: sha256(await readFile(join(base, "suppressions.v1.json"))),
+      triageHash: sha256(await readFile(join(base, "triage.v1.json"))),
+    };
   } finally {
     await processPort.run(dockerPath, ["rm", "--force", containerName], 30_000).catch(() => {});
+    await processPort.run(dockerPath, ["rm", "--force", fixtureContainerName], 30_000).catch(() => {});
     await rm(scratch, { recursive: true, force: true });
   }
 }
 
+interface VulnerableFixtureRequest {
+  readonly repositoryRoot: string;
+  readonly scratch: string;
+  readonly processPort: ProcessPort;
+  readonly dockerPath: string;
+  readonly forgePath: string;
+  readonly solcPath: string;
+  readonly containerName: string;
+  readonly imageEnvironment: OfficialImageEnvironment;
+  readonly expectedDetectors: readonly string[];
+}
+
+async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): Promise<void> {
+  const input = join(request.scratch, "fixture-input");
+  const output = join(request.scratch, "fixture-output");
+  await mkdir(join(input, "contracts/evm/src"), { recursive: true, mode: 0o755 });
+  await mkdir(join(input, "tooling/security/slither"), { recursive: true, mode: 0o755 });
+  await mkdir(output, { mode: 0o733 });
+  await chmod(output, 0o733);
+  await copyFile(join(request.repositoryRoot, "tooling/security/slither/tests/fixtures/Vulnerable.sol"), join(input, "contracts/evm/src/Vulnerable.sol"));
+  await copyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"));
+  await copyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"));
+  const result = await request.processPort.run(
+    request.dockerPath,
+    dockerVulnerableFixtureArguments({
+      input,
+      output,
+      forge: request.forgePath,
+      solc: request.solcPath,
+      containerName: request.containerName,
+      ...request.imageEnvironment,
+    }),
+    600_000,
+  );
+  assertContainerResult(result);
+  await verifyVersions(output);
+  const parsed = await parseSlitherJson(await readFile(join(output, "slither.json"), "utf8"), input);
+  const status = parseSlitherExit(await readFile(join(output, "slither.exit"), "utf8"));
+  assertSlitherStatus(parsed.success, parsed.errors, status);
+  const observedDetectors = parseDetectorInventory(await readFile(join(output, "detectors.txt"), "utf8"));
+  if (JSON.stringify(observedDetectors) !== JSON.stringify(request.expectedDetectors)) {
+    throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "vulnerable fixture used a different detector inventory");
+  }
+  const decision = evaluateVulnerableFixture(parsed.findings);
+  if (decision.exitCode !== 20) {
+    throw new SlitherGateError("VULNERABLE_FIXTURE_NOT_BLOCKED", "real pinned Slither fixture must produce policy exit 20");
+  }
+}
+
 async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
-  const { repositoryRoot, candidateSha, processPort, forgePath, solcPath, dockerPath } = request;
-  const head = await processPort.run("/usr/bin/git", ["-C", repositoryRoot, "rev-parse", "HEAD"], 10_000);
-  if (head.timedOut || head.exitCode !== 0 || head.stdout.trim() !== candidateSha) {throw new SlitherGateError("CANDIDATE_SHA_MISMATCH", "candidate SHA does not equal the checked-out HEAD");}
+  const { repositoryRoot, processPort, forgePath, solcPath, dockerPath } = request;
   const base = join(repositoryRoot, "tooling/security/slither");
   const manifest = JSON.parse(await readFile(join(base, "production-closure.v1.json"), "utf8")) as GateManifest;
-  const suppressionDocument = JSON.parse(await readFile(join(base, "suppressions.v1.json"), "utf8")) as { schemaVersion: number; suppressions: Suppression[] };
-  if (manifest.schemaVersion !== 1 || suppressionDocument.schemaVersion !== 1 || !Array.isArray(suppressionDocument.suppressions)) {throw new SlitherGateError("POLICY_SHAPE_INVALID", "policy inputs are malformed");}
+  const suppressionRaw = await readFile(join(base, "suppressions.v1.json"), "utf8");
+  const triageRaw = await readFile(join(base, "triage.v1.json"), "utf8");
+  await assertSerializedAgainstSchema(suppressionRaw, join(base, "suppression-ledger.schema.v1.json"));
+  await assertSerializedAgainstSchema(triageRaw, join(base, "triage-ledger.schema.v1.json"));
+  const suppressionDocument = JSON.parse(suppressionRaw) as { schemaVersion: number; suppressions: Suppression[] };
+  const triageDocument = JSON.parse(triageRaw) as { schemaVersion: number; findings: FindingTriage[] };
+  if (manifest.schemaVersion !== 1 || suppressionDocument.schemaVersion !== 1 || !Array.isArray(suppressionDocument.suppressions) || triageDocument.schemaVersion !== 1 || !Array.isArray(triageDocument.findings)) {throw new SlitherGateError("POLICY_SHAPE_INVALID", "policy inputs are malformed");}
   parseCompilerProfile(manifest.compiler);
   assertSuppressionShape(suppressionDocument.suppressions);
   const inventoryDocument = await readDetectorInventory(repositoryRoot, manifest.detectorInventory);
@@ -127,6 +206,7 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
     base,
     manifest,
     suppressions: suppressionDocument.suppressions,
+    triage: triageDocument.findings,
     expectedDetectors: inventoryDocument.detectors,
     forgeBinarySha256,
     solcBinarySha256,
@@ -149,6 +229,21 @@ function parseSlitherExit(raw: string | Buffer): number {
     throw new SlitherGateError("SLITHER_EXIT_INVALID", "Slither exit status is missing or malformed");
   }
   return status;
+}
+
+export function assertSlitherStatus(
+  success: boolean,
+  errors: readonly string[],
+  status: number,
+): void {
+  const cleanOutput = success && errors.length === 0 && status === 0;
+  const reportedFailure = !success && errors.length > 0 && status === 255;
+  if (!cleanOutput && !reportedFailure) {
+    throw new SlitherGateError(
+      "SLITHER_EXIT_INVALID",
+      "Slither JSON and exit status violate the documented 0/success or 255/failure matrix",
+    );
+  }
 }
 
 async function assertTool(path: string, expected: string, code: string): Promise<void> {
@@ -221,17 +316,6 @@ async function readDetectorInventory(
   return document as DetectorInventoryDocument;
 }
 
-export function deriveAnalysisErrors(
-  success: boolean,
-  errors: readonly string[],
-  slitherExit: number,
-): readonly string[] {
-  if (success || errors.length > 0) {
-    return errors;
-  }
-  return [`slither-exit-${slitherExit}`];
-}
-
 const safePathList = (value: string): boolean => value.split(":").every((entry) => entry.startsWith("/") && !entry.includes("..") && !entry.includes("\n"));
 
 async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
@@ -256,20 +340,16 @@ async function verifyVersions(output: string): Promise<void> {
   }
 }
 
-async function parseCompiledOutput(output: string): Promise<{ contracts: string[]; sources: string[]; compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string }> {
+async function parseCompiledOutput(output: string): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string }> {
   const artifact = JSON.parse(await readFile(join(output, "AGTMAIToken.json"), "utf8")) as ForgeArtifact;
   const build = JSON.parse(await readFile(join(output, "build-info.json"), "utf8")) as BuildInfo;
-  const contracts = Object.values(build.output?.contracts ?? {})
-    .flatMap((value) => Object.keys(value))
-    .toSorted();
-  const sources = Object.keys(build.input?.sources ?? {}).toSorted();
   const compiler = validateBuildCompiler(build);
   const sourceName = "src/features/token-genesis/AGTMAIToken.sol";
   const artifactHex = artifact.bytecode?.object;
   const buildHex = build.output?.contracts?.[sourceName]?.AGTMAIToken?.evm?.bytecode?.object;
   const artifactBytes = decodeCreationBytecode(artifactHex);
   const buildInfoBytes = decodeCreationBytecode(buildHex);
-  return { contracts, sources, compiler, artifactBytecode: sha256(artifactBytes), buildInfoBytecode: sha256(buildInfoBytes) };
+  return { compiler, artifactBytecode: sha256(artifactBytes), buildInfoBytecode: sha256(buildInfoBytes) };
 }
 
 function validateBuildCompiler(build: BuildInfo): GateManifest["compiler"] {

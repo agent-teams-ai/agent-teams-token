@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseDetectorInventory, parseSlitherJson } from "../src/adapters/slither-json.ts";
+import { parseDetectorInventory, parseSlitherInventory, parseSlitherJson } from "../src/adapters/slither-json.ts";
 import { makeTestDirectory } from "./test-directory.ts";
 
 test("strict parser accepts findings when Slither success is true", async () => {
@@ -51,4 +51,10 @@ test("detector inventory rejects empty and duplicate tables", () => {
   assert.deepEqual(parseDetectorInventory("| 1 | suicidal | High | High |"), ["suicidal"]);
   assert.throws(() => parseDetectorInventory(""));
   assert.throws(() => parseDetectorInventory("| 1 | suicidal | H | H |\n| 2 | suicidal | H | H |"));
+});
+
+test("Slither printer inventory is the analyzed target and source authority", () => {
+  const raw = JSON.stringify({ success: true, contracts: ["A"], sources: ["src/A.sol"], errors: [] });
+  assert.deepEqual(parseSlitherInventory(raw), { success: true, contracts: ["A"], sources: ["src/A.sol"], errors: [] });
+  assert.throws(() => parseSlitherInventory(JSON.stringify({ success: true, contracts: [], sources: [], errors: [] })), /omitted analyzed/u);
 });

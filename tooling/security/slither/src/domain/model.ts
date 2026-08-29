@@ -40,7 +40,7 @@ export interface Suppression {
 export interface ClosureEntry { readonly path: string; readonly sha256: string }
 export interface GateManifest {
   readonly schemaVersion: 1;
-  readonly target: string;
+  readonly targets: readonly { readonly path: string; readonly contract: string }[];
   readonly expectedContracts: readonly string[];
   readonly sources: readonly ClosureEntry[];
   readonly config: readonly ClosureEntry[];
@@ -74,8 +74,8 @@ export interface DetectorInventoryDocument {
 export interface AnalysisInput {
   readonly success: boolean;
   readonly findings: readonly Finding[];
-  readonly contracts: readonly string[];
-  readonly compiledSources: readonly string[];
+  readonly analyzedContracts: readonly string[];
+  readonly analyzedSources: readonly string[];
   readonly closure: readonly ClosureEntry[];
   readonly detectorInventory: readonly string[];
   readonly compiler: GateManifest["compiler"];
@@ -84,6 +84,15 @@ export interface AnalysisInput {
   readonly analysisErrors: readonly string[];
   readonly forgeBinarySha256: string;
   readonly solcBinarySha256: string;
+}
+
+export interface FindingTriage {
+  readonly schemaVersion: 1;
+  readonly fingerprint: string;
+  readonly owner: string;
+  readonly disposition: "accepted-design" | "false-positive" | "future-hardening";
+  readonly rationale: string;
+  readonly reviewedAt: string;
 }
 
 export interface PolicyDecision {

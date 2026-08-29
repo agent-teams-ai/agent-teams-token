@@ -25,7 +25,19 @@ lookup or fallback occurs. The official toolbox image must already be present by
 runner never pulls, uses a public network, or falls back to host tools. It
 copies the pinned production closure into fresh container tmpfs, prebuilds with
 the project Forge while skipping tests and scripts, then invokes Slither with
-`--foundry-ignore-compile`. Exit classes are `0` clean, `20` policy findings,
+`--foundry-ignore-compile`. A second pinned Slither object-model pass supplies
+the analyzed contract/source inventory; Forge build labels are never reported
+as analyzed targets. Every gate also runs `tests/fixtures/Vulnerable.sol`
+through the same hardened image and requires policy exit `20`.
+
+The exact raw Slither status/JSON matrix is:
+
+- status `0`, `success=true`, no analysis errors: complete analysis, then policy;
+- status `255`, `success=false`, at least one analysis error: tool failure;
+- every other combination, including signal-derived `137`/`143`, is malformed
+  output and fails with gate exit `40`.
+
+Gate exit classes are `0` clean, `20` policy findings,
 `30` tool failure, `40` malformed/incomplete analysis, and `50` environment
 failure. The composition boundary always tries to retain a sanitised failure
 envelope; raw Slither/build output stays in an owned temporary directory.
@@ -34,3 +46,8 @@ Suppression entries are intentionally empty initially. A waiver must reproduce
 the exact versioned finding fingerprint and all tuple fields, include an owner,
 reason, review/expiry dates, and regression evidence. Duplicate, broad,
 expired, multiply matched, or unused entries fail closed.
+
+Separately, every visible Low/Informational/Optimization fingerprint must have
+exactly one current entry in `triage.v1.json` with owner, disposition, rationale
+and UTC review date. Missing, duplicate, malformed, or stale triage makes the
+otherwise nonblocking result an output failure.

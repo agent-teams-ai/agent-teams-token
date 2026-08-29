@@ -1,10 +1,12 @@
-import type { AnalysisInput, Finding, GateManifest, PolicyDecision, Suppression } from "../domain/model.ts";
+import type { AnalysisInput, Finding, FindingTriage, GateManifest, PolicyDecision, Suppression } from "../domain/model.ts";
+import { validateFindingTriage } from "./triage.ts";
 
 interface PolicyRequest {
   readonly input: AnalysisInput;
   readonly manifest: GateManifest;
   readonly expectedDetectors: readonly string[];
   readonly suppressions: readonly Suppression[];
+  readonly triage?: readonly FindingTriage[];
   readonly now?: Date;
 }
 
@@ -34,6 +36,9 @@ export function evaluatePolicy(request: PolicyRequest): PolicyDecision {
     request.now ?? new Date(),
   );
   const errors = [...structuralErrors, ...suppressionResult.errors];
+  if (request.triage !== undefined) {
+    errors.push(...validateFindingTriage(suppressionResult.unsuppressed, request.triage));
+  }
   if (errors.length > 0) {
     return failureDecision(input, suppressionResult.suppressed, errors, toolFailed);
   }
@@ -51,12 +56,20 @@ export function evaluatePolicy(request: PolicyRequest): PolicyDecision {
   };
 }
 
+export function evaluateVulnerableFixture(findings: readonly Finding[]): PolicyDecision {
+  const blocking = findings.filter(({ impact }) => impact === "High" || impact === "Medium");
+  if (blocking.length === 0) {
+    return { category: "output-failure", exitCode: 40, blocking: [], visible: findings, suppressed: [], errors: ["vulnerable fixture produced no blocking detector finding"] };
+  }
+  return { category: "policy-failure", exitCode: 20, blocking, visible: findings, suppressed: [], errors: [] };
+}
+
 function validateAnalysis(request: PolicyRequest, toolFailed: boolean): readonly string[] {
   const { input, manifest, expectedDetectors } = request;
   const checks: readonly [boolean, string][] = [
     [toolFailed, "Slither reported an analysis error"],
-    [!sameSet(input.contracts, manifest.expectedContracts), "analyzed contract closure differs from the expected manifest"],
-    [!sameSet(input.compiledSources, expectedSources(manifest)), "compiled source closure differs from the expected manifest"],
+    [!sameSet(input.analyzedContracts, manifest.expectedContracts), "analyzed contract closure differs from the expected manifest"],
+    [!sameSet(input.analyzedSources, expectedSources(manifest)), "analyzed source closure differs from the expected manifest"],
     [!sameSet(observedClosure(input), expectedClosure(manifest)), "source closure hash differs from the expected manifest"],
     [!bytecodeMatches(input, manifest), "Slither, fresh Foundry and approved creation bytecode identities differ"],
     [!toolsMatch(input, manifest), "mounted tool binary identity differs from the expected manifest"],
