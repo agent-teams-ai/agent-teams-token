@@ -1,4 +1,9 @@
-import { canonicalJson, computePlanId, sha256Hex } from "../domain/identity.ts";
+import {
+  canonicalJson,
+  computePlanId,
+  deriveCreateAddress,
+  sha256Hex,
+} from "../domain/identity.ts";
 import { calculateCosts, checkedAdd, fail, parseUint } from "../domain/model.ts";
 import { validateTrustRootSafety, type FeeQuote, type StablePlan } from "./builder.ts";
 import type { ApprovedArtifact, DeploymentRpc, TrustRoots } from "./ports.ts";
@@ -52,7 +57,7 @@ export function verifyReadyDigests(
 export async function independentlyVerifyRpc(request: RpcVerificationRequest): Promise<void> {
   const { rpc, plan, quote, creationInput } = request;
   const inputHash = sha256Hex(Buffer.from(creationInput.slice(2), "hex"));
-  if (inputHash !== plan.identity.creationInputHash) {
+  if (creationInput !== plan.identity.creationInput || inputHash !== plan.identity.creationInputHash) {
     fail("CREATION_INPUT_MISMATCH", "reconstructed creation input differs from plan");
   }
   const chain = quantity(await rpc.request("eth_chainId", []));
@@ -65,6 +70,16 @@ export async function independentlyVerifyRpc(request: RpcVerificationRequest): P
   validateRpcBlocks(bound, head, quote);
   const history = record(await rpc.request("eth_feeHistory", ["0x1", tag, []]));
   validateRpcFeeHistory(history, quote);
+  const nonce = quantity(await rpc.request("eth_getTransactionCount", [
+    plan.identity.from,
+    tag,
+  ]));
+  if (
+    nonce.toString() !== quote.observation.senderNonce
+    || nonce.toString() !== plan.identity.senderNonce
+  ) {
+    fail("RPC_NONCE_CHANGED", "sender nonce changed or was cross-swapped");
+  }
   const gas = quantity(await rpc.request("eth_estimateGas", [
     { from: plan.identity.from, data: creationInput, value: "0x0" },
     tag,
@@ -101,6 +116,10 @@ function validatePlanTrust(plan: StablePlan, roots: TrustRoots): void {
     || identity.broadcastAllowed !== false
   ) {
     fail("PLAN_TRUST_MISMATCH", "plan differs from trust roots");
+  }
+  const nonce = parseUint(identity.senderNonce, "senderNonce");
+  if (identity.expectedCreateAddress !== deriveCreateAddress(roots.from, nonce)) {
+    fail("CREATE_ADDRESS_MISMATCH", "expected CREATE address is not derived from sender and nonce");
   }
   validateCapPolicy(identity.capPolicy, roots);
   if (
@@ -142,6 +161,7 @@ function validateBuildBindings(plan: StablePlan, expected: ApprovedArtifact): vo
     constructorAbiHash: expected.constructorAbiHash,
     constructorArguments: expected.constructorArguments,
     constructorArgumentsHash: expected.constructorArgumentsHash,
+    creationInput: expected.creationInput,
     creationInputHash: expected.creationInputHash,
   };
   for (const [key, value] of Object.entries(bindings)) {
@@ -158,6 +178,13 @@ function validateQuote(request: VerificationRequest): void {
   const { plan, quote, roots, nowSeconds } = request;
   if (quote.planId !== plan.planId || quote.creationInputHash !== plan.identity.creationInputHash) {
     fail("QUOTE_PLAN_MISMATCH", "quote is not bound to plan creation input");
+  }
+  if (
+    plan.identity.senderNonce !== quote.observation.senderNonce
+    || plan.identity.observedBlockNumber !== quote.observation.blockNumber
+    || plan.identity.observedBlockHash !== quote.observation.blockHash
+  ) {
+    fail("QUOTE_DEPLOYMENT_BINDING_MISMATCH", "quote nonce or block is not bound to plan identity");
   }
   if (quote.observation.chainId !== roots.chainId) {
     fail("WRONG_CHAIN", "quote chain is wrong");

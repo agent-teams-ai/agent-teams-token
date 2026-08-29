@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, realpath, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ApprovedArtifact, TrustRoots } from "../src/adapters/artifact.ts";
 import type { DeploymentRpc, RpcMethod } from "../src/application/ports.ts";
 import { buildFeeQuote, buildStablePlan, type QuoteObservation } from "../src/application/builder.ts";
-import { independentlyVerify } from "../src/application/verifier.ts";
+import { independentlyVerify, independentlyVerifyRpc } from "../src/application/verifier.ts";
 import { publishReadyLast, verifyBundle } from "../src/composition/index.ts";
 import { computePlanId, sha256Hex } from "../src/domain/identity.ts";
+import { main as estimateLocalMain } from "../../../scripts/deployment/estimate-local.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
 const inputHash = sha256Hex(Buffer.from("0103", "hex"));
@@ -60,6 +61,7 @@ const observation: QuoteObservation = {
   currentHeadNumber: "10",
   currentHeadHash: hash,
   feeHistoryNewestBlock: "10",
+  senderNonce: "0",
   gasEstimate: "100",
   blockGasLimit: "1000",
   baseFeePerGas: "1",
@@ -68,8 +70,12 @@ const observation: QuoteObservation = {
   observedAt: "110",
 };
 
+test("production CLI rejects caller-supplied simulated time", async () => {
+  await assert.rejects(estimateLocalMain(["--now", "1"]), /invalid.*--now/u);
+});
+
 test("wrong chain, head lag, future, stale, reorg and exact expiry fail", () => {
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   assert.throws(
     () => buildFeeQuote(plan, { ...observation, chainId: "1" }, roots),
     /chain/u,
@@ -103,13 +109,13 @@ test("wrong chain, head lag, future, stale, reorg and exact expiry fail", () => 
 });
 
 test("identity mutation, quote swapping and unsafe plan flags are rejected", () => {
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   const quote = buildFeeQuote(plan, observation, roots);
   const changedArtifact = {
     ...artifact,
     buildInfoSha256: `0x${"b".repeat(64)}` as const,
   };
-  const changed = buildStablePlan(changedArtifact, roots);
+  const changed = buildStablePlan(changedArtifact, roots, observation);
   assert.notEqual(changed.planId, plan.planId);
   assert.throws(
     () => independentlyVerify({
@@ -135,6 +141,72 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
   );
 });
 
+test("nonce-zero and nonce-one evidence cannot be cross-swapped", async () => {
+  const planZero = buildStablePlan(artifact, roots, observation);
+  const quoteZero = buildFeeQuote(planZero, observation, roots);
+  const observationOne = { ...observation, senderNonce: "1" };
+  const planOne = buildStablePlan(artifact, roots, observationOne);
+  const quoteOne = buildFeeQuote(planOne, observationOne, roots);
+  assert.notEqual(planZero.planId, planOne.planId);
+  assert.notEqual(planZero.identity.expectedCreateAddress, planOne.identity.expectedCreateAddress);
+  const swappedAddressIdentity = {
+    ...planZero.identity,
+    expectedCreateAddress: planOne.identity.expectedCreateAddress,
+  };
+  const swappedAddressPlan = {
+    ...planZero,
+    identity: swappedAddressIdentity,
+    planId: computePlanId(swappedAddressIdentity),
+  };
+  assert.throws(
+    () => independentlyVerify({
+      plan: swappedAddressPlan,
+      quote: { ...quoteZero, planId: swappedAddressPlan.planId },
+      roots,
+      expected: artifact,
+      ready: readyFor(swappedAddressPlan.planId),
+      nowSeconds: 120n,
+    }),
+    /CREATE address/u,
+  );
+  assert.throws(
+    () => independentlyVerify({
+      plan: planZero,
+      quote: { ...quoteZero, observation: observationOne },
+      roots,
+      expected: artifact,
+      ready: readyFor(planZero.planId),
+      nowSeconds: 120n,
+    }),
+    /nonce|binding/u,
+  );
+  assert.throws(
+    () => independentlyVerify({
+      plan: planZero,
+      quote: quoteOne,
+      roots,
+      expected: artifact,
+      ready: readyFor(planZero.planId),
+      nowSeconds: 120n,
+    }),
+    /not bound/u,
+  );
+  const nonceOneRpc: DeploymentRpc = {
+    async request(method, params) {
+      return method === "eth_getTransactionCount" ? "0x1" : rpc.request(method, params);
+    },
+  };
+  await assert.rejects(
+    independentlyVerifyRpc({
+      rpc: nonceOneRpc,
+      plan: planZero,
+      quote: quoteZero,
+      creationInput: artifact.creationInput,
+    }),
+    /nonce changed/u,
+  );
+});
+
 test("independent complete-input golden rejects coherent wrong bytecode and constructor input", () => {
   const wrongArguments = "0x04" as const;
   const wrongInput = "0x0104" as const;
@@ -145,7 +217,7 @@ test("independent complete-input golden rejects coherent wrong bytecode and cons
     creationInput: wrongInput,
     creationInputHash: sha256Hex(Buffer.from("0104", "hex")),
   };
-  assert.throws(() => buildStablePlan(coherentlyWrong, roots), /golden/u);
+  assert.throws(() => buildStablePlan(coherentlyWrong, roots, observation), /golden/u);
   const wrongBytecode = "0x02" as const;
   const wrongBytecodeInput = "0x0203" as const;
   const coherentlyWrongBytecode: ApprovedArtifact = {
@@ -155,11 +227,11 @@ test("independent complete-input golden rejects coherent wrong bytecode and cons
     creationInput: wrongBytecodeInput,
     creationInputHash: sha256Hex(Buffer.from("0203", "hex")),
   };
-  assert.throws(() => buildStablePlan(coherentlyWrongBytecode, roots), /golden/u);
+  assert.throws(() => buildStablePlan(coherentlyWrongBytecode, roots, observation), /golden/u);
 });
 
 test("standalone verification rejects coherent non-local trust roots", () => {
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   const quote = buildFeeQuote(plan, observation, roots);
   const unsafeRoots = { ...roots, chainId: "1" as never };
   const identity = { ...plan.identity, chainId: "1" };
@@ -181,9 +253,29 @@ test("standalone verification rejects coherent non-local trust roots", () => {
   );
 });
 
-test("READY-last detects stale marker, content replacement and symlink substitution", async () => {
+test("expiry at the final pre-publication check leaves no target or staging bundle", async (context) => {
+  context.mock.method(Date, "now", () => 170_000);
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-expiry-")));
+  const plan = buildStablePlan(artifact, roots, observation);
+  const quote = buildFeeQuote(plan, observation, roots);
+  await assert.rejects(
+    publishReadyLast({
+      parent,
+      bundleName: "expired",
+      plan,
+      quote,
+      roots,
+      expected: artifact,
+    }),
+    /expiresAt/u,
+  );
+  assert.deepEqual(await readdir(parent), []);
+});
+
+test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substitution", async (context) => {
+  context.mock.method(Date, "now", () => 120_000);
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-test-")));
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   const quote = buildFeeQuote(plan, observation, roots);
   const publish = {
     parent,
@@ -191,7 +283,6 @@ test("READY-last detects stale marker, content replacement and symlink substitut
     quote,
     roots,
     expected: artifact,
-    nowSeconds: 120n,
   };
   const directory = await publishReadyLast({ ...publish, bundleName: "bundle" });
   await verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
@@ -204,6 +295,9 @@ test("READY-last detects stale marker, content replacement and symlink substitut
     verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
     /estimate changed/u,
   );
+  assert.deepEqual((await readdir(directory)).toSorted(), [
+    "READY", "deployment-plan.v1.json", "fee-quote.v1.json",
+  ]);
 
   const planPath = join(directory, "deployment-plan.v1.json");
   await writeFile(planPath, Buffer.concat([await readFile(planPath), Buffer.from(" ")]));
@@ -242,6 +336,7 @@ const rpc: DeploymentRpc = {
         number: "0xa", hash, timestamp: "0x64", gasLimit: "0x3e8", baseFeePerGas: "0x1",
       };
       case "eth_feeHistory": return { oldestBlock: "0xa", baseFeePerGas: ["0x1", "0x2"] };
+      case "eth_getTransactionCount": return "0x0";
       case "eth_estimateGas": return "0x64";
     }
   },

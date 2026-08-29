@@ -5,6 +5,7 @@ import { fail } from "../domain/model.ts";
 const ALLOWED = new Set<RpcMethod>([
   "eth_chainId",
   "eth_getBlockByNumber",
+  "eth_getTransactionCount",
   "eth_feeHistory",
   "eth_estimateGas",
 ]);
@@ -73,6 +74,10 @@ export async function observeFees(
   if (history.baseFee !== bound.baseFeePerGas) {
     fail("BASE_FEE_MISMATCH", "block base fee differs from fee history");
   }
+  const senderNonce = quantity(
+    await rpc.request("eth_getTransactionCount", [request.from, head.numberHex]),
+    "senderNonce",
+  );
   const gas = quantity(
     await rpc.request("eth_estimateGas", [
       { from: request.from, data: request.creationInput, value: "0x0" },
@@ -88,6 +93,7 @@ export async function observeFees(
     currentHeadNumber: head.number.toString(),
     currentHeadHash: head.hash,
     feeHistoryNewestBlock: history.newest.toString(),
+    senderNonce: senderNonce.toString(),
     gasEstimate: gas.toString(),
     blockGasLimit: head.gasLimit.toString(),
     baseFeePerGas: history.baseFee.toString(),

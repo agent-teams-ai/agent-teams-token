@@ -14,7 +14,7 @@ const bytes = (value: unknown): Uint8Array => Buffer.from(JSON.stringify(value))
 const observation = {
   chainId: "31337", blockNumber: "1", blockHash: hash, blockTimestamp: "1",
   currentHeadNumber: "1", currentHeadHash: hash, feeHistoryNewestBlock: "1",
-  gasEstimate: "1", blockGasLimit: "2", baseFeePerGas: "1",
+  senderNonce: "0", gasEstimate: "1", blockGasLimit: "2", baseFeePerGas: "1",
   maxPriorityFeePerGas: "1", maxFeePerGas: "2", observedAt: "1",
 };
 const identity = {
@@ -22,8 +22,11 @@ const identity = {
   buildInfoSha256: hash, artifactSha256: hash, abiSha256: hash, fixtureSha256: hash,
   fixtureReadySha256: hash, buildInfoSolcVersion: "0.8.36", compilerSettings: {},
   creationBytecodeHash: hash, constructorAbiBytes: "0x", constructorAbiHash: hash,
-  constructorArguments: "0x", constructorArgumentsHash: hash, creationInputHash: hash,
+  constructorArguments: "0x", constructorArgumentsHash: hash, creationInput: "0x",
+  creationInputHash: hash,
   chainId: "31337", from: "0x0000000000000000000000000000000000000001",
+  senderNonce: "0", expectedCreateAddress: "0xbd770416a3345f91e4b34576cb804a576fa48eb1",
+  observedBlockNumber: "1", observedBlockHash: hash,
   value: "0", capPolicy: { maximumWorstCaseWei: "1", testOnly: true },
   broadcastAllowed: false,
 };

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ApprovedArtifact, TrustRoots } from "../src/adapters/artifact.ts";
 import { buildFeeQuote, buildStablePlan, type QuoteObservation } from "../src/application/builder.ts";
-import { computePlanId } from "../src/domain/identity.ts";
+import { computePlanId, deriveCreateAddress } from "../src/domain/identity.ts";
 import { calculateCosts, ceilDiv, UINT256_MAX, type CostInput } from "../src/domain/model.ts";
 
 const hash = `0x${"1".repeat(64)}` as const;
@@ -54,6 +54,7 @@ const observation: QuoteObservation = {
   currentHeadNumber: "9007199254740994",
   currentHeadHash: hash,
   feeHistoryNewestBlock: "9007199254740993",
+  senderNonce: "0",
   gasEstimate: "1000000",
   blockGasLimit: "30000000",
   baseFeePerGas: "7000000000",
@@ -130,16 +131,42 @@ test("malformed fee relations and overflow fail closed", () => {
 });
 
 test("gas estimate changes quote but not stable plan identity", () => {
-  const plan = buildStablePlan(artifact, roots);
-  assert.equal(plan.planId, "0xdd5bbe94ec1684741a7b69c91d5e60a9a776f38b94981bac359a50e2168821c0");
+  const plan = buildStablePlan(artifact, roots, observation);
+  assert.equal(plan.planId, "0xa619fc9c5adea8314a6a67f90e981d3bc5217b1a027221c46866017bf8fcb5fd");
   const first = buildFeeQuote(plan, observation, roots);
   const second = buildFeeQuote(plan, { ...observation, gasEstimate: "1000001" }, roots);
   assert.equal(first.planId, second.planId);
   assert.notEqual(first.estimatedWei, second.estimatedWei);
 });
 
+test("canonical RLP plus Ethereum Keccak derives CREATE nonce and integer boundaries", () => {
+  const sender = "0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0";
+  const vectors = [
+    [0n, "0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d"],
+    [1n, "0x343c43a37d37dff08ae8c4a11544c718abb4fcf8"],
+    [127n, "0x06d9a77f5e4b311bae8d559db9cdb4df94104aa0"],
+    [128n, "0x08e190dcb7b73f5fcdabb43e102215c83659a76d"],
+    [255n, "0x3ef7c1a519e4b4431e317d7839340e3139b03c65"],
+    [256n, "0x3837c1ae70354f670550c746580199ac6a73cb0a"],
+    [(1n << 64n) - 1n, "0x9bc924993b60399df164c3763a964301d3db95ca"],
+    [1n << 64n, "0xb3cf11188ea4dcc4111df6310b98a5d432f09be4"],
+    [UINT256_MAX, "0x5f3df856986b2268fe2b263878a45e3bfdb09505"],
+  ] as const;
+  for (const [nonce, expected] of vectors) {
+    assert.equal(deriveCreateAddress(sender, nonce), expected, nonce.toString());
+  }
+  assert.throws(() => deriveCreateAddress(sender, UINT256_MAX + 1n), /nonce/u);
+});
+
+test("nonce zero and one bind different CREATE addresses and plan IDs", () => {
+  const zero = buildStablePlan(artifact, roots, observation);
+  const one = buildStablePlan(artifact, roots, { ...observation, senderNonce: "1" });
+  assert.notEqual(zero.identity.expectedCreateAddress, one.identity.expectedCreateAddress);
+  assert.notEqual(zero.planId, one.planId);
+});
+
 test("every stable identity field participates in planId", () => {
-  const identity = buildStablePlan(artifact, roots).identity;
+  const identity = buildStablePlan(artifact, roots, observation).identity;
   const baseline = computePlanId(identity);
   for (const key of Object.keys(identity)) {
     const value = identity[key];

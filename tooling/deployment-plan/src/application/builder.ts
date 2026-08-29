@@ -1,5 +1,5 @@
 import type { ApprovedArtifact, TrustRoots } from "./ports.ts";
-import { computePlanId } from "../domain/identity.ts";
+import { computePlanId, deriveCreateAddress } from "../domain/identity.ts";
 import {
   calculateCosts,
   checkedAdd,
@@ -27,6 +27,7 @@ export interface QuoteObservation {
   readonly currentHeadNumber: string;
   readonly currentHeadHash: `0x${string}`;
   readonly feeHistoryNewestBlock: string;
+  readonly senderNonce: string;
   readonly gasEstimate: string;
   readonly blockGasLimit: string;
   readonly baseFeePerGas: string;
@@ -62,6 +63,7 @@ interface QuoteTimes {
 export function buildStablePlan(
   approved: ApprovedArtifact,
   roots: TrustRoots,
+  observation: QuoteObservation,
 ): StablePlan {
   validateTrustRootSafety(roots);
   if (
@@ -70,6 +72,10 @@ export function buildStablePlan(
   ) {
     fail("GOLDEN_INPUT_MISMATCH", "creation input differs from independently pinned golden hashes");
   }
+  if (observation.chainId !== roots.chainId) {
+    fail("WRONG_CHAIN", "observed chain does not match approved chain");
+  }
+  const senderNonce = parseUint(observation.senderNonce, "senderNonce");
   const identity: Record<string, unknown> = {
     contractFqn: roots.contractFqn,
     buildProfile: roots.buildProfile,
@@ -86,9 +92,14 @@ export function buildStablePlan(
     constructorAbiHash: approved.constructorAbiHash,
     constructorArguments: approved.constructorArguments,
     constructorArgumentsHash: approved.constructorArgumentsHash,
+    creationInput: approved.creationInput,
     creationInputHash: approved.creationInputHash,
     chainId: roots.chainId,
     from: roots.from,
+    senderNonce: senderNonce.toString(),
+    expectedCreateAddress: deriveCreateAddress(roots.from, senderNonce),
+    observedBlockNumber: parseUint(observation.blockNumber, "blockNumber").toString(),
+    observedBlockHash: observation.blockHash,
     value: "0",
     capPolicy: { maximumWorstCaseWei: roots.maximumWorstCaseWei, testOnly: true },
     broadcastAllowed: false,

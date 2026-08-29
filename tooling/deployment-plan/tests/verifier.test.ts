@@ -67,6 +67,7 @@ const observation: QuoteObservation = {
   currentHeadNumber: "10",
   currentHeadHash: hash,
   feeHistoryNewestBlock: "10",
+  senderNonce: "0",
   gasEstimate: "100",
   blockGasLimit: "1000",
   baseFeePerGas: "1",
@@ -76,7 +77,7 @@ const observation: QuoteObservation = {
 };
 
 test("trust roots bind buffer, exact expiry and the complete time ordering", () => {
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   const quote = buildFeeQuote(plan, observation, roots);
   const verify = (candidate: FeeQuote, nowSeconds = 110n): void => {
     independentlyVerify({
@@ -115,7 +116,7 @@ test("trust roots bind buffer, exact expiry and the complete time ordering", () 
 });
 
 test("quote expiry addition is uint256 overflow checked", () => {
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   assert.throws(
     () => buildFeeQuote(plan, {
       ...observation,
@@ -127,7 +128,7 @@ test("quote expiry addition is uint256 overflow checked", () => {
 });
 
 test("independent RPC verification binds every quoted chain fact", async () => {
-  const plan = buildStablePlan(artifact, roots);
+  const plan = buildStablePlan(artifact, roots, observation);
   const quote = buildFeeQuote(plan, observation, roots);
   const rpc = fixtureRpc();
   await independentlyVerifyRpc({ rpc, plan, quote, creationInput });
@@ -140,6 +141,7 @@ test("independent RPC verification binds every quoted chain fact", async () => {
     withObservation(quote, { currentHeadNumber: "11" }),
     withObservation(quote, { currentHeadHash: otherHash }),
     withObservation(quote, { feeHistoryNewestBlock: "9" }),
+    withObservation(quote, { senderNonce: "1" }),
     withObservation(quote, { baseFeePerGas: "2" }),
     withObservation(quote, { gasEstimate: "101" }),
   ];
@@ -168,6 +170,7 @@ function fixtureRpc(): DeploymentRpc {
           oldestBlock: "0xa",
           baseFeePerGas: ["0x1", "0x2"],
         };
+        case "eth_getTransactionCount": return "0x0";
         case "eth_estimateGas": return "0x64";
       }
     },

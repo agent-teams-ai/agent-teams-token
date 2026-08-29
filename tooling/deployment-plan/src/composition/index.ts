@@ -21,6 +21,7 @@ import {
   independentlyVerifyRpc,
   verifyReadyDigests,
   type ReadyMarker,
+  type VerificationRequest,
 } from "../application/verifier.ts";
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
@@ -36,7 +37,6 @@ export interface PublishRequest {
   readonly quote: FeeQuote;
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
-  readonly nowSeconds: bigint;
   readonly outputFaultInjection?: OutputFaultInjection;
 }
 
@@ -58,7 +58,6 @@ export interface PlannerInput {
   readonly trustRootsPath: string;
   readonly outputParent: string;
   readonly bundleName: string;
-  readonly nowSeconds: bigint;
   readonly maxPriorityFeePerGas: bigint;
   readonly maxFeePerGas: bigint;
 }
@@ -76,7 +75,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
     planId: request.plan.planId,
     creationInputHash: request.quote.creationInputHash,
   };
-  independentlyVerify({ ...request, ready });
+  independentlyVerify({ ...request, ready, nowSeconds: trustedNowSeconds() });
   const output = await claimOwnedOutputDirectory(
     request.parent,
     request.bundleName,
@@ -87,10 +86,16 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
     await output.writeExclusive(QUOTE, quoteBytes);
     await output.writeExclusive(READY, jsonBytes(ready));
     await assertExactBundle(output.path);
-    await assertPublishedContent(output.path, planBytes, quoteBytes, ready, request);
+    await assertPublishedContent(
+      output.path, planBytes, quoteBytes, ready,
+      { ...request, nowSeconds: trustedNowSeconds() },
+    );
     const published = await output.publish();
     await assertExactBundle(published);
-    await assertPublishedContent(published, planBytes, quoteBytes, ready, request);
+    await assertPublishedContent(
+      published, planBytes, quoteBytes, ready,
+      { ...request, nowSeconds: trustedNowSeconds() },
+    );
     return published;
   } finally {
     await output.close();
@@ -131,7 +136,7 @@ async function assertPublishedContent(
   expectedPlanBytes: Uint8Array,
   expectedQuoteBytes: Uint8Array,
   expectedReady: ReadyMarker,
-  request: PublishRequest,
+  request: PublishRequest & Pick<VerificationRequest, "nowSeconds">,
 ): Promise<void> {
   const planBytes = await safeRead(join(directory, PLAN));
   const quoteBytes = await safeRead(join(directory, QUOTE));
@@ -164,34 +169,48 @@ export async function runUnsignedPlanner(
     fixtureBytes,
     constructorValues: parseJsonWithoutDuplicates(fixtureBytes),
   }, roots);
-  const plan = buildStablePlan(approved, roots);
   const rpc = createLocalRpc(input.rpcUrl);
   const observation = await observeFees(rpc, {
     from: roots.from,
     creationInput: approved.creationInput,
-    nowSeconds: input.nowSeconds,
+    nowSeconds: trustedNowSeconds(),
     maxPriorityFeePerGas: input.maxPriorityFeePerGas,
     maxFeePerGas: input.maxFeePerGas,
   });
+  const plan = buildStablePlan(approved, roots, observation);
   const quote = buildFeeQuote(plan, observation, roots);
-  const directory = await publishReadyLast({
+  await independentlyVerifyRpc({
+    rpc,
+    plan,
+    quote,
+    creationInput: approved.creationInput,
+  });
+  const publishRequest = {
     parent: input.outputParent,
     bundleName: input.bundleName,
     plan,
     quote,
     roots,
     expected: approved,
-    nowSeconds: input.nowSeconds,
-  });
+  };
+  const directory = await publishReadyLast(publishRequest);
   await verifyBundle({
     directory,
     roots,
     expected: approved,
-    nowSeconds: input.nowSeconds,
+    nowSeconds: trustedNowSeconds(),
     rpc,
     creationInput: approved.creationInput,
   });
   return { directory, planId: plan.planId };
+}
+
+function trustedNowSeconds(): bigint {
+  const milliseconds = Date.now();
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+    fail("TRUSTED_CLOCK_INVALID", "system clock is outside the supported range");
+  }
+  return BigInt(Math.floor(milliseconds / 1000));
 }
 
 async function safeRead(path: string): Promise<Uint8Array> {

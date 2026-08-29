@@ -48,19 +48,50 @@ test(
         trustRootsPath: resolvePath("tooling/deployment-plan/trust-roots.v1.json"),
         outputParent,
         bundleName: "estimate",
-        nowSeconds: BigInt(Math.floor(Date.now() / 1000)),
         maxPriorityFeePerGas: 1_000_000_000n,
         maxFeePerGas: 3_000_000_000n,
       });
       const plan = JSON.parse(
         await readFile(join(result.directory, "deployment-plan.v1.json"), "utf8"),
-      ) as { identity: { buildInfoSolcVersion: string; creationInputHash: string } };
+      ) as { planId: string; identity: {
+        buildInfoSolcVersion: string;
+        creationInputHash: string;
+        senderNonce: string;
+        expectedCreateAddress: string;
+      } };
       const quote = JSON.parse(
         await readFile(join(result.directory, "fee-quote.v1.json"), "utf8"),
       ) as { creationInputHash: string; observation: { gasEstimate: string } };
       assert.equal(plan.identity.buildInfoSolcVersion, "0.8.36");
+      assert.equal(plan.identity.senderNonce, "0");
+      assert.equal(plan.identity.expectedCreateAddress, "0x522b3294e6d06aa25ad0f1b8891242e335d3b459");
       assert.equal(quote.creationInputHash, plan.identity.creationInputHash);
       assertWithinFoundryTolerance(BigInt(quote.observation.gasEstimate));
+
+      await testOnlyRpc(rpcUrl, "anvil_setNonce", [
+        "0x0000000000000000000000000000000000000001", "0x1",
+      ]);
+      const nonceOneResult = await runUnsignedPlanner({
+        rpcUrl,
+        buildInfoPath: build.buildInfoPath,
+        artifactPath: build.artifactPath,
+        abiPath: resolvePath("contracts/evm/abi/AGTMAIToken.abi.json"),
+        fixturePath: resolvePath("contracts/evm/evidence/shared-test-vector.json"),
+        trustRootsPath: resolvePath("tooling/deployment-plan/trust-roots.v1.json"),
+        outputParent,
+        bundleName: "estimate-nonce-one",
+        maxPriorityFeePerGas: 1_000_000_000n,
+        maxFeePerGas: 3_000_000_000n,
+      });
+      const nonceOnePlan = JSON.parse(
+        await readFile(join(nonceOneResult.directory, "deployment-plan.v1.json"), "utf8"),
+      ) as { planId: string; identity: { senderNonce: string; expectedCreateAddress: string } };
+      assert.equal(nonceOnePlan.identity.senderNonce, "1");
+      assert.equal(
+        nonceOnePlan.identity.expectedCreateAddress,
+        "0x535b3d7a252fa034ed71f0c53ec0c6f784cb64e1",
+      );
+      assert.notEqual(nonceOnePlan.planId, plan.planId);
     } finally {
       await stop(child);
     }
@@ -186,6 +217,17 @@ async function waitUntilReady(url: string): Promise<void> {
     });
   }
   throw new Error("Anvil readiness timeout");
+}
+
+async function testOnlyRpc(url: string, method: string, params: readonly unknown[]): Promise<void> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  assert(response.ok, `test-only Anvil RPC ${method} returned HTTP ${response.status}`);
+  const body = await response.json() as { result?: unknown; error?: unknown };
+  assert.equal(body.error, undefined, `test-only Anvil RPC ${method} failed`);
 }
 
 async function stop(child: ChildProcess): Promise<void> {

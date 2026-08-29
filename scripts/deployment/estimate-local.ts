@@ -13,7 +13,6 @@ interface Arguments {
   readonly trustRootsPath: string;
   readonly outputParent?: string;
   readonly bundleName: string;
-  readonly nowSeconds: bigint;
   readonly maxPriorityFeePerGas: bigint;
   readonly maxFeePerGas: bigint;
 }
@@ -27,7 +26,6 @@ const knownFlags = new Set([
   "--trust-roots",
   "--output",
   "--bundle",
-  "--now",
   "--priority-fee",
   "--max-fee",
 ]);
@@ -48,7 +46,6 @@ export async function main(rawArguments = process.argv.slice(2)): Promise<void> 
     trustRootsPath: resolve(parsed.trustRootsPath),
     outputParent,
     bundleName: parsed.bundleName,
-    nowSeconds: parsed.nowSeconds,
     maxPriorityFeePerGas: parsed.maxPriorityFeePerGas,
     maxFeePerGas: parsed.maxFeePerGas,
   });
@@ -84,10 +81,6 @@ function parseArguments(arguments_: readonly string[]): Arguments {
       ?? "tooling/deployment-plan/trust-roots.v1.json",
     outputParent: values.get("--output"),
     bundleName: values.get("--bundle") ?? "estimate",
-    nowSeconds: decimal(
-      values.get("--now") ?? String(Math.floor(Date.now() / 1000)),
-      "--now",
-    ),
     maxPriorityFeePerGas: decimal(
       values.get("--priority-fee") ?? "1000000000",
       "--priority-fee",

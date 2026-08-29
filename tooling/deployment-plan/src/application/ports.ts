@@ -1,4 +1,9 @@
-export type RpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_feeHistory" | "eth_estimateGas";
+export type RpcMethod =
+  | "eth_chainId"
+  | "eth_getBlockByNumber"
+  | "eth_getTransactionCount"
+  | "eth_feeHistory"
+  | "eth_estimateGas";
 
 export interface DeploymentRpc {
   request(method: RpcMethod, params: readonly unknown[]): Promise<unknown>;

@@ -89,9 +89,33 @@ test("one-block fee history requires two fees and matches the block base fee", a
   assert.equal((await observeFees(feeRpc(["0x1", "0x2"]), request)).baseFeePerGas, "1");
 });
 
-function feeRpc(fees: readonly string[]): DeploymentRpc {
+test("sender nonce uses the bound block and exact canonical quantity parsing", async () => {
+  const from = "0x0000000000000000000000000000000000000001";
+  const request = {
+    from,
+    creationInput: "0x00",
+    nowSeconds: 1n,
+    maxPriorityFeePerGas: 1n,
+    maxFeePerGas: 2n,
+  };
+  let nonceParams: readonly unknown[] | undefined;
+  const valid = feeRpc(["0x1", "0x2"], "0x80", (params) => {
+    nonceParams = params;
+  });
+  assert.equal((await observeFees(valid, request)).senderNonce, "128");
+  assert.deepEqual(nonceParams, [from, "0x1"]);
+  for (const malformed of ["0x00", "0x01", "0X1", 1, null]) {
+    await assert.rejects(observeFees(feeRpc(["0x1", "0x2"], malformed), request), /quantity/u);
+  }
+});
+
+function feeRpc(
+  fees: readonly string[],
+  nonce: unknown = "0x0",
+  onNonce?: (params: readonly unknown[]) => void,
+): DeploymentRpc {
   return {
-    async request(method: RpcMethod): Promise<unknown> {
+    async request(method: RpcMethod, params: readonly unknown[]): Promise<unknown> {
       switch (method) {
         case "eth_chainId": return "0x7a69";
         case "eth_getBlockByNumber": return {
@@ -99,6 +123,10 @@ function feeRpc(fees: readonly string[]): DeploymentRpc {
           gasLimit: "0x100", baseFeePerGas: "0x1",
         };
         case "eth_feeHistory": return { oldestBlock: "0x1", baseFeePerGas: fees };
+        case "eth_getTransactionCount": {
+          onNonce?.(params);
+          return nonce;
+        }
         case "eth_estimateGas": return "0x10";
       }
     },

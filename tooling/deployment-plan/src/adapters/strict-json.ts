@@ -25,8 +25,9 @@ const IDENTITY_KEYS = [
   "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256",
   "buildInfoSolcVersion", "compilerSettings", "creationBytecodeHash",
   "constructorAbiBytes", "constructorAbiHash", "constructorArguments",
-  "constructorArgumentsHash", "creationInputHash", "chainId", "from", "value",
-  "capPolicy", "broadcastAllowed",
+  "constructorArgumentsHash", "creationInput", "creationInputHash", "chainId", "from",
+  "senderNonce", "expectedCreateAddress", "observedBlockNumber", "observedBlockHash",
+  "value", "capPolicy", "broadcastAllowed",
 ] as const;
 const QUOTE_KEYS = [
   "schemaVersion", "kind", "planId", "creationInputHash", "observation",
@@ -35,7 +36,7 @@ const QUOTE_KEYS = [
 ] as const;
 const OBSERVATION_KEYS = [
   "chainId", "blockNumber", "blockHash", "blockTimestamp", "currentHeadNumber",
-  "currentHeadHash", "feeHistoryNewestBlock", "gasEstimate", "blockGasLimit",
+  "currentHeadHash", "feeHistoryNewestBlock", "senderNonce", "gasEstimate", "blockGasLimit",
   "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt",
 ] as const;
 const READY_KEYS = [
@@ -72,7 +73,11 @@ export function parseStablePlan(bytes: Uint8Array): StablePlan {
   hashes(identity, ["buildInfoSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "creationBytecodeHash", "constructorAbiHash", "constructorArgumentsHash", "creationInputHash"]);
   match(identity.constructorAbiBytes, HEX, "PLAN_IDENTITY_SCHEMA", "constructorAbiBytes");
   match(identity.constructorArguments, HEX, "PLAN_IDENTITY_SCHEMA", "constructorArguments");
+  match(identity.creationInput, HEX, "PLAN_IDENTITY_SCHEMA", "creationInput");
   match(identity.from, ADDRESS, "PLAN_IDENTITY_SCHEMA", "from");
+  match(identity.expectedCreateAddress, ADDRESS, "PLAN_IDENTITY_SCHEMA", "expectedCreateAddress");
+  match(identity.observedBlockHash, HASH, "PLAN_IDENTITY_SCHEMA", "observedBlockHash");
+  decimals(identity, ["senderNonce", "observedBlockNumber"]);
   if (identity.broadcastAllowed !== false) {
     fail("PLAN_IDENTITY_SCHEMA", "identity broadcastAllowed must be false");
   }
@@ -95,7 +100,7 @@ export function parseFeeQuote(bytes: Uint8Array): FeeQuote {
   decimals(quote, ["bufferBps", "gasLimit", "effectiveFeePerGas", "estimatedWei", "worstCaseWei", "expiresAt"]);
   const observation = object(quote.observation, "QUOTE_OBSERVATION_SCHEMA");
   exactKeys(observation, OBSERVATION_KEYS, "QUOTE_OBSERVATION_SCHEMA");
-  decimals(observation, ["chainId", "blockNumber", "blockTimestamp", "currentHeadNumber", "feeHistoryNewestBlock", "gasEstimate", "blockGasLimit", "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt"]);
+  decimals(observation, ["chainId", "blockNumber", "blockTimestamp", "currentHeadNumber", "feeHistoryNewestBlock", "senderNonce", "gasEstimate", "blockGasLimit", "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt"]);
   hashes(observation, ["blockHash", "currentHeadHash"]);
   return quote as unknown as FeeQuote;
 }
