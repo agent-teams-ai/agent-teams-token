@@ -7,6 +7,7 @@ import { assertConstructorInputs, constructorInputsFromManifest, readApprovedMan
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_SOURCE_SHA256, asError, LocalEvmError, type ApprovedBuildProfile, type DeploymentReport, type EvidenceCheck, type VerificationEvidence, type VerificationInput } from "./model.ts";
 import { assertPrivateRpcUrl, createRpcClient, type RpcClient } from "./rpc.ts";
 import { assertPinnedSolcVersionOutput } from "./toolchain.ts";
+import { deriveCreateAddress, parseTransactionNonce } from "./create-address.ts";
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const TRANSACTION = /^0x[0-9a-f]{64}$/;
@@ -394,13 +395,19 @@ function assertApprovalShape(value: ApprovedBuildProfile): void {
 async function verifyDirectCreation(rpc: RpcClient, deployment: DeploymentReport, input: VerificationInput, expectedCreationInput: `0x${string}`): Promise<void> {
   const transaction = await rpc.request("eth_getTransactionByHash", [deployment.transactionHash]);
   const receipt = await rpc.request("eth_getTransactionReceipt", [deployment.transactionHash]);
-  if (!isRecord(transaction) || typeof transaction.input !== "string" || transaction.input !== expectedCreationInput
+  if (!isRecord(transaction) || transaction.input !== expectedCreationInput
     || sha256(expectedCreationInput) !== deployment.creationInputSha256) {
     throw new LocalEvmError("VERIFY_CREATION_INPUT_MISMATCH", "transaction creation input differs from exact build-info bytecode and manifest constructor arguments");
   }
-  if (!isRecord(receipt)
-    || String(transaction.from).toLowerCase() !== input.deployerAddress || transaction.to !== null
-    || String(receipt.contractAddress).toLowerCase() !== input.targetAddress || receipt.to !== null
+  if (transaction.hash !== deployment.transactionHash || transaction.from !== input.deployerAddress
+    || transaction.to !== null || transaction.value !== "0x0") {
+    throw new LocalEvmError("VERIFY_DIRECT_CREATION_MISMATCH", "RPC transaction does not identify the reported zero-value direct creation");
+  }
+  const nonce = parseTransactionNonce(transaction.nonce);
+  const derivedAddress = deriveCreateAddress(input.deployerAddress, nonce);
+  if (!isRecord(receipt) || receipt.contractAddress !== derivedAddress
+    || receipt.contractAddress !== deployment.targetAddress || deployment.targetAddress !== input.targetAddress
+    || receipt.to !== null
     || receipt.transactionHash !== deployment.transactionHash || BigInt(rpcString(receipt.status, "VERIFY_RECEIPT_STATUS_INVALID")) !== 1n) {
     throw new LocalEvmError("VERIFY_DIRECT_CREATION_MISMATCH", "RPC transaction/receipt do not prove direct deployer creation of the target");
   }

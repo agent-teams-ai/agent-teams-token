@@ -12,10 +12,11 @@ import { APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type De
 import type { RpcClient } from "../rpc.ts";
 import { reconstructRuntime, verifyLocalDeployment, writeEvidence } from "../verifier.ts";
 import { pinnedSolcPath } from "../toolchain.ts";
+import { deriveCreateAddress, encodeCreateAddressPreimage, parseTransactionNonce } from "../create-address.ts";
 
 const execute = promisify(execFile);
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
-const targetAddress = "0x9000000000000000000000000000000000000009" as const;
+const targetAddress = "0x18b25cf46bcf833a5b6155cc9ece3875c75703db" as const;
 const deployerAddress = "0x9000000000000000000000000000000000000008" as const;
 const transactionHash = `0x${"12".repeat(32)}` as const;
 let creationInput: `0x${string}`;
@@ -103,7 +104,7 @@ class MockRpc implements RpcClient {
   code = reconstructRuntime(build, artifact, manifest.token.initialSupplyBaseUnits, manifest.genesisAllocationHash);
   commitment: `0x${string}` = manifest.genesisAllocationHash;
   balances = new Map(manifest.allocations.map((allocation) => [allocation.recipient, allocation.amountBaseUnits]));
-  transaction: Record<string, unknown> = { from: deployerAddress, to: null, input: creationInput };
+  transaction: Record<string, unknown> = { hash: transactionHash, from: deployerAddress, nonce: "0x0", to: null, input: creationInput, value: "0x0" };
   receipt: Record<string, unknown> = { contractAddress: targetAddress, to: null, transactionHash, status: "0x1" };
 
   async request(method: string, params: readonly unknown[] = []): Promise<unknown> {
@@ -177,6 +178,38 @@ async function diagnostic(context: CaseContext): Promise<string> {
   return (await verifyLocalDeployment(context.input, context.rpc)).exit.code;
 }
 
+test("direct CREATE derivation matches independent published Foundry vectors", () => {
+  // Produced by the independently published Foundry 1.8.0 implementation:
+  // `cast compute-address 0x6ac7...dbf0 --nonce <nonce>`.
+  const sender = "0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0";
+  const vectors = [
+    ["0x0", "0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d"],
+    ["0x1", "0x343c43a37d37dff08ae8c4a11544c718abb4fcf8"],
+    ["0x7f", "0x06d9a77f5e4b311bae8d559db9cdb4df94104aa0"],
+    ["0x80", "0x08e190dcb7b73f5fcdabb43e102215c83659a76d"],
+    ["0x100000000", "0xf4bf328880432064068338f915c49f817dc4ce18"],
+  ] as const;
+  for (const [quantity, expected] of vectors) {
+    assert.equal(deriveCreateAddress(sender, parseTransactionNonce(quantity)), expected);
+  }
+});
+
+test("CREATE RLP covers empty zero, scalar and uint256 byte-length boundaries", () => {
+  const sender = "0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0";
+  assert.equal(Buffer.from(encodeCreateAddressPreimage(sender, 0n)).toString("hex"), `d694${sender.slice(2)}80`);
+  assert.equal(Buffer.from(encodeCreateAddressPreimage(sender, 127n)).toString("hex"), `d694${sender.slice(2)}7f`);
+  assert.equal(Buffer.from(encodeCreateAddressPreimage(sender, 128n)).toString("hex"), `d794${sender.slice(2)}8180`);
+  assert.equal(Buffer.from(encodeCreateAddressPreimage(sender, 256n)).toString("hex"), `d894${sender.slice(2)}820100`);
+  assert.equal(Buffer.from(encodeCreateAddressPreimage(sender, (1n << 256n) - 1n)).toString("hex"), `f694${sender.slice(2)}a0${"ff".repeat(32)}`);
+});
+
+test("transaction nonce parser rejects malformed, ambiguous and out-of-range quantities", () => {
+  for (const value of [undefined, null, 0, "", "0x", "0X0", "0x00", "0x01", "0xA", "0x-1", "1", `0x1${"0".repeat(64)}`]) {
+    assert.throws(() => parseTransactionNonce(value), { code: "VERIFY_TRANSACTION_NONCE_INVALID" });
+  }
+  assert.equal(parseTransactionNonce(`0x${"f".repeat(64)}`), (1n << 256n) - 1n);
+});
+
 test("clean approved deployment is independently proven without trusting deployer observations", { timeout: 60_000 }, async () => {
   const context = await makeCase();
   const report = await verifyLocalDeployment(context.input, context.rpc);
@@ -224,6 +257,45 @@ test("wrong chain, forged target, balances, commitment and RPC creation proof ar
   context = await makeCase(); context.rpc.balances.set(manifest.allocations[0]!.recipient, "1"); assert.equal(await diagnostic(context), "VERIFY_ALLOCATION_BALANCE_MISMATCH");
   context = await makeCase(); context.rpc.commitment = `0x${"00".repeat(32)}`; assert.equal(await diagnostic(context), "VERIFY_COMMITMENT_MISMATCH");
   context = await makeCase(); context.rpc.transaction = { ...context.rpc.transaction, to: deployerAddress }; assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+});
+
+test("direct creation rejects malformed nonces and nonce/address swaps", { timeout: 60_000 }, async () => {
+  for (const nonce of [undefined, null, 0, "0x", "0x00", "0x01", "0xA", `0x1${"0".repeat(64)}`]) {
+    const context = await makeCase();
+    context.rpc.transaction = { ...context.rpc.transaction, nonce };
+    assert.equal(await diagnostic(context), "VERIFY_TRANSACTION_NONCE_INVALID");
+  }
+
+  let context = await makeCase();
+  context.rpc.transaction = { ...context.rpc.transaction, nonce: "0x1" };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+
+  context = await makeCase();
+  context.rpc.receipt = { ...context.rpc.receipt, contractAddress: deriveCreateAddress(deployerAddress, 1n) };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+});
+
+test("transaction and receipt facts cannot be cross-swapped", { timeout: 60_000 }, async () => {
+  const otherHash = `0x${"34".repeat(32)}`;
+  let context = await makeCase();
+  context.rpc.transaction = { ...context.rpc.transaction, hash: otherHash };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+
+  context = await makeCase();
+  context.rpc.transaction = { ...context.rpc.transaction, from: "0x9000000000000000000000000000000000000007" };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+
+  context = await makeCase();
+  context.rpc.transaction = { ...context.rpc.transaction, value: "0x1" };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+
+  context = await makeCase();
+  context.rpc.transaction = { ...context.rpc.transaction, value: "0x00" };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
+
+  context = await makeCase();
+  context.rpc.receipt = { ...context.rpc.receipt, transactionHash: otherHash };
+  assert.equal(await diagnostic(context), "VERIFY_DIRECT_CREATION_MISMATCH");
 });
 
 test("a non-test artifact fails before any RPC access or possible broadcast", { timeout: 60_000 }, async () => {
