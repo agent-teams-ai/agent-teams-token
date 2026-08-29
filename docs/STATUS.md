@@ -68,21 +68,25 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - The local Solana fixture now completes a real classic SPL Token lifecycle on
   checksum-pinned Agave 4.2.1: supply `0 -> 1,000 -> 0`, freeze authority is
   irreversibly removed for the fixture, signed restore/freeze attempts fail,
-  parallel runs remain isolated and no key material is retained. All 23 tests
-  pass locally at real asset cost `$0`.
+  parallel runs remain isolated and no key material is retained. The verifier
+  also proves zero supply immediately before minting, and stale-run leases bind
+  PID plus process-start identity. All 42 applicable tests pass locally at real
+  asset cost `$0`.
 - The unsigned Ethereum deployment planner now binds the exact creation input,
   immutable test-only trust roots, buffer, fee-history/block facts and strict
   `blockTimestamp <= observedAt <= now < expiresAt` ordering. Its READY-last
   output uses an exclusive owned `0700` directory and rejects symlink,
-  replacement and pre-existing-target attacks. All 24 tests pass, including a
-  fresh Forge build and real loopback Anvil estimate; there is no signer or
-  broadcast capability.
+  replacement and pre-existing-target attacks. Sender nonce, deterministic
+  CREATE address, observation block and repeated trusted-clock checks are part
+  of the reviewed identity. All 42 applicable tests plus the real loopback
+  Anvil test pass; there is no signer or broadcast capability.
 - The pinned Slither gate now runs the real Trail of Bits image digest as its
   immutable non-root user, mounts checksum-pinned Forge 1.8.0 and solc 0.8.36,
   analyses the six-file production closure with all 101 expected detectors and
   emits READY-last evidence. The real container reports 11 visible
-  informational findings and zero blocking findings; all 41 unit/contract
-  tests pass. This is static-analysis evidence, not an audit.
+  informational findings and zero blocking findings; all 61 unit/contract
+  tests pass, including hostile serialized-output cases. This is
+  static-analysis evidence, not an audit.
 - Engineering Foundation 0.20.0 governs all three new feature roots with exact
   entrypoints and `domain -> application -> adapters -> composition` edges;
   full coverage currently reports zero diagnostics.
@@ -105,14 +109,14 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 - The three local zero-cost slices were explicitly owner-approved for E2E
   implementation on 2026-08-29. Barriers 0, 0.5 and targeted implementation are
-  closed. Solana, the deployment planner and Slither were integrated locally;
-  exact SHA `881f1bed74692cd70986240cbba076500ab401e9` passed the full local gate
-  and all six jobs in GitHub Actions run `33242942132`. Four specialist critics
-  and one subsequent holistic critic nevertheless confirmed thirteen P1
-  code/evidence defects, so that green candidate is not accepted. Three isolated
-  remediation jobs are active; a new full local gate, exact-head CI, four fresh
-  specialist reviews and a subsequent holistic review remain mandatory. The
-  complete ledger is in
+  closed. After the initial thirteen-P1 remediation, exact SHA
+  `405fe8ef69177fb0e9cd2897d5c97d548f444743` passed all six jobs in GitHub
+  Actions run `33254830057`. Four fresh specialists found no P0 and four P1 root
+  causes: CREATE identity, deployment nonce/time, Solana pre-mint supply and PID
+  reuse, and malformed Slither output. All four are now corrected locally with
+  focused regressions and real Agave, Anvil and pinned-container evidence. A new
+  exact-head CI run, four fresh specialist reviews and a subsequent holistic
+  review remain mandatory. The complete ledger is in
   `docs/research/NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`. These slices
   do not depend on unresolved tokenomics, vesting, governance, CCIP or liquidity
   decisions.

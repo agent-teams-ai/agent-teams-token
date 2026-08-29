@@ -1,9 +1,9 @@
 # AGTMAI zero-cost slices: implementation ledger
 
-Status: Barriers 0, 0.5 and 1 closed. Barrier 2 remediation is integrated; one
-exact-head CI attempt exposed and correctly preserved a Slither exit-semantics
-failure. Its focused fix is locally green, while a new full local gate,
-exact-head CI and independent re-review remain mandatory, 2026-08-29.
+Status: Barriers 0, 0.5 and 1 closed. Barrier 2 implementation and two review
+remediation cycles are integrated. The latest P1 corrections are locally green;
+a new exact-head CI run and independent four-plus-one re-review remain
+mandatory, 2026-08-29.
 
 This ledger is append-only evidence for
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](../NEXT_ZERO_COST_SLICES_PLAN.md). A changed
@@ -220,6 +220,34 @@ parallel fixture processes, plus the separately enabled real loopback Anvil
 test 1/1. Updating this ledger creates the final documentation candidate, so
 one exact-SHA local recheck and replacement CI/review evidence remain required;
 run `33252045534` is superseded and is not success evidence.
+
+### First fresh specialist review and second remediation cycle
+
+Exact-head run
+[`33254830057`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33254830057)
+passed all six jobs at
+`405fe8ef69177fb0e9cd2897d5c97d548f444743`. Four parallel read-only hosted
+specialists reviewed that exact clean SHA with `gpt-5.6-sol`, `xhigh` and no
+fast mode. No P0 was reported; the blocking findings and integrated corrections
+are:
+
+| Lane | Reviewer | Integrated correction | Result |
+| --- | --- | --- | --- |
+| Local EVM | `agtmai-review405-deployment-r2` | `031a4f0` | strict nonce parsing and independent RLP/Keccak CREATE-address binding; 3/3 real isolated Anvil scenarios pass |
+| Solana | `agtmai-review405-solana-r2` | `f9bd48c` | zero pre-mint supply and process-start-bound parent leases; 42 applicable tests pass, including both real fixture E2Es |
+| Slither | `agtmai-review405-slither-r2` | `e1a4ec4`, `0cf6415` | exact exit-file grammar and strict error shapes, compatible with canonical `null`; 61/61 tests and the pinned real image pass |
+| Deployment | `agtmai-review405-deployment-r2`, confirmed by architecture review | `c429c0e` | trusted repeated clock reads plus sender nonce, CREATE address and observed-block identity; 42/42 applicable tests and 1/1 real Anvil pass |
+
+The four immutable specialist result hashes and finding details are recorded in
+[`NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`](NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md).
+The pinned real Slither run after the compatibility correction produced a valid
+clean evidence bundle with SHA-256
+`d452483fba00fb6c4494610dc42ffae22be6dce862a49af5dacda44f685be829`.
+No public RPC, asset, secret or paid gas was used.
+
+These commits change the reviewed SHA. They therefore require one final clean
+`pnpm check`, a replacement exact-head six-job CI run, four fresh specialist
+reviews and a subsequent holistic adjudication before Barrier 3 can close.
 
 ## Model-split delivery metrics
 

@@ -143,3 +143,49 @@ Complete `pnpm check` and the separately enabled real Anvil test also passed.
 This remains a remediation checkpoint, not a replacement review verdict: the
 documentation commit requires exact-head CI and fresh four-plus-one review
 evidence.
+
+## First fresh specialist review of the corrected E2E candidate
+
+Exact-head GitHub Actions run
+[`33254830057`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33254830057)
+passed all six jobs at
+`405fe8ef69177fb0e9cd2897d5c97d548f444743`. Four independent read-only
+`gpt-5.6-sol` `xhigh` specialists then reviewed that same clean SHA. Their
+frozen result hashes are:
+
+| Review | Job | Frozen result SHA-256 |
+| --- | --- | --- |
+| Architecture/Foundation | `agtmai-review405-architecture-r2` | `f4ef2bd8709e54b68fe1182cc4f431158957270787121f19ced65205ec2c0037` |
+| Deployment plan and local EVM | `agtmai-review405-deployment-r2` | `505907c505603a7ba9bc3cee174a067c7b1b80c3cda2ec6c6ad40f4c7708fe4b` |
+| Slither/security | `agtmai-review405-slither-r2` | `54bcfd9b614aa0e08b5133b6209ce407d8d429daad87531a11e7fd2fa91503c6` |
+| Solana lifecycle | `agtmai-review405-solana-r2` | `dbf706b82ebf9f490da1eea184c164079668415724865c12bd82dc2fb9c2aa0c` |
+
+The specialists found no P0 and four blocking P1 root causes:
+
+1. the local-EVM verifier did not independently derive the direct CREATE
+   address from the transaction sender and nonce;
+2. the unsigned deployment identity omitted the sender nonce and expected
+   CREATE address, while freshness used a frozen caller-controlled time;
+3. Solana evidence did not require zero supply immediately before minting, and
+   stale-run reclamation could confuse PID reuse with the original parent;
+4. malformed Slither error fields or prefix-valid exit files could be accepted
+   as clean.
+
+The architecture specialist retracted its initial concern about retaining a
+complete READY bundle after post-publication RPC drift: READY means immutable
+bundle completeness, while current RPC validity is a separate mandatory check.
+This contract is now explicit in the deployment-plan README.
+
+Commits `031a4f0`, `f9bd48c`, `e1a4ec4`, `c429c0e` and `0cf6415` remediate the
+four P1 roots. The final Slither correction is intentionally split: strict
+shape validation remains fail-closed, while the canonical Slither `0.11.6`
+success representation `error: null` and `results.errors: null` is accepted.
+The exact pinned Linux image passes with 101 detectors, 11 visible
+informational findings, 0 blocking findings and 0 suppressions. Its independently
+validated local `evidence.json` SHA-256 is
+`d452483fba00fb6c4494610dc42ffae22be6dce862a49af5dacda44f685be829`.
+
+This is another remediation checkpoint, not final acceptance. The amended
+documentation creates a new exact SHA. A replacement six-job CI run, four fresh
+specialist reviews and one later holistic adjudication with no P0/P1 are still
+mandatory.
