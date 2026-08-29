@@ -78,7 +78,7 @@ function parseArguments(arguments_: readonly string[]): Arguments {
     fixturePath: values.get("--fixture")
       ?? "contracts/evm/evidence/shared-test-vector.json",
     trustRootsPath: values.get("--trust-roots")
-      ?? "tooling/deployment-plan/trust-roots.v1.json",
+      ?? "tooling/deployment-plan/trust-roots.v2.json",
     outputParent: values.get("--output"),
     bundleName: values.get("--bundle") ?? "estimate",
     maxPriorityFeePerGas: decimal(

@@ -26,6 +26,7 @@ fullScanPaths:
   - pnpm-lock.yaml
   - pnpm-workspace.yaml
   - tooling/deployment-plan
+  - tooling/local-evm
   - tooling/local-solana
   - tooling/security/slither
   - tsconfig.json

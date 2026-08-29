@@ -79,8 +79,9 @@ test("every tooling lane routes representative non-TypeScript changes through th
     "architecture/foundation/repository-agent-workflow.yaml",
   );
   const representatives = [
+    "tooling/local-evm/evidence-report.schema.v1.json",
     "tooling/local-solana/evidence-report.schema.v1.json",
-    "tooling/deployment-plan/schema.v1.json",
+    "tooling/deployment-plan/schema.v2.json",
     "tooling/security/slither/fixtures/vulnerable/contracts/src/Vulnerable.sol",
   ];
 
