@@ -189,3 +189,51 @@ This is another remediation checkpoint, not final acceptance. The amended
 documentation creates a new exact SHA. A replacement six-job CI run, four fresh
 specialist reviews and one later holistic adjudication with no P0/P1 are still
 mandatory.
+
+## Final exact-SHA specialist and holistic acceptance
+
+Immutable code candidate
+`4037e4b52ad4d8a1180ee8c7bf771de0d88f0819` passed the complete local gate,
+real Agave and Anvil E2E, the pinned Slither container and all six GitHub Actions
+jobs in run
+[`33258983415`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33258983415).
+The independently validated CI Slither evidence SHA-256 is
+`df55aec680290d6d8b3513fc38dc3c75775fc96d5b1a0912303f992c69579dec`.
+
+Four fresh specialists inspected separate clean detached worktrees of that
+exact SHA. Their outputs were frozen before the holistic review started:
+
+| Review | Job | Frozen result SHA-256 | Verdict |
+| --- | --- | --- | --- |
+| Architecture/Foundation | `agtmai-review403-new-architecture-r1` | `7eafebd87a9faf1081cd96755aa381382dfe8fee06075647e50c07c9143f06dd` | `ACCEPT`, no P0/P1 |
+| Deployment plan and local EVM | `agtmai-review403-new-deployment-r1` | `56685369ac88e298bba5c122a06733a7e1b628f89fa14107b941675300b2b042` | no P0/P1; P2/P3 follow-ups |
+| Slither/security | `agtmai-review403-new-slither-r1` | `eb001edee443f76a5e9a3a80045596d5533714e10dbc6f4900a05201d0f4ae0f` | `ACCEPT`, no P0/P1 |
+| Solana lifecycle | `agtmai-review403-new-solana-r1` | `118b97f2eefbfd7a5ba6a29a8533cc06bcf24347b2ec67281a9e0049730f4d62` | `ACCEPT`, no P0/P1 |
+
+The later `agtmai-review403-new-holistic-r1` job verified all four hashes,
+deduplicated their findings, rechecked every prior P1 correction and returned
+`ACCEPT` with no P0/P1 on the same exact SHA. Its immutable result SHA-256 is
+`63ac52096a6875a68fc47f1eebcb9303396c2203e461a93dcd6499234a499cb2`.
+
+The holistic scores are correctness 8.8/10, security 9.0/10, architecture
+8.8/10, tests/evidence 9.2/10, maintainability 8.5/10 and MVP fitness 9.7/10.
+No retained P2/P3 was upgraded to a completion blocker.
+
+### Accepted non-blocking hardening queue
+
+The nine P2 roots are Foundation changed-scan routing; unambiguous cross-tool
+creation-input hashing; authenticated local-EVM orphan cleanup; owned Anvil
+ports in the deployment integration test; derived Slither severities, counts
+and human summary; documented macOS Docker image preparation; fail-closed
+Solana live-lease handling; observation-to-report publication binding; and
+sanitized post-mutation Solana failure evidence.
+
+The six P3 roots are power-loss directory durability; complete compiler-input
+identity; strict no-skip real Solana CI; removal of the application-layer
+ambient-environment fallback; distinct Slither failure categories; and one
+authoritative Slither CI definition. The alleged adapter-owned Slither policy
+orchestration finding was rejected after independent boundary inspection.
+
+Barrier 3 is closed for this frozen local/test-only code candidate. This review
+is engineering evidence, not a security audit, tokenomics approval or permission
+to deploy, sign, broadcast, create liquidity or use a public network.

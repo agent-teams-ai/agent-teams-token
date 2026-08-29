@@ -1,9 +1,10 @@
 # AGTMAI zero-cost slices: implementation ledger
 
-Status: Barriers 0, 0.5 and 1 closed. Barrier 2 implementation and two review
-remediation cycles are integrated. The latest P1 corrections are locally green;
-a new exact-head CI run and independent four-plus-one re-review remain
-mandatory, 2026-08-29.
+Status: Barriers 0 through 3 are closed for immutable local/test-only code
+candidate `4037e4b52ad4d8a1180ee8c7bf771de0d88f0819`. Exact-head CI, four
+specialist reviews and the later holistic adjudication completed with no P0/P1,
+2026-08-29. Retained P2/P3 hardening remains explicitly tracked and does not
+authorize a public deployment.
 
 This ledger is append-only evidence for
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](../NEXT_ZERO_COST_SLICES_PLAN.md). A changed
@@ -245,9 +246,49 @@ clean evidence bundle with SHA-256
 `d452483fba00fb6c4494610dc42ffae22be6dce862a49af5dacda44f685be829`.
 No public RPC, asset, secret or paid gas was used.
 
-These commits change the reviewed SHA. They therefore require one final clean
-`pnpm check`, a replacement exact-head six-job CI run, four fresh specialist
-reviews and a subsequent holistic adjudication before Barrier 3 can close.
+These commits changed the reviewed SHA and therefore required the final
+exact-head evidence recorded below.
+
+## Final exact-SHA acceptance
+
+Frozen code candidate
+`4037e4b52ad4d8a1180ee8c7bf771de0d88f0819` passed the complete local
+`pnpm check`, the separately enabled real deployment-plan Anvil test 1/1, the
+isolated local-EVM integration suite 3/3, all 42 applicable Agave tests and the
+real pinned Slither Linux-image gate. No public RPC, asset, signer, secret or
+paid gas was used.
+
+GitHub Actions run
+[`33258983415`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33258983415)
+passed all six required jobs at that exact SHA. The independently downloaded
+and validated CI Slither `evidence.json` SHA-256 is
+`df55aec680290d6d8b3513fc38dc3c75775fc96d5b1a0912303f992c69579dec`.
+
+Four parallel read-only hosted specialists reviewed clean detached checkouts
+with `gpt-5.6-sol`, `xhigh`, default service tier and no fast mode. Their result
+files were frozen before the separate holistic reviewer started:
+
+| Review | Job | Frozen result SHA-256 | P0/P1 |
+| --- | --- | --- | --- |
+| Architecture/Foundation | `agtmai-review403-new-architecture-r1` | `7eafebd87a9faf1081cd96755aa381382dfe8fee06075647e50c07c9143f06dd` | none |
+| Deployment plan and local EVM | `agtmai-review403-new-deployment-r1` | `56685369ac88e298bba5c122a06733a7e1b628f89fa14107b941675300b2b042` | none |
+| Slither/security | `agtmai-review403-new-slither-r1` | `eb001edee443f76a5e9a3a80045596d5533714e10dbc6f4900a05201d0f4ae0f` | none |
+| Solana lifecycle | `agtmai-review403-new-solana-r1` | `118b97f2eefbfd7a5ba6a29a8533cc06bcf24347b2ec67281a9e0049730f4d62` | none |
+
+The later holistic job `agtmai-review403-new-holistic-r1` verified those four
+hashes, independently inspected the same clean SHA and returned `ACCEPT` with
+no P0/P1. Its immutable result SHA-256 is
+`63ac52096a6875a68fc47f1eebcb9303396c2203e461a93dcd6499234a499cb2`.
+Barrier 3 is closed for the frozen code candidate.
+
+The accepted result retains nine P2 and six P3 hardening items. They include
+Foundation changed-scan routing for non-TypeScript tooling changes,
+cross-tool creation-input hash semantics, authenticated local-EVM orphan
+cleanup, deployment-test port ownership, derived Slither evidence/summary
+validation, macOS image preparation, fail-closed Solana lease/publication
+binding and sanitized post-mutation failure evidence. The complete adjudication
+and smallest regressions are recorded in the code-review ledger. These are not
+silently represented as finished and must be considered before production use.
 
 ## Model-split delivery metrics
 
@@ -258,6 +299,6 @@ reviews and a subsequent holistic adjudication before Barrier 3 can close.
   integrator;
 - review defects by severity: first holistic round found `0` P0 and `13`
   deduplicated P1 root causes, plus visible P2/P3 follow-ups;
-- remediation iterations to a locally stable candidate: one specialist review
-  round followed by focused remediation and real-runtime follow-ups; final
-  exact-SHA re-review remains pending.
+- remediation iterations to a locally stable candidate: two specialist review
+  rounds followed by focused remediation and real-runtime follow-ups; the final
+  exact-SHA four-plus-one review returned `ACCEPT` with no P0/P1.

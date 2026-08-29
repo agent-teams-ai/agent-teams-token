@@ -89,7 +89,9 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   static-analysis evidence, not an audit.
 - Engineering Foundation 0.20.0 governs all three new feature roots with exact
   entrypoints and `domain -> application -> adapters -> composition` edges;
-  full coverage currently reports zero diagnostics.
+  the full gate reports zero diagnostics. Changed-only routing for non-TypeScript
+  files in those roots remains a recorded P2 follow-up and is not represented as
+  complete Foundation coverage.
 - Five exact-SHA implementation critics and their remediation ledger are recorded
   in [`GENESIS-CORE-CODE-REVIEW-2026-08-28.md`](research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md).
 - The first final review of exact SHA `ec735a6` accepted Solidity and the
@@ -104,34 +106,35 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 - Barrier 2 is closed for the frozen code candidate. The evidence-recording
   documentation commit does not change product code and must independently
   retain green exact-head CI before merge.
+- Frozen zero-cost-slices code candidate
+  `4037e4b52ad4d8a1180ee8c7bf771de0d88f0819` passed all six GitHub Actions
+  jobs in run `33258983415`, the complete local gate, real Agave and Anvil E2E,
+  and the pinned Slither container. Four independent specialist reviews and a
+  later holistic `gpt-5.6-sol xhigh` adjudication inspected clean detached
+  checkouts of that exact SHA. The holistic verdict is `ACCEPT` with no P0/P1;
+  its immutable result SHA-256 is
+  `63ac52096a6875a68fc47f1eebcb9303396c2203e461a93dcd6499234a499cb2`.
+  Barrier 3 is closed for this code candidate. This is local/test-only
+  engineering evidence, not an audit or public-deployment approval.
 
 ## In progress
 
-- The three local zero-cost slices were explicitly owner-approved for E2E
-  implementation on 2026-08-29. Barriers 0, 0.5 and targeted implementation are
-  closed. After the initial thirteen-P1 remediation, exact SHA
-  `405fe8ef69177fb0e9cd2897d5c97d548f444743` passed all six jobs in GitHub
-  Actions run `33254830057`. Four fresh specialists found no P0 and four P1 root
-  causes: CREATE identity, deployment nonce/time, Solana pre-mint supply and PID
-  reuse, and malformed Slither output. All four are now corrected locally with
-  focused regressions and real Agave, Anvil and pinned-container evidence. A new
-  exact-head CI run, four fresh specialist reviews and a subsequent holistic
-  review remain mandatory. The complete ledger is in
-  `docs/research/NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`. These slices
-  do not depend on unresolved tokenomics, vesting, governance, CCIP or liquidity
-  decisions.
+- The accepted zero-cost-slices candidate retains nine P2 and six P3 follow-ups.
+  The highest-value next work is Foundation changed-scan routing, unified
+  creation-input hashing, authenticated local-EVM orphan cleanup, owned Anvil
+  test ports, derived Slither evidence/summary validation, fail-closed Solana
+  lease and publication binding, and sanitized post-mutation failure evidence.
+  The full adjudication is in
+  `docs/research/NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`. None grants
+  permission for public deployment.
 - Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
   constructor gas, every additional contract, live fees, total-cost guard and
   unsigned-plan review must be completed before any public broadcast. The
   current cheap local core estimate is not a whole-launch estimate.
 - The three zero-cost follow-up slices (local SPL fixture, unsigned Ethereum
-  deployment-cost plan and Slither/Linux security evidence) have an amended
-  executable plan in `docs/NEXT_ZERO_COST_SLICES_PLAN.md`. Four independent
-  hosted `gpt-5.6-sol xhigh` critics reviewed exact draft SHA `1cd5515` without
-  fast mode; all returned AMEND, none found P0, and accepted P1/P2 are recorded
-  in `docs/research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md` and folded
-  into the plan. Initial implementation is complete, but review remediation and
-  replacement exact-SHA evidence collection are in progress.
+  deployment-cost plan and Slither/Linux security evidence) are implemented and
+  accepted for local/test-only use. Their retained P2/P3 improvements are the
+  next engineering-hardening queue; public-chain work remains separately gated.
 
 ## Designed, not implemented
 
