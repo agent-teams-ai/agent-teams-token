@@ -42,6 +42,23 @@ Gate exit classes are `0` clean, `20` policy findings,
 failure. The composition boundary always tries to retain a sanitised failure
 envelope; raw Slither/build output stays in an owned temporary directory.
 
+Immediately before artifact upload, CI must independently reopen the finalized
+bundle and validate its exact variant, schema, internal counts, READY marker,
+and candidate binding. The integrator-owned upload step should be preceded by:
+
+```text
+SLITHER_REPOSITORY_ROOT="$GITHUB_WORKSPACE" \
+SLITHER_CANDIDATE_SHA="$GITHUB_SHA" \
+SLITHER_EVIDENCE_DIRECTORY="/tmp/slither-evidence-$GITHUB_SHA" \
+node tooling/security/slither/src/composition/validate-evidence.ts
+```
+
+The validator accepts exactly one of the analysis, output-failure, or
+environment-failure variants and rejects extra files, symlinks, nonempty READY
+markers, schema-invalid content, inconsistent result semantics, and a SHA that
+does not match the upload candidate. This is deliberately a separate process
+from evidence creation so CI upload does not trust the producer's validation.
+
 Suppression entries are intentionally empty initially. A waiver must reproduce
 the exact versioned finding fingerprint and all tuple fields, include an owner,
 reason, review/expiry dates, and regression evidence. Duplicate, broad,

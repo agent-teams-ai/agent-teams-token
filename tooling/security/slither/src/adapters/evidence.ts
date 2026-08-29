@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AnalysisInput, GateManifest, PolicyDecision } from "../domain/model.ts";
 import { sha256 } from "./fingerprint.ts";
 import { IMAGE, IMAGE_REVISION } from "./container-contract.ts";
+import { assertAnalysisEvidenceSemantics } from "./evidence-bundle.ts";
 import { assertSerializedAgainstSchema } from "./json-schema.ts";
 
 function canonical(value: unknown): unknown {
@@ -61,6 +62,7 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
   };
   const serialized = stable(evidence);
   await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, "evidence-report.schema.v1.json"));
+  assertAnalysisEvidenceSemantics(evidence);
   const partial = join(output, "evidence.json.partial");
   await writeFile(partial, serialized, { mode: 0o600, flag: "wx" });
   await rename(partial, join(output, "evidence.json"));
