@@ -58,19 +58,16 @@ test("Slither JSON, errors, exact finding count and exit obey the exhaustive sta
   const errorSets = [[], ["compile failed"]] as const;
   const findingCounts = [-1, 0, 1, 11, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.POSITIVE_INFINITY] as const;
   const statuses = [-1, ...Array.from({ length: 256 }, (_, status) => status), 256];
-  for (const success of booleans) {
-    for (const errors of errorSets) {
-      for (const findingCount of findingCounts) {
-        for (const status of statuses) {
-          const valid = Number.isSafeInteger(findingCount) && findingCount >= 0 && (success
-            ? errors.length === 0 && ((findingCount === 0 && status === 0) || (findingCount > 0 && status === 255))
-            : errors.length > 0 && status === 255);
-          const invocation = () => assertSlitherStatus(success, errors, findingCount, status);
-          if (valid) {assert.doesNotThrow(invocation);}
-          else {assert.throws(invocation, /success, errors, finding count and exit status/u);}
-        }
-      }
-    }
+  const cases = booleans.flatMap((success) => errorSets.flatMap((errors) => findingCounts.flatMap(
+    (findingCount) => statuses.map((status) => ({ success, errors, findingCount, status })),
+  )));
+  for (const { success, errors, findingCount, status } of cases) {
+    const valid = Number.isSafeInteger(findingCount) && findingCount >= 0 && (success
+      ? errors.length === 0 && ((findingCount === 0 && status === 0) || (findingCount > 0 && status === 255))
+      : errors.length > 0 && status === 255);
+    const invocation = () => assertSlitherStatus(success, errors, findingCount, status);
+    if (valid) {assert.doesNotThrow(invocation);}
+    else {assert.throws(invocation, /success, errors, finding count and exit status/u);}
   }
 });
 
