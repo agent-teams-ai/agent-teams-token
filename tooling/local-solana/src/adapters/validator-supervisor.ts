@@ -12,7 +12,7 @@ type ControlMessage = StartMessage | { readonly type: "acknowledge" } | { readon
 
 let validator: ChildProcess | undefined;
 let acknowledged = false;
-let stopping: Promise<void> | undefined;
+let stopping: Promise<boolean> | undefined;
 
 process.on("message", (message: ControlMessage) => {
   if (message.type === "start" && validator === undefined) {
@@ -44,8 +44,8 @@ function send(message: object): void {
 }
 
 async function terminateAndExit(): Promise<void> {
-  stopping ??= stopValidator();
-  if (await stopping.catch(() => false)) {
+  const result = stopping ??= stopValidator();
+  if (await result.catch(() => false)) {
     send({ type: "stopped" });
     process.exit(acknowledged ? 0 : 1);
   }
