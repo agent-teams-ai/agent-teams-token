@@ -19,7 +19,7 @@ test("cross-process leases reserve disjoint validator blocks until release", asy
     const [one, two] = await Promise.all([childLease(root), childLease(root)]); children.push(one.child, two.child);
     assert.notEqual(one.ports.rpcPort, two.ports.rpcPort); assert.notEqual(one.ports.dynamicPortRange, two.ports.dynamicPortRange);
     for (const child of children) { child.stdin?.end(); }
-    await Promise.all(children.map(async (child) => await new Promise<void>((resolve) => child.once("close", () => resolve()))));
+    await Promise.all(children.map(async (child) => await new Promise<void>((resolve) => { child.once("close", () => resolve()); })));
   } finally { for (const child of children) { if (child.exitCode === null) { child.kill("SIGKILL"); } } await rm(boundary, { recursive: true, force: true }); }
 });
 
@@ -62,7 +62,7 @@ test("stale reclaim refuses a hardlinked marker, then reclaims after repair", as
   let child: ChildProcess | undefined;
   try {
     ({ child } = await childLease(root)); const [block] = await readdir(root); assert.ok(block); const directory = join(root, block); const marker = join(directory, "lease.json");
-    child.kill("SIGKILL"); await new Promise<void>((resolve) => child!.once("close", () => resolve()));
+    child.kill("SIGKILL"); await new Promise<void>((resolve) => { child!.once("close", () => resolve()); });
     const duplicate = join(directory, "lease-copy"); await link(marker, duplicate);
     const other = await new LoopbackPortAllocator(root).allocate(); assert.equal((await lstat(marker)).nlink, 2); await other.release();
     await unlink(duplicate); const fresh = await new LoopbackPortAllocator(root).allocate();
@@ -76,7 +76,7 @@ test("stale reclaim refuses a copied marker in a substituted block", async () =>
   let child: ChildProcess | undefined;
   try {
     ({ child } = await childLease(root)); const [block] = await readdir(root); assert.ok(block); const directory = join(root, block); const markerBytes = await readFile(join(directory, "lease.json"));
-    child.kill("SIGKILL"); await new Promise<void>((resolve) => child!.once("close", () => resolve()));
+    child.kill("SIGKILL"); await new Promise<void>((resolve) => { child!.once("close", () => resolve()); });
     const preserved = join(root, `${block}-preserved`); await rename(directory, preserved); await mkdir(directory, { mode: 0o700 }); await writeFile(join(directory, "lease.json"), markerBytes, { mode: 0o600 });
     const other = await new LoopbackPortAllocator(root).allocate();
     assert.equal((await lstat(join(directory, "lease.json"))).isFile(), true); assert.equal((await lstat(preserved)).isDirectory(), true); await other.release();

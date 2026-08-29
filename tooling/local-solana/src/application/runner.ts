@@ -30,7 +30,7 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
     const env = allowlistedEnvironment(deps.environment ?? process.env, paths.directory);
     const cliContext = { paths, tools, env, signal };
     const keys = await deps.cli.createKeys(cliContext);
-    ({ validator, portLease } = await startValidatorWithPortRetry(deps, paths, tools, env, signal, keys.payer));
+    ({ validator, portLease } = await startValidatorWithPortRetry({ deps, paths, tools, env, signal, genesisMint: keys.payer }));
     const rpcUrl = `http://127.0.0.1:${portLease.rpcPort}/`;
     const ready = await deps.rpc.waitReady(rpcUrl, 30_000, signal);
     await deps.rpc.waitProgramsReady(rpcUrl, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 30_000, signal);
@@ -80,14 +80,17 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
   }
 }
 
-async function startValidatorWithPortRetry(
-  deps: FixtureDependencies,
-  paths: Awaited<ReturnType<RunStorePort["create"]>>,
-  tools: Awaited<ReturnType<ToolResolverPort["resolve"]>>,
-  env: NodeJS.ProcessEnv,
-  signal: AbortSignal,
-  genesisMint: string,
-): Promise<{ readonly validator: Awaited<ReturnType<ValidatorPort["start"]>>; readonly portLease: PortLease }> {
+interface ValidatorStartContext {
+  readonly deps: FixtureDependencies;
+  readonly paths: Awaited<ReturnType<RunStorePort["create"]>>;
+  readonly tools: Awaited<ReturnType<ToolResolverPort["resolve"]>>;
+  readonly env: NodeJS.ProcessEnv;
+  readonly signal: AbortSignal;
+  readonly genesisMint: string;
+}
+
+async function startValidatorWithPortRetry(context: ValidatorStartContext): Promise<{ readonly validator: Awaited<ReturnType<ValidatorPort["start"]>>; readonly portLease: PortLease }> {
+  const { deps, paths, tools, env, signal, genesisMint } = context;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const portLease = await deps.ports.allocate();
     try {

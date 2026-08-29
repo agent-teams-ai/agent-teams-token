@@ -115,15 +115,18 @@ async function readLease(directory: string): Promise<Record<string, unknown>> {
 }
 
 function parseLease(raw: Record<string, unknown>): Lease {
-  const valid = Object.keys(raw).sort().join(",") === "kind,pid,schemaVersion,token,validator"
+  const valid = Object.keys(raw).toSorted().join(",") === "kind,pid,schemaVersion,token,validator"
     && raw.schemaVersion === 2 && raw.kind === "agtmai-local-solana" && typeof raw.pid === "number"
     && Number.isSafeInteger(raw.pid) && raw.pid >= 1 && typeof raw.token === "string" && /^[a-f0-9]{64}$/u.test(raw.token);
   if (!valid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "owned lease is invalid"); }
   if (raw.validator === null) { return { pid: raw.pid as number, token: raw.token as string, validator: null }; }
-  const child = raw.validator;
+  return { pid: raw.pid as number, token: raw.token as string, validator: parseValidatorIdentity(raw.validator) };
+}
+
+function parseValidatorIdentity(child: unknown): ValidatorIdentity {
   if (typeof child !== "object" || child === null || Array.isArray(child)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "validator identity is invalid"); }
   const identity = child as Record<string, unknown>;
-  const childValid = Object.keys(identity).sort().join(",") === "commandHash,executable,ledger,pid,platform,startTime"
+  const childValid = Object.keys(identity).toSorted().join(",") === "commandHash,executable,ledger,pid,platform,startTime"
     && typeof identity.pid === "number" && Number.isSafeInteger(identity.pid) && identity.pid >= 1
     && (identity.platform === "linux" || identity.platform === "darwin")
     && typeof identity.startTime === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(identity.startTime)
@@ -131,7 +134,7 @@ function parseLease(raw: Record<string, unknown>): Lease {
     && typeof identity.ledger === "string" && identity.ledger.startsWith("/")
     && typeof identity.commandHash === "string" && /^[a-f0-9]{64}$/u.test(identity.commandHash);
   if (!childValid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "validator identity is invalid"); }
-  return { pid: raw.pid as number, token: raw.token as string, validator: identity as unknown as ValidatorIdentity };
+  return identity as unknown as ValidatorIdentity;
 }
 
 async function terminateAuthenticatedValidator(lease: Lease, directory: string): Promise<void> {

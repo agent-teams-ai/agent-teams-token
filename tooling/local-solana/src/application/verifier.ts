@@ -70,6 +70,20 @@ function verifyTransactions(value: FixtureObservations): void {
 
 function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObservations): void {
   const relevant = relevantInstruction(fact);
+  verifyTransactionResult(fact, relevant);
+
+  switch (fact.operation) {
+    case "createMint": verifyCreateMint(fact, relevant, value); break;
+    case "revokeFreeze": verifyRevokeFreeze(fact, relevant, value); break;
+    case "createAta": verifyCreateAta(fact, relevant, value); break;
+    case "mint": verifyMint(fact, relevant, value); break;
+    case "burn": verifyBurn(fact, relevant, value); break;
+    case "restoreFreezeAttempt": verifyRestoreFreeze(fact, relevant, value); break;
+    case "freezeAttempt": verifyFreeze(fact, relevant, value); break;
+  }
+}
+
+function verifyTransactionResult(fact: TransactionFact, relevant: InstructionFact): void {
   const shouldFail = fact.operation === "restoreFreezeAttempt" || fact.operation === "freezeAttempt";
   if (shouldFail) {
     if (fact.error === null || fact.error.instructionIndex !== relevant.instructionIndex || relevant.innerInstructionIndex !== null) {
@@ -79,59 +93,62 @@ function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObserva
       fail("SOLANA_TRANSACTION_ERROR_CODE", `${fact.operation} did not return the expected classic Token error`);
     }
   } else if (fact.error !== null) { fail("SOLANA_TRANSACTION_RESULT", `${fact.operation} unexpectedly failed`); }
+}
 
-  switch (fact.operation) {
-    case "createMint":
-      requireKind(relevant, ["initializeMint", "initializeMint2"]);
-      assertCondition(relevant.mint === value.mintAddress && relevant.authority === value.mintAuthority && relevant.newAuthority === value.freezeAuthority && relevant.decimals === FIXTURE_DECIMALS,
-        "SOLANA_CREATE_SEMANTICS", "mint initialization does not bind mint, authorities and decimals");
-      requireSigners(fact, [value.payerAddress, value.mintAddress]);
-      break;
-    case "revokeFreeze":
-      requireKind(relevant, ["setAuthority"]);
-      assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
-        && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
-        "SOLANA_REVOKE_SEMANTICS", "freeze revocation does not bind mint and former authority");
-      requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
-      break;
-    case "createAta": {
-      assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && ["raw", "create", "createIdempotent"].includes(relevant.kind), "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
-      const expectedPrefix = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress];
-      const exactParsedSemantics = relevant.kind !== "raw" && relevant.authority === value.payerAddress
-        && relevant.tokenAccount === value.tokenAccountAddress && relevant.owner === value.ownerAddress && relevant.mint === value.mintAddress;
-      const exactRawPrefix = relevant.kind === "raw" && expectedPrefix.every((address, index) => relevant.accounts[index] === address);
-      assertCondition((exactParsedSemantics || exactRawPrefix)
-        && [...expectedPrefix, CLASSIC_TOKEN_PROGRAM].every((address) => relevant.accounts.includes(address)),
-      "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
-      requireSigners(fact, [value.payerAddress]);
-      break;
-    }
-    case "mint":
-      requireKind(relevant, ["mintTo", "mintToChecked"]);
-      assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.mintAuthority && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
-        "SOLANA_MINT_SEMANTICS", "mint instruction does not bind mint, ATA, authority and amount");
-      requireSigners(fact, [value.payerAddress, value.mintAuthority]);
-      break;
-    case "burn":
-      requireKind(relevant, ["burn", "burnChecked"]);
-      assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.ownerAddress && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
-        "SOLANA_BURN_SEMANTICS", "burn instruction does not bind mint, ATA, owner and amount");
-      requireSigners(fact, [value.payerAddress, value.ownerAddress]);
-      break;
-    case "restoreFreezeAttempt":
-      requireKind(relevant, ["setAuthority"]);
-      assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
-        && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
-        "SOLANA_RESTORE_SEMANTICS", "restore attempt does not bind mint and former authority");
-      requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
-      break;
-    case "freezeAttempt":
-      requireKind(relevant, ["freezeAccount"]);
-      assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.freezeAuthority,
-        "SOLANA_FREEZE_SEMANTICS", "freeze attempt does not bind ATA, mint and former authority");
-      requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
-      break;
-  }
+function verifyCreateMint(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  requireKind(relevant, ["initializeMint", "initializeMint2"]);
+  assertCondition(relevant.mint === value.mintAddress && relevant.authority === value.mintAuthority && relevant.newAuthority === value.freezeAuthority && relevant.decimals === FIXTURE_DECIMALS,
+    "SOLANA_CREATE_SEMANTICS", "mint initialization does not bind mint, authorities and decimals");
+  requireSigners(fact, [value.payerAddress, value.mintAddress]);
+}
+
+function verifyRevokeFreeze(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  requireKind(relevant, ["setAuthority"]);
+  assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
+    && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
+  "SOLANA_REVOKE_SEMANTICS", "freeze revocation does not bind mint and former authority");
+  requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
+}
+
+function verifyCreateAta(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && ["raw", "create", "createIdempotent"].includes(relevant.kind), "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
+  const expectedPrefix = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress];
+  const exactParsedSemantics = relevant.kind !== "raw" && relevant.authority === value.payerAddress
+    && relevant.tokenAccount === value.tokenAccountAddress && relevant.owner === value.ownerAddress && relevant.mint === value.mintAddress;
+  const exactRawPrefix = relevant.kind === "raw" && expectedPrefix.every((address, index) => relevant.accounts[index] === address);
+  assertCondition((exactParsedSemantics || exactRawPrefix)
+    && [...expectedPrefix, CLASSIC_TOKEN_PROGRAM].every((address) => relevant.accounts.includes(address)),
+  "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
+  requireSigners(fact, [value.payerAddress]);
+}
+
+function verifyMint(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  requireKind(relevant, ["mintTo", "mintToChecked"]);
+  assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.mintAuthority && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
+    "SOLANA_MINT_SEMANTICS", "mint instruction does not bind mint, ATA, authority and amount");
+  requireSigners(fact, [value.payerAddress, value.mintAuthority]);
+}
+
+function verifyBurn(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  requireKind(relevant, ["burn", "burnChecked"]);
+  assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.ownerAddress && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
+    "SOLANA_BURN_SEMANTICS", "burn instruction does not bind mint, ATA, owner and amount");
+  requireSigners(fact, [value.payerAddress, value.ownerAddress]);
+}
+
+function verifyRestoreFreeze(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  requireKind(relevant, ["setAuthority"]);
+  assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
+    && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
+  "SOLANA_RESTORE_SEMANTICS", "restore attempt does not bind mint and former authority");
+  requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
+}
+
+function verifyFreeze(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  requireKind(relevant, ["freezeAccount"]);
+  assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.freezeAuthority,
+    "SOLANA_FREEZE_SEMANTICS", "freeze attempt does not bind ATA, mint and former authority");
+  requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
 }
 
 function relevantInstruction(fact: TransactionFact): InstructionFact {

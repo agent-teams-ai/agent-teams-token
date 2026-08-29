@@ -80,9 +80,11 @@ function parseDarwinCommand(command: string): readonly string[] {
 }
 
 async function ps(args: readonly string[]): Promise<string> {
-  return await new Promise((resolvePromise, reject) => execFile("/bin/ps", [...args], { encoding: "utf8", maxBuffer: 1024 * 1024 }, (cause, stdout) => {
-    if (cause) { reject(cause); } else if (stdout.trim().length === 0) { reject(new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "Darwin process identity is unavailable")); } else { resolvePromise(stdout); }
-  }));
+  return await new Promise((resolve, reject) => {
+    execFile("/bin/ps", [...args], { encoding: "utf8", maxBuffer: 1024 * 1024 }, (cause, stdout) => {
+      if (cause) { reject(cause); } else if (stdout.trim().length === 0) { reject(new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "Darwin process identity is unavailable")); } else { resolve(stdout); }
+    });
+  });
 }
 
 function digest(value: Uint8Array): string { return createHash("sha256").update(value).digest("hex"); }

@@ -28,10 +28,10 @@ test("two separately spawned real fixture processes hold distinct cross-process 
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-real-parallel-")); await chmod(boundary, 0o700);
   try {
     const script = join(repositoryRoot, "scripts/solana/local-fixture.ts");
-    const run = async (output: string): Promise<void> => await new Promise((resolvePromise, reject) => {
+    const run = async (output: string): Promise<void> => await new Promise((_resolve, reject) => {
       const child = spawn(process.execPath, [script, "--output", output], { cwd: repositoryRoot, stdio: ["ignore", "pipe", "pipe"] }); let diagnostics = "";
       child.stdout.on("data", (chunk) => { diagnostics += String(chunk); }); child.stderr.on("data", (chunk) => { diagnostics += String(chunk); });
-      child.once("close", (code) => { if (code === 0) { resolvePromise(); } else { reject(new Error(`fixture process exited ${code}: ${diagnostics}`)); } }); child.once("error", reject);
+      child.once("close", (code) => { if (code === 0) { _resolve(); } else { reject(new Error(`fixture process exited ${code}: ${diagnostics}`)); } }); child.once("error", reject);
     });
     await Promise.all([run(join(boundary, "one")), run(join(boundary, "two"))]);
   }

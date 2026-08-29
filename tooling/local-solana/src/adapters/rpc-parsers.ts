@@ -61,7 +61,7 @@ function decodeInstruction(value: unknown, instructionIndex: number, innerInstru
   const programId = string(instruction.programId, "instruction program ID");
   const rawAccounts = instruction.accounts === undefined ? [] : array(instruction.accounts, "instruction accounts").map((item) => string(item, "instruction account"));
   if (instruction.parsed === undefined) {
-    return semantic(programId, instructionIndex, innerInstructionIndex, "raw", rawAccounts, {});
+    return semantic({ programId, instructionIndex, innerInstructionIndex, kind: "raw", accounts: rawAccounts }, {});
   }
   const parsed = object(instruction.parsed, "parsed instruction");
   const kind = string(parsed.type, "instruction type");
@@ -74,7 +74,7 @@ function decodeInstruction(value: unknown, instructionIndex: number, innerInstru
     ?? (kind === "freezeAccount" ? info.freezeAuthority : undefined)
     ?? (programId === ASSOCIATED_TOKEN_PROGRAM ? info.source : undefined);
   const newAuthority = kind === "freezeAccount" ? undefined : info.newAuthority ?? info.freezeAuthority;
-  return semantic(programId, instructionIndex, innerInstructionIndex, kind, accounts, {
+  return semantic({ programId, instructionIndex, innerInstructionIndex, kind, accounts }, {
     mint: optionalString(info.mint), tokenAccount: optionalString(account), owner: optionalString(info.owner ?? info.wallet),
     authority: optionalString(authority),
     newAuthority: info.newAuthority === null ? null : optionalString(newAuthority), authorityType: optionalString(info.authorityType),
@@ -82,8 +82,10 @@ function decodeInstruction(value: unknown, instructionIndex: number, innerInstru
   });
 }
 
-function semantic(programId: string, instructionIndex: number, innerInstructionIndex: number | null, kind: string, accounts: readonly string[], partial: Partial<InstructionFact>): InstructionFact {
-  return { programId, instructionIndex, innerInstructionIndex, kind, accounts, mint: null, tokenAccount: null, owner: null, authority: null, newAuthority: null, authorityType: null, amountBaseUnits: null, decimals: null, ...partial };
+type InstructionLocation = Pick<InstructionFact, "programId" | "instructionIndex" | "innerInstructionIndex" | "kind" | "accounts">;
+
+function semantic(location: InstructionLocation, partial: Partial<InstructionFact>): InstructionFact {
+  return { ...location, mint: null, tokenAccount: null, owner: null, authority: null, newAuthority: null, authorityType: null, amountBaseUnits: null, decimals: null, ...partial };
 }
 
 function semanticAccounts(info: Record<string, unknown>): readonly string[] {

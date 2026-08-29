@@ -121,7 +121,7 @@ async function releaseAcquired(root: string, acquired: AcquiredLease): Promise<v
   if (record.pid !== process.pid || record.processStart !== await currentProcessStart(process.pid)) {
     throw new LocalSolanaError("SOLANA_PORT_LEASE_OWNER", "port lease no longer belongs to this process identity");
   }
-  await quarantineAndDelete(root, acquired.rootIdentity, acquired.directory, acquired.directoryIdentity, acquired.markerIdentity, acquired.token);
+  await quarantineAndDelete(root, acquired);
 }
 
 async function reclaimStale(root: string, rootIdentity: EntryIdentity, directory: string): Promise<void> {
@@ -137,7 +137,7 @@ async function reclaimStale(root: string, rootIdentity: EntryIdentity, directory
   const currentStart = await currentProcessStart(record.pid).catch(() => null);
   if (currentStart === record.processStart) { return; }
   await assertRootIdentity(root, rootIdentity);
-  await quarantineAndDelete(root, rootIdentity, directory, directoryIdentity, markerIdentity, record.token);
+  await quarantineAndDelete(root, { directory, rootIdentity, directoryIdentity, markerIdentity, token: record.token });
 }
 
 async function reclaimStaleLeases(root: string, rootIdentity: EntryIdentity): Promise<void> {
@@ -146,7 +146,8 @@ async function reclaimStaleLeases(root: string, rootIdentity: EntryIdentity): Pr
   }
 }
 
-async function quarantineAndDelete(root: string, rootIdentity: EntryIdentity, directory: string, directoryIdentity: EntryIdentity, markerIdentity: EntryIdentity, token: string): Promise<void> {
+async function quarantineAndDelete(root: string, lease: AcquiredLease): Promise<void> {
+  const { rootIdentity, directory, directoryIdentity, markerIdentity, token } = lease;
   await assertRootIdentity(root, rootIdentity);
   await validateLease(directory, directoryIdentity, markerIdentity, token);
   const quarantine = join(root, `.release-${token}`);
@@ -199,7 +200,7 @@ async function readMarker(directory: string): Promise<{ readonly identity: Entry
 function parseRecord(raw: unknown): LeaseRecord {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) { throw new LocalSolanaError("SOLANA_PORT_LEASE_INVALID", "port lease marker is invalid"); }
   const value = raw as Record<string, unknown>;
-  const exactKeys = Object.keys(value).sort().join(",") === "directoryDevice,directoryInode,kind,markerDevice,markerInode,pid,processStart,rootDevice,rootInode,schemaVersion,token";
+  const exactKeys = Object.keys(value).toSorted().join(",") === "directoryDevice,directoryInode,kind,markerDevice,markerInode,pid,processStart,rootDevice,rootInode,schemaVersion,token";
   const valid = exactKeys && value.schemaVersion === 1 && value.kind === KIND && typeof value.pid === "number" && Number.isSafeInteger(value.pid) && value.pid >= 1
     && typeof value.processStart === "string" && /^[a-z0-9:-]{1,128}$/u.test(value.processStart)
     && typeof value.token === "string" && /^[a-f0-9]{64}$/u.test(value.token)
@@ -238,7 +239,9 @@ async function currentProcessStart(pid: number): Promise<string> {
   // On Darwin PID plus the kernel-reported start timestamp distinguishes a recycled PID.
   if (process.platform === "darwin") {
     const { execFile } = await import("node:child_process");
-    const output = await new Promise<string>((resolvePromise, reject) => execFile("/bin/ps", ["-o", "lstart=", "-p", `${pid}`], { encoding: "utf8" }, (cause, stdout) => cause ? reject(cause) : resolvePromise(stdout.trim())));
+    const output = await new Promise<string>((_resolve, reject) => {
+      execFile("/bin/ps", ["-o", "lstart=", "-p", `${pid}`], { encoding: "utf8" }, (cause, stdout) => { if (cause) { reject(cause); } else { _resolve(stdout.trim()); } });
+    });
     if (output.length === 0) { throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "Darwin process start identity is unavailable"); }
     return `darwin:${Buffer.from(output).toString("hex")}`;
   }
@@ -247,8 +250,8 @@ async function currentProcessStart(pid: number): Promise<string> {
 }
 
 async function canListen(port: number): Promise<boolean> {
-  return await new Promise((resolvePromise) => {
-    const server = createServer(); server.unref(); server.once("error", () => resolvePromise(false));
-    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => { server.close((cause) => resolvePromise(cause === undefined)); });
+  return await new Promise((_resolve) => {
+    const server = createServer(); server.unref(); server.once("error", () => _resolve(false));
+    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => { server.close((cause) => _resolve(cause === undefined)); });
   });
 }

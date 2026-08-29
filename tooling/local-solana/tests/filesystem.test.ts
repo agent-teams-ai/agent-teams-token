@@ -84,8 +84,8 @@ test("real parent SIGKILL reclaim authenticates, terminates and awaits its valid
   const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   try {
     let ready: { readonly validatorPid: number; readonly runDirectory: string } | undefined;
-    for (let attempt = 0; attempt < 600 && ready === undefined && parent.exitCode === null; attempt += 1) { try { ready = JSON.parse(await readFile(readyPath, "utf8")); } catch { await new Promise((resolve) => setTimeout(resolve, 50)); } }
-    assert.ok(ready, `validator helper did not become ready: ${diagnostics}`); parent.kill("SIGKILL"); await new Promise<void>((resolve) => parent.once("close", () => resolve()));
+    for (let attempt = 0; attempt < 600 && ready === undefined && parent.exitCode === null; attempt += 1) { try { ready = JSON.parse(await readFile(readyPath, "utf8")); } catch { await new Promise((resolve) => { setTimeout(resolve, 50); }); } }
+    assert.ok(ready, `validator helper did not become ready: ${diagnostics}`); parent.kill("SIGKILL"); await new Promise<void>((resolve) => { parent.once("close", () => resolve()); });
     assert.equal(processAlive(ready.validatorPid), true);
     assert.equal(await new PrivateRunStore(runRoot, outputRoot).reclaimStale(), 1);
     assert.equal(processAlive(ready.validatorPid), false); assert.equal(processAlive(neighbour.pid!), true); await assert.rejects(lstat(ready.runDirectory));
