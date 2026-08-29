@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,7 +8,7 @@ import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
 import { checkedCommand, command, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
-import { createRunLease, reclaimStaleRuns, registerRunAnvil } from "./run-lease.ts";
+import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
 import { atomicWrite, ensurePrivateDirectory, ensurePrivateDirectoryPath, readRegularFile } from "./safe-fs.ts";
 import { assertPinnedSolcVersionOutput, pinnedSolcPath } from "./toolchain.ts";
@@ -24,8 +24,9 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   await reclaimStaleRuns(privateRoot);
   await ensurePrivateDirectoryPath(root, reportsRoot);
   const runId = `${Date.now().toString(36)}-${randomBytes(12).toString("hex")}`;
-  const runDirectory = await mkdtemp(join(privateRoot, `run-${runId}-`));
+  const runDirectory = await createProvisionalRunDirectory(privateRoot, runId);
   await ensurePrivateDirectory(runDirectory);
+  await faultPause("after-run-directory-before-lease");
   await createRunLease(runDirectory);
   await atomicWrite(join(runDirectory, "runner.pid"), Buffer.from(`${process.pid}\n`, "ascii"));
   let anvil: OwnedAnvil | undefined;
@@ -48,7 +49,12 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     anvil = await startOwnedAnvil(
       "anvil",
       wallet.address,
-      async (identity) => await registerRunAnvil(runDirectory, identity),
+      async (identity) => {
+        if (process.env.AGTMAI_LOCAL_EVM_FAULT === "after-anvil-spawn-before-registration") {
+          await faultPause("after-anvil-spawn-before-registration", {childIdentity: identity});
+        }
+        await registerRunAnvil(runDirectory, identity);
+      },
     );
     await atomicWrite(join(runDirectory, "anvil.pid"), Buffer.from(`${anvil.pid}\n`, "ascii"));
     if (interruptedSignal) {throw new LocalEvmError("LOCAL_EVM_INTERRUPTED", `interrupted by ${interruptedSignal}`);}
@@ -141,9 +147,15 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
     await anvil?.stop();
-    await rm(runDirectory, { recursive: true, force: true });
+    await removeOwnedRunDirectory(runDirectory);
     if (interruptedSignal) {process.exitCode = interruptedSignal === "SIGINT" ? 130 : 143;}
   }
+}
+
+async function faultPause(point: string, details: Record<string, unknown> = {}): Promise<void> {
+  if (process.env.AGTMAI_LOCAL_EVM_FAULT !== point) {return;}
+  process.stdout.write(`${JSON.stringify({faultPoint: point, pid: process.pid, ...details})}\n`);
+  await new Promise<void>(() => {});
 }
 
 export function privateRunRoot(repositoryRoot: string): string {

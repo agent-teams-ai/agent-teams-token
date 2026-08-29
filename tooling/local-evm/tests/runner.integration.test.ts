@@ -80,7 +80,7 @@ test("interrupting one run removes only its owned directory and does not affect 
   await assertNoPrivateRunDirectories();
 });
 
-test("a later run reclaims an exact Anvil orphan after runner SIGKILL", { timeout: 120_000 }, async () => {
+test("a later run reclaims a registered run after runner SIGKILL", { timeout: 120_000 }, async () => {
   await assertNoPrivateRunDirectories();
   const killed = start();
   await waitFor(async () => (await anvilPids()).length === 1, 30_000, "owned Anvil PID");
@@ -91,7 +91,7 @@ test("a later run reclaims an exact Anvil orphan after runner SIGKILL", { timeou
   assert.equal(killed.child.kill("SIGKILL"), true);
   const killedResult = await killed.result;
   assert.notEqual(killedResult.exitCode, 0);
-  assert.equal(processExists(orphanPid!), true, "SIGKILL must leave the child for recovery proof");
+  await waitFor(async () => await authenticateProcess(orphanIdentity) !== "owned", 15_000, "supervised Anvil termination");
 
   const recovered = await run();
   assert.equal(recovered.exitCode, 0, recovered.stderr);
@@ -101,8 +101,48 @@ test("a later run reclaims an exact Anvil orphan after runner SIGKILL", { timeou
   await assertNoPrivateRunDirectories();
 });
 
-function start(): { child: ChildProcessByStdio<null, Readable, Readable>; pid: number; result: Promise<RunResult> } {
-  const child = spawn(process.execPath, [runnerPath], { cwd: repositoryRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+test("supervisor closes the pre-registration SIGKILL window", {timeout: 120_000}, async () => {
+  await assertNoPrivateRunDirectories();
+  const killed = start({AGTMAI_LOCAL_EVM_FAULT: "after-anvil-spawn-before-registration"});
+  const fault = await waitForFault(killed, "after-anvil-spawn-before-registration", 30_000);
+  const identity = fault.childIdentity as {pid: number; processStart: string};
+  assert.equal(await authenticateProcess(identity), "owned");
+  assert.equal(killed.child.kill("SIGKILL"), true);
+  assert.notEqual((await killed.result).exitCode, 0);
+  await waitFor(async () => await authenticateProcess(identity) !== "owned", 15_000, "supervised Anvil termination");
+
+  const recovered = await run();
+  assert.equal(recovered.exitCode, 0, recovered.stderr);
+  rememberReport(lastJson(recovered.stdout));
+  assert.notEqual(await authenticateProcess(identity), "owned");
+  await assertNoPrivateRunDirectories();
+});
+
+test("a later run reclaims a killed markerless initializer", {timeout: 120_000}, async () => {
+  await assertNoPrivateRunDirectories();
+  const killed = start({AGTMAI_LOCAL_EVM_FAULT: "after-run-directory-before-lease"});
+  await waitForFault(killed, "after-run-directory-before-lease", 15_000);
+  const [directory] = await runDirectories();
+  assert(directory);
+  await assert.rejects(readFile(join(privateRoot, directory, "lease.v1.json")));
+  assert.equal(killed.child.kill("SIGKILL"), true);
+  assert.notEqual((await killed.result).exitCode, 0);
+
+  const recovered = await run();
+  assert.equal(recovered.exitCode, 0, recovered.stderr);
+  rememberReport(lastJson(recovered.stdout));
+  await assertNoPrivateRunDirectories();
+});
+
+interface StartedRun {
+  readonly child: ChildProcessByStdio<null, Readable, Readable>;
+  readonly pid: number;
+  readonly result: Promise<RunResult>;
+  stdout(): string;
+}
+
+function start(extraEnv: NodeJS.ProcessEnv = {}): StartedRun {
+  const child = spawn(process.execPath, [runnerPath], { cwd: repositoryRoot, env: {...process.env, ...extraEnv}, stdio: ["ignore", "pipe", "pipe"] });
   assert.notEqual(child.pid, undefined);
   const pid = child.pid!;
   activeChildren.add(child);
@@ -127,7 +167,7 @@ function start(): { child: ChildProcessByStdio<null, Readable, Readable>; pid: n
       resolve({ stdout, stderr, exitCode: timedOut ? 124 : code ?? (signal ? 128 : 1) });
     });
   });
-  return { child, pid, result };
+  return {child, pid, result, stdout: () => stdout};
 }
 
 interface RunResult { readonly stdout: string; readonly stderr: string; readonly exitCode: number }
@@ -147,6 +187,24 @@ async function readPid(path: string): Promise<number | undefined> {
 async function anvilPids(): Promise<number[]> {
   const values = await Promise.all((await runDirectories()).map((directory) => readPid(join(privateRoot, directory, "anvil.pid"))));
   return values.filter((value): value is number => value !== undefined);
+}
+
+async function waitForFault(started: StartedRun, point: string, timeout: number): Promise<Record<string, unknown>> {
+  let found: Record<string, unknown> | undefined;
+  await waitFor(async () => {
+    for (const line of started.stdout().trim().split(/\r?\n/u)) {
+      try {
+        const value = JSON.parse(line) as unknown;
+        if (value && typeof value === "object" && !Array.isArray(value)
+          && "faultPoint" in value && value.faultPoint === point) {
+          found = value as Record<string, unknown>;
+          return true;
+        }
+      } catch { /* continue */ }
+    }
+    return false;
+  }, timeout, point);
+  return found!;
 }
 
 async function assertNoPrivateRunDirectories(): Promise<void> {

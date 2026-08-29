@@ -1,13 +1,13 @@
-import { readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { lstat, mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { LocalEvmError } from "./model.ts";
 import {
   authenticateProcess,
   processStartIdentity,
-  terminateOwnedProcess,
   type OwnedProcessIdentity,
 } from "./process.ts";
-import { atomicWrite, ensurePrivateDirectory, readRegularFile } from "./safe-fs.ts";
+import { atomicWrite, readRegularFile, validatePrivateDirectory } from "./safe-fs.ts";
 
 const KIND = "agtmai-local-evm-run";
 const LEASE = "lease.v1.json";
@@ -28,6 +28,15 @@ export async function createRunLease(directory: string): Promise<void> {
   });
 }
 
+export async function createProvisionalRunDirectory(root: string, runId: string): Promise<string> {
+  if (!/^[A-Za-z0-9-]+$/u.test(runId)) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_ID_INVALID", "run ID cannot be encoded into its provisional identity");
+  }
+  const initializer = {pid: process.pid, processStart: await processStartIdentity(process.pid)};
+  const encodedStart = initializer.processStart.replace(":", "x");
+  return await mkdtemp(join(root, `run-init-${initializer.pid}-${encodedStart}-${runId}-`));
+}
+
 export async function registerRunAnvil(
   directory: string,
   anvil: OwnedProcessIdentity,
@@ -41,32 +50,64 @@ export async function registerRunAnvil(
   await writeLease(directory, { ...lease, anvil });
 }
 
-export async function reclaimStaleRuns(root: string): Promise<number> {
+interface ReclaimHooks { readonly afterDirectoryList?: (directory: string) => Promise<void> }
+
+interface ReclaimEntry {
+  readonly runName: string;
+  readonly claimedIdentity?: string;
+}
+
+export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): Promise<number> {
   let reclaimed = 0;
   for (const name of await readdir(root)) {
     // mkdtemp(3) suffixes are case-sensitive and may contain upper-case ASCII.
     // Accept exactly the portable alphabet it can emit while still refusing
     // unrelated entries under the private root.
-    if (!/^run-[A-Za-z0-9-]+$/u.test(name)) { continue; }
+    const entry = parseReclaimEntry(name);
+    if (entry === undefined) {continue;}
     const directory = join(root, name);
-    await ensurePrivateDirectory(directory);
-    const lease = await readLeaseAfterInitialization(directory);
+    const expectedDirectory = await existingDirectoryIdentity(directory);
+    if (expectedDirectory === undefined) {continue;}
+    if (entry.claimedIdentity !== undefined && entry.claimedIdentity !== expectedDirectory) {
+      throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_CHANGED", "abandoned claim no longer names the inode originally claimed");
+    }
+    let lease: RunLease;
+    try {
+      await validatePrivateDirectory(directory);
+      lease = await readLease(directory);
+    } catch (cause) {
+      if (await existingDirectoryIdentity(directory) === undefined) {continue;}
+      if (!(cause instanceof LocalEvmError) || cause.code !== "LOCAL_EVM_RUN_LEASE_ENOENT") {throw cause;}
+      if (!await provisionalIsStale(entry.runName)) {continue;}
+      await hooks.afterDirectoryList?.(directory);
+      const claim = await claimDirectory(directory, expectedDirectory);
+      if (claim === undefined) {continue;}
+      await validatePrivateDirectory(claim);
+      await assertProvisionalName(entry.runName);
+      await rm(claim, {recursive: true, force: false, maxRetries: 2});
+      reclaimed += 1;
+      continue;
+    }
     const runnerState = await authenticateProcess(lease.runner);
     if (runnerState === "owned") { continue; }
     if (runnerState === "ambiguous") {
       throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
     }
     if (lease.anvil !== null) {
-      await terminateOwnedProcess(lease.anvil);
+      const anvilState = await authenticateProcess(lease.anvil);
+      if (anvilState === "owned" || anvilState === "ambiguous") {
+        throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "supervisor did not close its owned Anvil; refusing unauthenticated cross-process termination");
+      }
     }
-    // Re-read the exact lease and directory immediately before deletion. A
-    // concurrently replaced or newly-owned run must fail closed.
-    const confirmed = await readLease(directory);
+    await hooks.afterDirectoryList?.(directory);
+    const claim = await claimDirectory(directory, expectedDirectory);
+    if (claim === undefined) {continue;}
+    await validatePrivateDirectory(claim);
+    const confirmed = await readLease(claim);
     if (JSON.stringify(confirmed) !== JSON.stringify(lease)) {
       throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "stale-run lease changed during reclamation");
     }
-    await ensurePrivateDirectory(directory);
-    await rm(directory, { recursive: true, force: false, maxRetries: 2 });
+    await rm(claim, { recursive: true, force: false, maxRetries: 2 });
     reclaimed += 1;
   }
   return reclaimed;
@@ -92,27 +133,87 @@ async function readLease(directory: string): Promise<RunLease> {
   return raw as unknown as RunLease;
 }
 
-/**
- * A parallel runner can observe the directory in the tiny interval between
- * mkdtemp() and the atomic lease rename. Give that authenticated initializer a
- * bounded grace period, while malformed or persistently partial directories
- * still fail closed instead of being deleted.
- */
-async function readLeaseAfterInitialization(directory: string): Promise<RunLease> {
-  const attempts = 100;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await readLease(directory);
-    } catch (cause) {
-      if (!(cause instanceof LocalEvmError)
-        || cause.code !== "LOCAL_EVM_RUN_LEASE_ENOENT"
-        || attempt === attempts - 1) {
-        throw cause;
-      }
-      await new Promise((resolve) => { setTimeout(resolve, 20); });
-    }
+async function provisionalIsStale(name: string): Promise<boolean> {
+  const initializer = await assertProvisionalName(name);
+  const state = await authenticateProcess(initializer);
+  if (state === "owned") {return false;}
+  if (state === "ambiguous") {
+    throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "run initializer identity is unavailable; preserving its directory");
   }
-  throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_ENOENT", "run lease initialization did not complete");
+  return true;
+}
+
+async function assertProvisionalName(name: string): Promise<OwnedProcessIdentity> {
+  const match = /^run-init-([1-9][0-9]*)-((?:linuxx[0-9]+)|(?:darwinx[a-f0-9]+))-[A-Za-z0-9-]+$/u.exec(name);
+  if (!match) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_INITIALIZER_INVALID", "markerless run has no authenticated initializer identity");
+  }
+  const encodedStart = match[2]!;
+  const processStart = encodedStart.startsWith("linuxx")
+    ? `linux:${encodedStart.slice("linuxx".length)}`
+    : `darwin:${encodedStart.slice("darwinx".length)}`;
+  const initializer = {pid: Number(match[1]), processStart};
+  if (!Number.isSafeInteger(initializer.pid)) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_INITIALIZER_INVALID", "markerless run initializer PID is invalid");
+  }
+  return initializer;
+}
+
+async function claimDirectory(directory: string, expectedIdentity: string): Promise<string | undefined> {
+  const entry = parseReclaimEntry(basename(directory));
+  if (entry === undefined) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_NAME_INVALID", "run directory cannot be represented by an atomic claim");
+  }
+  const encodedIdentity = expectedIdentity.replaceAll(":", "-");
+  const claim = join(dirname(directory), `.reclaim-v1-${encodedIdentity}-${process.pid}-${randomBytes(12).toString("hex")}-${entry.runName}`);
+  try {
+    await rename(directory, claim);
+    if (await directoryIdentity(claim) !== expectedIdentity) {
+      throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_CHANGED", "claimed run directory is not the inode that was validated");
+    }
+    return claim;
+  }
+  catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return undefined;}
+    throw cause;
+  }
+}
+
+export async function removeOwnedRunDirectory(directory: string): Promise<void> {
+  const expectedDirectory = await directoryIdentity(directory).catch((cause: unknown) => {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return undefined;}
+    throw cause;
+  });
+  if (expectedDirectory === undefined) {return;}
+  const claim = await claimDirectory(directory, expectedDirectory);
+  if (claim === undefined) {return;}
+  await validatePrivateDirectory(claim);
+  const lease = await readLease(claim);
+  const current = await processStartIdentity(process.pid);
+  if (lease.runner.pid !== process.pid || lease.runner.processStart !== current) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "refusing to delete a claimed directory not owned by this runner");
+  }
+  await rm(claim, {recursive: true, force: false, maxRetries: 2});
+}
+
+async function directoryIdentity(directory: string): Promise<string> {
+  const entry = await lstat(directory, {bigint: true});
+  return `${entry.dev}:${entry.ino}:${entry.birthtimeNs}`;
+}
+
+async function existingDirectoryIdentity(directory: string): Promise<string | undefined> {
+  try {return await directoryIdentity(directory);}
+  catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return undefined;}
+    throw cause;
+  }
+}
+
+function parseReclaimEntry(name: string): ReclaimEntry | undefined {
+  if (/^run-[A-Za-z0-9-]+$/u.test(name)) {return {runName: name};}
+  const claim = /^\.reclaim-v1-([0-9]+)-([0-9]+)-([0-9]+)-[1-9][0-9]*-[0-9a-f]{24}-(run-[A-Za-z0-9-]+)$/u.exec(name);
+  if (!claim) {return undefined;}
+  return {runName: claim[4]!, claimedIdentity: `${claim[1]}:${claim[2]}:${claim[3]}`};
 }
 
 function isIdentity(value: unknown): value is OwnedProcessIdentity {

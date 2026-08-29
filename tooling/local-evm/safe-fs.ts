@@ -44,6 +44,30 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
   await ensureDirectoryComponent(resolve(path), true);
 }
 
+export async function validatePrivateDirectory(path: string): Promise<void> {
+  const absolute = resolve(path);
+  const parent = dirname(absolute);
+  if (await realpath(parent).catch(() => null) !== parent) {
+    throw new LocalEvmError("LOCAL_EVM_DIRECTORY_PATH_SUBSTITUTION", `${absolute} parent is absent or substituted`);
+  }
+  let handle;
+  try {
+    handle = await open(absolute, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const entry = await handle.stat();
+    const expectedOwner = process.getuid?.();
+    if (!entry.isDirectory() || (expectedOwner !== undefined && entry.uid !== expectedOwner)
+      || (entry.mode & 0o077) !== 0) {
+      throw new LocalEvmError("LOCAL_EVM_DIRECTORY_NOT_PRIVATE", `${absolute} must be an owned mode-0700 directory`);
+    }
+  } catch (cause) {
+    if (cause instanceof LocalEvmError) {throw cause;}
+    const error = cause as NodeJS.ErrnoException;
+    throw new LocalEvmError(`LOCAL_EVM_DIRECTORY_${error.code ?? "OPEN_FAILED"}`, `${absolute} could not be validated without creating it`);
+  } finally {
+    await handle?.close();
+  }
+}
+
 async function ensureDirectoryComponent(absolute: string, requirePrivate: boolean): Promise<void> {
   const parent = dirname(absolute);
   if (await realpath(parent).catch(() => null) !== parent) {
