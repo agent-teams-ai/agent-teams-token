@@ -38,7 +38,9 @@ export function dockerRunArguments(paths: ContainerPaths): readonly string[] {
     ...securityPrelude,
     "targets=$(tr '\\n' ' ' < /input/tooling/security/slither/targets.txt)",
     "test -n \"$targets\"",
+    "printf '%s\\n' compiler-build > /output/failure.stage",
     "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc /tools/forge build --skip test --skip script --use /tools/solc $targets",
+    "printf '%s\\n' analyzer-runtime > /output/failure.stage",
     "set +e",
     "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc slither . --fail-pedantic --foundry-ignore-compile --foundry-out-directory /work/out --foundry-build-info-directory /work/out/build-info --config-file /input/tooling/security/slither/slither.config.json --json /work/gate-output/slither.json",
     "slither_status=$?",
@@ -51,9 +53,11 @@ export function dockerRunArguments(paths: ContainerPaths): readonly string[] {
     "set -e",
     "printf '%s\\n' \"$inventory_status\" > /work/gate-output/slither-inventory.exit",
     "test -s /work/gate-output/slither-inventory.json",
+    "printf '%s\\n' artifact-export > /output/failure.stage",
     "cp /work/out/AGTMAIToken.sol/AGTMAIToken.json /work/gate-output/AGTMAIToken.json",
     "cp /work/out/build-info/*.json /work/gate-output/build-info.json",
     "cp /work/gate-output/* /output/",
+    "rm /output/failure.stage",
   ].join("\n");
   return hardenedDockerArguments(paths, script);
 }
@@ -61,7 +65,9 @@ export function dockerRunArguments(paths: ContainerPaths): readonly string[] {
 export function dockerVulnerableFixtureArguments(paths: ContainerPaths): readonly string[] {
   const script = [
     ...securityPrelude,
+    "printf '%s\\n' compiler-build > /output/failure.stage",
     "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc /tools/forge build --skip test --skip script --use /tools/solc src/Vulnerable.sol",
+    "printf '%s\\n' analyzer-runtime > /output/failure.stage",
     "set +e",
     "FOUNDRY_OUT=/work/out FOUNDRY_CACHE_PATH=/work/cache FOUNDRY_BUILD_INFO_PATH=/work/out/build-info SOLC=/tools/solc slither . --fail-pedantic --foundry-ignore-compile --foundry-out-directory /work/out --foundry-build-info-directory /work/out/build-info --config-file /input/tooling/security/slither/slither.config.json --json /work/gate-output/slither.json",
     "slither_status=$?",
@@ -69,6 +75,7 @@ export function dockerVulnerableFixtureArguments(paths: ContainerPaths): readonl
     "printf '%s\\n' \"$slither_status\" > /work/gate-output/slither.exit",
     "test -s /work/gate-output/slither.json",
     "cp /work/gate-output/* /output/",
+    "rm /output/failure.stage",
   ].join("\n");
   return hardenedDockerArguments(paths, script);
 }

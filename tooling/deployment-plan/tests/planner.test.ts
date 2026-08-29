@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { runUnsignedPlanner, type PlannerInput } from "../src/composition/index.ts";
 import type { TrustRoots } from "../src/application/ports.ts";
-import { sha256Hex } from "../src/domain/identity.ts";
+import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
 
 const source = "contract X {}";
 const settings = {
@@ -77,6 +77,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "1",
   buildInfoSolcVersion: "0.8.36",
+  compilerInputSha256: sha256Hex(canonicalJson(build.input)),
   compilerSettings: settings,
   artifactSha256: sha256Hex(artifactBytes),
   abiSha256: sha256Hex(abiBytes),

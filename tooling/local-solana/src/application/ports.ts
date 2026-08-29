@@ -1,4 +1,4 @@
-import type { AccountState, FixtureObservations, TokenAccountState, TransactionFact } from "../domain/model.ts";
+import type { AccountState, FailureEvidenceReport, FixtureObservations, TokenAccountState, TransactionFact } from "../domain/model.ts";
 
 export interface ToolPaths {
   readonly solana: string;
@@ -71,6 +71,7 @@ export interface RunStorePort {
   registerValidator(paths: RunPaths, identity: ValidatorIdentity): Promise<void>;
   reclaimStale(): Promise<number>;
   publish(report: FixtureObservations, verified: unknown): Promise<{ readonly jsonPath: string; readonly markdownPath: string }>;
+  publishFailure(report: FailureEvidenceReport): Promise<{ readonly jsonPath: string; readonly markdownPath: string }>;
 }
 
 export interface CliExecutionContext {

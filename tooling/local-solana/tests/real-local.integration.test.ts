@@ -11,8 +11,14 @@ const platform = process.platform === "linux" && process.arch === "x64" ? "linux
   : process.platform === "darwin" && process.arch === "arm64" ? "darwin-arm64" : null;
 const binaryRoot = platform === null ? null : join(repositoryRoot, `.tools/agave-v4.2.1-${platform}/bin`);
 const available = binaryRoot !== null && await Promise.all(["solana", "solana-keygen", "solana-test-validator", "spl-token"].map(async (name) => await access(join(binaryRoot, name)).then(() => true, () => false))).then((values) => values.every(Boolean));
+const required = process.env.AGTMAI_SOLANA_REAL_TESTS_REQUIRED === "1";
 
-test("real local validator completes mint-burn-negative-authority lifecycle", { skip: available ? false : "checksum-pinned Agave fixture binaries are not installed" }, async () => {
+test("strict CI mode requires every checksum-pinned Solana fixture binary", { skip: required ? false : "strict real-binary mode is CI-only" }, () => {
+  assert.equal(available, true, "AGTMAI_SOLANA_REAL_TESTS_REQUIRED=1 but pinned fixture binaries are unavailable");
+});
+
+test("real local validator completes mint-burn-negative-authority lifecycle", { skip: available ? false : required ? false : "checksum-pinned Agave fixture binaries are not installed" }, async () => {
+  assert.equal(available, true);
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-real-local-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
   try {
     await main(["--output", output]);
@@ -24,7 +30,8 @@ test("real local validator completes mint-burn-negative-authority lifecycle", { 
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
 
-test("two separately spawned real fixture processes hold distinct cross-process leases", { skip: available ? false : "checksum-pinned Agave fixture binaries are not installed" }, async () => {
+test("two separately spawned real fixture processes hold distinct cross-process leases", { skip: available ? false : required ? false : "checksum-pinned Agave fixture binaries are not installed" }, async () => {
+  assert.equal(available, true);
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-real-parallel-")); await chmod(boundary, 0o700);
   try {
     const script = join(repositoryRoot, "scripts/solana/local-fixture.ts");

@@ -79,7 +79,7 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
     );
     const before = await closure(repositoryRoot, productionClosure);
     const result = await processPort.run(dockerPath, dockerRunArguments({ input: inputDirectory, output: rawOutput, forge: forgePath, solc: solcPath, containerName, ...imageEnvironment }), 600_000);
-    assertContainerResult(result);
+    await assertContainerResult(result, rawOutput);
     await verifyVersions(rawOutput);
     const after = await closure(repositoryRoot, productionClosure);
     if (JSON.stringify(before) !== JSON.stringify(after)) {
@@ -162,7 +162,7 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
     }),
     600_000,
   );
-  assertContainerResult(result);
+  await assertContainerResult(result, output);
   await verifyVersions(output);
   const parsed = await parseSlitherJson(await readFile(join(output, "slither.json"), "utf8"), input);
   const status = parseSlitherExit(await readFile(join(output, "slither.exit"), "utf8"));
@@ -214,11 +214,24 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   };
 }
 
-function assertContainerResult(result: { readonly timedOut: boolean; readonly exitCode: number | null }): void {
+async function assertContainerResult(
+  result: { readonly timedOut: boolean; readonly exitCode: number | null },
+  output: string,
+): Promise<void> {
   if (result.timedOut) {
     throw new SlitherGateError("CONTAINER_TIMEOUT", "container exceeded the bounded analysis timeout");
   }
   if (result.exitCode !== 0) {
+    const stage = await readFile(join(output, "failure.stage"), "utf8").then((value) => value.trim(), () => "");
+    if (stage === "compiler-build") {
+      throw new SlitherGateError("COMPILER_BUILD_FAILED", "pinned compiler build failed");
+    }
+    if (stage === "analyzer-runtime") {
+      throw new SlitherGateError("ANALYZER_RUNTIME_FAILED", "pinned Slither runtime failed");
+    }
+    if (stage === "artifact-export") {
+      throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "fresh compiler artifacts could not be exported");
+    }
     throw new SlitherGateError("CONTAINER_FAILED", "container analysis command failed");
   }
 }

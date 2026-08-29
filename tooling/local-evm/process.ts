@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import { LocalEvmError } from "./model.ts";
 
@@ -95,21 +96,40 @@ export interface OwnedAnvil {
   stop(): Promise<void>;
 }
 
-export async function startOwnedAnvil(executable: string, fundedAddress: string): Promise<OwnedAnvil> {
+export interface OwnedProcessIdentity {
+  readonly pid: number;
+  readonly processStart: string;
+}
+
+export async function startOwnedAnvil(
+  executable: string,
+  fundedAddress: string,
+  registerIdentity?: (identity: OwnedProcessIdentity) => Promise<void>,
+): Promise<OwnedAnvil> {
   const child = spawn(executable, [
     "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
     "--fund-accounts", `${fundedAddress}:1000000000000000000`,
   ], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+  if (child.pid === undefined) {
+    // A spawn error (for example ENOENT) owns no OS process. Reuse the
+    // startup observer so the original error is delivered without waiting on
+    // a close event that Node does not guarantee for an unspawned child.
+    await listeningUrl(child);
+    throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
+  }
+  try {
+    const identity = { pid: child.pid, processStart: await processStartIdentity(child.pid) };
+    await registerIdentity?.(identity);
+  } catch (cause) {
+    await stopExactChild(child);
+    throw cause;
+  }
   let rpcUrl: string;
   try {
     rpcUrl = await listeningUrl(child);
   } catch (cause) {
     await stopExactChild(child);
     throw cause;
-  }
-  if (child.pid === undefined) {
-    await stopExactChild(child);
-    throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
   }
   let stopPromise: Promise<void> | undefined;
   return {
@@ -120,6 +140,75 @@ export async function startOwnedAnvil(executable: string, fundedAddress: string)
       return stopPromise;
     },
   };
+}
+
+export async function processStartIdentity(pid: number): Promise<string> {
+  if (process.platform === "linux") {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const end = stat.lastIndexOf(")");
+    const field = end < 0 ? undefined : stat.slice(end + 2).trim().split(/\s+/u)[19];
+    if (field === undefined || !/^[0-9]+$/u.test(field)) {
+      throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY", "Linux process start identity is unavailable");
+    }
+    return `linux:${field}`;
+  }
+  if (process.platform === "darwin") {
+    const output = await new Promise<string>((resolve, reject) => {
+      execFile("/bin/ps", ["-o", "lstart=", "-p", `${pid}`], { encoding: "utf8" }, (cause, stdout) => {
+        if (cause) { reject(cause); } else { resolve(stdout); }
+      });
+    });
+    if (output.trim().length === 0) {
+      throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY", "Darwin process start identity is unavailable");
+    }
+    return `darwin:${Buffer.from(output.trim()).toString("hex")}`;
+  }
+  throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY", "cross-process identity is unsupported on this platform");
+}
+
+export function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; }
+}
+
+export async function terminateOwnedProcess(identity: OwnedProcessIdentity): Promise<void> {
+  const state = await authenticateProcess(identity);
+  if (state === "absent" || state === "reused") { return; }
+  if (state === "ambiguous") {
+    throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY_AMBIGUOUS", "refusing to terminate a live PID whose start identity is unavailable");
+  }
+  process.kill(identity.pid, "SIGTERM");
+  if (!await waitForProcessExit(identity.pid, 5_000)) {
+    const again = await authenticateProcess(identity);
+    if (again !== "owned") {
+      if (again === "absent" || again === "reused") { return; }
+      throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY_AMBIGUOUS", "refusing SIGKILL after process identity became ambiguous");
+    }
+    process.kill(identity.pid, "SIGKILL");
+    if (!await waitForProcessExit(identity.pid, 5_000)) {
+      throw new LocalEvmError("LOCAL_EVM_PROCESS_STOP_TIMEOUT", `owned process ${identity.pid} did not exit after SIGKILL`);
+    }
+  }
+}
+
+export async function authenticateProcess(
+  identity: OwnedProcessIdentity,
+): Promise<"owned" | "absent" | "reused" | "ambiguous"> {
+  if (!processAlive(identity.pid)) { return "absent"; }
+  try {
+    return await processStartIdentity(identity.pid) === identity.processStart ? "owned" : "reused";
+  } catch {
+    return processAlive(identity.pid) ? "ambiguous" : "absent";
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processAlive(pid)) { return true; }
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+  }
+  return !processAlive(pid);
 }
 
 type AnvilChild = ChildProcessByStdio<null, Readable, Readable>;

@@ -24,6 +24,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       tools: new PinnedToolResolver(repositoryRoot, command), command, validator: new OwnedValidatorAdapter(), rpc: new JsonRpcAdapter(),
       cli: new SolanaCliAdapter(command), store: new PrivateRunStore(runRoot, outputRoot), ports: new LoopbackPortAllocator(),
       authorityTransactions: new Ed25519AuthorityTransactionAdapter(),
+      environment: process.env,
     }, controller.signal);
     process.stdout.write(`${JSON.stringify({ status: "READY", ...result })}\n`);
   } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", interrupt); }

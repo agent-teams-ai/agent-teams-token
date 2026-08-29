@@ -22,6 +22,7 @@
     {"path":"tooling/security/slither/triage-ledger.schema.v1.json","sha256":"9800595693b0578607c9422022bcf7be989ef1626a05472afb882f371d676087"},
     {"path":"tooling/security/slither/evidence-report.schema.v1.json","sha256":"65f9eb1980f8aea30230b9cdd4cf27d4e3b91272f218c4ec6c343370c6060f3e"},
     {"path":"tooling/security/slither/output-failure.schema.v1.json","sha256":"6e54ad1eec051480dfd044d08ac458c83ba902afd3974fca911702f075d9ac93"},
+    {"path":"tooling/security/slither/tool-failure.schema.v1.json","sha256":"0a3b6f1c7ce7ce72ea69f28ce0c1ba72e0e55822609eed5909341ca477b0167f"},
     {"path":"tooling/security/slither/environment-failure.schema.v1.json","sha256":"1f6f8e57eeb667242a4d6a968f98a05e752d7fc85ffd8705f40d5b93406370a1"}
   ],
   "compiler": {"version":"0.8.36+commit.8a079791","evmVersion":"paris","optimizerEnabled":true,"optimizerRuns":200,"bytecodeHash":"ipfs","cborMetadata":true,"useLiteralContent":false,"viaIR":false,"experimental":false,"remappings":["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"]},

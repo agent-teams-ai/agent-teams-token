@@ -1,7 +1,7 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { atomicWrite, readRegularFile } from "./safe-fs.ts";
-import { canonicalJson, keccak256, sha256, strip0x } from "./crypto.ts";
+import { canonicalJson, keccak256, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { assertConstructorInputs, constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_SOURCE_SHA256, asError, LocalEvmError, type ApprovedBuildProfile, type DeploymentReport, type EvidenceCheck, type VerificationEvidence, type VerificationInput } from "./model.ts";
@@ -224,12 +224,12 @@ function safeDiagnosticCode(value: string): string {
 }
 
 function assertDeploymentReport(value: DeploymentReport, input: VerificationInput): void {
-  const keys = ["buildInfoSha256", "chainId", "constructorInputsSha256", "contractArtifactSha256", "creationInputSha256", "deployerAddress", "factoryAddress", "localFixtureArtifactSha256", "schemaVersion", "targetAddress", "transactionHash"];
+  const keys = ["buildInfoSha256", "chainId", "constructorInputsSha256", "contractArtifactSha256", "creationInputBytesSha256", "deployerAddress", "factoryAddress", "localFixtureArtifactSha256", "schemaVersion", "targetAddress", "transactionHash"];
   if (!isRecord(value) || !exactKeys(value, keys) || value.schemaVersion !== 1 || value.chainId !== "31337"
     || value.targetAddress !== input.targetAddress || value.deployerAddress !== input.deployerAddress || value.factoryAddress !== null
     || !TRANSACTION.test(value.transactionHash) || value.localFixtureArtifactSha256 !== input.approvedArtifactSha256
     || value.buildInfoSha256 !== input.expectedBuildInfoSha256 || value.contractArtifactSha256 !== input.expectedContractArtifactSha256
-    || value.constructorInputsSha256 !== input.expectedConstructorInputsSha256 || !/^0x[0-9a-f]{64}$/.test(value.creationInputSha256)) {
+    || value.constructorInputsSha256 !== input.expectedConstructorInputsSha256 || !/^0x[0-9a-f]{64}$/.test(value.creationInputBytesSha256)) {
     throw new LocalEvmError("VERIFY_DEPLOYMENT_REPORT_MISMATCH", "deployment report does not match independently supplied facts");
   }
 }
@@ -396,7 +396,7 @@ async function verifyDirectCreation(rpc: RpcClient, deployment: DeploymentReport
   const transaction = await rpc.request("eth_getTransactionByHash", [deployment.transactionHash]);
   const receipt = await rpc.request("eth_getTransactionReceipt", [deployment.transactionHash]);
   if (!isRecord(transaction) || transaction.input !== expectedCreationInput
-    || sha256(expectedCreationInput) !== deployment.creationInputSha256) {
+    || sha256HexBytes(expectedCreationInput) !== deployment.creationInputBytesSha256) {
     throw new LocalEvmError("VERIFY_CREATION_INPUT_MISMATCH", "transaction creation input differs from exact build-info bytecode and manifest constructor arguments");
   }
   if (transaction.hash !== deployment.transactionHash || transaction.from !== input.deployerAddress

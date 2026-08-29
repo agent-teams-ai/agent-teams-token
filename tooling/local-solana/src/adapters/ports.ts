@@ -135,8 +135,7 @@ async function reclaimStale(root: string, rootIdentity: EntryIdentity, directory
     markerIdentity = snapshot.identity;
     record = snapshot.record;
   } catch { return; }
-  const currentStart = await processStartIdentity(record.pid).catch(() => null);
-  if (currentStart === record.processStart) { return; }
+  if (!await leaseOwnerIsProvablyStale(record.pid, record.processStart)) { return; }
   await assertRootIdentity(root, rootIdentity);
   await quarantineAndDelete(root, { directory, rootIdentity, directoryIdentity, markerIdentity, token: record.token });
 }
@@ -229,6 +228,24 @@ async function rollbackEmptyDirectory(directory: string, expected: EntryIdentity
 }
 function identity(entry: { readonly dev: bigint; readonly ino: bigint }): EntryIdentity { return { dev: entry.dev, ino: entry.ino }; }
 function sameIdentity(left: EntryIdentity, right: EntryIdentity): boolean { return left.dev === right.dev && left.ino === right.ino; }
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; }
+}
+
+export async function leaseOwnerIsProvablyStale(
+  pid: number,
+  recordedStart: string,
+  readIdentity: (candidate: number) => Promise<string> = processStartIdentity,
+  alive: (candidate: number) => boolean = processAlive,
+): Promise<boolean> {
+  if (!alive(pid)) { return true; }
+  try { return await readIdentity(pid) !== recordedStart; }
+  catch {
+    // A live PID with unreadable identity is ambiguous, not stale.
+    return !alive(pid);
+  }
+}
 
 async function canListen(port: number): Promise<boolean> {
   return await new Promise((_resolve) => {

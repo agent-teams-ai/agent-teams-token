@@ -149,6 +149,7 @@ jobs:
         shell: bash
         env:
           SOLANA_EVIDENCE_DIRECTORY: /tmp/agtmai-solana-evidence-${{ github.sha }}
+          AGTMAI_SOLANA_REAL_TESTS_REQUIRED: "1"
         run: |
           source scripts/env.sh
           pnpm test:local-solana

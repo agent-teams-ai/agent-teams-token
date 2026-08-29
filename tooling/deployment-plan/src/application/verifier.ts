@@ -127,6 +127,7 @@ function validatePlanTrust(plan: StablePlan, roots: TrustRoots): void {
     || identity.abiSha256 !== roots.abiSha256
     || identity.fixtureSha256 !== roots.fixtureSha256
     || identity.fixtureReadySha256 !== roots.fixtureReadySha256
+    || identity.compilerInputSha256 !== roots.compilerInputSha256
     || identity.constructorArgumentsHash !== roots.constructorArgumentsHash
     || identity.creationInputHash !== roots.creationInputHash
   ) {
@@ -155,6 +156,7 @@ function validateBuildBindings(plan: StablePlan, expected: ApprovedArtifact): vo
     fixtureSha256: expected.fixtureSha256,
     sourceDependencyClosure: expected.sourceDependencyClosure,
     buildInfoSolcVersion: expected.buildInfoSolcVersion,
+    compilerInputSha256: expected.compilerInputSha256,
     compilerSettings: expected.compilerSettings,
     creationBytecodeHash: expected.creationBytecodeHash,
     constructorAbiBytes: expected.constructorAbiBytes,

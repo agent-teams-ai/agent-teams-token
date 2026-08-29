@@ -15,6 +15,11 @@ and `solcLongVersion` as that short value, so this feature does not claim that
 build-info proves the `+commit.8a079791` suffix. The separately pinned and
 checksum-verified Forge/solc toolchain boundary enforces that long compiler
 identity before a fresh build is admitted.
+The trust roots also bind the SHA-256 of the complete canonical Solidity
+compiler input, including every source body, remapping, library map, optimizer
+detail, metadata option, IR flag and output selection. The smaller normalized
+settings object remains a readable policy view, but it cannot replace the full
+compiler-input identity.
 The RPC port has five read-only methods, rejects redirects and final-URL
 changes, and cannot accept public hosts. There is deliberately no wallet,
 signer, key, raw-transaction, deploy, transaction-send, or broadcast surface.
@@ -26,6 +31,10 @@ exchange evidence.
 
 Bundles are assembled READY-last in an unguessable owned staging directory,
 validated there, and atomically renamed into place as a complete directory.
+Before rename the held staging directory is synchronised to durable storage;
+after rename its owned parent directory is synchronised as well. A failure at
+either durability boundary fails closed and is covered by injected-failure
+tests.
 No bundle leaf is written after publication. The held staging identity and the
 exact bytes are checked again after rename, so check/open, rename, substitution,
 and ABA races cannot produce a bundle that publication reports as accepted.
@@ -65,4 +74,6 @@ The real integration test is enabled only when all three test-only tool paths
 are supplied: `AGTMAI_ANVIL_BINARY`, `AGTMAI_FORGE_BINARY`, and
 `AGTMAI_SOLC_BINARY`. It performs a fresh isolated Forge build and feeds the
 resulting artifact and build-info into the actual unsigned planner. Supplying
-only a subset is a configuration failure, not a skip.
+only a subset is a configuration failure, not a skip. Anvil selects its owned
+listener atomically with `--port 0`; the test parses that exact loopback
+listener instead of probing and releasing a port before process startup.

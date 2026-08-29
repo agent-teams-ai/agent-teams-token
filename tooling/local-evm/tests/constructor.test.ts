@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { encodeConstructorArguments, reconstructCreationInput } from "../constructor.ts";
+import { sha256HexBytes } from "../crypto.ts";
 import type { ConstructorInputs } from "../model.ts";
 
 const inputs: ConstructorInputs = {
@@ -32,6 +33,13 @@ test("shared constructor encoder produces exact ABI words and build-info creatio
   assert.equal(
     reconstructCreationInput(build, { bytecode: { object: "0x6000" } }, inputs),
     `0x6000${expectedArguments.slice(2)}`,
+  );
+});
+
+test("creation-input SHA-256 hashes decoded bytes with the cross-tool golden vector", () => {
+  assert.equal(
+    sha256HexBytes("0x01020304"),
+    "0x9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
   );
 });
 

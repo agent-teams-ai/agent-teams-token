@@ -119,22 +119,24 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 ## In progress
 
-- The accepted zero-cost-slices candidate retains nine P2 and six P3 follow-ups.
-  The highest-value next work is Foundation changed-scan routing, unified
-  creation-input hashing, authenticated local-EVM orphan cleanup, owned Anvil
-  test ports, derived Slither evidence/summary validation, fail-closed Solana
-  lease and publication binding, and sanitized post-mutation failure evidence.
-  The full adjudication is in
-  `docs/research/NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`. None grants
-  permission for public deployment.
+- All nine retained P2 and six P3 zero-cost-slice findings now have a locally
+  green remediation candidate. It adds Foundation full-scan routing, decoded-
+  byte creation-input hashing, authenticated local-EVM orphan recovery, owned
+  dynamic Anvil ports, durable deployment publication, full compiler-input
+  identity, independently derived Slither evidence, fail-closed Solana lease
+  and publication binding, sanitized post-mutation failure evidence, strict
+  real-Solana CI and one canonical Slither job. The remaining acceptance work is
+  a clean exact-SHA GitHub run plus repeated specialist and holistic reviews of
+  that same SHA. This still grants no permission for public deployment.
 - Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
   constructor gas, every additional contract, live fees, total-cost guard and
   unsigned-plan review must be completed before any public broadcast. The
   current cheap local core estimate is not a whole-launch estimate.
 - The three zero-cost follow-up slices (local SPL fixture, unsigned Ethereum
   deployment-cost plan and Slither/Linux security evidence) are implemented and
-  accepted for local/test-only use. Their retained P2/P3 improvements are the
-  next engineering-hardening queue; public-chain work remains separately gated.
+  accepted for local/test-only use. Their P2/P3 remediation is locally green but
+  awaits exact-SHA external acceptance; public-chain work remains separately
+  gated.
 
 ## Designed, not implemented
 

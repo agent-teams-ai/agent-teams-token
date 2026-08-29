@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { AnalysisInput, GateManifest, PolicyDecision } from "../domain/model.ts";
 import { sha256 } from "./fingerprint.ts";
 import { IMAGE, IMAGE_REVISION } from "./container-contract.ts";
-import { assertAnalysisEvidenceSemantics } from "./evidence-bundle.ts";
+import { assertAnalysisEvidenceSemantics, renderAnalysisSummary } from "./evidence-bundle.ts";
 import { assertSerializedAgainstSchema } from "./json-schema.ts";
 
 function canonical(value: unknown): unknown {
@@ -36,8 +36,8 @@ interface ReadyEvidenceRequest {
 interface FailureEvidenceRequest {
   readonly output: string;
   readonly candidateSha: string;
-  readonly category: "output-failure" | "environment-failure";
-  readonly exitCode: 40 | 50;
+  readonly category: "tool-failure" | "output-failure" | "environment-failure";
+  readonly exitCode: 30 | 40 | 50;
   readonly stage: string;
   readonly errorCode: string;
   readonly schemaDirectory: string;
@@ -68,8 +68,7 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
   const partial = join(output, "evidence.json.partial");
   await writeFile(partial, serialized, { mode: 0o600, flag: "wx" });
   await rename(partial, join(output, "evidence.json"));
-  const findingLines = findings.map((finding) => `- ${finding.impact} ${finding.detectorId} at ${finding.path}:${finding.start} (${finding.suppressed ? "suppressed" : finding.blocking ? "blocking" : "visible"})`);
-  const summary = [`# Slither security gate`, ``, `Result: ${decision.category} (exit ${decision.exitCode})`, `Findings: ${input.findings.length}; blocking: ${decision.blocking.length}; suppressed: ${decision.suppressed.length}`, `Targets: ${input.analyzedContracts.join(", ")}`, ...findingLines, ``].join("\n");
+  const summary = renderAnalysisSummary(evidence);
   await writeFile(join(output, "summary.md.partial"), summary, { mode: 0o600, flag: "wx" });
   await rename(join(output, "summary.md.partial"), join(output, "summary.md"));
   await request.assertReadyPrecondition();
@@ -86,7 +85,8 @@ export async function writeEnvironmentFailure(request: EnvironmentFailureRequest
 
 export async function writeFailureEvidence(request: FailureEvidenceRequest): Promise<void> {
   const { output, candidateSha, category, exitCode, stage, errorCode } = request;
-  if ((category === "output-failure") !== (exitCode === 40)) {throw new Error("failure category and exit code differ");}
+  const expectedExit = { "tool-failure": 30, "output-failure": 40, "environment-failure": 50 } as const;
+  if (expectedExit[category] !== exitCode) {throw new Error("failure category and exit code differ");}
   await mkdir(output, { recursive: false, mode: 0o700 });
   const info = await lstat(output); if (!info.isDirectory() || info.isSymbolicLink()) {throw new Error("evidence output is not an owned directory");}
   const value = { schemaVersion: 1, ready: true, candidateSha, execution: { platform: "linux/amd64", event: process.env.GITHUB_EVENT_NAME ?? "local", repository: process.env.GITHUB_REPOSITORY ?? "local", workflow: process.env.GITHUB_WORKFLOW ?? "local", job: process.env.GITHUB_JOB ?? "local", runId: process.env.GITHUB_RUN_ID ?? "local", runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1" }, image: IMAGE, category, exitCode, stage, errorCode, sanitised: true };

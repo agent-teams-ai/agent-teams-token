@@ -59,7 +59,7 @@ export interface DeploymentReport {
   readonly transactionHash: `0x${string}`;
   readonly deployerAddress: `0x${string}`;
   readonly factoryAddress: null;
-  readonly creationInputSha256: `0x${string}`;
+  readonly creationInputBytesSha256: `0x${string}`;
   readonly localFixtureArtifactSha256: `0x${string}`;
   readonly buildInfoSha256: `0x${string}`;
   readonly contractArtifactSha256: `0x${string}`;

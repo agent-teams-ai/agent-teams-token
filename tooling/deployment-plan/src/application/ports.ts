@@ -31,6 +31,7 @@ export interface TrustRoots {
   readonly quoteTtlSeconds: string;
   readonly maximumHeadLag: string;
   readonly buildInfoSolcVersion: string;
+  readonly compilerInputSha256: `0x${string}`;
   readonly compilerSettings: Record<string, unknown>;
   readonly artifactSha256: `0x${string}`;
   readonly abiSha256: `0x${string}`;
@@ -48,6 +49,7 @@ export interface ApprovedArtifact {
   readonly fixtureSha256: `0x${string}`;
   readonly sourceDependencyClosure: Readonly<Record<string, `0x${string}`>>;
   readonly buildInfoSolcVersion: string;
+  readonly compilerInputSha256: `0x${string}`;
   readonly compilerSettings: Record<string, unknown>;
   readonly creationBytecode: `0x${string}`;
   readonly creationBytecodeHash: `0x${string}`;

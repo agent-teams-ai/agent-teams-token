@@ -1,11 +1,13 @@
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { SlitherGateError } from "../domain/model.ts";
+import { sha256 } from "./fingerprint.ts";
 import { assertSerializedAgainstSchema } from "./json-schema.ts";
 
 const VARIANTS = {
   "evidence.json": ["READY", "evidence.json", "summary.md"],
   "environment-failure.json": ["READY", "environment-failure.json"],
+  "tool-failure.json": ["READY", "tool-failure.json"],
   "output-failure.json": ["READY", "output-failure.json"],
 } as const;
 
@@ -52,7 +54,14 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
   if (value.candidateSha !== request.candidateSha) {
     throw invalid("evidence candidate SHA differs from the upload candidate");
   }
-  if (variant === "evidence.json") {assertAnalysisEvidenceSemantics(value);}
+  if (variant === "evidence.json") {
+    assertAnalysisEvidenceSemantics(value);
+    await assertAcceptedPolicyInputs(value, request.schemaDirectory);
+    const summary = await readFile(join(request.output, "summary.md"), "utf8");
+    if (summary !== renderAnalysisSummary(value)) {
+      throw invalid("summary does not exactly match recomputed finding evidence");
+    }
+  }
 }
 
 export function assertAnalysisEvidenceSemantics(value: JsonObject): void {
@@ -95,13 +104,94 @@ function assertFindingClassifications(
 ): { readonly blocking: number } {
   const suppressed = findings.filter((finding) => object(finding, "finding").suppressed === true).length;
   const blocking = findings.filter((finding) => object(finding, "finding").blocking === true).length;
-  if (findings.some((finding) => {
-    const item = object(finding, "finding"); return item.blocking === true && item.suppressed === true;
-  })) {throw invalid("a finding cannot be both blocking and suppressed");}
-  if (analysis.suppressions !== suppressed || policy.suppressed !== suppressed || policy.blocking !== blocking) {
+  const errors = array(policy.errors, "policy.errors");
+  for (const finding of findings) {
+    const item = object(finding, "finding");
+    const shouldBlock = errors.length === 0 && item.suppressed === false
+      && (item.impact === "High" || item.impact === "Medium");
+    if (item.blocking !== shouldBlock) {
+      throw invalid("finding blocking status differs from recomputed severity policy");
+    }
+  }
+  const visible = errors.length > 0 ? findings.length : findings.length - suppressed;
+  if (analysis.suppressions !== suppressed || policy.suppressed !== suppressed
+    || policy.blocking !== blocking || policy.visible !== visible) {
     throw invalid("finding classifications differ from policy counts");
   }
   return { blocking };
+}
+
+export function renderAnalysisSummary(value: JsonObject): string {
+  const result = object(value.result, "result");
+  const analysis = object(value.analysis, "analysis");
+  const policy = object(value.policy, "policy");
+  const findings = array(analysis.findings, "analysis.findings").map((finding) => object(finding, "finding"));
+  const targets = array(analysis.observedTargets, "analysis.observedTargets");
+  if (targets.some((target) => typeof target !== "string")) { throw invalid("observed targets are malformed"); }
+  const findingLines = findings.map((finding) => {
+    const classification = finding.suppressed === true ? "suppressed" : finding.blocking === true ? "blocking" : "visible";
+    return `- ${finding.impact} ${finding.detectorId} at ${finding.path}:${finding.start} (${classification})`;
+  });
+  return [
+    "# Slither security gate", "",
+    `Result: ${result.category} (exit ${result.exitCode})`,
+    `Findings: ${findings.length}; blocking: ${policy.blocking}; suppressed: ${policy.suppressed}`,
+    `Targets: ${(targets as string[]).join(", ")}`,
+    ...findingLines,
+    "",
+  ].join("\n");
+}
+
+async function assertAcceptedPolicyInputs(value: JsonObject, directory: string): Promise<void> {
+  const inputs = object(value.inputs, "inputs");
+  const analysis = object(value.analysis, "analysis");
+  const findings = array(analysis.findings, "analysis.findings").map((finding) => object(finding, "finding"));
+  const files = {
+    configHash: "slither.config.json",
+    policyHash: "suppressions.v1.json",
+    triageHash: "triage.v1.json",
+  } as const;
+  const serialized = new Map<string, string>();
+  for (const [field, name] of Object.entries(files)) {
+    const bytes = await readFile(join(directory, name));
+    serialized.set(name, bytes.toString("utf8"));
+    const digest = `sha256:${sha256(bytes)}`;
+    if (inputs[field] !== digest) { throw invalid(`${field} differs from the accepted policy input`); }
+  }
+  await assertSerializedAgainstSchema(
+    serialized.get(files.policyHash)!,
+    join(directory, "suppression-ledger.schema.v1.json"),
+  );
+  await assertSerializedAgainstSchema(
+    serialized.get(files.triageHash)!,
+    join(directory, "triage-ledger.schema.v1.json"),
+  );
+  const suppressionDocument = JSON.parse(serialized.get(files.policyHash)!) as { suppressions: readonly { fingerprint: string }[] };
+  const suppressionValues = suppressionDocument.suppressions.map(({ fingerprint }) => fingerprint);
+  const suppressionFingerprints = new Set(suppressionValues);
+  if (suppressionFingerprints.size !== suppressionValues.length) {
+    throw invalid("accepted suppression ledger contains duplicate fingerprints");
+  }
+  for (const finding of findings) {
+    if (finding.suppressed !== suppressionFingerprints.has(String(finding.fingerprint))) {
+      throw invalid("finding suppression differs from the accepted suppression ledger");
+    }
+  }
+  if ([...suppressionFingerprints].some((fingerprint) => !findings.some((finding) => finding.fingerprint === fingerprint))) {
+    throw invalid("accepted suppression ledger contains an unused fingerprint");
+  }
+  const triageDocument = JSON.parse(serialized.get(files.triageHash)!) as { findings: readonly { fingerprint: string }[] };
+  const triageValues = triageDocument.findings.map(({ fingerprint }) => fingerprint).toSorted();
+  const lowerVisible = findings.filter((finding) => finding.suppressed === false
+    && ["Low", "Informational", "Optimization"].includes(String(finding.impact)))
+    .map((finding) => String(finding.fingerprint)).toSorted();
+  if (new Set(triageValues).size !== triageValues.length
+    || JSON.stringify(triageValues) !== JSON.stringify(lowerVisible)) {
+    throw invalid("accepted triage ledger must exactly cover visible lower-impact findings");
+  }
+  if (analysis.triaged !== lowerVisible.length) {
+    throw invalid("triaged finding count differs from independently derived findings");
+  }
 }
 
 function assertPolicyOutcome(category: string, policy: JsonObject, blocking: number, findingCount: number): void {

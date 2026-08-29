@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { test } from "node:test";
-import { startOwnedAnvil } from "../process.ts";
+import { processStartIdentity, startOwnedAnvil } from "../process.ts";
+import { reclaimStaleRuns } from "../run-lease.ts";
 
 const execute = promisify(execFile);
 const firstAddress = "0x7000000000000000000000000000000000000001";
@@ -74,6 +76,58 @@ test("concurrent stop callers share cleanup through forced termination", { timeo
     assert.equal(processExists(anvil.pid), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("stale-run recovery terminates only the exact recorded child identity", { timeout: 20_000 }, async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-reclaim-")));
+  // macOS mkdtemp() may emit upper-case characters in its random suffix.
+  const runDirectory = join(root, "run-dead-owner-Z9");
+  await mkdir(runDirectory, { mode: 0o700 });
+  const owned = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  assert(owned.pid && neighbour.pid);
+  try {
+    const anvil = { pid: owned.pid, processStart: await processStartIdentity(owned.pid) };
+    const staleRunnerStart = process.platform === "darwin" ? "darwin:00" : "linux:0";
+    await writeFile(join(runDirectory, "lease.v1.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agtmai-local-evm-run",
+      runner: { pid: process.pid, processStart: staleRunnerStart },
+      anvil,
+    })}\n`, { mode: 0o600 });
+    assert.equal(await reclaimStaleRuns(root), 1);
+    assert.equal(processExists(owned.pid), false);
+    assert.equal(processExists(neighbour.pid), true);
+    await assert.rejects(stat(runDirectory));
+  } finally {
+    if (processExists(owned.pid)) { owned.kill("SIGKILL"); }
+    if (processExists(neighbour.pid)) { neighbour.kill("SIGKILL"); }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("parallel recovery waits for an atomically initializing run lease", { timeout: 10_000 }, async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-initializing-")));
+  const runDirectory = join(root, "run-initializing-Z9");
+  await mkdir(runDirectory, { mode: 0o700 });
+  const processStart = await processStartIdentity(process.pid);
+  const writer = (async () => {
+    await delay(50);
+    await writeFile(join(runDirectory, "lease.v1.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agtmai-local-evm-run",
+      runner: { pid: process.pid, processStart },
+      anvil: null,
+    })}\n`, { mode: 0o600 });
+  })();
+  try {
+    assert.equal(await reclaimStaleRuns(root), 0);
+    await writer;
+    assert.equal((await stat(runDirectory)).isDirectory(), true);
+  } finally {
+    await writer.catch(() => {});
+    await rm(root, { recursive: true, force: true });
   }
 });
 

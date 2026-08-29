@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { after, before, test } from "node:test";
-import { canonicalJson, keccak256, sha256, strip0x } from "../crypto.ts";
+import { canonicalJson, keccak256, sha256, sha256HexBytes, strip0x } from "../crypto.ts";
 import { encodeConstructorArguments, reconstructCreationInput } from "../constructor.ts";
 import { encodeAllocationCommitment, readApprovedManifest } from "../manifest.ts";
 import { APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type DeploymentReport, type LocalManifest, type VerificationInput } from "../model.ts";
@@ -155,7 +155,7 @@ async function makeCase(): Promise<CaseContext> {
   await writeFile(constructorPath, constructorBytes);
   const deployment: DeploymentReport = {
     schemaVersion: 1, chainId: "31337", targetAddress, transactionHash, deployerAddress, factoryAddress: null,
-    creationInputSha256: sha256(creationInput), localFixtureArtifactSha256: APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256,
+    creationInputBytesSha256: sha256HexBytes(creationInput), localFixtureArtifactSha256: APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256,
     buildInfoSha256: sha256(await readFile(buildPath)), contractArtifactSha256: sha256(await readFile(artifactPath)), constructorInputsSha256: sha256(constructorBytes),
   };
   const deploymentPath = join(directory, "deployment-report.v1.json");
@@ -396,7 +396,7 @@ test("exact reconstructed creation input rejects unrelated initcode, trailing by
 
   context = await makeCase();
   const deployment = JSON.parse(await readFile(context.paths.deployment, "utf8")) as Record<string, unknown>;
-  deployment.creationInputSha256 = `0x${"00".repeat(32)}`;
+  deployment.creationInputBytesSha256 = `0x${"00".repeat(32)}`;
   const deploymentBytes = Buffer.from(canonicalJson(deployment));
   await writeFile(context.paths.deployment, deploymentBytes);
   (context.input as { expectedDeploymentReportSha256: string }).expectedDeploymentReportSha256 = sha256(deploymentBytes);

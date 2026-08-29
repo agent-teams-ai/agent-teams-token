@@ -12,6 +12,7 @@
   "quoteTtlSeconds": "60",
   "maximumHeadLag": "2",
   "buildInfoSolcVersion": "0.8.36",
+  "compilerInputSha256": "0x26cffc41d8fdf70a563bf43c91a74cc97f1dd4f7fbfe34873bd95ac0dc65349a",
   "compilerSettings": {
     "optimizer": { "enabled": true, "runs": 200 },
     "evmVersion": "paris",

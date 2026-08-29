@@ -181,6 +181,43 @@ test("exclusive output files cannot be overwritten", async () => {
   }
 });
 
+test("publication durably syncs staging before rename and parent after rename", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const operations: string[] = [];
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    async beforeStagingDirectorySync() { operations.push("before-staging-sync"); },
+    async afterStagingDirectorySync() { operations.push("after-staging-sync"); },
+    async beforePublishRename() { operations.push("before-rename"); },
+    async afterPublishRename() { operations.push("after-rename"); },
+    async beforeParentDirectorySync() { operations.push("before-parent-sync"); },
+    async afterParentDirectorySync() { operations.push("after-parent-sync"); },
+  });
+  try {
+    await claim.writeExclusive("READY", Buffer.from("ready"));
+    await claim.publish();
+    assert.deepEqual(operations, [
+      "before-staging-sync", "after-staging-sync", "before-rename",
+      "after-rename", "before-parent-sync", "after-parent-sync",
+    ]);
+  } finally {
+    await claim.close();
+  }
+});
+
+test("staging sync failure prevents publication", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    async beforeStagingDirectorySync() { throw new Error("injected staging sync failure"); },
+  });
+  try {
+    await claim.writeExclusive("READY", Buffer.from("ready"));
+    await assert.rejects(claim.publish(), /injected staging sync failure/u);
+    await assert.rejects(readFile(join(parent, "bundle", "READY")));
+  } finally {
+    await claim.close();
+  }
+});
+
 async function canonicalTemporaryDirectory(): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), "deployment-output-")));
 }

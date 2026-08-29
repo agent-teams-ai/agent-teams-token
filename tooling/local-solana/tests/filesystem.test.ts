@@ -21,7 +21,8 @@ test("private store deletes keys and ledger while retaining READY-last sanitized
     const store = new PrivateRunStore(runs, output); const paths = await store.create();
     await writeFile(paths.payerKey, "SENTINEL_SECRET"); await chmod(paths.payerKey, 0o600);
     await store.cleanup(paths); await assert.rejects(lstat(paths.directory));
-    const published = await store.publish({} as never, report());
+    const observations = observationFixture();
+    const published = await store.publish(observations, verifyObservations(observations));
     const directory = join(published.jsonPath, "..");
     assert.equal(JSON.parse(await readFile(published.jsonPath, "utf8")).assertions.mintAuthorityRevoked, false);
     assert.equal((await readFile(published.markdownPath, "utf8")).includes("SENTINEL_SECRET"), false);
@@ -34,8 +35,39 @@ test("publication rejects schema drift before creating READY", async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-schema-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
   try {
     const store = new PrivateRunStore(join(boundary, "runs"), output); const invalid = { ...report(), transactions: report().transactions.slice(1) };
-    await assert.rejects(store.publish({} as never, invalid), /SOLANA_EVIDENCE_SCHEMA/u);
+    await assert.rejects(store.publish(observationFixture(), invalid), /SOLANA_EVIDENCE_SCHEMA/u);
     await assert.rejects(lstat(output));
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("publication rejects a valid but observation-inconsistent report", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-mismatch-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
+  try {
+    const store = new PrivateRunStore(join(boundary, "runs"), output);
+    const observations = observationFixture();
+    const inconsistent = { ...verifyObservations(observations), validatorVersion: "different-valid-version" };
+    await assert.rejects(store.publish(observations, inconsistent), /SOLANA_EVIDENCE_MISMATCH/u);
+    await assert.rejects(lstat(output));
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("post-mutation failure publication is sanitized and READY-last", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-failure-")); await chmod(boundary, 0o700); const output = join(boundary, "output");
+  try {
+    const store = new PrivateRunStore(join(boundary, "runs"), output);
+    const published = await store.publishFailure({
+      schemaVersion: 1, status: "FAILED", failedPhase: "burn",
+      diagnosticCode: "SOLANA_CLI_FAILED", mutationsMayHaveOccurred: true,
+      cleanupCompleted: true, publicNetwork: false, realAssetCostUsd: 0,
+      secretsRetained: false, productionApproved: false,
+    });
+    const directory = join(published.jsonPath, "..");
+    const json = await readFile(published.jsonPath, "utf8");
+    const markdown = await readFile(published.markdownPath, "utf8");
+    assert.doesNotMatch(`${json}${markdown}`, /rpcUrl|\/tmp|seed phrase|private key|http/iu);
+    const ready = await lstat(join(directory, "READY"));
+    assert.equal(ready.mtimeMs >= (await lstat(published.jsonPath)).mtimeMs, true);
+    assert.equal(ready.mtimeMs >= (await lstat(published.markdownPath)).mtimeMs, true);
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
 

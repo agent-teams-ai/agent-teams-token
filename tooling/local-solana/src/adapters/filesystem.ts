@@ -3,9 +3,10 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { LocalSolanaError, type EvidenceReport, type FixtureObservations } from "../domain/model.ts";
+import { FAILURE_PHASES, LocalSolanaError, type EvidenceReport, type FailureEvidenceReport, type FixtureObservations } from "../domain/model.ts";
 import type { RunPaths, RunStorePort, ValidatorIdentity } from "../application/ports.ts";
 import { assertEvidenceReport } from "../application/evidence.ts";
+import { verifyObservations } from "../application/verifier.ts";
 import { authenticateValidatorIdentity, processStartIdentity } from "./process-identity.ts";
 
 const PREFIX = "run-";
@@ -56,17 +57,32 @@ export class PrivateRunStore implements RunStorePort {
     }
     return reclaimed;
   }
-  public async publish(_observations: FixtureObservations, verified: unknown): Promise<{ readonly jsonPath: string; readonly markdownPath: string }> {
+  public async publish(observations: FixtureObservations, verified: unknown): Promise<{ readonly jsonPath: string; readonly markdownPath: string }> {
     const report = verified as EvidenceReport;
     assertEvidenceReport(report);
+    const recomputed = verifyObservations(observations);
+    if (stableValue(report) !== stableValue(recomputed)) {
+      throw new LocalSolanaError("SOLANA_EVIDENCE_MISMATCH", "supplied evidence differs from independently recomputed observations");
+    }
     const outputRoot = await ensurePrivateRoot(this.outputRoot);
     const directory = await mkdtemp(join(outputRoot, "evidence-")); await chmod(directory, 0o700);
     const jsonPath = join(directory, "evidence-report.v1.json"); const markdownPath = join(directory, "evidence-report.v1.md");
-    const serialized = `${JSON.stringify(report, null, 2)}\n`;
+    const serialized = `${JSON.stringify(recomputed, null, 2)}\n`;
     assertEvidenceReport(JSON.parse(serialized));
     await atomicWrite(jsonPath, serialized, 0o600);
-    await atomicWrite(markdownPath, markdown(report), 0o600);
-    await atomicWrite(join(directory, "READY"), `${report.genesisHash}\n`, 0o600);
+    await atomicWrite(markdownPath, markdown(recomputed), 0o600);
+    await atomicWrite(join(directory, "READY"), `${recomputed.genesisHash}\n`, 0o600);
+    return { jsonPath, markdownPath };
+  }
+  public async publishFailure(report: FailureEvidenceReport): Promise<{ readonly jsonPath: string; readonly markdownPath: string }> {
+    assertFailureEvidence(report);
+    const outputRoot = await ensurePrivateRoot(this.outputRoot);
+    const directory = await mkdtemp(join(outputRoot, "failure-evidence-")); await chmod(directory, 0o700);
+    const jsonPath = join(directory, "failure-evidence-report.v1.json");
+    const markdownPath = join(directory, "failure-evidence-report.v1.md");
+    await atomicWrite(jsonPath, `${JSON.stringify(report, null, 2)}\n`, 0o600);
+    await atomicWrite(markdownPath, failureMarkdown(report), 0o600);
+    await atomicWrite(join(directory, "READY"), "FAILED\n", 0o600);
     return { jsonPath, markdownPath };
   }
 }
@@ -171,5 +187,22 @@ export async function atomicWrite(path: string, content: string, mode: number): 
 }
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; } }
 async function exists(path: string): Promise<boolean> { try { await stat(path); return true; } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return false; } throw cause; } }
-function markdown(report: EvidenceReport): string { return `# Local Solana SPL fixture evidence\n\n- Status: READY\n- Mint: ${report.mintAddress}\n- Program: ${report.programId}\n- Decimals: ${report.decimals}\n- Supply: ${report.initialSupply} -> ${report.intermediateSupply} -> ${report.finalSupply}\n- Freeze authority: None\n- Signed restore/freeze attempts: reached Token Program and failed\n- Public network: false\n- Real asset cost USD: 0\n- Mint authority revoked: false\n- Authority key retained: false\n- Remint possible until teardown: true\n- Production hard cap proven: false\n`;
+function markdown(report: EvidenceReport): string { return `# Local Solana SPL fixture evidence\n\n- Status: READY\n- Mint: ${report.mintAddress}\n- Program: ${report.programId}\n- Decimals: ${report.decimals}\n- Supply: ${report.initialSupply} -> ${report.intermediateSupply} -> ${report.finalSupply}\n- Freeze authority: None\n- Signed restore/freeze attempts: reached Token Program and failed\n- Public network: false\n- Real asset cost USD: 0\n- Mint authority revoked: false\n- Authority key retained: false\n- Remint possible until teardown: true\n- Production hard cap proven: false\n`; }
+function assertFailureEvidence(value: FailureEvidenceReport): void {
+  const keys = Object.keys(value).toSorted().join(",");
+  const expected = "cleanupCompleted,diagnosticCode,failedPhase,mutationsMayHaveOccurred,productionApproved,publicNetwork,realAssetCostUsd,schemaVersion,secretsRetained,status";
+  const valid = keys === expected && value.schemaVersion === 1 && value.status === "FAILED"
+    && FAILURE_PHASES.includes(value.failedPhase) && /^[A-Z][A-Z0-9_]{2,95}$/u.test(value.diagnosticCode)
+    && value.mutationsMayHaveOccurred === true && typeof value.cleanupCompleted === "boolean"
+    && value.publicNetwork === false && value.realAssetCostUsd === 0
+    && value.secretsRetained === !value.cleanupCompleted && value.productionApproved === false;
+  if (!valid) { throw new LocalSolanaError("SOLANA_FAILURE_EVIDENCE_SCHEMA", "failure evidence fields are invalid"); }
+}
+function failureMarkdown(report: FailureEvidenceReport): string { return `# Local Solana SPL fixture failure evidence\n\n- Status: FAILED\n- Failed phase: ${report.failedPhase}\n- Diagnostic: ${report.diagnosticCode}\n- Mutation may have occurred: true\n- Cleanup completed: ${report.cleanupCompleted}\n- Public network: false\n- Real asset cost USD: 0\n- Secrets retained: ${report.secretsRetained}\n- Production approved: false\n`; }
+function stableValue(value: unknown): string {
+  if (Array.isArray(value)) { return `[${value.map(stableValue).join(",")}]`; }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value).toSorted(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${stableValue(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }

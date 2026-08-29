@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { after, test } from "node:test";
 import type { Readable } from "node:stream";
 import { privateRunRoot } from "../runner.ts";
+import { authenticateProcess, processStartIdentity } from "../process.ts";
 
 const repositoryRoot = resolvePath(import.meta.dirname, "../../..");
 const runnerPath = join(repositoryRoot, "scripts/genesis/local-evm.ts");
@@ -76,6 +77,27 @@ test("interrupting one run removes only its owned directory and does not affect 
   assert.equal(neighbourResult.exitCode, 0, neighbourResult.stderr);
   const output = lastJson(neighbourResult.stdout);
   rememberReport(output);
+  await assertNoPrivateRunDirectories();
+});
+
+test("a later run reclaims an exact Anvil orphan after runner SIGKILL", { timeout: 120_000 }, async () => {
+  await assertNoPrivateRunDirectories();
+  const killed = start();
+  await waitFor(async () => (await anvilPids()).length === 1, 30_000, "owned Anvil PID");
+  const [orphanPid] = await anvilPids();
+  assert.notEqual(orphanPid, undefined);
+  const orphanIdentity = { pid: orphanPid!, processStart: await processStartIdentity(orphanPid!) };
+  assert.equal(processExists(orphanPid!), true);
+  assert.equal(killed.child.kill("SIGKILL"), true);
+  const killedResult = await killed.result;
+  assert.notEqual(killedResult.exitCode, 0);
+  assert.equal(processExists(orphanPid!), true, "SIGKILL must leave the child for recovery proof");
+
+  const recovered = await run();
+  assert.equal(recovered.exitCode, 0, recovered.stderr);
+  const output = lastJson(recovered.stdout);
+  rememberReport(output);
+  assert.notEqual(await authenticateProcess(orphanIdentity), "owned");
   await assertNoPrivateRunDirectories();
 });
 

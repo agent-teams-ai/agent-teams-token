@@ -234,6 +234,34 @@ ambient-environment fallback; distinct Slither failure categories; and one
 authoritative Slither CI definition. The alleged adapter-owned Slither policy
 orchestration finding was rejected after independent boundary inspection.
 
+### Post-review hardening remediation candidate
+
+All fifteen accepted roots now have concrete local remediation. This updates
+their implementation status, but does not rewrite the historical verdict for
+`4037e4b` or claim external acceptance before a new clean exact SHA is reviewed.
+
+| Severity | Root | Local remediation evidence |
+| --- | --- | --- |
+| P2 | Foundation changed-scan routing | all three tooling roots are full-scan paths; installed Foundation routing is contract-tested |
+| P2 | cross-tool creation-input hash | deployment and local-EVM both hash decoded bytes; shared golden vector rejects UTF-8 hex hashing |
+| P2 | local-EVM orphan cleanup | PID plus process-start leases reclaim only the exact child after runner `SIGKILL`; mixed-case `mkdtemp` suffix regression covered |
+| P2 | deployment Anvil port ownership | integration starts Anvil with `--port 0` and consumes its reported owned listener |
+| P2 | derived Slither evidence | upload validator recomputes severities, counts, policy/triage digests and exact Markdown summary |
+| P2 | macOS Docker preparation | image pull uses and removes an owned empty Docker config, bypassing ambient credential helpers |
+| P2 | live Solana lease ambiguity | a live PID whose start identity cannot be read is preserved and fails closed |
+| P2 | Solana publication binding | publication independently verifies observations and rejects a mismatched supplied report |
+| P2 | Solana post-mutation evidence | failures after mutation produce sanitized READY-last failure evidence after cleanup attempt |
+| P3 | deployment durability | staging directory is synced before rename and parent directory after rename, with injected-failure tests |
+| P3 | complete compiler identity | trust roots bind the full canonical compiler input from a fresh pinned Forge build |
+| P3 | real Solana CI enforcement | CI sets an explicit required flag; unavailable real binaries cannot silently skip |
+| P3 | ambient Solana environment | application runner requires an injected allowlisted environment from composition |
+| P3 | Slither failure taxonomy | analyzer runtime, malformed/compiler/artifact output and environment failures have distinct stable variants/exits |
+| P3 | canonical Slither CI | `.github/workflows/ci.yml#solidity-security` is the only executable definition; duplicate fragment removed |
+
+The local complete gate, real Solana lifecycle, local-EVM interruption/orphan
+suite and real unsigned Anvil planner are green. Exact-SHA GitHub CI and new
+independent specialist/holistic review remain the acceptance barrier.
+
 Barrier 3 is closed for this frozen local/test-only code candidate. This review
 is engineering evidence, not a security audit, tokenomics approval or permission
 to deploy, sign, broadcast, create liquidity or use a public network.

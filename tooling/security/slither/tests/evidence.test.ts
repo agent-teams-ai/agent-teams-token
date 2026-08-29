@@ -52,6 +52,15 @@ test("malformed analysis output has a distinct READY-last exit-40 envelope", asy
   } finally { await rm(parent, { recursive: true, force: true }); }
 });
 
+test("analyzer runtime failures have a distinct READY-last exit-30 envelope", async () => {
+  const parent = await makeTestDirectory("tool-failure-"); const output = join(parent, "bundle");
+  try {
+    await writeFailureEvidence({ output, candidateSha: "e".repeat(40), category: "tool-failure", exitCode: 30, stage: "analysis-runtime", errorCode: "ANALYZER_RUNTIME_FAILED", schemaDirectory, assertReadyPrecondition: precondition });
+    const value = JSON.parse(await readFile(join(output, "tool-failure.json"), "utf8")) as { category: unknown; exitCode: unknown };
+    assert.equal(value.category, "tool-failure"); assert.equal(value.exitCode, 30); assert.equal((await readFile(join(output, "READY"))).length, 0);
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
 test("schema validation and final precondition both happen before READY", async () => {
   const parent = await makeTestDirectory("schema-before-ready-");
   try {

@@ -1,0 +1,5 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
+  "required":["schemaVersion","ready","candidateSha","execution","image","category","exitCode","stage","errorCode","sanitised"],
+  "properties":{"schemaVersion":{"const":1},"ready":{"const":true},"candidateSha":{"type":"string","pattern":"^[0-9a-f]{40}$"},"execution":{"type":"object","additionalProperties":false,"required":["platform","event","repository","workflow","job","runId","runAttempt"],"properties":{"platform":{"const":"linux/amd64"},"event":{"type":"string"},"repository":{"type":"string"},"workflow":{"type":"string"},"job":{"type":"string"},"runId":{"type":"string"},"runAttempt":{"type":"string"}}},"image":{"const":"ghcr.io/trailofbits/eth-security-toolbox:nightly-20260824@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0"},"category":{"const":"tool-failure"},"exitCode":{"const":30},"stage":{"type":"string"},"errorCode":{"type":"string","pattern":"^[A-Z0-9_]+$"},"sanitised":{"const":true}}
+}

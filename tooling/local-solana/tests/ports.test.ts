@@ -4,7 +4,18 @@ import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unli
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { LoopbackPortAllocator } from "../src/adapters/ports.ts";
+import { leaseOwnerIsProvablyStale, LoopbackPortAllocator } from "../src/adapters/ports.ts";
+
+test("live PID with unavailable start identity is retained fail-closed", async () => {
+  assert.equal(await leaseOwnerIsProvablyStale(
+    123,
+    "linux:456",
+    async () => { throw new Error("identity lookup denied"); },
+    () => true,
+  ), false);
+  assert.equal(await leaseOwnerIsProvablyStale(123, "linux:456", async () => "linux:789", () => true), true);
+  assert.equal(await leaseOwnerIsProvablyStale(123, "linux:456", async () => "linux:456", () => true), false);
+});
 
 async function childLease(root: string): Promise<{ readonly child: ChildProcess; readonly ports: { readonly rpcPort: number; readonly dynamicPortRange: string } }> {
   const child = spawn(process.execPath, [join(import.meta.dirname, "helpers/hold-port-lease.ts"), root], { stdio: ["pipe", "pipe", "pipe"] });

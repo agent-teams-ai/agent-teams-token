@@ -1039,6 +1039,17 @@ native macOS loop + exact-SHA Linux CI parity
 security/CI matrix являются следующими independently-green slices, а не частью
 12-часового Definition of Done.
 
+Три zero-cost slice после Genesis Core исполняются по
+[`NEXT_ZERO_COST_SLICES_PLAN.md`](NEXT_ZERO_COST_SLICES_PLAN.md). Их кандидат
+`4037e4b` принят для local/test-only использования и прошёл exact-SHA CI без
+`P0/P1`, однако это не означает полного выполнения каждой строки плана. Девять
+`P2` и шесть `P3` из финального review реализованы в локально green remediation-
+кандидате: закрыты Foundation full-scan, authenticated owned-process recovery,
+Solana failure/publication evidence, полный compiler-input digest и независимая
+Slither evidence validation. Заявление о финальном принятии плана разрешено
+только после нового exact-SHA CI и повторных specialist/holistic reviews.
+Публичные сети и спорные product rules в эту remediation не входят.
+
 Исполнение `Core-12h` использует production-hosted subscription-runtime:
 W1 manifest и W2 Solidity идут параллельно до cross-language barrier, затем W3
 verifier и W4 Linux parity идут от нового integrated SHA. Candidate проверяют

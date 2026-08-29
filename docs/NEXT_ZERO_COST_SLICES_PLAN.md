@@ -1,6 +1,20 @@
 # AGTMAI: план трёх следующих локальных zero-cost slices
 
-Status: owner-approved and in implementation, 2026-08-29.
+Status: local/test-only candidate accepted; all nine retained `P2` and six
+retained `P3` have a locally green remediation candidate, 2026-08-29. Final
+acceptance still requires one clean exact-SHA CI run and repeated independent
+specialist plus holistic reviews of that same SHA.
+
+Correction: the first Barrier 3 closure correctly proved no `P0/P1`, but it did
+not prove that every explicit requirement below was implemented. The final
+holistic review retained nine `P2` and six `P3`; several are direct requirements
+of sections 5-8 rather than optional future hardening. Therefore the three
+vertical slices remain accepted for local MVP use. The direct code gaps are now
+implemented and pass the complete local gate, real local Solana lifecycle, real
+local EVM lifecycle and real unsigned Anvil deployment-plan test. The stronger
+claim "this plan is fully accepted" remains suspended until the new exact-SHA
+CI and independent reviews finish. This correction does not expand scope into
+public networks, tokenomics, vesting, governance, CCIP or liquidity.
 
 Этот документ описывает только три независимо полезных блока:
 
@@ -579,7 +593,7 @@ Reviewer job identity должна отличаться от всех author/int
 job identities её scope. Holistic reviewer не может быть участником реализации,
 интеграции или исправлений кандидата.
 
-Every finding requires verdict `ACCEPT/AMEND/REJECT`, severity `P0/P1/P2`, exact
+Every finding requires verdict `ACCEPT/AMEND/REJECT`, severity `P0/P1/P2/P3`, exact
 `file:line`, reproducible scenario, violated invariant, minimal fix and a test
 that failed before the fix. Preferences are listed separately.
 

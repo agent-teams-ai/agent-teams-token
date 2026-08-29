@@ -19,7 +19,7 @@ const observation = {
 };
 const identity = {
   contractFqn: "X.sol:X", buildProfile: "default", sourceDependencyClosure: {},
-  buildInfoSha256: hash, artifactSha256: hash, abiSha256: hash, fixtureSha256: hash,
+  buildInfoSha256: hash, compilerInputSha256: hash, artifactSha256: hash, abiSha256: hash, fixtureSha256: hash,
   fixtureReadySha256: hash, buildInfoSolcVersion: "0.8.36", compilerSettings: {},
   creationBytecodeHash: hash, constructorAbiBytes: "0x", constructorAbiHash: hash,
   constructorArguments: "0x", constructorArgumentsHash: hash, creationInput: "0x",

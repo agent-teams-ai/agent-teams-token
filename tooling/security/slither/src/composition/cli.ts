@@ -4,6 +4,7 @@ import { writeFailureEvidence, writeReadyEvidence } from "../adapters/evidence.t
 import { runGate } from "../adapters/runner.ts";
 import { resolveDockerCli } from "../adapters/executable.ts";
 import { executeGate } from "../application/gate.ts";
+import { classifyGateFailure } from "../application/failure.ts";
 import { SlitherGateError } from "../domain/model.ts";
 
 async function main(): Promise<void> {
@@ -40,28 +41,18 @@ async function main(): Promise<void> {
     process.exitCode = result.decision.exitCode;
   } catch (error) {
     const code = error instanceof SlitherGateError ? error.code : "UNEXPECTED_ENVIRONMENT_FAILURE";
-    const outputFailureCodes = new Set([
-      "MALFORMED_JSON",
-      "DETECTOR_INVENTORY_INVALID",
-      "SLITHER_INVENTORY_EMPTY",
-      "SLITHER_EXIT_INVALID",
-      "BUILD_INFO_INVALID",
-      "COMPILER_SETTINGS_MISMATCH",
-      "BYTECODE_MISSING",
-      "VULNERABLE_FIXTURE_NOT_BLOCKED",
-    ]);
-    const outputFailure = outputFailureCodes.has(code);
+    const failure = classifyGateFailure(code);
     await writeFailureEvidence({
       output,
       candidateSha: sha,
-      category: outputFailure ? "output-failure" : "environment-failure",
-      exitCode: outputFailure ? 40 : 50,
-      stage: "analysis",
+      category: failure.category,
+      exitCode: failure.exitCode,
+      stage: failure.stage,
       errorCode: code,
       schemaDirectory: `${root}/tooling/security/slither`,
       assertReadyPrecondition: async () => await new GitRepositoryState(root, new OwnedProcess()).assertExactClean(sha),
     });
-    process.exitCode = outputFailure ? 40 : 50;
+    process.exitCode = failure.exitCode;
   }
 }
 

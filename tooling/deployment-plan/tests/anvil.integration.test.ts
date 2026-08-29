@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, readFile, readdir, realpath } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import test from "node:test";
@@ -20,20 +19,7 @@ test(
   async () => {
     const binaries = requireCompleteConfiguration();
     const build = await freshForgeBuild(binaries.forge, binaries.solc);
-    const port = await unusedPort();
-    const child = spawn(binaries.anvil, [
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(port),
-      "--chain-id",
-      "31337",
-      "--silent",
-    ], {
-      stdio: ["ignore", "ignore", "pipe"],
-      env: {},
-    });
-    const rpcUrl = `http://127.0.0.1:${port}/`;
+    const { child, rpcUrl } = await startAnvil(binaries.anvil);
     try {
       await waitUntilReady(rpcUrl);
       const outputParent = await realpath(
@@ -184,18 +170,44 @@ function assertWithinFoundryTolerance(estimate: bigint): void {
   );
 }
 
-async function unusedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
+async function startAnvil(binary: string): Promise<{
+  readonly child: ChildProcess;
+  readonly rpcUrl: string;
+}> {
+  const child = spawn(binary, [
+    "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337",
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {},
   });
-  const address = server.address();
-  assert(address && typeof address === "object");
-  const { port } = address;
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
+  const rpcUrl = await new Promise<string>((resolve, reject) => {
+    let output = "";
+    const timeout = setTimeout(() => {
+      reject(new Error(`Anvil did not report its owned listener: ${output.slice(-2_000)}`));
+    }, 5_000);
+    const consume = (chunk: Buffer | string): void => {
+      output += chunk.toString();
+      const match = /Listening on 127\.0\.0\.1:(\d+)/u.exec(output);
+      if (match) {
+        clearTimeout(timeout);
+        resolve(`http://127.0.0.1:${match[1]}/`);
+      }
+    };
+    child.stdout?.on("data", consume);
+    child.stderr?.on("data", consume);
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      clearTimeout(timeout);
+      reject(new Error(`Anvil exited before reporting its listener (${signal ?? code}): ${output.slice(-2_000)}`));
+    });
+  }).catch(async (error: unknown) => {
+    await stop(child);
+    throw error;
   });
-  return port;
+  return { child, rpcUrl };
 }
 
 async function waitUntilReady(url: string): Promise<void> {

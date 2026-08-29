@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentteams.ai/schemas/local-solana-failure-evidence-report.v1.json",
+  "title": "AGTMAI local Solana post-mutation failure evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "failedPhase", "diagnosticCode", "mutationsMayHaveOccurred", "cleanupCompleted", "publicNetwork", "realAssetCostUsd", "secretsRetained", "productionApproved"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": { "const": "FAILED" },
+    "failedPhase": { "enum": ["createMint", "revokeFreeze", "createAta", "mint", "burn", "restoreFreezeAttempt", "freezeAttempt", "verification"] },
+    "diagnosticCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$" },
+    "mutationsMayHaveOccurred": { "const": true },
+    "cleanupCompleted": { "type": "boolean" },
+    "publicNetwork": { "const": false },
+    "realAssetCostUsd": { "const": 0 },
+    "secretsRetained": { "type": "boolean" },
+    "productionApproved": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "cleanupCompleted": { "const": true } }, "required": ["cleanupCompleted"] },
+      "then": { "properties": { "secretsRetained": { "const": false } } },
+      "else": { "properties": { "secretsRetained": { "const": true } } }
+    }
+  ]
+}

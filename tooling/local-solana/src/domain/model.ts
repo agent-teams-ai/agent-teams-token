@@ -129,6 +129,26 @@ export interface EvidenceReport {
   };
 }
 
+export const FAILURE_PHASES = [
+  "createMint", "revokeFreeze", "createAta", "mint", "burn",
+  "restoreFreezeAttempt", "freezeAttempt", "verification",
+] as const;
+export type FailurePhase = typeof FAILURE_PHASES[number];
+
+/** Sanitized terminal evidence emitted only after a mutation may have started. */
+export interface FailureEvidenceReport {
+  readonly schemaVersion: 1;
+  readonly status: "FAILED";
+  readonly failedPhase: FailurePhase;
+  readonly diagnosticCode: string;
+  readonly mutationsMayHaveOccurred: true;
+  readonly cleanupCompleted: boolean;
+  readonly publicNetwork: false;
+  readonly realAssetCostUsd: 0;
+  readonly secretsRetained: boolean;
+  readonly productionApproved: false;
+}
+
 export function parseUnsignedInteger(value: unknown, label: string): bigint {
   if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
     throw new LocalSolanaError("SOLANA_INTEGER_INVALID", `${label} must be a canonical decimal string`);

@@ -13,8 +13,10 @@ test("CI wiring request is exact, dependency-ordered and fail closed", async () 
   assert.doesNotMatch(raw, /continue-on-error[^\n]*true/u);
 });
 
-test("exact CI fragment binds SHA, dependencies, failures and immutable upload", async () => {
-  const fragment = await readFile("tooling/security/slither/ci-job.fragment.yml", "utf8");
-  for (const required of ["needs: [solidity]", "ref: ${{ github.sha }}", "persist-credentials: false", "timeout-minutes: 20", "SLITHER_DOCKER_PATH: /usr/bin/docker", "pnpm security:solidity:prepare-image", "pnpm security:solidity", "if: ${{ failure() }}", "if: ${{ always() }}", "validate-evidence.ts", "steps.validate-slither-evidence.outcome == 'success'", "if-no-files-found: error", "scripts/assert-clean-head.sh", "@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"]) {assert.match(fragment, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));}
-  assert.doesNotMatch(fragment, /continue-on-error|paths-ignore|--network[ =]host/u);
+test("the one canonical CI job binds SHA, dependencies, failures and immutable upload", async () => {
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  assert.equal([...workflow.matchAll(/^  solidity-security:$/gmu)].length, 1);
+  const job = workflow.slice(workflow.indexOf("  solidity-security:"));
+  for (const required of ["needs: [solidity]", "ref: ${{ github.sha }}", "persist-credentials: false", "timeout-minutes: 20", "SLITHER_DOCKER_PATH: /usr/bin/docker", "pnpm security:solidity:prepare-image", "pnpm security:solidity", "if: ${{ failure() }}", "if: ${{ always() }}", "validate-evidence.ts", "steps.validate-slither-evidence.outcome == 'success'", "if-no-files-found: error", "scripts/assert-clean-head.sh", "@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"]) {assert.match(job, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));}
+  assert.doesNotMatch(job, /continue-on-error|paths-ignore|--network[ =]host/u);
 });

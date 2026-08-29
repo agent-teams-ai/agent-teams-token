@@ -21,8 +21,12 @@ export interface ClaimedOutputDirectory {
 export interface OutputFaultInjection {
   readonly beforeStagingLeafOpen?: () => Promise<void>;
   readonly afterStagingLeafOpen?: () => Promise<void>;
+  readonly beforeStagingDirectorySync?: () => Promise<void>;
+  readonly afterStagingDirectorySync?: () => Promise<void>;
   readonly beforePublishRename?: () => Promise<void>;
   readonly afterPublishRename?: () => Promise<void>;
+  readonly beforeParentDirectorySync?: () => Promise<void>;
+  readonly afterParentDirectorySync?: () => Promise<void>;
 }
 
 export async function claimOwnedOutputDirectory(
@@ -142,6 +146,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     }
     await this.assertStagingStable();
     await assertMissing(this.target);
+    await this.faultInjection.beforeStagingDirectorySync?.();
+    await this.stagingHandle.sync();
+    await this.faultInjection.afterStagingDirectorySync?.();
     await this.faultInjection.beforePublishRename?.();
     await rename(this.path, this.target);
     this.published = true;
@@ -151,6 +158,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     assertSameIdentity(
       await this.stagingHandle.stat(), this.stagingIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED",
     );
+    await this.faultInjection.beforeParentDirectorySync?.();
+    await this.parentHandle.sync();
+    await this.faultInjection.afterParentDirectorySync?.();
     return this.target;
   }
 

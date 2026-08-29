@@ -4,6 +4,14 @@ export function sha256(bytes: Uint8Array | string): `0x${string}` {
   return `0x${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
+/** SHA-256 of decoded 0x-prefixed bytes, never of their hexadecimal text. */
+export function sha256HexBytes(value: string): `0x${string}` {
+  if (!/^0x(?:[0-9a-fA-F]{2})*$/u.test(value)) {
+    throw new TypeError("hex bytes must be an even-length 0x-prefixed string");
+  }
+  return sha256(Buffer.from(value.slice(2), "hex"));
+}
+
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "string") {return JSON.stringify(value);}
   if (typeof value === "number") {

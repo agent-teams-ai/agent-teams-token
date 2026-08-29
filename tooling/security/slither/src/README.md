@@ -30,6 +30,12 @@ the analyzed contract/source inventory; Forge build labels are never reported
 as analyzed targets. Every gate also runs `tests/fixtures/Vulnerable.sol`
 through the same hardened image and requires policy exit `20`.
 
+Image preparation is the only network-enabled step. It creates an owned
+temporary Docker configuration containing only an empty `auths` object, passes
+that directory explicitly to Docker and removes it afterward. This prevents a
+macOS user-level credential helper from being invoked or copied into evidence;
+the analysis runner itself remains pull-disabled and offline.
+
 The exact raw Slither status/JSON matrix is:
 
 - status `0`, `success=true`, no analysis errors, zero findings: complete
@@ -56,11 +62,22 @@ SLITHER_EVIDENCE_DIRECTORY="/tmp/slither-evidence-$GITHUB_SHA" \
 node tooling/security/slither/src/composition/validate-evidence.ts
 ```
 
-The validator accepts exactly one of the analysis, output-failure, or
-environment-failure variants and rejects extra files, symlinks, nonempty READY
-markers, schema-invalid content, inconsistent result semantics, and a SHA that
-does not match the upload candidate. This is deliberately a separate process
-from evidence creation so CI upload does not trust the producer's validation.
+The validator accepts exactly one of the analysis, tool-failure,
+output-failure, or environment-failure variants and rejects extra files,
+symlinks, nonempty READY markers, schema-invalid content, inconsistent result
+semantics, and a SHA that does not match the upload candidate. For successful
+analysis it derives every severity, blocking/suppressed/visible count, accepted
+policy and triage digest, and the exact human summary again from the machine
+findings. Supplied aggregate fields are never trusted. This is deliberately a
+separate process from evidence creation so CI upload does not trust the
+producer's validation.
+
+Container stages write one exact failure marker. Compiler-build and
+artifact-export failures are incomplete output (`40`), an analyzer runtime
+failure is a tool failure (`30`), and host/preflight failures are environment
+failures (`50`). `.github/workflows/ci.yml#solidity-security` is the sole
+authoritative CI definition; the feature-owned wiring request points to it and
+no duplicate workflow fragment is retained.
 
 Suppression entries are intentionally empty initially. A waiver must reproduce
 the exact versioned finding fingerprint and all tuple fields, include an owner,

@@ -94,6 +94,7 @@ boundaries:
       - tooling/local-solana/src/application/evidence.ts
       - tooling/local-solana/src/application/ports.ts
       - tooling/local-solana/src/application/runner.ts
+      - tooling/local-solana/src/application/verifier.ts
     allow:
       boundaries:
         - tooling.local-solana.domain
@@ -218,6 +219,7 @@ boundaries:
       - tooling/security/slither/src/application
     entrypoints:
       - tooling/security/slither/src/application/coverage.ts
+      - tooling/security/slither/src/application/failure.ts
       - tooling/security/slither/src/application/gate.ts
       - tooling/security/slither/src/application/policy.ts
       - tooling/security/slither/src/application/ports.ts

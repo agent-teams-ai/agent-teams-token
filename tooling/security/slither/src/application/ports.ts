@@ -1,7 +1,8 @@
 import type { AnalysisInput, FindingTriage, GateManifest, PolicyDecision, Suppression } from "../domain/model.ts";
 
 export interface ProcessResult { readonly exitCode: number | null; readonly stdout: string; readonly stderr: string; readonly timedOut: boolean }
-export interface ProcessPort { run(command: string, args: readonly string[], timeoutMs: number): Promise<ProcessResult> }
+export interface ProcessOptions { readonly env?: NodeJS.ProcessEnv }
+export interface ProcessPort { run(command: string, args: readonly string[], timeoutMs: number, options?: ProcessOptions): Promise<ProcessResult> }
 
 export interface RepositoryStatePort {
   assertExactClean(candidateSha: string): Promise<void>;

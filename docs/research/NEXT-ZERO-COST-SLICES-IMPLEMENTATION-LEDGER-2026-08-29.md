@@ -290,6 +290,27 @@ binding and sanitized post-mutation failure evidence. The complete adjudication
 and smallest regressions are recorded in the code-review ledger. These are not
 silently represented as finished and must be considered before production use.
 
+## Post-review P2/P3 remediation candidate
+
+The nine P2 and six P3 roots retained by the accepted `4037e4b` review have all
+been implemented in a new local candidate. The detailed one-to-one mapping is
+recorded in `NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`. Local evidence
+includes the complete root gate, 36 local-EVM unit/adversarial tests, four real
+local-EVM lifecycle/interruption tests, 47 deployment-plan tests with real
+Anvil, 46 passing local-Solana tests including the real lifecycle, and 64
+Slither policy, schema, evidence and failure-taxonomy tests. The real pinned Slither container,
+new exact-SHA GitHub jobs and replacement hosted reviews remain pending until
+the candidate is frozen as a clean commit.
+
+During final local E2E, two additional integration defects were found and fixed:
+stale-run discovery now accepts the mixed-case random suffix emitted by macOS
+`mkdtemp`, and the complete compiler-input trust root is derived from the real
+pinned Forge build rather than a reduced test fixture. Both are protected by
+the corresponding real integration paths.
+
+This ledger entry is local engineering evidence only. It is not a security
+audit, Mainnet approval, tokenomics decision or permission to sign/broadcast.
+
 ## Model-split delivery metrics
 
 - time from the final lint-worker dispatches to reviewed patches: approximately

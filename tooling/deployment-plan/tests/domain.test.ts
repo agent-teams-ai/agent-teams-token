@@ -20,6 +20,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "2",
   buildInfoSolcVersion: "0.8.36",
+  compilerInputSha256: hash,
   compilerSettings: {},
   artifactSha256: hash,
   abiSha256: hash,
@@ -36,6 +37,7 @@ const artifact: ApprovedArtifact = {
   fixtureSha256: hash,
   sourceDependencyClosure: {},
   buildInfoSolcVersion: roots.buildInfoSolcVersion,
+  compilerInputSha256: roots.compilerInputSha256,
   compilerSettings: {},
   creationBytecode: "0x01",
   creationBytecodeHash: hash,
@@ -132,7 +134,7 @@ test("malformed fee relations and overflow fail closed", () => {
 
 test("gas estimate changes quote but not stable plan identity", () => {
   const plan = buildStablePlan(artifact, roots, observation);
-  assert.equal(plan.planId, "0xa619fc9c5adea8314a6a67f90e981d3bc5217b1a027221c46866017bf8fcb5fd");
+  assert.equal(plan.planId, "0xd89550765c467336db2e06951bc6bccd807d0fb436fb83d49a39f49a905f6733");
   const first = buildFeeQuote(plan, observation, roots);
   const second = buildFeeQuote(plan, { ...observation, gasEstimate: "1000001" }, roots);
   assert.equal(first.planId, second.planId);

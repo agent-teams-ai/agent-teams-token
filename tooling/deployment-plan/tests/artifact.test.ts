@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { approveForgeArtifact, encodeConstructor, type TrustRoots } from "../src/adapters/artifact.ts";
-import { sha256Hex } from "../src/domain/identity.ts";
+import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
 import { UINT256_MAX } from "../src/domain/model.ts";
 
 const source = "contract X {}";
@@ -74,6 +74,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "1",
   buildInfoSolcVersion: build.solcVersion,
+  compilerInputSha256: sha256Hex(canonicalJson(build.input)),
   compilerSettings: settings,
   artifactSha256: sha256Hex(inputs.artifactBytes),
   abiSha256: sha256Hex(inputs.abiBytes),
@@ -95,6 +96,30 @@ test("golden constructor vector binds build, ABI, bytecode and exact initcode", 
   );
   assert.equal(approved.creationInputHash.length, 66);
   assert.equal(approved.buildInfoSolcVersion, "0.8.36");
+  assert.equal(approved.compilerInputSha256, roots.compilerInputSha256);
+});
+
+test("byte-oriented SHA-256 uses the shared cross-tool vector", () => {
+  assert.equal(
+    sha256Hex(Buffer.from("01020304", "hex")),
+    "0x9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+  );
+});
+
+test("full canonical compiler input is an immutable trust root", () => {
+  const variants = [
+    { ...build.input, settings: { ...settings, viaIR: true } },
+    { ...build.input, settings: { ...settings, optimizer: { ...settings.optimizer, details: { yul: true } } } },
+    { ...build.input, settings: { ...settings, libraries: { "X.sol": { X: "0x0000000000000000000000000000000000000001" } } } },
+    { ...build.input, settings: { ...settings, remappings: ["lib/=vendor/"] } },
+    { ...build.input, settings: { ...settings, outputSelection: { "*": { "*": ["abi"] } } } },
+  ];
+  for (const input of variants) {
+    assert.throws(
+      () => approveForgeArtifact({ ...inputs, buildInfoBytes: bytes({ ...build, input }) }, roots),
+      /compiler input/u,
+    );
+  }
 });
 
 test("constructor integers enforce the exact uint256 boundary", () => {

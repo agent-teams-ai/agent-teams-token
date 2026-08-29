@@ -23,6 +23,7 @@ interface ParsedArtifactInputs {
 
 interface BuildContract {
   readonly outputContract: Record<string, unknown>;
+  readonly compilerInputSha256: `0x${string}`;
   readonly normalizedSettings: Record<string, unknown>;
   readonly sourceDependencyClosure: Record<string, `0x${string}`>;
 }
@@ -62,6 +63,7 @@ export function approveForgeArtifact(
     fixtureSha256: parsed.fixtureSha256,
     sourceDependencyClosure: buildContract.sourceDependencyClosure,
     buildInfoSolcVersion: roots.buildInfoSolcVersion,
+    compilerInputSha256: buildContract.compilerInputSha256,
     compilerSettings: buildContract.normalizedSettings,
     creationBytecode,
     creationBytecodeHash: hashHex(creationBytecode),
@@ -116,6 +118,10 @@ function validateBuildInfoCompiler(
 
 function readBuildContract(build: Record<string, unknown>, roots: TrustRoots): BuildContract {
   const input = object(build.input, "BUILD_INPUT_INVALID");
+  const compilerInputSha256 = sha256Hex(canonicalJson(input));
+  if (compilerInputSha256 !== roots.compilerInputSha256) {
+    fail("COMPILER_INPUT_MISMATCH", "full canonical Solidity compiler input differs from trust root");
+  }
   const settings = object(input.settings, "BUILD_SETTINGS_INVALID");
   const normalizedSettings = normalizeSettings(settings);
   if (canonicalJson(normalizedSettings) !== canonicalJson(roots.compilerSettings)) {
@@ -129,7 +135,7 @@ function readBuildContract(build: Record<string, unknown>, roots: TrustRoots): B
   const contracts = object(output.contracts, "BUILD_CONTRACTS_INVALID");
   const sourceContracts = object(contracts[SOURCE], "BUILD_SOURCE_CONTRACT_INVALID");
   const outputContract = object(sourceContracts[CONTRACT], "BUILD_CONTRACT_INVALID");
-  return { outputContract, normalizedSettings, sourceDependencyClosure };
+  return { outputContract, compilerInputSha256, normalizedSettings, sourceDependencyClosure };
 }
 
 function readSourceClosure(value: unknown): Record<string, `0x${string}`> {

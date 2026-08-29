@@ -86,6 +86,7 @@ export function buildStablePlan(
     fixtureSha256: approved.fixtureSha256,
     fixtureReadySha256: roots.fixtureReadySha256,
     buildInfoSolcVersion: approved.buildInfoSolcVersion,
+    compilerInputSha256: approved.compilerInputSha256,
     compilerSettings: approved.compilerSettings,
     creationBytecodeHash: approved.creationBytecodeHash,
     constructorAbiBytes: approved.constructorAbiBytes,
@@ -170,6 +171,7 @@ export function validateTrustRootSafety(roots: TrustRoots): void {
     ["abiSha256", roots.abiSha256],
     ["fixtureSha256", roots.fixtureSha256],
     ["fixtureReadySha256", roots.fixtureReadySha256],
+    ["compilerInputSha256", roots.compilerInputSha256],
     ["constructorArgumentsHash", roots.constructorArgumentsHash],
     ["creationInputHash", roots.creationInputHash],
   ] as const) {
