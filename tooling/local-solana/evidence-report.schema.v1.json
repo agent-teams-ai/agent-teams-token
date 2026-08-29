@@ -35,7 +35,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "signature", "slot", "confirmationStatus", "err", "programIds", "instructionKinds", "amountBaseUnits", "genesisHash"],
       "properties": {
-        "kind": { "enum": ["create", "revokeFreeze", "mint", "burn", "restoreFreezeAttempt", "freezeAttempt"] },
+        "kind": { "enum": ["create", "assignFreeze", "revokeFreeze", "mint", "burn", "restoreFreezeAttempt", "freezeAttempt"] },
         "signature": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,88}$" }, "slot": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
         "confirmationStatus": { "const": "finalized" }, "err": {}, "programIds": { "type": "array", "items": { "type": "string" } },
         "instructionKinds": { "type": "array", "items": { "type": "string" } }, "amountBaseUnits": { "type": ["string", "null"], "pattern": "^(0|[1-9][0-9]*)$" },

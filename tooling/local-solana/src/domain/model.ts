@@ -1,4 +1,5 @@
 export const CLASSIC_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+export const ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const FIXTURE_DECIMALS = 9;
 export const FIXTURE_AMOUNT_BASE_UNITS = 1_000_000_000_000n;
 
@@ -11,7 +12,7 @@ export class LocalSolanaError extends Error {
   }
 }
 
-export type LifecycleKind = "create" | "revokeFreeze" | "mint" | "burn" | "restoreFreezeAttempt" | "freezeAttempt";
+export type LifecycleKind = "create" | "assignFreeze" | "revokeFreeze" | "mint" | "burn" | "restoreFreezeAttempt" | "freezeAttempt";
 
 export interface AccountState {
   readonly address: string;
@@ -49,6 +50,7 @@ export interface FixtureObservations {
   readonly validatorVersion: string;
   readonly mintAddress: string;
   readonly mintAuthority: string;
+  readonly freezeAuthority: string;
   readonly ownerAddress: string;
   readonly tokenAccountAddress: string;
   readonly initialMint: AccountState;

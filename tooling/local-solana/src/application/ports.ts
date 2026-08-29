@@ -5,6 +5,8 @@ export interface ToolPaths {
   readonly keygen: string;
   readonly validator: string;
   readonly splToken: string;
+  readonly tokenProgram: string;
+  readonly associatedTokenProgram: string;
 }
 
 export interface CommandResult { readonly stdout: string; readonly stderr: string; readonly exitCode: number; }
@@ -13,15 +15,31 @@ export interface CommandPort {
 }
 
 export interface ValidatorHandle { readonly pid: number; stop(): Promise<void>; }
+export interface ValidatorStartRequest {
+  readonly executable: string;
+  readonly ledger: string;
+  readonly config: string;
+  readonly genesisMint: string;
+  readonly tokenProgram: string;
+  readonly associatedTokenProgram: string;
+  readonly rpcPort: number;
+  readonly faucetPort: number;
+  readonly gossipPort: number;
+  readonly dynamicPortRange: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly signal: AbortSignal;
+}
 export interface ValidatorPort {
-  start(executable: string, ledger: string, rpcPort: number, faucetPort: number, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<ValidatorHandle>;
+  start(request: ValidatorStartRequest): Promise<ValidatorHandle>;
 }
 
 export interface RpcPort {
   waitReady(rpcUrl: string, timeoutMs: number, signal: AbortSignal): Promise<{ readonly version: string; readonly genesisHash: string }>;
+  waitProgramsReady(rpcUrl: string, programIds: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<void>;
   genesisHash(rpcUrl: string): Promise<string>;
   mintAccount(rpcUrl: string, address: string): Promise<AccountState>;
   tokenAccount(rpcUrl: string, address: string): Promise<TokenAccountState>;
+  tokenAccountAddress(rpcUrl: string, owner: string, mint: string): Promise<string>;
   finalizedTransaction(rpcUrl: string, kind: TransactionFact["kind"], signature: string, genesisHash: string): Promise<TransactionFact>;
   sendSignedTransaction(rpcUrl: string, bytes: Uint8Array): Promise<string>;
   latestBlockhash(rpcUrl: string): Promise<string>;
@@ -44,19 +62,41 @@ export interface RunStorePort {
   publish(report: FixtureObservations, verified: unknown): Promise<{ readonly jsonPath: string; readonly markdownPath: string }>;
 }
 
+export interface CliExecutionContext {
+  readonly paths: RunPaths;
+  readonly tools: ToolPaths;
+  readonly env: NodeJS.ProcessEnv;
+  readonly signal: AbortSignal;
+}
+
 export interface CliPort {
-  createKeys(paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<{ payer: string; mint: string; owner: string; freeze: string }>;
-  fund(rpcUrl: string, payer: string, paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string>;
-  createMint(rpcUrl: string, publicKeys: { payer: string; mint: string; freeze: string }, paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string>;
-  revokeFreeze(rpcUrl: string, mint: string, paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string>;
-  createTokenAccount(rpcUrl: string, mint: string, owner: string, paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<{ address: string; signature: string }>;
-  mint(rpcUrl: string, mint: string, account: string, paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string>;
-  burn(rpcUrl: string, account: string, paths: RunPaths, tools: ToolPaths, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string>;
+  createKeys(context: CliExecutionContext): Promise<{ payer: string; mint: string; owner: string; freeze: string }>;
+  verifyFunded(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly payer: string }): Promise<void>;
+  createMint(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly publicKeys: { readonly payer: string; readonly mint: string; readonly freeze: string } }): Promise<{ readonly createSignature: string; readonly assignFreezeSignature: string }>;
+  revokeFreeze(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string }): Promise<string>;
+  createTokenAccount(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string; readonly owner: string }): Promise<string>;
+  associatedAddress(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string; readonly owner: string }): Promise<string>;
+  mint(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly mint: string; readonly account: string }): Promise<string>;
+  burn(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly account: string }): Promise<string>;
 }
 
 export interface ToolResolverPort { resolve(): Promise<ToolPaths>; }
-export interface PortAllocator { allocate(): Promise<{ readonly rpcPort: number; readonly faucetPort: number }>; }
+export interface PortLease {
+  readonly rpcPort: number;
+  readonly faucetPort: number;
+  readonly gossipPort: number;
+  readonly dynamicPortRange: string;
+  release(): void;
+}
+export interface PortAllocator { allocate(): Promise<PortLease>; }
 export interface AuthorityTransactionPort {
-  restoreFreeze(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, mint: string, newAuthority: string): Promise<Uint8Array>;
-  freezeAccount(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, account: string, mint: string, authority: string): Promise<Uint8Array>;
+  restoreFreeze(request: AuthorityTransactionContext & { readonly mint: string; readonly newAuthority: string }): Promise<Uint8Array>;
+  freezeAccount(request: AuthorityTransactionContext & { readonly account: string; readonly mint: string }): Promise<Uint8Array>;
+}
+
+export interface AuthorityTransactionContext {
+  readonly rpc: RpcPort;
+  readonly rpcUrl: string;
+  readonly payerPath: string;
+  readonly authorityPath: string;
 }

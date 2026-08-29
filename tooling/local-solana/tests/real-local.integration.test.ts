@@ -6,8 +6,10 @@ import test from "node:test";
 import { main } from "../src/composition/index.ts";
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
-const binaryRoot = join(repositoryRoot, ".tools/agave-v4.2.1-linux-x64/bin");
-const available = process.platform === "linux" && process.arch === "x64" && await Promise.all(["solana", "solana-keygen", "solana-test-validator", "spl-token"].map(async (name) => await access(join(binaryRoot, name)).then(() => true, () => false))).then((values) => values.every(Boolean));
+const platform = process.platform === "linux" && process.arch === "x64" ? "linux-x64"
+  : process.platform === "darwin" && process.arch === "arm64" ? "darwin-arm64" : null;
+const binaryRoot = platform === null ? null : join(repositoryRoot, `.tools/agave-v4.2.1-${platform}/bin`);
+const available = binaryRoot !== null && await Promise.all(["solana", "solana-keygen", "solana-test-validator", "spl-token"].map(async (name) => await access(join(binaryRoot, name)).then(() => true, () => false))).then((values) => values.every(Boolean));
 
 test("real local validator completes mint-burn-negative-authority lifecycle", { skip: available ? false : "checksum-pinned Agave fixture binaries are not installed" }, async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-real-local-")); await chmod(boundary, 0o700); const output = join(boundary, "output");

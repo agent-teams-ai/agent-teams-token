@@ -183,6 +183,26 @@
         }
       }
     },
+    "splPrograms": {
+      "scope": "local-solana-fixture",
+      "buildTool": "cargo-build-sbf 4.1.0 with platform-tools 1.54",
+      "token": {
+        "version": "9.0.0",
+        "tag": "program@v9.0.0",
+        "source": "https://github.com/solana-program/token",
+        "commit": "dfb260231c761be7d9c8b63728e770a102b86495",
+        "path": "tooling/local-solana/programs/spl_token-v9.0.0.so",
+        "sha256": "773bb8e1c2883e373ab887d09920c85a0373098827ab938c13180f0901e8ea78"
+      },
+      "associatedToken": {
+        "version": "8.0.0",
+        "tag": "program@v8.0.0",
+        "source": "https://github.com/solana-program/associated-token-account",
+        "commit": "0b867b5340cd001e5980d8ca7928effc4e10015c",
+        "path": "tooling/local-solana/programs/spl_associated_token_account-v8.0.0.so",
+        "sha256": "80965251e946ad724fde2f2d448646a8822dcc1018ccdd85a93aed6654ce95c8"
+      }
+    },
     "ccipSdk": {
       "scope": "future-non-core",
       "enabledForCore": false,

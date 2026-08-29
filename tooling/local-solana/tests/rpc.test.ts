@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { createServer, type RequestListener, type Server } from "node:http";
 import test from "node:test";
 import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
-import { CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
+import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
 
 async function listen(handler: RequestListener): Promise<{ readonly server: Server; readonly url: string }> {
-  const server = createServer(handler); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const server = createServer(handler); await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
   const address = server.address(); if (typeof address === "string" || address === null) { throw new Error("test server missing port"); }
   return { server, url: `http://127.0.0.1:${address.port}/` };
 }
-async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => server.close((cause) => cause ? reject(cause) : resolve())); }
+async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => { server.close((cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); }
 
 test("RPC adapter independently decodes finalized Token Program facts", async () => {
   const signature = "2".repeat(64);
@@ -34,6 +34,17 @@ test("RPC transport rejects redirects and non-loopback targets", async () => {
     await assert.rejects(new JsonRpcAdapter().genesisHash(fixture.url));
     await assert.rejects(new JsonRpcAdapter().genesisHash("http://localhost:8899/"), /SOLANA_RPC_NON_LOOPBACK/u);
   } finally { await close(fixture.server); }
+});
+
+test("RPC readiness proves pinned local programs at a finalized post-genesis slot", async () => {
+  const fixture = await listen((request, response) => {
+    let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
+      const call = JSON.parse(body); const result = call.method === "getSlot" ? 2 : { value: { executable: true, owner: "BPFLoaderUpgradeab1e11111111111111111111111", data: ["", "base64"] } };
+      response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
+    });
+  });
+  try { await new JsonRpcAdapter().waitProgramsReady(fixture.url, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 1_000, new AbortController().signal); }
+  finally { await close(fixture.server); }
 });
 
 test("RPC structured account reads reject forged Token-2022 ownership", async () => {

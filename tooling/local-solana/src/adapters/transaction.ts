@@ -1,40 +1,39 @@
 import { createPrivateKey, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { CLASSIC_TOKEN_PROGRAM, LocalSolanaError } from "../domain/model.ts";
-import type { AuthorityTransactionPort, RpcPort } from "../application/ports.ts";
+import type { AuthorityTransactionContext, AuthorityTransactionPort } from "../application/ports.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 
 export class Ed25519AuthorityTransactionAdapter implements AuthorityTransactionPort {
-  public async restoreFreeze(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, mint: string, newAuthority: string): Promise<Uint8Array> {
-    return await signedRestoreFreezeTransaction(rpc, rpcUrl, payerPath, authorityPath, mint, newAuthority);
+  public async restoreFreeze(request: AuthorityTransactionContext & { readonly mint: string; readonly newAuthority: string }): Promise<Uint8Array> {
+    return await signedRestoreFreezeTransaction(request);
   }
-  public async freezeAccount(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, account: string, mint: string, authority: string): Promise<Uint8Array> {
-    return await signedFreezeAccountTransaction(rpc, rpcUrl, payerPath, authorityPath, account, mint, authority);
+  public async freezeAccount(request: AuthorityTransactionContext & { readonly account: string; readonly mint: string }): Promise<Uint8Array> {
+    return await signedFreezeAccountTransaction(request);
   }
 }
 
-export async function signedRestoreFreezeTransaction(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, mint: string, newAuthority: string): Promise<Uint8Array> {
-  const data = Uint8Array.from([6, 1, 1, ...base58Decode(newAuthority)]); // SetAuthority, FreezeAccount, Some(pubkey)
-  return await signedTokenTransaction(rpc, rpcUrl, payerPath, authorityPath, [mint], [false], data);
+export async function signedRestoreFreezeTransaction(request: AuthorityTransactionContext & { readonly mint: string; readonly newAuthority: string }): Promise<Uint8Array> {
+  const data = Uint8Array.from([6, 1, 1, ...base58Decode(request.newAuthority)]); // SetAuthority, FreezeAccount, Some(pubkey)
+  return await signedTokenTransaction(request, { writableAccounts: [request.mint], readonlyFlags: [false], data });
 }
 
-export async function signedFreezeAccountTransaction(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, account: string, mint: string, authority: string): Promise<Uint8Array> {
-  void authority;
-  return await signedTokenTransaction(rpc, rpcUrl, payerPath, authorityPath, [account, mint], [false, true], Uint8Array.from([10]));
+export async function signedFreezeAccountTransaction(request: AuthorityTransactionContext & { readonly account: string; readonly mint: string }): Promise<Uint8Array> {
+  return await signedTokenTransaction(request, { writableAccounts: [request.account, request.mint], readonlyFlags: [false, true], data: Uint8Array.from([10]) });
 }
 
-async function signedTokenTransaction(rpc: RpcPort, rpcUrl: string, payerPath: string, authorityPath: string, writableAccounts: readonly string[], readonlyFlags: readonly boolean[], data: Uint8Array): Promise<Uint8Array> {
-  const payer = await keypair(payerPath);
-  const authority = await keypair(authorityPath);
-  const accounts = [payer.publicKey, authority.publicKey, ...writableAccounts.map(base58Decode), base58Decode(CLASSIC_TOKEN_PROGRAM)];
-  const readonlyUnsigned = 1 + readonlyFlags.filter(Boolean).length;
-  const instructionAccounts = writableAccounts.map((_unused, index) => index + 2).concat(1);
-  const instruction = concat([Uint8Array.from([accounts.length - 1]), shortVec(instructionAccounts.length), Uint8Array.from(instructionAccounts), shortVec(data.length), data]);
+async function signedTokenTransaction(context: AuthorityTransactionContext, instructionRequest: { readonly writableAccounts: readonly string[]; readonly readonlyFlags: readonly boolean[]; readonly data: Uint8Array }): Promise<Uint8Array> {
+  const payer = await keypair(context.payerPath);
+  const authority = await keypair(context.authorityPath);
+  const accounts = [payer.publicKey, authority.publicKey, ...instructionRequest.writableAccounts.map(base58Decode), base58Decode(CLASSIC_TOKEN_PROGRAM)];
+  const readonlyUnsigned = 1 + instructionRequest.readonlyFlags.filter(Boolean).length;
+  const instructionAccounts = instructionRequest.writableAccounts.map((_unused, index) => index + 2).concat(1);
+  const instruction = concat([Uint8Array.from([accounts.length - 1]), shortVec(instructionAccounts.length), Uint8Array.from(instructionAccounts), shortVec(instructionRequest.data.length), instructionRequest.data]);
   const message = concat([
     Uint8Array.from([2, 1, readonlyUnsigned]), shortVec(accounts.length), ...accounts,
-    base58Decode(await rpc.latestBlockhash(rpcUrl)), shortVec(1), instruction,
+    base58Decode(await context.rpc.latestBlockhash(context.rpcUrl)), shortVec(1), instruction,
   ]);
   const signatures = [ed25519Sign(message, payer.seed), ed25519Sign(message, authority.seed)];
   return concat([shortVec(signatures.length), ...signatures, message]);
