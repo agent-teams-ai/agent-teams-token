@@ -86,7 +86,10 @@ export class OwnedValidatorAdapter implements ValidatorPort {
     return { pid: validatorPid, stop: () => {
       request.signal.removeEventListener("abort", abort);
       if (stopped) { return Promise.resolve(); }
-      inFlight ??= stopSupervisor(supervisor, validatorPid).then(() => { stopped = true; }).finally(() => { inFlight = undefined; });
+      inFlight ??= (async () => {
+        try { await stopSupervisor(supervisor, validatorPid); stopped = true; }
+        finally { inFlight = undefined; }
+      })();
       return inFlight;
     } };
   }

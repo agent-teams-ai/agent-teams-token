@@ -134,14 +134,14 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
 
 async function finalizeCleanup(resources: CleanupResources, store: RunStorePort, paths: Awaited<ReturnType<RunStorePort["create"]>>): Promise<CleanupTruth> {
   for (let attempt = 0; attempt < CLEANUP_ATTEMPTS && resources.validator !== undefined; attempt += 1) {
-    await resources.validator.stop().then(() => { resources.validator = undefined; }).catch(() => {});
+    try { await resources.validator.stop(); resources.validator = undefined; } catch {}
   }
   for (let attempt = 0; attempt < CLEANUP_ATTEMPTS && resources.portLease !== undefined; attempt += 1) {
-    await resources.portLease.release().then(() => { resources.portLease = undefined; }).catch(() => {});
+    try { await resources.portLease.release(); resources.portLease = undefined; } catch {}
   }
   let privateDirectoryRemoved = false;
   for (let attempt = 0; attempt < CLEANUP_ATTEMPTS && !privateDirectoryRemoved; attempt += 1) {
-    await store.cleanup(paths).then(() => { privateDirectoryRemoved = true; }).catch(() => {});
+    try { await store.cleanup(paths); privateDirectoryRemoved = true; } catch {}
   }
   return {
     validatorStopped: resources.validator === undefined,

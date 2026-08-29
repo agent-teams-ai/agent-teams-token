@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { canonicalJson, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
@@ -16,9 +16,9 @@ import { assertPinnedSolcVersionOutput, pinnedSolcPath } from "./toolchain.ts";
 interface RunnerOptions { readonly repositoryRoot: string; readonly reportsRoot?: string }
 
 export async function runLocalEvm(options: RunnerOptions): Promise<Record<string, unknown>> {
-  const root = resolve(options.repositoryRoot);
+  const root = resolvePath(options.repositoryRoot);
   const privateRoot = privateRunRoot(root);
-  const reportsRoot = resolve(options.reportsRoot ?? join(root, ".local", "local-evm", "reports"));
+  const reportsRoot = resolvePath(options.reportsRoot ?? join(root, ".local", "local-evm", "reports"));
   const canonicalTemporaryRoot = realpathSync(tmpdir());
   await ensurePrivateDirectoryPath(canonicalTemporaryRoot, privateRoot);
   await reclaimStaleRuns(privateRoot);
@@ -159,7 +159,7 @@ async function faultPause(point: string, details: Record<string, unknown> = {}):
 }
 
 export function privateRunRoot(repositoryRoot: string): string {
-  const repositoryIdentity = strip0x(sha256(resolve(repositoryRoot))).slice(0, 32);
+  const repositoryIdentity = strip0x(sha256(resolvePath(repositoryRoot))).slice(0, 32);
   // macOS exposes its temporary directory through /var, which is a stable
   // system symlink to /private/var. Canonicalize that trusted boundary once so
   // later path-substitution checks can remain fail-closed.

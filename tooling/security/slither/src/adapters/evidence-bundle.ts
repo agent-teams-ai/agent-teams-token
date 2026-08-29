@@ -85,6 +85,42 @@ interface DerivedBundle {
 }
 
 async function deriveRawBundle(output: string, directory: string, schemaDirectory: string): Promise<DerivedBundle> {
+  const canonicalInputs = await readCanonicalInputs(directory, schemaDirectory);
+  const findings = await readRawAnalysis(
+    output,
+    canonicalInputs.targets,
+    canonicalInputs.sources,
+    canonicalInputs.acceptedDetectors,
+  );
+  assertRawFindingSources(findings, canonicalInputs.manifest);
+  const policies = await readCanonicalPolicies(directory, schemaDirectory, findings);
+  const tools = await readCanonicalTools(canonicalInputs.repositoryRoot, canonicalInputs.manifest);
+  return {
+    manifest: canonicalInputs.manifest,
+    findings,
+    targets: canonicalInputs.targets,
+    sources: canonicalInputs.sources,
+    detectors: canonicalInputs.acceptedDetectors,
+    closureHash: `sha256:${hex(JSON.stringify(canonicalInputs.closure))}`,
+    configHash: `sha256:${hex(policies.configBytes)}`,
+    policyHash: `sha256:${hex(policies.policyBytes)}`,
+    triageHash: `sha256:${hex(policies.triageBytes)}`,
+    suppressed: policies.suppressed,
+    triaged: policies.triaged,
+    tools,
+  };
+}
+
+interface CanonicalInputs {
+  readonly manifest: JsonObject;
+  readonly targets: readonly string[];
+  readonly sources: readonly string[];
+  readonly acceptedDetectors: readonly string[];
+  readonly closure: readonly unknown[];
+  readonly repositoryRoot: string;
+}
+
+async function readCanonicalInputs(directory: string, schemaDirectory: string): Promise<CanonicalInputs> {
   const manifestRaw = await readFile(join(directory, "production-closure.v1.json"), "utf8");
   const manifest = object(parseJsonWithoutDuplicateKeys(manifestRaw), "production manifest");
   if (manifest.schemaVersion !== 1) {throw invalid("production manifest version is invalid");}
@@ -115,7 +151,15 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
     throw invalid("canonical detector inventory identity is invalid");
   }
   const acceptedDetectors = uniqueSortedStrings(acceptedDetectorDocument.detectors, "canonical detectors");
+  return {manifest, targets, sources, acceptedDetectors, closure, repositoryRoot};
+}
 
+async function readRawAnalysis(
+  output: string,
+  targets: readonly string[],
+  sources: readonly string[],
+  acceptedDetectors: readonly string[],
+): Promise<JsonObject[]> {
   const rawAnalysis = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "slither.json"), "utf8")), "slither.json");
   const rawInventory = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "slither-inventory.json"), "utf8")), "slither-inventory.json");
   const rawDetectors = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "detector-inventory.json"), "utf8")), "detector-inventory.json");
@@ -128,25 +172,53 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
   const targetsObserved = uniqueSortedStrings(rawInventory.contracts, "raw contracts");
   const sourcesObserved = uniqueSortedStrings(rawInventory.sources, "raw sources");
   const detectorsObserved = uniqueSortedStrings(rawDetectors.detectors, "raw detectors");
-  if (rawAnalysis.schemaVersion !== 1 || rawInventory.schemaVersion !== 1 || rawDetectors.schemaVersion !== 1 || status.schemaVersion !== 1
-    || rawAnalysis.success !== true || rawInventory.success !== true
-    || array(rawAnalysis.errors, "analysis errors").length !== 0 || array(rawInventory.errors, "inventory errors").length !== 0
-    || status.analysisExit !== (findings.length === 0 ? 0 : 255) || status.inventoryExit !== 0) {
-    throw invalid("raw analysis status matrix is invalid");
-  }
+  assertRawAnalysisStatus(rawAnalysis, rawInventory, rawDetectors, status, findings.length);
   if (!same(targets, targetsObserved) || !same(sources, sourcesObserved) || !same(acceptedDetectors, detectorsObserved)) {
     throw invalid("raw targets, sources or detectors differ from canonical production inputs");
   }
   if (findings.some((finding) => !acceptedDetectors.includes(stringValue(finding.detectorId)))) {
     throw invalid("raw finding uses a detector outside the canonical inventory");
   }
+  return findings;
+}
+
+function assertRawAnalysisStatus(
+  analysis: JsonObject,
+  inventory: JsonObject,
+  detectors: JsonObject,
+  status: JsonObject,
+  findingCount: number,
+): void {
+  if (analysis.schemaVersion !== 1 || inventory.schemaVersion !== 1 || detectors.schemaVersion !== 1 || status.schemaVersion !== 1
+    || analysis.success !== true || inventory.success !== true
+    || array(analysis.errors, "analysis errors").length !== 0 || array(inventory.errors, "inventory errors").length !== 0
+    || status.analysisExit !== (findingCount === 0 ? 0 : 255) || status.inventoryExit !== 0) {
+    throw invalid("raw analysis status matrix is invalid");
+  }
+}
+
+function assertRawFindingSources(findings: readonly JsonObject[], manifest: JsonObject): void {
   const sourceHashes = new Map(array(manifest.sources, "manifest.sources").map((rawEntry) => {
     const entry = object(rawEntry, "source entry"); return [stringValue(entry.path), stringValue(entry.sha256)] as const;
   }));
   if (findings.some((finding) => sourceHashes.get(stringValue(finding.path)) !== String(finding.sourceHash).replace(/^sha256:/u, ""))) {
     throw invalid("raw finding source hash differs from the canonical source");
   }
+}
 
+interface CanonicalPolicies {
+  readonly configBytes: Uint8Array;
+  readonly policyBytes: Uint8Array;
+  readonly triageBytes: Uint8Array;
+  readonly suppressed: ReadonlySet<string>;
+  readonly triaged: ReadonlySet<string>;
+}
+
+async function readCanonicalPolicies(
+  directory: string,
+  schemaDirectory: string,
+  findings: readonly JsonObject[],
+): Promise<CanonicalPolicies> {
   const configBytes = await readFile(join(directory, "slither.config.json"));
   const policyBytes = await readFile(join(directory, "suppressions.v1.json"));
   const triageBytes = await readFile(join(directory, "triage.v1.json"));
@@ -154,6 +226,13 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
   await assertSerializedAgainstSchema(triageBytes.toString("utf8"), join(schemaDirectory, "triage-ledger.schema.v1.json"));
   const policy = object(parseJsonWithoutDuplicateKeys(policyBytes.toString("utf8")), "suppression policy");
   const suppressions = array(policy.suppressions, "suppressions").map((item) => object(item, "suppression"));
+  const suppressed = deriveSuppressions(findings, suppressions);
+  const triage = object(parseJsonWithoutDuplicateKeys(triageBytes.toString("utf8")), "triage policy");
+  const triaged = deriveTriage(findings, suppressed, triage);
+  return {configBytes, policyBytes, triageBytes, suppressed, triaged};
+}
+
+function deriveSuppressions(findings: readonly JsonObject[], suppressions: readonly JsonObject[]): ReadonlySet<string> {
   const now = Date.now();
   for (const suppression of suppressions) {
     const expires = Date.parse(stringValue(suppression.expiresAt));
@@ -172,7 +251,10 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
   if (suppressions.some((suppression) => !findings.some((finding) => exactSuppression(finding, suppression)))) {
     throw invalid("canonical suppression is unused");
   }
-  const triage = object(parseJsonWithoutDuplicateKeys(triageBytes.toString("utf8")), "triage policy");
+  return suppressed;
+}
+
+function deriveTriage(findings: readonly JsonObject[], suppressed: ReadonlySet<string>, triage: JsonObject): ReadonlySet<string> {
   const triageValues = array(triage.findings, "triage findings").map((item) => stringValue(object(item, "triage").fingerprint));
   const triaged = new Set(triageValues);
   if (triaged.size !== triageValues.length) {throw invalid("canonical triage contains duplicate fingerprints");}
@@ -180,6 +262,10 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
     && ["Low", "Informational", "Optimization"].includes(stringValue(finding.impact)))
     .map((finding) => stringValue(finding.fingerprint));
   if (!same([...triaged], lowerVisible)) {throw invalid("canonical triage does not exactly cover visible lower findings");}
+  return triaged;
+}
+
+async function readCanonicalTools(repositoryRoot: string, manifest: JsonObject): Promise<JsonObject> {
   const lock = object(parseJsonWithoutDuplicateKeys(await readFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8")), "toolchain lock");
   const image = object(object(lock.securityImages, "securityImages").slither, "slither image");
   const versions = object(image.versions, "image versions");
@@ -191,15 +277,23 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
     solc: String(versions.solc).replace(/\.Linux\.g\+\+$/u, ""),
     solcBinarySha256: `sha256:${manifestTools.solcBinarySha256}`,
   };
-  return {
-    manifest, findings, targets, sources, detectors: acceptedDetectors,
-    closureHash: `sha256:${hex(JSON.stringify(closure))}`,
-    configHash: `sha256:${hex(configBytes)}`, policyHash: `sha256:${hex(policyBytes)}`,
-    triageHash: `sha256:${hex(triageBytes)}`, suppressed, triaged, tools,
-  };
+  return tools;
 }
 
 export function assertAnalysisEvidenceSemantics(value: JsonObject, derived?: DerivedBundle): void {
+  const context = readAnalysisContext(value);
+  assertFindingClassifications(context);
+  if (derived) {assertDerivedAnalysis(value, context, derived);}
+}
+
+interface AnalysisContext {
+  readonly category: unknown;
+  readonly analysis: JsonObject;
+  readonly policy: JsonObject;
+  readonly findings: readonly JsonObject[];
+}
+
+function readAnalysisContext(value: JsonObject): AnalysisContext {
   const result = object(value.result, "result");
   const category = result.category;
   if (!((category === "clean" && result.exitCode === 0) || (category === "policy-failure" && result.exitCode === 20))) {
@@ -217,6 +311,11 @@ export function assertAnalysisEvidenceSemantics(value: JsonObject, derived?: Der
   }
   const errors = array(policy.errors, "policy.errors");
   if (errors.length !== 0) {throw invalid("analysis evidence cannot serialize tool or output errors");}
+  return {category, analysis, policy, findings};
+}
+
+function assertFindingClassifications(context: AnalysisContext): void {
+  const {analysis, category, findings, policy} = context;
   const suppressed = findings.filter((finding) => finding.suppressed === true).length;
   const blocking = findings.filter((finding) => finding.blocking === true).length;
   for (const finding of findings) {
@@ -229,7 +328,10 @@ export function assertAnalysisEvidenceSemantics(value: JsonObject, derived?: Der
     || (category === "policy-failure") !== (blocking > 0)) {
     throw invalid("finding classifications differ from independently derived counts");
   }
-  if (!derived) {return;}
+}
+
+function assertDerivedAnalysis(value: JsonObject, context: AnalysisContext, derived: DerivedBundle): void {
+  const {analysis, findings} = context;
   const inputs = object(value.inputs, "inputs");
   if (inputs.closureHash !== derived.closureHash || inputs.configHash !== derived.configHash
     || inputs.policyHash !== derived.policyHash || inputs.triageHash !== derived.triageHash) {
@@ -262,14 +364,14 @@ function validateRawFinding(finding: JsonObject): JsonObject {
     || !Number.isSafeInteger(finding.length) || Number(finding.start) < 0 || Number(finding.length) < 1
     || !IMPACTS.includes(finding.impact as (typeof IMPACTS)[number])) {throw invalid("raw finding tuple is malformed");}
   const identityHash = `sha256:${hex(identity)}`;
-  const canonical = ["agtmai-slither-finding-v1", finding.detectorId, path, String(finding.start), String(finding.length), finding.sourceHash, finding.snippetHash, identityHash].join("\n");
+  const fingerprintInput = ["agtmai-slither-finding-v1", finding.detectorId, path, String(finding.start), String(finding.length), finding.sourceHash, finding.snippetHash, identityHash].join("\n");
   const expected = ["detectorId", "impact", "confidence", "identity", "path", "start", "length", "sourceHash", "snippetHash"];
   if (JSON.stringify(Object.keys(finding).toSorted()) !== JSON.stringify(expected.toSorted())) {
     throw invalid("raw finding contains derived or incomplete fields");
   }
   return {
     detectorId: finding.detectorId, impact: finding.impact, confidence: finding.confidence,
-    identity, findingIdentityHash: identityHash, fingerprint: `sha256:${hex(canonical)}`,
+    identity, findingIdentityHash: identityHash, fingerprint: `sha256:${hex(fingerprintInput)}`,
     path, start: finding.start, length: finding.length,
     sourceHash: finding.sourceHash, snippetHash: finding.snippetHash,
   };

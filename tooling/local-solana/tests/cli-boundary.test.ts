@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import test from "node:test";
 
 interface Result { readonly code: number | null; readonly stdout: string; readonly stderr: string }
 
 async function subprocess(entrypoint: string, args: readonly string[]): Promise<Result> {
-  return await new Promise((resolveResult, reject) => {
+  return await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [entrypoint, ...args], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = ""; let stderr = "";
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { stdout += chunk; }); child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    child.once("error", reject); child.once("close", (code) => { resolveResult({ code, stdout, stderr }); });
+    child.once("error", reject); child.once("close", (code) => { resolve({ code, stdout, stderr }); });
   });
 }
 
-const composition = resolve(import.meta.dirname, "../src/composition/index.ts");
-const wrapper = resolve(import.meta.dirname, "../../../scripts/solana/local-fixture.ts");
-const helper = resolve(import.meta.dirname, "helpers/cli-boundary.ts");
+const composition = resolvePath(import.meta.dirname, "../src/composition/index.ts");
+const wrapper = resolvePath(import.meta.dirname, "../../../scripts/solana/local-fixture.ts");
+const helper = resolvePath(import.meta.dirname, "helpers/cli-boundary.ts");
 
 test("direct and wrapper entrypoints share the sanitized pre-mutation CLI boundary", async () => {
   for (const entrypoint of [composition, wrapper]) {

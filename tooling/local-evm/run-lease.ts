@@ -76,16 +76,7 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
       await validatePrivateDirectory(directory);
       lease = await readLease(directory);
     } catch (cause) {
-      if (await existingDirectoryIdentity(directory) === undefined) {continue;}
-      if (!(cause instanceof LocalEvmError) || cause.code !== "LOCAL_EVM_RUN_LEASE_ENOENT") {throw cause;}
-      if (!await provisionalIsStale(entry.runName)) {continue;}
-      await hooks.afterDirectoryList?.(directory);
-      const claim = await claimDirectory(directory, expectedDirectory);
-      if (claim === undefined) {continue;}
-      await validatePrivateDirectory(claim);
-      await assertProvisionalName(entry.runName);
-      await rm(claim, {recursive: true, force: false, maxRetries: 2});
-      reclaimed += 1;
+      if (await reclaimProvisionalEntry(directory, expectedDirectory, entry.runName, cause, hooks)) {reclaimed += 1;}
       continue;
     }
     const runnerState = await authenticateProcess(lease.runner);
@@ -111,6 +102,25 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     reclaimed += 1;
   }
   return reclaimed;
+}
+
+async function reclaimProvisionalEntry(
+  directory: string,
+  expectedDirectory: string,
+  runName: string,
+  cause: unknown,
+  hooks: ReclaimHooks,
+): Promise<boolean> {
+  if (await existingDirectoryIdentity(directory) === undefined) {return false;}
+  if (!(cause instanceof LocalEvmError) || cause.code !== "LOCAL_EVM_RUN_LEASE_ENOENT") {throw cause;}
+  if (!await provisionalIsStale(runName)) {return false;}
+  await hooks.afterDirectoryList?.(directory);
+  const claim = await claimDirectory(directory, expectedDirectory);
+  if (claim === undefined) {return false;}
+  await validatePrivateDirectory(claim);
+  await assertProvisionalName(runName);
+  await rm(claim, {recursive: true, force: false, maxRetries: 2});
+  return true;
 }
 
 async function writeLease(directory: string, lease: RunLease): Promise<void> {
@@ -174,14 +184,14 @@ async function claimDirectory(directory: string, expectedIdentity: string): Prom
     return claim;
   }
   catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return undefined;}
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return;}
     throw cause;
   }
 }
 
 export async function removeOwnedRunDirectory(directory: string): Promise<void> {
   const expectedDirectory = await directoryIdentity(directory).catch((cause: unknown) => {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return undefined;}
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return;}
     throw cause;
   });
   if (expectedDirectory === undefined) {return;}
