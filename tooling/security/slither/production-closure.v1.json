@@ -19,6 +19,5 @@
   "compiler": {"version":"0.8.36+commit.8a079791","evmVersion":"paris","optimizerEnabled":true,"optimizerRuns":200,"bytecodeHash":"ipfs","cborMetadata":true,"useLiteralContent":false,"viaIR":false,"experimental":false,"remappings":["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"]},
   "tools": {"forgeArchiveSha256":"8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57","forgeBinarySha256":"c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f","solcBinarySha256":"c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6"},
   "creationBytecodeSha256": "56d021ec13df6cccbc5d330ccad2acd567f5b4cb75665a0d9982604306c92493",
-  "detectorCount": 102,
-  "requiredDetectors": ["arbitrary-send-eth", "controlled-delegatecall", "reentrancy-eth", "suicidal", "tx-origin", "unchecked-lowlevel", "uninitialized-state", "unprotected-upgrade"]
+  "detectorInventory": {"path":"tooling/security/slither/detector-inventory.v1.json","sha256":"e073e66b11dcbe1e549e61040814aa09be1bdb0a9572b72c956ff0f3c9634f22"}
 }

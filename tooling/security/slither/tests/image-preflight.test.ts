@@ -13,10 +13,14 @@ class FakeProcess implements ProcessPort {
 
 test("image preflight pulls only the exact platform manifest digest", async () => {
   const port = new FakeProcess({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
-  assert.equal(await pullPinnedImage(port), true); assert.equal(port.command, "/usr/bin/docker"); assert.deepEqual(port.args, ["pull", "--platform", "linux/amd64", IMAGE]);
+  assert.equal(await pullPinnedImage(port, "/canonical/docker"), true);
+  assert.equal(port.command, "/canonical/docker");
+  assert.deepEqual(port.args, ["pull", "--platform", "linux/amd64", IMAGE]);
 });
 
 test("image pull failure and timeout fail closed", async () => {
-  assert.equal(await pullPinnedImage(new FakeProcess({ exitCode: 1, stdout: "", stderr: "redacted", timedOut: false })), false);
-  assert.equal(await pullPinnedImage(new FakeProcess({ exitCode: null, stdout: "", stderr: "", timedOut: true })), false);
+  const failure = new FakeProcess({ exitCode: 1, stdout: "", stderr: "redacted", timedOut: false });
+  const timeout = new FakeProcess({ exitCode: null, stdout: "", stderr: "", timedOut: true });
+  assert.equal(await pullPinnedImage(failure, "/canonical/docker"), false);
+  assert.equal(await pullPinnedImage(timeout, "/canonical/docker"), false);
 });

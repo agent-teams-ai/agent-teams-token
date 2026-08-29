@@ -9,12 +9,12 @@ test("CI wiring request is exact, dependency-ordered and fail closed", async () 
   assert.match(request.workflow.checkoutAction, /@[0-9a-f]{40}$/u); assert.match(request.workflow.uploadAction, /@[0-9a-f]{40}$/u);
   assert.match(request.packageScripts["check:release"] ?? "", /security:solidity/u);
   const requirements = request.workflow.requirements.join("\n");
-  for (const required of ["persist-credentials false", "if: always()", "if-no-files-found: error", "missing READY", "without a path filter", "do not use a pipeline", "SLITHER_CANDIDATE_SHA=$GITHUB_SHA"]) assert.match(requirements, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
+  for (const required of ["persist-credentials false", "if: always()", "if-no-files-found: error", "missing READY", "without a path filter", "do not use a pipeline", "SLITHER_CANDIDATE_SHA=$GITHUB_SHA"]) {assert.match(requirements, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));}
   assert.doesNotMatch(raw, /continue-on-error[^\n]*true/u);
 });
 
 test("exact CI fragment binds SHA, dependencies, failures and immutable upload", async () => {
   const fragment = await readFile("tooling/security/slither/ci-job.fragment.yml", "utf8");
-  for (const required of ["needs: [solidity]", "ref: ${{ github.sha }}", "persist-credentials: false", "timeout-minutes: 20", "pnpm security:solidity:prepare-image", "pnpm security:solidity", "if: ${{ failure() }}", "if: ${{ always() }}", "if-no-files-found: error", "scripts/assert-clean-head.sh", "@ea165f8d65b6e75b540449e92b4886f43607fa02"]) assert.match(fragment, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
+  for (const required of ["needs: [solidity]", "ref: ${{ github.sha }}", "persist-credentials: false", "timeout-minutes: 20", "SLITHER_DOCKER_PATH: /usr/bin/docker", "pnpm security:solidity:prepare-image", "pnpm security:solidity", "if: ${{ failure() }}", "if: ${{ always() }}", "if-no-files-found: error", "scripts/assert-clean-head.sh", "@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"]) {assert.match(fragment, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));}
   assert.doesNotMatch(fragment, /continue-on-error|paths-ignore|--network[ =]host/u);
 });

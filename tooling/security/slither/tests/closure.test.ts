@@ -1,16 +1,26 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import type { GateManifest } from "../src/domain/model.ts";
+import type { DetectorInventoryDocument, GateManifest } from "../src/domain/model.ts";
 import { sha256 } from "../src/adapters/fingerprint.ts";
 
 test("committed production closure has exact source and config hashes", async () => {
   const root = process.cwd();
   const manifest = JSON.parse(await readFile(`${root}/tooling/security/slither/production-closure.v1.json`, "utf8")) as GateManifest;
-  for (const entry of [...manifest.sources, ...manifest.config]) assert.equal(sha256(await readFile(`${root}/${entry.path}`)), entry.sha256, entry.path);
+  for (const entry of [...manifest.sources, ...manifest.config]) {assert.equal(sha256(await readFile(`${root}/${entry.path}`)), entry.sha256, entry.path);}
   assert.equal(manifest.sources.some(({ path }) => path.includes("/test/") || path.includes("/script/")), false);
   assert.equal(manifest.sources.some(({ path }) => path.endsWith("AGTMAIToken.sol")), true);
-  assert.equal(manifest.detectorCount, 102);
+  const inventory = JSON.parse(
+    await readFile(`${root}/${manifest.detectorInventory.path}`, "utf8"),
+  ) as DetectorInventoryDocument;
+  assert.equal(
+    sha256(await readFile(`${root}/${manifest.detectorInventory.path}`)),
+    manifest.detectorInventory.sha256,
+  );
+  assert.equal(inventory.slitherVersion, "0.11.6");
+  assert.equal(inventory.detectors.length, 101);
+  assert.deepEqual(inventory.detectors, inventory.detectors.toSorted());
+  assert.equal(new Set(inventory.detectors).size, 101);
   assert.equal(manifest.creationBytecodeSha256, "56d021ec13df6cccbc5d330ccad2acd567f5b4cb75665a0d9982604306c92493");
 });
 

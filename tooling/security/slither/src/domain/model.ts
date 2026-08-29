@@ -62,8 +62,13 @@ export interface GateManifest {
     readonly solcBinarySha256: "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6";
   };
   readonly creationBytecodeSha256: string;
-  readonly detectorCount: 102;
-  readonly requiredDetectors: readonly string[];
+  readonly detectorInventory: ClosureEntry;
+}
+
+export interface DetectorInventoryDocument {
+  readonly schemaVersion: 1;
+  readonly slitherVersion: "0.11.6";
+  readonly detectors: readonly string[];
 }
 
 export interface AnalysisInput {
@@ -93,4 +98,30 @@ export interface PolicyDecision {
 export class SlitherGateError extends Error {
   readonly code: string;
   constructor(code: string, message: string) { super(message); this.code = code; this.name = "SlitherGateError"; }
+}
+
+const COMPILER_PROFILE: GateManifest["compiler"] = {
+  version: "0.8.36+commit.8a079791",
+  evmVersion: "paris",
+  optimizerEnabled: true,
+  optimizerRuns: 200,
+  bytecodeHash: "ipfs",
+  cborMetadata: true,
+  useLiteralContent: false,
+  viaIR: false,
+  experimental: false,
+  remappings: [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/",
+  ],
+};
+
+export function parseCompilerProfile(value: unknown): GateManifest["compiler"] {
+  if (JSON.stringify(value) !== JSON.stringify(COMPILER_PROFILE)) {
+    throw new SlitherGateError(
+      "COMPILER_SETTINGS_MISMATCH",
+      "compiler settings differ from the exact approved profile",
+    );
+  }
+  return COMPILER_PROFILE;
 }

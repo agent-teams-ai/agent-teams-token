@@ -13,12 +13,15 @@ Linux Forge 1.8.0 and solc 0.8.36 paths through `SLITHER_FORGE_PATH` and
 SLITHER_REPOSITORY_ROOT="$PWD" \
 SLITHER_FORGE_PATH=/absolute/verified/forge \
 SLITHER_SOLC_PATH=/absolute/verified/solc \
+SLITHER_DOCKER_PATH=/absolute/canonical/docker \
 SLITHER_CANDIDATE_SHA=<40-hex-sha> \
 SLITHER_EVIDENCE_DIRECTORY=/absolute/new/evidence \
 node tooling/security/slither/src/composition/cli.ts
 ```
 
-The official toolbox image must already be present by its manifest digest. The
+The Docker CLI path is an explicit platform composition binding. It is
+canonicalized and must resolve to an absolute executable regular file; no PATH
+lookup or fallback occurs. The official toolbox image must already be present by its manifest digest. The
 runner never pulls, uses a public network, or falls back to host tools. It
 copies the pinned production closure into fresh container tmpfs, prebuilds with
 the project Forge while skipping tests and scripts, then invokes Slither with

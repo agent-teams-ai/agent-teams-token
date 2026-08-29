@@ -15,8 +15,8 @@ test("source dependencies preserve domain to application to adapters to composit
   };
   for (const [layer, allowed] of Object.entries(rules)) {
     for (const name of await readdir(join(root, layer))) {
-      if (!name.endsWith(".ts")) continue;
-      for (const specifier of imports(await readFile(join(root, layer, name), "utf8"))) assert.equal(allowed(specifier), true, `${layer}/${name} imports forbidden ${specifier}`);
+      if (!name.endsWith(".ts")) {continue;}
+      for (const specifier of imports(await readFile(join(root, layer, name), "utf8"))) {assert.equal(allowed(specifier), true, `${layer}/${name} imports forbidden ${specifier}`);}
     }
   }
 });

@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseDetectorInventory, parseSlitherJson } from "../src/adapters/slither-json.ts";
-import { makeTestDirectory } from "./temp.ts";
+import { makeTestDirectory } from "./test-directory.ts";
 
 test("strict parser accepts findings when Slither success is true", async () => {
   const root = await makeTestDirectory("parser-");
