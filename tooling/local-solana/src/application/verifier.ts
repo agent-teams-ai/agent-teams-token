@@ -31,7 +31,9 @@ function verifyMintStates(value: FixtureObservations): void {
     if (state.decimals !== FIXTURE_DECIMALS) { fail("SOLANA_DECIMALS", `expected ${FIXTURE_DECIMALS} decimals`); }
     if (state.mintAuthority !== value.mintAuthority) { fail("SOLANA_MINT_AUTHORITY", "ephemeral mint authority changed"); }
   }
-  if (value.initialMint.supply !== "0") { fail("SOLANA_INITIAL_SUPPLY", "mint did not begin at zero"); }
+  if (value.initialMint.supply !== "0" || value.afterRevokeMint.supply !== "0") {
+    fail("SOLANA_PRE_MINT_SUPPLY", "mint supply was not canonical zero through freeze-authority revocation");
+  }
   if (value.initialMint.freezeAuthority !== value.freezeAuthority || value.freezeAuthority !== value.mintAuthority) { fail("SOLANA_INITIAL_FREEZE", "mint creation did not bind the explicit ephemeral freeze authority"); }
   if (value.afterRevokeMint.freezeAuthority !== null || value.afterMint.freezeAuthority !== null || value.finalMint.freezeAuthority !== null) {
     fail("SOLANA_FREEZE_AUTHORITY", "freeze authority was not permanently disabled before minting");

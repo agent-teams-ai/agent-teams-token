@@ -34,3 +34,11 @@ test("verifier fails closed on state and authority mutations", () => {
   ];
   for (const mutate of mutations) { assert.throws(() => verifyObservations(mutate(observationFixture())), /SOLANA_/u); }
 });
+
+test("verifier rejects supply introduced only after freeze-authority revocation", () => {
+  const observation = observationFixture();
+  assert.throws(
+    () => verifyObservations({ ...observation, afterRevokeMint: { ...observation.afterRevokeMint, supply: "777" } }),
+    /SOLANA_PRE_MINT_SUPPLY/u,
+  );
+});

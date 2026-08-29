@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { chmod, link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { spawn } from "node:child_process";
 import { PrivateRunStore, ensurePrivateRoot } from "../src/adapters/filesystem.ts";
+import { processStartIdentity } from "../src/adapters/process-identity.ts";
 import { verifyObservations } from "../src/application/verifier.ts";
 import type { EvidenceReport } from "../src/domain/model.ts";
 import { observationFixture } from "./helpers/observations.ts";
@@ -64,6 +65,50 @@ test("a subsequent invocation reclaims only a valid dead owned lease", async () 
     const lease = JSON.parse(await readFile(marker, "utf8")); lease.pid = 2_000_000_000; await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
     assert.equal(await store.reclaimStale(), 1); await assert.rejects(lstat(paths.directory));
   } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("run reclamation treats a reused PID with a different process start as stale", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "kernel process-start identity requires Linux or Darwin" }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-reused-pid-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  try {
+    const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json");
+    const lease = JSON.parse(await readFile(marker, "utf8")); lease.processStart = process.platform === "linux" ? "linux:0" : "darwin:00";
+    await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
+    assert.equal(await store.reclaimStale(), 1); await assert.rejects(lstat(paths.directory));
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("run reclamation retains the exact live owner and records the native kernel identity", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "kernel process-start identity requires Linux or Darwin" }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-live-owner-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  try {
+    const paths = await store.create(); const lease = JSON.parse(await readFile(join(paths.directory, ".agtmai-local-solana-lease.json"), "utf8"));
+    assert.equal(lease.processStart, await processStartIdentity(process.pid));
+    assert.match(lease.processStart, process.platform === "linux" ? /^linux:[0-9]+$/u : /^darwin:[a-f0-9]+$/u);
+    assert.equal(await store.reclaimStale(), 0); assert.equal((await lstat(paths.directory)).isDirectory(), true);
+    await store.cleanup(paths);
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("run reclamation fails closed when process-start identity is missing", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-missing-identity-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  try {
+    const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json");
+    const lease = JSON.parse(await readFile(marker, "utf8")); delete lease.processStart;
+    await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
+    assert.equal(await store.reclaimStale(), 0); assert.equal((await lstat(paths.directory)).isDirectory(), true);
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("reused owner PID never authenticates a neighbouring process as its validator", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "validator identity requires Linux or Darwin" }, async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-neighbour-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  try {
+    const neighbourPid = neighbour.pid; assert.ok(neighbourPid); const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const lease = JSON.parse(await readFile(marker, "utf8"));
+    lease.processStart = process.platform === "linux" ? "linux:0" : "darwin:00";
+    lease.validator = { pid: neighbourPid, platform: process.platform, startTime: process.platform === "linux" ? "linux:0" : "darwin:00", executable: await realpath(process.execPath), ledger: paths.ledger, commandHash: "a".repeat(64) };
+    await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
+    await assert.rejects(store.reclaimStale(), /SOLANA_RECLAIM_IDENTITY/u);
+    assert.equal(processAlive(neighbourPid), true); assert.equal((await lstat(paths.directory)).isDirectory(), true);
+  } finally { if (neighbour.exitCode === null) { neighbour.kill("SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
 });
 
 test("normal cleanup refuses to delete state beneath a registered live validator", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "validator leases support Linux and Darwin" }, async () => {

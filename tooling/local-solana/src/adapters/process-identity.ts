@@ -22,6 +22,25 @@ export async function authenticateValidatorIdentity(identity: ValidatorIdentity,
     && (process.platform === "darwin" || observed.environment.includes(`AGTMAI_LOCAL_SOLANA_LEASE_TOKEN=${leaseToken}`));
 }
 
+/** Kernel-backed process identity shared by run and port leases. */
+export async function processStartIdentity(pid: number): Promise<string> {
+  if (process.platform === "linux") {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const end = stat.lastIndexOf(")");
+    const field = end < 0 ? undefined : stat.slice(end + 2).trim().split(/\s+/u)[19];
+    if (field === undefined || !/^[0-9]+$/u.test(field)) {
+      throw new LocalSolanaError("SOLANA_PROCESS_IDENTITY", "Linux process start identity is unavailable");
+    }
+    return `linux:${field}`;
+  }
+  if (process.platform === "darwin") {
+    const output = (await ps(["-o", "lstart=", "-p", `${pid}`])).trim();
+    if (output.length === 0) { throw new LocalSolanaError("SOLANA_PROCESS_IDENTITY", "Darwin process start identity is unavailable"); }
+    return `darwin:${Buffer.from(output).toString("hex")}`;
+  }
+  throw new LocalSolanaError("SOLANA_PROCESS_IDENTITY", "cross-process identity is unsupported on this platform");
+}
+
 interface Observation {
   readonly startTime: string;
   readonly executable: string;

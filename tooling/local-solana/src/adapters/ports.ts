@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { LocalSolanaError } from "../domain/model.ts";
 import type { PortAllocator, PortLease } from "../application/ports.ts";
+import { processStartIdentity } from "./process-identity.ts";
 
 const DYNAMIC_WIDTH = 128;
 const BLOCK_WIDTH = 132;
@@ -29,7 +30,7 @@ export class LoopbackPortAllocator implements PortAllocator {
   public async allocate(): Promise<PortLease> {
     const leaseRoot = await ensureLeaseRoot(this.root); const root = leaseRoot.path;
     await reclaimStaleLeases(root, leaseRoot.identity);
-    const processStart = await currentProcessStart(process.pid);
+    const processStart = await processStartIdentity(process.pid);
     const offset = randomInt(0, BLOCK_COUNT);
     for (let attempt = 0; attempt < Math.min(BLOCK_COUNT, 40); attempt += 1) {
       const index = (offset + attempt) % BLOCK_COUNT;
@@ -118,7 +119,7 @@ async function acquire(directory: string, processStart: string, rootIdentity: En
 async function releaseAcquired(root: string, acquired: AcquiredLease): Promise<void> {
   await assertRootIdentity(root, acquired.rootIdentity);
   const record = await validateLease(acquired.directory, acquired.directoryIdentity, acquired.markerIdentity, acquired.token);
-  if (record.pid !== process.pid || record.processStart !== await currentProcessStart(process.pid)) {
+  if (record.pid !== process.pid || record.processStart !== await processStartIdentity(process.pid)) {
     throw new LocalSolanaError("SOLANA_PORT_LEASE_OWNER", "port lease no longer belongs to this process identity");
   }
   await quarantineAndDelete(root, acquired);
@@ -134,7 +135,7 @@ async function reclaimStale(root: string, rootIdentity: EntryIdentity, directory
     markerIdentity = snapshot.identity;
     record = snapshot.record;
   } catch { return; }
-  const currentStart = await currentProcessStart(record.pid).catch(() => null);
+  const currentStart = await processStartIdentity(record.pid).catch(() => null);
   if (currentStart === record.processStart) { return; }
   await assertRootIdentity(root, rootIdentity);
   await quarantineAndDelete(root, { directory, rootIdentity, directoryIdentity, markerIdentity, token: record.token });
@@ -228,26 +229,6 @@ async function rollbackEmptyDirectory(directory: string, expected: EntryIdentity
 }
 function identity(entry: { readonly dev: bigint; readonly ino: bigint }): EntryIdentity { return { dev: entry.dev, ino: entry.ino }; }
 function sameIdentity(left: EntryIdentity, right: EntryIdentity): boolean { return left.dev === right.dev && left.ino === right.ino; }
-
-async function currentProcessStart(pid: number): Promise<string> {
-  if (process.platform === "linux") {
-    const raw = await readFile(`/proc/${pid}/stat`, "utf8");
-    const end = raw.lastIndexOf(")"); const field = end < 0 ? undefined : raw.slice(end + 2).trim().split(/\s+/u)[19];
-    if (field === undefined || !/^[0-9]+$/u.test(field)) { throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "process start identity is unavailable"); }
-    return `linux:${field}`;
-  }
-  // On Darwin PID plus the kernel-reported start timestamp distinguishes a recycled PID.
-  if (process.platform === "darwin") {
-    const { execFile } = await import("node:child_process");
-    const output = await new Promise<string>((_resolve, reject) => {
-      execFile("/bin/ps", ["-o", "lstart=", "-p", `${pid}`], { encoding: "utf8" }, (cause, stdout) => { if (cause) { reject(cause); } else { _resolve(stdout.trim()); } });
-    });
-    if (output.length === 0) { throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "Darwin process start identity is unavailable"); }
-    return `darwin:${Buffer.from(output).toString("hex")}`;
-  }
-  if (pid === process.pid) { return `runtime:${process.pid}`; }
-  throw new LocalSolanaError("SOLANA_PORT_LEASE_IDENTITY", "cross-process identity is unsupported on this platform");
-}
 
 async function canListen(port: number): Promise<boolean> {
   return await new Promise((_resolve) => {

@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { LocalSolanaError, type EvidenceReport, type FixtureObservations } from "../domain/model.ts";
 import type { RunPaths, RunStorePort, ValidatorIdentity } from "../application/ports.ts";
 import { assertEvidenceReport } from "../application/evidence.ts";
-import { authenticateValidatorIdentity } from "./process-identity.ts";
+import { authenticateValidatorIdentity, processStartIdentity } from "./process-identity.ts";
 
 const PREFIX = "run-";
 const MARKER = ".agtmai-local-solana-lease.json";
@@ -17,11 +17,12 @@ export class PrivateRunStore implements RunStorePort {
   public constructor(runRoot: string, outputRoot: string) { this.root = resolve(runRoot); this.outputRoot = resolve(outputRoot); }
   public async create(): Promise<RunPaths> {
     const root = await ensurePrivateRoot(this.root);
+    const processStart = await processStartIdentity(process.pid);
     const directory = await mkdtemp(join(root, PREFIX));
     await chmod(directory, 0o700);
     const payerKey = join(directory, "payer.json");
     const token = randomBytes(32).toString("hex");
-    const lease = { schemaVersion: 2, kind: "agtmai-local-solana", pid: process.pid, token, validator: null };
+    const lease = { schemaVersion: 3, kind: "agtmai-local-solana", pid: process.pid, processStart, token, validator: null };
     await atomicWrite(join(directory, MARKER), `${JSON.stringify(lease)}\n`, 0o600);
     await atomicWrite(join(directory, "config.yml"), `json_rpc_url: http://127.0.0.1:0/\nwebsocket_url: ''\nkeypair_path: ${payerKey}\naddress_labels: {}\ncommitment: finalized\n`, 0o600);
     const ledger = join(directory, "ledger"); await mkdir(ledger, { mode: 0o700 });
@@ -30,7 +31,7 @@ export class PrivateRunStore implements RunStorePort {
   public async registerValidator(paths: RunPaths, identity: ValidatorIdentity): Promise<void> {
     const root = await canonicalTarget(this.root); const lease = await validateOwnedRun(root, paths.directory, false);
     if (lease.token !== paths.leaseToken || identity.ledger !== await realpath(paths.ledger)) { throw new LocalSolanaError("SOLANA_VALIDATOR_LEASE", "validator identity is not bound to this owned run"); }
-    const updated = { schemaVersion: 2, kind: "agtmai-local-solana", pid: process.pid, token: lease.token, validator: identity };
+    const updated = { schemaVersion: 3, kind: "agtmai-local-solana", pid: process.pid, processStart: lease.processStart, token: lease.token, validator: identity };
     await atomicWrite(join(paths.directory, MARKER), `${JSON.stringify(updated)}\n`, 0o600);
   }
   public async cleanup(paths: RunPaths): Promise<void> {
@@ -49,7 +50,7 @@ export class PrivateRunStore implements RunStorePort {
       if (!name.startsWith(PREFIX)) { continue; }
       const directory = join(root, name);
       const lease = await validateOwnedRun(root, directory, true).catch(() => null);
-      if (!lease || processAlive(lease.pid)) { continue; }
+      if (!lease || await leaseOwnerIsLive(lease)) { continue; }
       if (lease.validator !== null) { await terminateAuthenticatedValidator(lease, directory); }
       await rm(directory, { recursive: true, force: false, maxRetries: 2 }); reclaimed += 1;
     }
@@ -87,13 +88,15 @@ async function canonicalTarget(path: string): Promise<string> {
   return join(parent, basename(absolute));
 }
 
-interface Lease { readonly pid: number; readonly token: string; readonly validator: ValidatorIdentity | null; }
+interface Lease { readonly pid: number; readonly processStart: string; readonly token: string; readonly validator: ValidatorIdentity | null; }
 async function validateOwnedRun(root: string, directory: string, allowStale: boolean): Promise<Lease> {
   if (dirname(directory) !== root || !basename(directory).startsWith(PREFIX)) { throw new LocalSolanaError("SOLANA_CLEANUP_BOUNDARY", "refusing cleanup outside owned run root"); }
   await assertOwnedDirectory(directory);
   const raw = await readLease(directory);
   const lease = parseLease(raw);
-  if (!allowStale && lease.pid !== process.pid) { throw new LocalSolanaError("SOLANA_LEASE_OWNER", "run belongs to another process"); }
+  if (!allowStale && (lease.pid !== process.pid || lease.processStart !== await processStartIdentity(process.pid))) {
+    throw new LocalSolanaError("SOLANA_LEASE_OWNER", "run belongs to another process identity");
+  }
   return lease;
 }
 
@@ -115,12 +118,13 @@ async function readLease(directory: string): Promise<Record<string, unknown>> {
 }
 
 function parseLease(raw: Record<string, unknown>): Lease {
-  const valid = Object.keys(raw).toSorted().join(",") === "kind,pid,schemaVersion,token,validator"
-    && raw.schemaVersion === 2 && raw.kind === "agtmai-local-solana" && typeof raw.pid === "number"
+  const valid = Object.keys(raw).toSorted().join(",") === "kind,pid,processStart,schemaVersion,token,validator"
+    && raw.schemaVersion === 3 && raw.kind === "agtmai-local-solana" && typeof raw.pid === "number"
     && Number.isSafeInteger(raw.pid) && raw.pid >= 1 && typeof raw.token === "string" && /^[a-f0-9]{64}$/u.test(raw.token);
-  if (!valid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "owned lease is invalid"); }
-  if (raw.validator === null) { return { pid: raw.pid as number, token: raw.token as string, validator: null }; }
-  return { pid: raw.pid as number, token: raw.token as string, validator: parseValidatorIdentity(raw.validator) };
+  const startValid = typeof raw.processStart === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(raw.processStart);
+  if (!valid || !startValid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "owned lease is invalid"); }
+  if (raw.validator === null) { return { pid: raw.pid as number, processStart: raw.processStart as string, token: raw.token as string, validator: null }; }
+  return { pid: raw.pid as number, processStart: raw.processStart as string, token: raw.token as string, validator: parseValidatorIdentity(raw.validator) };
 }
 
 function parseValidatorIdentity(child: unknown): ValidatorIdentity {
@@ -151,6 +155,11 @@ async function awaitExit(pid: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { if (!processAlive(pid)) { return true; } await delay(50); }
   return !processAlive(pid);
+}
+
+async function leaseOwnerIsLive(lease: Lease): Promise<boolean> {
+  try { return await processStartIdentity(lease.pid) === lease.processStart; }
+  catch { return processAlive(lease.pid); }
 }
 
 export async function atomicWrite(path: string, content: string, mode: number): Promise<void> {
