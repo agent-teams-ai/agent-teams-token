@@ -1,73 +1,298 @@
+import type {
+  ApprovedArtifact,
+  ArtifactInputs,
+  TrustRoots,
+} from "../application/ports.ts";
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
-import type { ArtifactInputs } from "../application/ports.ts";
 
-export interface TrustRoots {
-  readonly schemaVersion: 1; readonly testOnly: true; readonly productionApproved: false; readonly mainnetAllowed: false;
-  readonly chainId: "31337"; readonly contractFqn: string; readonly buildProfile: string; readonly from: `0x${string}`;
-  readonly maximumWorstCaseWei: string; readonly gasBufferBps: string; readonly quoteTtlSeconds: string; readonly maximumHeadLag: string;
-  readonly solcVersion: string; readonly compilerSettings: Record<string, unknown>; readonly artifactSha256: `0x${string}`;
-  readonly abiSha256: `0x${string}`; readonly fixtureSha256: `0x${string}`; readonly fixtureReadySha256: `0x${string}`;
-  readonly sourceDependencyClosure: Readonly<Record<string, `0x${string}`>>;
+const SOURCE = "src/features/token-genesis/AGTMAIToken.sol";
+const CONTRACT = "AGTMAIToken";
+
+export type { ApprovedArtifact, TrustRoots } from "../application/ports.ts";
+
+interface ParsedArtifactInputs {
+  readonly build: Record<string, unknown>;
+  readonly artifact: Record<string, unknown>;
+  readonly abi: unknown[];
+  readonly fixture: Record<string, unknown>;
+  readonly artifactSha256: `0x${string}`;
+  readonly abiSha256: `0x${string}`;
+  readonly fixtureSha256: `0x${string}`;
 }
-export interface ApprovedArtifact {
-  readonly buildInfoSha256: `0x${string}`; readonly artifactSha256: `0x${string}`; readonly abiSha256: `0x${string}`; readonly fixtureSha256: `0x${string}`;
-  readonly sourceDependencyClosure: Readonly<Record<string, `0x${string}`>>; readonly solcVersion: string; readonly compilerSettings: Record<string, unknown>;
-  readonly creationBytecode: `0x${string}`; readonly creationBytecodeHash: `0x${string}`; readonly constructorAbiBytes: `0x${string}`;
-  readonly constructorAbiHash: `0x${string}`; readonly constructorArguments: `0x${string}`; readonly constructorArgumentsHash: `0x${string}`;
-  readonly creationInput: `0x${string}`; readonly creationInputHash: `0x${string}`;
+
+interface BuildContract {
+  readonly outputContract: Record<string, unknown>;
+  readonly normalizedSettings: Record<string, unknown>;
+  readonly sourceDependencyClosure: Record<string, `0x${string}`>;
 }
-const SOURCE = "src/features/token-genesis/AGTMAIToken.sol"; const CONTRACT = "AGTMAIToken";
-export function approveForgeArtifact(inputs: ArtifactInputs, roots: TrustRoots): ApprovedArtifact {
-  const build = parseObject(inputs.buildInfoBytes, "BUILD_INFO"); const artifact = parseObject(inputs.artifactBytes, "ARTIFACT");
-  const abi = parseArray(inputs.abiBytes, "ABI"); const fixture = parseObject(inputs.fixtureBytes, "FIXTURE");
-  const artifactSha256 = sha256Hex(inputs.artifactBytes); const abiSha256 = sha256Hex(inputs.abiBytes); const fixtureSha256 = sha256Hex(inputs.fixtureBytes);
-  if (artifactSha256 !== roots.artifactSha256) fail("ARTIFACT_DIGEST_MISMATCH", "artifact digest differs from trust root");
-  if (abiSha256 !== roots.abiSha256) fail("ABI_DIGEST_MISMATCH", "ABI digest differs from trust root");
-  if (fixtureSha256 !== roots.fixtureSha256) fail("FIXTURE_DIGEST_MISMATCH", "fixture digest differs from trust root");
-  if (build.solcLongVersion !== roots.solcVersion && build.solcVersion !== roots.solcVersion) fail("SOLC_MISMATCH", "build-info exact solc version differs");
-  const input = object(build.input, "BUILD_INPUT_INVALID"); const settings = object(input.settings, "BUILD_SETTINGS_INVALID");
-  const normalizedSettings = normalizeSettings(settings); if (canonicalJson(normalizedSettings) !== canonicalJson(roots.compilerSettings)) fail("SETTINGS_MISMATCH", "compiler settings differ from trust root");
-  const sources = object(input.sources, "BUILD_SOURCES_INVALID"); const closure: Record<string, `0x${string}`> = {};
-  for (const [path, source] of Object.entries(sources)) { const content = object(source, "BUILD_SOURCE_INVALID").content; if (typeof content !== "string") fail("BUILD_SOURCE_INVALID", "source content is absent"); closure[path] = sha256Hex(content); }
-  if (canonicalJson(closure) !== canonicalJson(roots.sourceDependencyClosure)) fail("SOURCE_CLOSURE_MISMATCH", "source dependency closure differs from trust root");
+
+interface ConstructorValues {
+  readonly initialSupply: string;
+  readonly allocations: readonly Allocation[];
+}
+
+interface Allocation {
+  readonly id: string;
+  readonly recipient: string;
+  readonly amount: string;
+}
+
+export function approveForgeArtifact(
+  inputs: ArtifactInputs,
+  roots: TrustRoots,
+): ApprovedArtifact {
+  const parsed = parseArtifactInputs(inputs);
+  validateInputDigests(parsed, roots);
+  validateBuildInfoCompiler(parsed.build, roots);
+  const buildContract = readBuildContract(parsed.build, roots);
+  validateAbis(buildContract.outputContract, parsed.artifact, parsed.abi);
+  const constructor = findConstructor(parsed.abi);
+  const creationBytecode = readCreationBytecode(buildContract.outputContract, parsed.artifact);
+  const constructorArguments = encodeConstructor(
+    parseConstructor(inputs.constructorValues ?? parsed.fixture),
+  );
+  const creationInput = `${creationBytecode}${constructorArguments.slice(2)}` as `0x${string}`;
+  const constructorAbiBytes = utf8Hex(canonicalJson(constructor));
+
+  return {
+    buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
+    artifactSha256: parsed.artifactSha256,
+    abiSha256: parsed.abiSha256,
+    fixtureSha256: parsed.fixtureSha256,
+    sourceDependencyClosure: buildContract.sourceDependencyClosure,
+    buildInfoSolcVersion: roots.buildInfoSolcVersion,
+    compilerSettings: buildContract.normalizedSettings,
+    creationBytecode,
+    creationBytecodeHash: hashHex(creationBytecode),
+    constructorAbiBytes,
+    constructorAbiHash: hashHex(constructorAbiBytes),
+    constructorArguments,
+    constructorArgumentsHash: hashHex(constructorArguments),
+    creationInput,
+    creationInputHash: hashHex(creationInput),
+  };
+}
+
+function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
+  return {
+    build: parseObject(inputs.buildInfoBytes, "BUILD_INFO"),
+    artifact: parseObject(inputs.artifactBytes, "ARTIFACT"),
+    abi: parseArray(inputs.abiBytes, "ABI"),
+    fixture: parseObject(inputs.fixtureBytes, "FIXTURE"),
+    artifactSha256: sha256Hex(inputs.artifactBytes),
+    abiSha256: sha256Hex(inputs.abiBytes),
+    fixtureSha256: sha256Hex(inputs.fixtureBytes),
+  };
+}
+
+function validateInputDigests(parsed: ParsedArtifactInputs, roots: TrustRoots): void {
+  if (parsed.artifactSha256 !== roots.artifactSha256) {
+    fail("ARTIFACT_DIGEST_MISMATCH", "artifact digest differs from trust root");
+  }
+  if (parsed.abiSha256 !== roots.abiSha256) {
+    fail("ABI_DIGEST_MISMATCH", "ABI digest differs from trust root");
+  }
+  if (parsed.fixtureSha256 !== roots.fixtureSha256) {
+    fail("FIXTURE_DIGEST_MISMATCH", "fixture digest differs from trust root");
+  }
+}
+
+function validateBuildInfoCompiler(
+  build: Record<string, unknown>,
+  roots: TrustRoots,
+): void {
+  if (build.solcVersion !== roots.buildInfoSolcVersion) {
+    fail("SOLC_MISMATCH", "build-info solcVersion differs from trust root");
+  }
+}
+
+function readBuildContract(build: Record<string, unknown>, roots: TrustRoots): BuildContract {
+  const input = object(build.input, "BUILD_INPUT_INVALID");
+  const settings = object(input.settings, "BUILD_SETTINGS_INVALID");
+  const normalizedSettings = normalizeSettings(settings);
+  if (canonicalJson(normalizedSettings) !== canonicalJson(roots.compilerSettings)) {
+    fail("SETTINGS_MISMATCH", "compiler settings differ from trust root");
+  }
+  const sourceDependencyClosure = readSourceClosure(input.sources);
+  if (canonicalJson(sourceDependencyClosure) !== canonicalJson(roots.sourceDependencyClosure)) {
+    fail("SOURCE_CLOSURE_MISMATCH", "source dependency closure differs from trust root");
+  }
   const output = object(build.output, "BUILD_OUTPUT_INVALID");
   const contracts = object(output.contracts, "BUILD_CONTRACTS_INVALID");
   const sourceContracts = object(contracts[SOURCE], "BUILD_SOURCE_CONTRACT_INVALID");
   const outputContract = object(sourceContracts[CONTRACT], "BUILD_CONTRACT_INVALID");
-  const buildAbi = outputContract.abi; const artifactAbi = artifact.abi;
-  if (canonicalJson(buildAbi) !== canonicalJson(abi) || canonicalJson(artifactAbi) !== canonicalJson(abi)) fail("ABI_BUILD_MISMATCH", "ABI/build/artifact mismatch");
-  const constructor = abi.find((entry) => object(entry, "ABI_ENTRY_INVALID").type === "constructor"); if (!constructor) fail("CONSTRUCTOR_ABI_MISSING", "constructor ABI is absent");
-  const constructorAbiJson = canonicalJson(constructor); const constructorAbiBytes = utf8Hex(constructorAbiJson);
-  const bytecode = object(object(object(outputContract.evm, "BUILD_EVM_INVALID").bytecode, "BUILD_BYTECODE_INVALID"), "BUILD_BYTECODE_INVALID");
-  if (hasLinks(bytecode.linkReferences)) fail("LINK_REFERENCES_UNSUPPORTED", "linked bytecode is unsupported");
-  const raw = bytecode.object; if (typeof raw !== "string" || !/^[0-9a-f]+$/u.test(raw) || raw.length % 2) fail("BYTECODE_INVALID", "creation bytecode is malformed");
+  return { outputContract, normalizedSettings, sourceDependencyClosure };
+}
+
+function readSourceClosure(value: unknown): Record<string, `0x${string}`> {
+  const sources = object(value, "BUILD_SOURCES_INVALID");
+  const closure: Record<string, `0x${string}`> = {};
+  for (const [path, source] of Object.entries(sources)) {
+    const content = object(source, "BUILD_SOURCE_INVALID").content;
+    if (typeof content !== "string") {
+      fail("BUILD_SOURCE_INVALID", "source content is absent");
+    }
+    closure[path] = sha256Hex(content);
+  }
+  return closure;
+}
+
+function validateAbis(
+  outputContract: Record<string, unknown>,
+  artifact: Record<string, unknown>,
+  abi: unknown[],
+): void {
+  const approvedAbi = canonicalAbi(abi);
+  if (
+    canonicalAbi(outputContract.abi) !== approvedAbi
+    || canonicalAbi(artifact.abi) !== approvedAbi
+  ) {
+    fail("ABI_BUILD_MISMATCH", "ABI/build/artifact mismatch");
+  }
+}
+
+function canonicalAbi(value: unknown): string {
+  if (!Array.isArray(value)) {
+    fail("ABI_BUILD_MISMATCH", "ABI/build/artifact mismatch");
+  }
+  return canonicalJson(
+    value.toSorted((left, right) => canonicalJson(left).localeCompare(canonicalJson(right))),
+  );
+}
+
+function findConstructor(abi: unknown[]): Record<string, unknown> {
+  const constructor = abi.find(
+    (entry) => object(entry, "ABI_ENTRY_INVALID").type === "constructor",
+  );
+  if (constructor === undefined) {
+    fail("CONSTRUCTOR_ABI_MISSING", "constructor ABI is absent");
+  }
+  return object(constructor, "ABI_ENTRY_INVALID");
+}
+
+function readCreationBytecode(
+  outputContract: Record<string, unknown>,
+  artifact: Record<string, unknown>,
+): `0x${string}` {
+  const evm = object(outputContract.evm, "BUILD_EVM_INVALID");
+  const bytecode = object(evm.bytecode, "BUILD_BYTECODE_INVALID");
+  if (hasLinks(bytecode.linkReferences)) {
+    fail("LINK_REFERENCES_UNSUPPORTED", "linked bytecode is unsupported");
+  }
+  const raw = bytecode.object;
+  if (typeof raw !== "string" || !/^[0-9a-f]+$/u.test(raw) || raw.length % 2 !== 0) {
+    fail("BYTECODE_INVALID", "creation bytecode is malformed");
+  }
   const artifactRaw = object(artifact.bytecode, "ARTIFACT_BYTECODE_INVALID").object;
-  if (artifactRaw !== raw && artifactRaw !== `0x${raw}`) fail("ARTIFACT_BUILD_MISMATCH", "artifact bytecode differs from build-info");
-  const values = parseConstructor(inputs.constructorValues ?? fixture); const constructorArguments = encodeConstructor(values);
-  const creationBytecode = `0x${raw}` as const; const creationInput = `${creationBytecode}${constructorArguments.slice(2)}` as `0x${string}`;
-  return { buildInfoSha256: sha256Hex(inputs.buildInfoBytes), artifactSha256, abiSha256, fixtureSha256, sourceDependencyClosure: closure,
-    solcVersion: roots.solcVersion, compilerSettings: normalizedSettings, creationBytecode, creationBytecodeHash: sha256Hex(hexBytes(creationBytecode)),
-    constructorAbiBytes, constructorAbiHash: sha256Hex(hexBytes(constructorAbiBytes)), constructorArguments, constructorArgumentsHash: sha256Hex(hexBytes(constructorArguments)),
-    creationInput, creationInputHash: sha256Hex(hexBytes(creationInput)) };
+  if (artifactRaw !== raw && artifactRaw !== `0x${raw}`) {
+    fail("ARTIFACT_BUILD_MISMATCH", "artifact bytecode differs from build-info");
+  }
+  return `0x${raw}`;
 }
-interface ConstructorValues { readonly initialSupply: string; readonly allocations: readonly { id: string; recipient: string; amount: string }[] }
+
 function parseConstructor(value: unknown): ConstructorValues {
-  const record = object(value, "CONSTRUCTOR_INVALID"); const initialSupply = record.initialSupply ?? record.initialSupplyBaseUnits; const allocations = record.allocations;
-  if (typeof initialSupply !== "string" || !Array.isArray(allocations)) fail("CONSTRUCTOR_INVALID", "constructor values are malformed");
-  return { initialSupply, allocations: allocations.map((item) => { const a = object(item, "CONSTRUCTOR_INVALID"); const id = a.id ?? a.idBytes32; const amount = a.amount ?? a.amountBaseUnits; if (typeof id !== "string" || typeof a.recipient !== "string" || typeof amount !== "string") fail("CONSTRUCTOR_INVALID", "allocation is malformed"); return { id, recipient: a.recipient, amount }; }) };
+  const parsed = object(value, "CONSTRUCTOR_INVALID");
+  const initialSupply = parsed.initialSupply ?? parsed.initialSupplyBaseUnits;
+  if (typeof initialSupply !== "string" || !Array.isArray(parsed.allocations)) {
+    fail("CONSTRUCTOR_INVALID", "constructor values are malformed");
+  }
+  return { initialSupply, allocations: parsed.allocations.map(parseAllocation) };
 }
+
+function parseAllocation(value: unknown): Allocation {
+  const parsed = object(value, "CONSTRUCTOR_INVALID");
+  const id = parsed.id ?? parsed.idBytes32;
+  const amount = parsed.amount ?? parsed.amountBaseUnits;
+  if (
+    typeof id !== "string"
+    || typeof parsed.recipient !== "string"
+    || typeof amount !== "string"
+  ) {
+    fail("CONSTRUCTOR_INVALID", "allocation is malformed");
+  }
+  return { id, recipient: parsed.recipient, amount };
+}
+
 export function encodeConstructor(value: ConstructorValues): `0x${string}` {
   const words = [word(value.initialSupply), word("64"), word(String(value.allocations.length))];
-  for (const item of value.allocations) { if (!/^0x[0-9a-f]{64}$/u.test(item.id) || !/^0x[0-9a-f]{40}$/u.test(item.recipient)) fail("CONSTRUCTOR_INVALID", "constructor hex value is malformed"); words.push(item.id.slice(2), item.recipient.slice(2).padStart(64, "0"), word(item.amount)); }
+  for (const item of value.allocations) {
+    if (!/^0x[0-9a-f]{64}$/u.test(item.id) || !/^0x[0-9a-f]{40}$/u.test(item.recipient)) {
+      fail("CONSTRUCTOR_INVALID", "constructor hex value is malformed");
+    }
+    words.push(
+      item.id.slice(2),
+      item.recipient.slice(2).padStart(64, "0"),
+      word(item.amount),
+    );
+  }
   return `0x${words.join("")}`;
 }
-function word(value: string): string { if (!/^(0|[1-9][0-9]*)$/u.test(value)) fail("CONSTRUCTOR_INVALID", "constructor integer is malformed"); return BigInt(value).toString(16).padStart(64, "0"); }
-function parseObject(bytes: Uint8Array, code: string): Record<string, unknown> { const value = parse(bytes, code); return object(value, `${code}_INVALID`); }
-function parseArray(bytes: Uint8Array, code: string): unknown[] { const value = parse(bytes, code); if (!Array.isArray(value)) fail(`${code}_INVALID`, `${code} must be an array`); return value; }
-function parse(bytes: Uint8Array, code: string): unknown { try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { fail(`${code}_INVALID`, `${code} is not strict UTF-8 JSON`); } }
-function object(value: unknown, code: string): Record<string, unknown> { if (value === null || typeof value !== "object" || Array.isArray(value)) fail(code, "expected object"); return value as Record<string, unknown>; }
-function hasLinks(value: unknown): boolean { return value !== null && typeof value === "object" && Object.values(value as Record<string, unknown>).some((v) => v !== null && typeof v === "object" && Object.values(v as Record<string, unknown>).some((x) => Array.isArray(x) && x.length)); }
-function normalizeSettings(settings: Record<string, unknown>): Record<string, unknown> { const optimizer = object(settings.optimizer, "BUILD_OPTIMIZER_INVALID"); const metadata = object(settings.metadata, "BUILD_METADATA_INVALID"); return { optimizer: { enabled: optimizer.enabled, runs: optimizer.runs }, evmVersion: settings.evmVersion, metadata: { bytecodeHash: metadata.bytecodeHash, appendCBOR: metadata.appendCBOR } }; }
-function utf8Hex(value: string): `0x${string}` { return `0x${Buffer.from(value, "utf8").toString("hex")}`; }
-function hexBytes(value: `0x${string}`): Uint8Array { return Buffer.from(value.slice(2), "hex"); }
+
+function word(value: string): string {
+  if (!/^(0|[1-9][0-9]*)$/u.test(value)) {
+    fail("CONSTRUCTOR_INVALID", "constructor integer is malformed");
+  }
+  return BigInt(value).toString(16).padStart(64, "0");
+}
+
+function parseObject(bytes: Uint8Array, code: string): Record<string, unknown> {
+  return object(parseJson(bytes, code), `${code}_INVALID`);
+}
+
+function parseArray(bytes: Uint8Array, code: string): unknown[] {
+  const value = parseJson(bytes, code);
+  if (!Array.isArray(value)) {
+    fail(`${code}_INVALID`, `${code} must be an array`);
+  }
+  return value;
+}
+
+function parseJson(bytes: Uint8Array, code: string): unknown {
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    fail(`${code}_INVALID`, `${code} is not strict UTF-8 JSON`);
+  }
+}
+
+function object(value: unknown, code: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail(code, "expected object");
+  }
+  return value as Record<string, unknown>;
+}
+
+function hasLinks(value: unknown): boolean {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>).some(hasFileLinks);
+}
+
+function hasFileLinks(value: unknown): boolean {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>).some(
+    (links) => Array.isArray(links) && links.length > 0,
+  );
+}
+
+function normalizeSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  const optimizer = object(settings.optimizer, "BUILD_OPTIMIZER_INVALID");
+  const metadata = object(settings.metadata, "BUILD_METADATA_INVALID");
+  return {
+    optimizer: { enabled: optimizer.enabled, runs: optimizer.runs },
+    evmVersion: settings.evmVersion,
+    metadata: { bytecodeHash: metadata.bytecodeHash, appendCBOR: metadata.appendCBOR },
+  };
+}
+
+function utf8Hex(value: string): `0x${string}` {
+  return `0x${Buffer.from(value, "utf8").toString("hex")}`;
+}
+
+function hashHex(value: `0x${string}`): `0x${string}` {
+  return sha256Hex(Buffer.from(value.slice(2), "hex"));
+}
