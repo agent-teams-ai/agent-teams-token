@@ -18,7 +18,7 @@
     {"path":"tooling/security/slither/slither-inventory.py","sha256":"c3c6d98c6e6e73e51195dd9f0591da184d2c561eb541301a0653a05226dac566"},
     {"path":"tooling/security/slither/suppressions.v1.json","sha256":"2721471bedaf3d0ae3e0a600a7bac4a2d150d0c8f0929afbe69a0fd050d7a3dc"},
     {"path":"tooling/security/slither/suppression-ledger.schema.v1.json","sha256":"7ed9bfe880d078500da9697982189d80cc3a3e1ab4b54df2239e656f3de63386"},
-    {"path":"tooling/security/slither/triage.v1.json","sha256":"08fbbf45216153268c68b838ace1e89a02ae207d81fd42986f0e08fc466caebe"},
+    {"path":"tooling/security/slither/triage.v1.json","sha256":"38a02ae3f51fedb31680af7456f3cbbcd2d2c41cd82da12e05a0e6f5ce907029"},
     {"path":"tooling/security/slither/triage-ledger.schema.v1.json","sha256":"9800595693b0578607c9422022bcf7be989ef1626a05472afb882f371d676087"},
     {"path":"tooling/security/slither/evidence-report.schema.v1.json","sha256":"65f9eb1980f8aea30230b9cdd4cf27d4e3b91272f218c4ec6c343370c6060f3e"},
     {"path":"tooling/security/slither/output-failure.schema.v1.json","sha256":"6e54ad1eec051480dfd044d08ac458c83ba902afd3974fca911702f075d9ac93"},

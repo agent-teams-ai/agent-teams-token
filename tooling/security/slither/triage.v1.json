@@ -1,1 +1,93 @@
-{"schemaVersion":1,"findings":[]}
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:0bdc516c2ea70eb1506d9087c37a64bf74219c943fae4ce5ba6ec5c709e84607",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The pinned OpenZeppelin draft IERC-6093 interface intentionally retains its broad upstream pragma.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The pinned OpenZeppelin IERC20 interface keeps its broad upstream pragma for compatibility.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The approved AGTMAI acronym is intentionally retained in the public token contract identifier.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:3e9bbd4f4becbedeaf399132a78aae873c16832f014081535116f8d9a71b58bf",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Constructor complexity comes from fail-closed validation of at most 32 immutable genesis allocations.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:41a24f69881fa7e61a657184f095cca8f63b0294157d67d51f53c35fa205be6a",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The pinned OpenZeppelin ERC20 implementation intentionally retains its compatible upstream pragma.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:6968e5dfe430c2af75b3853c25e887ca502f113bf9bda91f9534c82162306811",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The pinned OpenZeppelin IERC20Metadata interface keeps its broad upstream compatibility pragma.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:83f6581c3996d4e9b5968b277ce1ff495a578911f308179538cc8f86ed788d8c",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The immutable token type intentionally uses the approved all-capitals AGTMAI product acronym.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:8dcdc97543baa44ed283ce33a2c4fc42bc59911a37b8b2d132787666173d54ff",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The constructor-only allocation validation loop is explicitly bounded to 32 entries before execution.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:9d8ec352a3f51ab1633f119d920d738e74bfeac64ffdcae6a3f53ae7bcf64272",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The bounded constructor mint loop must write each recipient balance and emit its allocation event once.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:b44fbecb5ceae85789986a70267528994357153d5487d7ca1b1bd780889cc617",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The full-width hexadecimal literal is the fixed, human-decodable genesis allocation domain tag.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:fb34e078e26432fff83d02582abcd0a15d915cf968edc1caa59ceb40a395ba82",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "The pinned OpenZeppelin draft IERC-6093 file keeps its upstream compiler compatibility range.",
+      "reviewedAt": "2026-08-29T00:00:00.000Z"
+    }
+  ]
+}

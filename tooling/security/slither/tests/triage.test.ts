@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { validateFindingTriage } from "../src/application/triage.ts";
 import { findingFingerprint, normalizedIdentityHash, sourceLocation } from "../src/adapters/fingerprint.ts";
+import { assertSerializedAgainstSchema } from "../src/adapters/json-schema.ts";
 import type { Finding, FindingTriage } from "../src/domain/model.ts";
 
 const source = "contract A {}";
@@ -14,4 +16,36 @@ test("every visible lower-impact fingerprint requires exact current triage", () 
   assert.match(validateFindingTriage([finding], [])[0] ?? "", /requires exactly one/u);
   assert.match(validateFindingTriage([], [triage])[0] ?? "", /stale/u);
   assert.match(validateFindingTriage([finding], [triage, triage])[0] ?? "", /unique/u);
+});
+
+test("production triage pins the exact prior artifact findings without suppressing them", async () => {
+  const raw = await readFile("tooling/security/slither/triage.v1.json", "utf8");
+  await assertSerializedAgainstSchema(raw, "tooling/security/slither/triage-ledger.schema.v1.json");
+  const document = JSON.parse(raw) as {
+    schemaVersion: number;
+    findings: FindingTriage[];
+  };
+  const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
+    suppressions: unknown[];
+  };
+  const expected = [
+    "sha256:0bdc516c2ea70eb1506d9087c37a64bf74219c943fae4ce5ba6ec5c709e84607",
+    "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
+    "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
+    "sha256:3e9bbd4f4becbedeaf399132a78aae873c16832f014081535116f8d9a71b58bf",
+    "sha256:41a24f69881fa7e61a657184f095cca8f63b0294157d67d51f53c35fa205be6a",
+    "sha256:6968e5dfe430c2af75b3853c25e887ca502f113bf9bda91f9534c82162306811",
+    "sha256:83f6581c3996d4e9b5968b277ce1ff495a578911f308179538cc8f86ed788d8c",
+    "sha256:8dcdc97543baa44ed283ce33a2c4fc42bc59911a37b8b2d132787666173d54ff",
+    "sha256:9d8ec352a3f51ab1633f119d920d738e74bfeac64ffdcae6a3f53ae7bcf64272",
+    "sha256:b44fbecb5ceae85789986a70267528994357153d5487d7ca1b1bd780889cc617",
+    "sha256:fb34e078e26432fff83d02582abcd0a15d915cf968edc1caa59ceb40a395ba82",
+  ];
+
+  assert.equal(document.schemaVersion, 1);
+  assert.deepEqual(document.findings.map(({ fingerprint }) => fingerprint), expected);
+  assert.ok(document.findings.every(({ owner }) => owner === "project-security"));
+  assert.ok(document.findings.every(({ reviewedAt }) => reviewedAt === "2026-08-29T00:00:00.000Z"));
+  assert.ok(document.findings.every(({ rationale }) => rationale.trim().length >= 20));
+  assert.deepEqual(suppressions.suppressions, []);
 });
