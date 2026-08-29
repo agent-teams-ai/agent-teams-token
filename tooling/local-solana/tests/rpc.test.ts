@@ -53,6 +53,27 @@ test("RPC readiness proves pinned local programs at a finalized post-genesis slo
   finally { await close(fixture.server); }
 });
 
+test("RPC delivers negative transactions with a fresh hash and bounded retries", async () => {
+  const signature = "4".repeat(64); const calls: Array<{ readonly method: string; readonly params: readonly unknown[] }> = [];
+  const fixture = await listen((request, response) => {
+    let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
+      const call = JSON.parse(body) as { readonly id: number; readonly method: string; readonly params: readonly unknown[] }; calls.push(call);
+      const result = call.method === "getLatestBlockhash" ? { value: { blockhash: payer, lastValidBlockHeight: 100 } }
+        : call.method === "sendTransaction" ? signature : { value: [{ confirmationStatus: "finalized", err: { InstructionError: [0, { Custom: 4 }] } }] };
+      response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
+    });
+  });
+  try {
+    const rpc = new JsonRpcAdapter();
+    assert.equal(await rpc.latestBlockhash(fixture.url), payer);
+    assert.equal(await rpc.sendSignedTransaction(fixture.url, Uint8Array.from([1, 2, 3])), signature);
+    assert.deepEqual(calls.find((call) => call.method === "getLatestBlockhash")?.params, [{ commitment: "processed" }]);
+    const send = calls.find((call) => call.method === "sendTransaction");
+    assert.deepEqual(send?.params[1], { encoding: "base64", skipPreflight: true, preflightCommitment: "processed", maxRetries: 5 });
+    assert.equal(calls.some((call) => call.method === "getSignatureStatuses"), true);
+  } finally { await close(fixture.server); }
+});
+
 test("RPC structured account reads reject forged Token-2022 ownership", async () => {
   const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { value: { owner: "Token2022", data: { parsed: { type: "mint", info: { decimals: 9, supply: "0", mintAuthority: "x", freezeAuthority: null } } } } } })); }); });
   try { await assert.rejects(new JsonRpcAdapter().mintAccount(fixture.url, "mint"), /SOLANA_MINT_PROGRAM/u); }

@@ -13,6 +13,8 @@ import {
   type TransactionFact,
 } from "../domain/model.ts";
 
+const EXPECTED_DISABLED_FREEZE_ERROR = "Custom(4)";
+
 export function verifyObservations(value: FixtureObservations): EvidenceReport {
   if (value.schemaVersion !== 1) { fail("SOLANA_EVIDENCE_SCHEMA", "unsupported observation schema"); }
   if (value.genesisHashBefore !== value.genesisHashAfter) { fail("SOLANA_GENESIS_CHANGED", "validator genesis changed during the fixture"); }
@@ -73,49 +75,52 @@ function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObserva
     if (fact.error === null || fact.error.instructionIndex !== relevant.instructionIndex || relevant.innerInstructionIndex !== null) {
       fail("SOLANA_TRANSACTION_ERROR_INDEX", `${fact.operation} did not fail at its exact outer Token instruction`);
     }
+    if (fact.error.code !== EXPECTED_DISABLED_FREEZE_ERROR) {
+      fail("SOLANA_TRANSACTION_ERROR_CODE", `${fact.operation} did not return the expected classic Token error`);
+    }
   } else if (fact.error !== null) { fail("SOLANA_TRANSACTION_RESULT", `${fact.operation} unexpectedly failed`); }
 
   switch (fact.operation) {
     case "createMint":
       requireKind(relevant, ["initializeMint", "initializeMint2"]);
-      require(relevant.mint === value.mintAddress && relevant.authority === value.mintAuthority && relevant.newAuthority === value.freezeAuthority && relevant.decimals === FIXTURE_DECIMALS,
+      assertCondition(relevant.mint === value.mintAddress && relevant.authority === value.mintAuthority && relevant.newAuthority === value.freezeAuthority && relevant.decimals === FIXTURE_DECIMALS,
         "SOLANA_CREATE_SEMANTICS", "mint initialization does not bind mint, authorities and decimals");
       requireSigners(fact, [value.payerAddress, value.mintAddress]);
       break;
     case "revokeFreeze":
       requireKind(relevant, ["setAuthority"]);
-      require(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
+      assertCondition(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
         "SOLANA_REVOKE_SEMANTICS", "freeze revocation does not bind mint and former authority");
       requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
       break;
     case "createAta": {
-      require(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && relevant.kind === "raw", "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
+      assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && relevant.kind === "raw", "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
       const expectedPrefix = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress];
-      require(expectedPrefix.every((address, index) => relevant.accounts[index] === address) && relevant.accounts.includes(CLASSIC_TOKEN_PROGRAM), "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
+      assertCondition(expectedPrefix.every((address, index) => relevant.accounts[index] === address) && relevant.accounts.includes(CLASSIC_TOKEN_PROGRAM), "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
       requireSigners(fact, [value.payerAddress]);
       break;
     }
     case "mint":
       requireKind(relevant, ["mintTo", "mintToChecked"]);
-      require(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.mintAuthority && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
+      assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.mintAuthority && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
         "SOLANA_MINT_SEMANTICS", "mint instruction does not bind mint, ATA, authority and amount");
       requireSigners(fact, [value.payerAddress, value.mintAuthority]);
       break;
     case "burn":
       requireKind(relevant, ["burn", "burnChecked"]);
-      require(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.ownerAddress && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
+      assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.ownerAddress && relevant.amountBaseUnits === FIXTURE_AMOUNT_BASE_UNITS.toString(),
         "SOLANA_BURN_SEMANTICS", "burn instruction does not bind mint, ATA, owner and amount");
       requireSigners(fact, [value.payerAddress, value.ownerAddress]);
       break;
     case "restoreFreezeAttempt":
       requireKind(relevant, ["setAuthority"]);
-      require(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
+      assertCondition(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
         "SOLANA_RESTORE_SEMANTICS", "restore attempt does not bind mint and former authority");
       requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
       break;
     case "freezeAttempt":
       requireKind(relevant, ["freezeAccount"]);
-      require(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.freezeAuthority,
+      assertCondition(relevant.mint === value.mintAddress && relevant.tokenAccount === value.tokenAccountAddress && relevant.authority === value.freezeAuthority,
         "SOLANA_FREEZE_SEMANTICS", "freeze attempt does not bind ATA, mint and former authority");
       requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
       break;
@@ -130,11 +135,11 @@ function relevantInstruction(fact: TransactionFact): InstructionFact {
   return candidates[0] as InstructionFact;
 }
 
-function requireKind(instruction: InstructionFact, kinds: readonly string[]): void { require(kinds.includes(instruction.kind), "SOLANA_INSTRUCTION_KIND", `unexpected instruction ${instruction.kind}`); }
+function requireKind(instruction: InstructionFact, kinds: readonly string[]): void { assertCondition(kinds.includes(instruction.kind), "SOLANA_INSTRUCTION_KIND", `unexpected instruction ${instruction.kind}`); }
 function requireSigners(fact: TransactionFact, expected: readonly string[]): void {
-  require(new Set(fact.signers).size === fact.signers.length && fact.signers.length === expected.length && expected.every((signer) => fact.signers.includes(signer)), "SOLANA_TRANSACTION_SIGNERS", `${fact.operation} does not have the exact signer set`);
+  assertCondition(new Set(fact.signers).size === fact.signers.length && fact.signers.length === expected.length && expected.every((signer) => fact.signers.includes(signer)), "SOLANA_TRANSACTION_SIGNERS", `${fact.operation} does not have the exact signer set`);
 }
-function require(condition: boolean, code: string, message: string): asserts condition { if (!condition) { fail(code, message); } }
+function assertCondition(condition: boolean, code: string, message: string): asserts condition { if (!condition) { fail(code, message); } }
 
 function evidence(value: FixtureObservations): EvidenceReport {
   const amount = FIXTURE_AMOUNT_BASE_UNITS.toString();

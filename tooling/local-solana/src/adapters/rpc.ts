@@ -55,11 +55,14 @@ export class JsonRpcAdapter implements RpcPort {
     return address;
   }
   public async latestBlockhash(rpcUrl: string): Promise<string> {
-    const root = object(await this.call(rpcUrl, "getLatestBlockhash", [{ commitment: "finalized" }]), "blockhash result");
+    // A processed hash is the validator's freshest hash. Failed transactions must
+    // skip simulation so they reach the real program, which makes a fresh hash and
+    // validator-side delivery retries especially important on a single-node cluster.
+    const root = object(await this.call(rpcUrl, "getLatestBlockhash", [{ commitment: "processed" }]), "blockhash result");
     return string(object(root.value, "blockhash value").blockhash, "blockhash");
   }
   public async sendSignedTransaction(rpcUrl: string, bytes: Uint8Array): Promise<string> {
-    const signature = string(await this.call(rpcUrl, "sendTransaction", [Buffer.from(bytes).toString("base64"), { encoding: "base64", skipPreflight: true, preflightCommitment: "finalized", maxRetries: 0 }]), "transaction signature");
+    const signature = string(await this.call(rpcUrl, "sendTransaction", [Buffer.from(bytes).toString("base64"), { encoding: "base64", skipPreflight: true, preflightCommitment: "processed", maxRetries: 5 }]), "transaction signature");
     await this.waitSignature(rpcUrl, signature);
     return signature;
   }
