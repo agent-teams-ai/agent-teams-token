@@ -10,8 +10,8 @@ function fact(operation: LifecycleKind, index: number): TransactionFact {
     case "createAta": return { ...common, signers: [payer], instructions: [instruction({ programId: ASSOCIATED_TOKEN_PROGRAM, kind: "raw", accounts: [payer, ata, owner, mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM] })] };
     case "mint": return { ...common, signers: [payer, mintAddress], instructions: [instruction({ kind: "mintTo", accounts: [mintAddress, ata, mintAddress], mint: mintAddress, tokenAccount: ata, authority: mintAddress, amountBaseUnits: amount })] };
     case "burn": return { ...common, signers: [payer, owner], instructions: [instruction({ kind: "burn", accounts: [ata, mintAddress, owner], mint: mintAddress, tokenAccount: ata, authority: owner, amountBaseUnits: amount })] };
-    case "restoreFreezeAttempt": return { ...common, error: { instructionIndex: 0, code: "Custom(4)" }, signers: [payer, mintAddress], instructions: [instruction({ kind: "setAuthority", accounts: [mintAddress, mintAddress], tokenAccount: mintAddress, authority: mintAddress, authorityType: "freezeAccount", newAuthority: mintAddress })] };
-    case "freezeAttempt": return { ...common, error: { instructionIndex: 0, code: "Custom(4)" }, signers: [payer, mintAddress], instructions: [instruction({ kind: "freezeAccount", accounts: [ata, mintAddress, mintAddress], tokenAccount: ata, mint: mintAddress, authority: mintAddress })] };
+    case "restoreFreezeAttempt": return { ...common, error: { instructionIndex: 0, code: "Custom(16)" }, signers: [payer, mintAddress], instructions: [instruction({ kind: "setAuthority", accounts: [mintAddress, mintAddress], tokenAccount: mintAddress, authority: mintAddress, authorityType: "freezeAccount", newAuthority: mintAddress })] };
+    case "freezeAttempt": return { ...common, error: { instructionIndex: 0, code: "Custom(16)" }, signers: [payer, mintAddress], instructions: [instruction({ kind: "freezeAccount", accounts: [ata, mintAddress, mintAddress], tokenAccount: ata, mint: mintAddress, authority: mintAddress })] };
   }
 }
 export function observationFixture(): FixtureObservations {

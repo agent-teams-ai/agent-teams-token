@@ -69,9 +69,15 @@ function decodeInstruction(value: unknown, instructionIndex: number, innerInstru
   const tokenAmount = typeof info.tokenAmount === "object" && info.tokenAmount !== null ? object(info.tokenAmount, "instruction token amount").amount : undefined;
   const amount = info.amount ?? tokenAmount;
   const accounts = rawAccounts.length > 0 ? rawAccounts : semanticAccounts(info);
+  const account = kind === "setAuthority" ? info.account ?? info.mint : info.account;
+  const authority = info.authority ?? info.mintAuthority
+    ?? (kind === "freezeAccount" ? info.freezeAuthority : undefined)
+    ?? (programId === ASSOCIATED_TOKEN_PROGRAM ? info.source : undefined);
+  const newAuthority = kind === "freezeAccount" ? undefined : info.newAuthority ?? info.freezeAuthority;
   return semantic(programId, instructionIndex, innerInstructionIndex, kind, accounts, {
-    mint: optionalString(info.mint), tokenAccount: optionalString(info.account), owner: optionalString(info.owner), authority: optionalString(info.authority ?? info.mintAuthority),
-    newAuthority: info.newAuthority === null ? null : optionalString(info.newAuthority ?? info.freezeAuthority), authorityType: optionalString(info.authorityType),
+    mint: optionalString(info.mint), tokenAccount: optionalString(account), owner: optionalString(info.owner ?? info.wallet),
+    authority: optionalString(authority),
+    newAuthority: info.newAuthority === null ? null : optionalString(newAuthority), authorityType: optionalString(info.authorityType),
     amountBaseUnits: amount === undefined ? null : canonicalInteger(amount, "instruction amount"), decimals: info.decimals === undefined ? null : integer(info.decimals, "instruction decimals"),
   });
 }
@@ -82,7 +88,7 @@ function semantic(programId: string, instructionIndex: number, innerInstructionI
 
 function semanticAccounts(info: Record<string, unknown>): readonly string[] {
   const result: string[] = [];
-  for (const key of ["account", "mint", "owner", "authority", "mintAuthority", "freezeAuthority", "newAuthority"]) {
+  for (const key of ["source", "account", "wallet", "mint", "owner", "authority", "mintAuthority", "freezeAuthority", "newAuthority", "systemProgram", "tokenProgram"]) {
     const value = info[key]; if (typeof value === "string" && !result.includes(value)) { result.push(value); }
   }
   return result;

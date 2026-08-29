@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type RequestListener, type Server } from "node:http";
 import test from "node:test";
 import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
+import { parseFinalizedTransaction } from "../src/adapters/rpc-parsers.ts";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
 
 const payer = "1".repeat(32); const mint = "2".repeat(32); const ata = "3".repeat(32);
@@ -79,3 +80,43 @@ test("RPC structured account reads reject forged Token-2022 ownership", async ()
   try { await assert.rejects(new JsonRpcAdapter().mintAccount(fixture.url, "mint"), /SOLANA_MINT_PROGRAM/u); }
   finally { await close(fixture.server); }
 });
+
+test("RPC parser normalizes exact authority and associated-account semantics", () => {
+  const transaction = (programId: string, type: string, info: Record<string, unknown>, err: unknown = null) => ({
+    slot: 42,
+    meta: { err, innerInstructions: [] },
+    transaction: {
+      message: {
+        accountKeys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: mint, signer: true, writable: true }],
+        instructions: [{ programId, parsed: { type, info } }],
+      },
+    },
+  });
+  const revoke = parseFinalizedTransaction(transaction(CLASSIC_TOKEN_PROGRAM, "setAuthority", {
+    authority: mint, authorityType: "freezeAccount", mint, newAuthority: null,
+  }), "4".repeat(64), payer);
+  assert.equal(revoke.operation, "revokeFreeze");
+  assert.deepEqual(revoke.instructions[0], {
+    programId: CLASSIC_TOKEN_PROGRAM, instructionIndex: 0, innerInstructionIndex: null, kind: "setAuthority",
+    accounts: [mint], mint, tokenAccount: mint, owner: null, authority: mint, newAuthority: null,
+    authorityType: "freezeAccount", amountBaseUnits: null, decimals: null,
+  });
+
+  const created = parseFinalizedTransaction(transaction(ASSOCIATED_TOKEN_PROGRAM, "create", {
+    source: payer, account: ata, wallet: ownerAddress(), mint, tokenProgram: CLASSIC_TOKEN_PROGRAM,
+  }), "5".repeat(64), payer);
+  const associated = created.instructions[0]!;
+  assert.equal(created.operation, "createAta");
+  assert.equal(associated.authority, payer); assert.equal(associated.tokenAccount, ata);
+  assert.equal(associated.owner, ownerAddress()); assert.equal(associated.mint, mint);
+  assert.equal(associated.accounts.includes(CLASSIC_TOKEN_PROGRAM), true);
+
+  const frozen = parseFinalizedTransaction(transaction(CLASSIC_TOKEN_PROGRAM, "freezeAccount", {
+    account: ata, mint, freezeAuthority: mint,
+  }, { InstructionError: [0, { Custom: 16 }] }), "6".repeat(64), payer);
+  assert.equal(frozen.operation, "freezeAttempt");
+  assert.equal(frozen.error?.code, "Custom(16)");
+  assert.equal(frozen.instructions[0]?.authority, mint); assert.equal(frozen.instructions[0]?.newAuthority, null);
+});
+
+function ownerAddress(): string { return "7".repeat(32); }

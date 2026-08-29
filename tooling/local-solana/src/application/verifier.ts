@@ -13,7 +13,7 @@ import {
   type TransactionFact,
 } from "../domain/model.ts";
 
-const EXPECTED_DISABLED_FREEZE_ERROR = "Custom(4)";
+const EXPECTED_DISABLED_FREEZE_ERROR = "Custom(16)";
 
 export function verifyObservations(value: FixtureObservations): EvidenceReport {
   if (value.schemaVersion !== 1) { fail("SOLANA_EVIDENCE_SCHEMA", "unsupported observation schema"); }
@@ -89,14 +89,20 @@ function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObserva
       break;
     case "revokeFreeze":
       requireKind(relevant, ["setAuthority"]);
-      assertCondition(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
+      assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
+        && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
         "SOLANA_REVOKE_SEMANTICS", "freeze revocation does not bind mint and former authority");
       requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
       break;
     case "createAta": {
-      assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && relevant.kind === "raw", "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
+      assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && ["raw", "create", "createIdempotent"].includes(relevant.kind), "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
       const expectedPrefix = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress];
-      assertCondition(expectedPrefix.every((address, index) => relevant.accounts[index] === address) && relevant.accounts.includes(CLASSIC_TOKEN_PROGRAM), "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
+      const exactParsedSemantics = relevant.kind !== "raw" && relevant.authority === value.payerAddress
+        && relevant.tokenAccount === value.tokenAccountAddress && relevant.owner === value.ownerAddress && relevant.mint === value.mintAddress;
+      const exactRawPrefix = relevant.kind === "raw" && expectedPrefix.every((address, index) => relevant.accounts[index] === address);
+      assertCondition((exactParsedSemantics || exactRawPrefix)
+        && [...expectedPrefix, CLASSIC_TOKEN_PROGRAM].every((address) => relevant.accounts.includes(address)),
+      "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
       requireSigners(fact, [value.payerAddress]);
       break;
     }
@@ -114,7 +120,8 @@ function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObserva
       break;
     case "restoreFreezeAttempt":
       requireKind(relevant, ["setAuthority"]);
-      assertCondition(relevant.tokenAccount === value.mintAddress && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
+      assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
+        && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
         "SOLANA_RESTORE_SEMANTICS", "restore attempt does not bind mint and former authority");
       requireSigners(fact, [value.payerAddress, value.freezeAuthority]);
       break;

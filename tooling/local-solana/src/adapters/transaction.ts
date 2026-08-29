@@ -27,16 +27,84 @@ export async function signedFreezeAccountTransaction(request: AuthorityTransacti
 async function signedTokenTransaction(context: AuthorityTransactionContext, instructionRequest: { readonly writableAccounts: readonly string[]; readonly readonlyFlags: readonly boolean[]; readonly data: Uint8Array }): Promise<Uint8Array> {
   const payer = await keypair(context.payerPath);
   const authority = await keypair(context.authorityPath);
-  const accounts = [payer.publicKey, authority.publicKey, ...instructionRequest.writableAccounts.map(base58Decode), base58Decode(CLASSIC_TOKEN_PROGRAM)];
-  const readonlyUnsigned = 1 + instructionRequest.readonlyFlags.filter(Boolean).length;
-  const instructionAccounts = instructionRequest.writableAccounts.map((_unused, index) => index + 2).concat(1);
-  const instruction = concat([Uint8Array.from([accounts.length - 1]), shortVec(instructionAccounts.length), Uint8Array.from(instructionAccounts), shortVec(instructionRequest.data.length), instructionRequest.data]);
+  if (instructionRequest.writableAccounts.length !== instructionRequest.readonlyFlags.length) {
+    throw new LocalSolanaError("SOLANA_TRANSACTION_ACCOUNTS", "instruction account flags are inconsistent");
+  }
+  const instructionKeys = instructionRequest.writableAccounts.map(base58Decode);
+  const programKey = base58Decode(CLASSIC_TOKEN_PROGRAM);
+  const compiled = compileAccountKeys([
+    { key: payer.publicKey, signer: true, writable: true, payer: true },
+    { key: authority.publicKey, signer: true, writable: false },
+    ...instructionKeys.map((key, index) => ({ key, signer: false, writable: !instructionRequest.readonlyFlags[index] })),
+    { key: programKey, signer: false, writable: false },
+  ]);
+  const instructionAccounts = instructionKeys.map((key) => compiled.indexOf(key)).concat(compiled.indexOf(authority.publicKey));
+  const instruction = concat([
+    Uint8Array.from([compiled.indexOf(programKey)]), shortVec(instructionAccounts.length),
+    Uint8Array.from(instructionAccounts), shortVec(instructionRequest.data.length), instructionRequest.data,
+  ]);
   const message = concat([
-    Uint8Array.from([2, 1, readonlyUnsigned]), shortVec(accounts.length), ...accounts,
+    Uint8Array.from([compiled.requiredSignatures, compiled.readonlySigned, compiled.readonlyUnsigned]),
+    shortVec(compiled.keys.length), ...compiled.keys,
     base58Decode(await context.rpc.latestBlockhash(context.rpcUrl)), shortVec(1), instruction,
   ]);
   const signatures = [ed25519Sign(message, payer.seed), ed25519Sign(message, authority.seed)];
   return concat([shortVec(signatures.length), ...signatures, message]);
+}
+
+interface RequestedAccount {
+  readonly key: Uint8Array;
+  readonly signer: boolean;
+  readonly writable: boolean;
+  readonly payer?: boolean;
+}
+
+interface CompiledAccountKeys {
+  readonly keys: readonly Uint8Array[];
+  readonly requiredSignatures: number;
+  readonly readonlySigned: number;
+  readonly readonlyUnsigned: number;
+  indexOf(key: Uint8Array): number;
+}
+
+function compileAccountKeys(requested: readonly RequestedAccount[]): CompiledAccountKeys {
+  const merged = new Map<string, { key: Uint8Array; signer: boolean; writable: boolean; payer: boolean; order: number }>();
+  requested.forEach((account, order) => {
+    const identity = Buffer.from(account.key).toString("hex");
+    const current = merged.get(identity);
+    if (current === undefined) {
+      merged.set(identity, { ...account, payer: account.payer === true, order });
+    } else {
+      current.signer ||= account.signer;
+      current.writable ||= account.writable;
+      current.payer ||= account.payer === true;
+    }
+  });
+  const payer = [...merged.values()].filter(({ payer: value }) => value);
+  if (payer.length !== 1 || !payer[0]!.signer || !payer[0]!.writable) {
+    throw new LocalSolanaError("SOLANA_TRANSACTION_PAYER", "transaction requires one writable signer payer");
+  }
+  const ordered = [
+    payer[0]!,
+    ...[...merged.values()].filter(({ payer: value }) => !value).toSorted((left, right) =>
+      accountCategory(left) - accountCategory(right) || left.order - right.order),
+  ];
+  const indexes = new Map(ordered.map((account, index) => [Buffer.from(account.key).toString("hex"), index]));
+  return {
+    keys: ordered.map(({ key }) => key),
+    requiredSignatures: ordered.filter(({ signer }) => signer).length,
+    readonlySigned: ordered.filter(({ signer, writable }) => signer && !writable).length,
+    readonlyUnsigned: ordered.filter(({ signer, writable }) => !signer && !writable).length,
+    indexOf: (key) => {
+      const index = indexes.get(Buffer.from(key).toString("hex"));
+      if (index === undefined) { throw new LocalSolanaError("SOLANA_TRANSACTION_ACCOUNT_INDEX", "instruction account is missing from the compiled message"); }
+      return index;
+    },
+  };
+}
+
+function accountCategory(account: { readonly signer: boolean; readonly writable: boolean }): number {
+  return account.signer ? (account.writable ? 0 : 1) : (account.writable ? 2 : 3);
 }
 
 async function keypair(path: string): Promise<{ readonly seed: Uint8Array; readonly publicKey: Uint8Array }> {
