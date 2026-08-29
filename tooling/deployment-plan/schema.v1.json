@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.ai/schemas/unsigned-deployment-bundle.v1.json",
+  "title": "Unsigned local deployment bundle artifacts",
+  "oneOf": [
+    { "$ref": "#/$defs/plan" },
+    { "$ref": "#/$defs/quote" },
+    { "$ref": "#/$defs/ready" }
+  ],
+  "$defs": {
+    "decimal": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "planId", "identity", "broadcastAllowed", "testOnly", "productionApproved", "mainnetAllowed"],
+      "properties": { "schemaVersion": { "const": 1 }, "kind": { "const": "deployment-plan" }, "planId": { "$ref": "#/$defs/hash" }, "identity": { "type": "object" }, "broadcastAllowed": { "const": false }, "testOnly": { "const": true }, "productionApproved": { "const": false }, "mainnetAllowed": { "const": false } }
+    },
+    "quote": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "planId", "creationInputHash", "observation", "bufferBps", "gasLimit", "effectiveFeePerGas", "estimatedWei", "worstCaseWei", "expiresAt"],
+      "properties": { "schemaVersion": { "const": 1 }, "kind": { "const": "fee-quote" }, "planId": { "$ref": "#/$defs/hash" }, "creationInputHash": { "$ref": "#/$defs/hash" }, "observation": { "type": "object" }, "bufferBps": { "$ref": "#/$defs/decimal" }, "gasLimit": { "$ref": "#/$defs/decimal" }, "effectiveFeePerGas": { "$ref": "#/$defs/decimal" }, "estimatedWei": { "$ref": "#/$defs/decimal" }, "worstCaseWei": { "$ref": "#/$defs/decimal" }, "expiresAt": { "$ref": "#/$defs/decimal" }, "informationalUsd": { "type": "string" } }
+    },
+    "ready": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "planSha256", "quoteSha256", "planId", "creationInputHash"],
+      "properties": { "schemaVersion": { "const": 1 }, "planSha256": { "$ref": "#/$defs/hash" }, "quoteSha256": { "$ref": "#/$defs/hash" }, "planId": { "$ref": "#/$defs/hash" }, "creationInputHash": { "$ref": "#/$defs/hash" } }
+    }
+  }
+}
