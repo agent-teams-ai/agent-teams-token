@@ -116,3 +116,22 @@ commit creates a new candidate SHA, so four fresh `gpt-5.6-sol` `xhigh`
 specialist reviews and a later holistic adjudication must examine that exact
 clean SHA after its six-job GitHub Actions run. Only a result with no P0/P1 can
 replace the original verdict.
+
+## First post-remediation CI finding
+
+Run
+[`33252045534`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33252045534)
+reviewed exact commit `d7c50a158228afcca30f2f42d22c19b853442b43` and passed five of six
+required jobs. The Slither job failed closed and uploaded a validated failure
+bundle. Exact-image diagnosis showed a real acceptance defect: Slither `0.11.6`
+returns `255` for a completed pedantic analysis containing findings, even when
+its JSON says `success=true` and contains no analysis error.
+
+The focused corrections are `7e7f330` and `0e81e87`. They explicitly pin
+pedantic behavior and exhaustively test 7,224 combinations of JSON success,
+errors, finding counts and process statuses. Lower-impact findings still flow
+to visible per-fingerprint triage; High and Medium findings still block; tool
+errors and all unrecognized outcomes still fail closed. Local strict lint,
+TypeScript 7 and 58/58 Slither tests pass. This is a remediation checkpoint,
+not a replacement review verdict: real-container, full local, exact-head CI and
+fresh four-plus-one review evidence are still required.

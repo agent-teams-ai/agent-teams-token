@@ -1,8 +1,9 @@
 # AGTMAI zero-cost slices: implementation ledger
 
-Status: Barriers 0, 0.5 and 1 closed; Barrier 2 remediation and its complete
-local E2E gate are closed. A new exact-head CI run and independent re-review
-remain mandatory before Barrier 2 acceptance, 2026-08-29.
+Status: Barriers 0, 0.5 and 1 closed. Barrier 2 remediation is integrated; one
+exact-head CI attempt exposed and correctly preserved a Slither exit-semantics
+failure. Its focused fix is locally green, while a new full local gate,
+exact-head CI and independent re-review remain mandatory, 2026-08-29.
 
 This ledger is append-only evidence for
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](../NEXT_ZERO_COST_SLICES_PLAN.md). A changed
@@ -188,6 +189,26 @@ This local SHA is evidence only, not the final frozen candidate. Updating this
 ledger changes `HEAD`; acceptance still requires a clean documentation commit,
 one new exact-head six-job CI run, four fresh specialist reviews and a subsequent
 holistic adjudication with no P0/P1 findings.
+
+### Exact-head CI correction
+
+Exact-head GitHub Actions run
+[`33252045534`](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/33252045534)
+at `d7c50a158228afcca30f2f42d22c19b853442b43` passed Solidity, Foundation and
+TypeScript, local Solana E2E, local EVM E2E and deployment-plan E2E. Only the
+Slither job failed with a finalized, schema-valid `output-failure` artifact and
+`SLITHER_EXIT_INVALID`; the failed evidence was uploaded rather than hidden.
+
+Reproduction in the exact pinned Linux image established that Slither `0.11.6`
+under pedantic finding policy returns shell status `255` with `success=true`,
+no analysis errors and non-empty findings. The earlier matrix incorrectly
+treated this documented finding outcome as a tool crash. Commit `7e7f330`
+passes `--fail-on pedantic` explicitly, accepts only the exact finding-aware
+status matrix and keeps every unknown/signal-derived combination fail-closed.
+Commit `0e81e87` flattens the exhaustive 7,224-case regression without reducing
+coverage. Strict lint, TypeScript 7 and all 58 Slither tests pass locally. The
+real pinned-container rerun and replacement exact-head CI remain acceptance
+gates; run `33252045534` is superseded and is not success evidence.
 
 ## Model-split delivery metrics
 
