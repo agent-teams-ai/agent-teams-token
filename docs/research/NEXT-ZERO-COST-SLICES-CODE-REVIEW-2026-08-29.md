@@ -93,3 +93,26 @@ review cycle.
 
 This review is engineering evidence, not a security audit or permission for a
 public-network deployment.
+
+## Remediation checkpoint
+
+All thirteen accepted P1 root causes have an integrated implementation and
+regression evidence on local candidate
+`4905d3ff63dfeb944707cc620a94e9a40cb019fe`. The resulting change from the
+first reviewed candidate is 14 commits and approximately 3,612 insertions plus
+688 deletions across implementation, tests, CI evidence validation and review
+records.
+
+The complete local `pnpm check` passes from the checksum-pinned project
+toolchain. In particular, real Agave proves the seven-step zero-supply
+lifecycle and two parallel fixture processes, real loopback Anvil proves the
+unsigned deployment estimator, and Slither evidence tests prove exact-SHA,
+clean-tree, schema and outcome binding. The 11 informational Slither findings
+remain visible and are individually triaged; the suppression ledger remains
+empty.
+
+This checkpoint does not change the original `AMEND` verdict. The documentation
+commit creates a new candidate SHA, so four fresh `gpt-5.6-sol` `xhigh`
+specialist reviews and a later holistic adjudication must examine that exact
+clean SHA after its six-job GitHub Actions run. Only a result with no P0/P1 can
+replace the original verdict.

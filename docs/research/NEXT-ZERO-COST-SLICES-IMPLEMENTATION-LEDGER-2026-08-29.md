@@ -1,7 +1,8 @@
 # AGTMAI zero-cost slices: implementation ledger
 
-Status: Barriers 0, 0.5 and 1 closed; Barrier 2 is blocked by accepted
-implementation-review findings and remediation is in progress, 2026-08-29.
+Status: Barriers 0, 0.5 and 1 closed; Barrier 2 remediation and its complete
+local E2E gate are closed. A new exact-head CI run and independent re-review
+remain mandatory before Barrier 2 acceptance, 2026-08-29.
 
 This ledger is append-only evidence for
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](../NEXT_ZERO_COST_SLICES_PLAN.md). A changed
@@ -152,25 +153,51 @@ review evidence.
 The immutable input hashes, complete adjudication and mandatory recheck are in
 [`NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md`](NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md).
 
-## Review remediation jobs
+## Review remediation and local recheck
 
 All remediation jobs start from `881f1be`, use `gpt-5.6-sol` with `medium`
 reasoning and the default service tier, and own non-overlapping paths.
 
-| Lane | Job | Result |
-| --- | --- | --- |
-| Deployment | `agtmai-remed881-deployment-r1` | in progress |
-| Solana | `agtmai-remed881-solana-r1` | in progress |
-| Slither | `agtmai-remed881-slither-r1` | in progress |
+The initial hosted remediation lanes were supplemented by narrowly scoped
+follow-up workers and integrator fixes whenever real-runtime or repository-wide
+checks exposed a gap. No public network or paid RPC was used.
 
-Acceptance still requires integrating the three reviewed commits, running all
-local and exact-head CI gates on one new SHA, four fresh specialist reviews and
-one subsequent holistic adjudication with no P0/P1 findings.
+| Lane | Integrated commits | Local result |
+| --- | --- | --- |
+| Deployment | `fa3417f`, `d9f5fdc` | strict independent RPC and input verification, race-resistant publication; 34/34 unit/adversarial tests plus 1/1 real loopback Anvil |
+| Solana | `fb05b96`, `87fc105`, `2dbfc0c`, `7b0227e`, `dc56d4d` | real Agave lifecycle and parallel-process E2E: 37 passed, 0 failed, 1 Darwin-inapplicable Linux procfs test skipped |
+| Slither | `d029c00`, `a5978ad`, `3a887a8`, `b6f3636`, `4905d3f` | exact clean-tree execution/evidence binding, complete source closure, 11 visible findings triaged without suppressions; 57/57 tests |
+
+The Solana real-runtime recheck found and fixed one additional integration bug:
+the mint address was also the fixture freeze-authority address, and the custom
+message compiler emitted it twice, causing Agave `AccountLoadedTwice`. Commit
+`7b0227e` now deduplicates account keys, merges signer/writable roles and keeps
+canonical key ordering; a focused regression test and the full native lifecycle
+prove the fix.
+
+Local candidate `4905d3ff63dfeb944707cc620a94e9a40cb019fe` passed the complete
+`pnpm check` through the checksum-pinned project environment. This includes
+Engineering Foundation `0.20.0` full coverage with zero diagnostics, strict
+lint with zero warnings, TypeScript 7, domain and supply tests, Linux-parity and
+workflow tests, Genesis vector, security scan, 28/28 local-EVM adversarial
+tests, the real local Solana lifecycle and parallel fixture, deployment-plan
+tests, and 57/57 Slither evidence/policy tests. The separately enabled real
+deployment-plan Anvil test also passed 1/1.
+
+This local SHA is evidence only, not the final frozen candidate. Updating this
+ledger changes `HEAD`; acceptance still requires a clean documentation commit,
+one new exact-head six-job CI run, four fresh specialist reviews and a subsequent
+holistic adjudication with no P0/P1 findings.
 
 ## Model-split delivery metrics
 
-- time from W1/W2/W3 dispatch to first working patch: pending;
-- targeted tests passing on first submitted worker commit: pending;
+- time from the final lint-worker dispatches to reviewed patches: approximately
+  11-13 minutes per lane;
+- targeted tests passing on the accepted final worker commits: deployment,
+  Solana and Slither all passed; native Solana was independently rerun by the
+  integrator;
 - review defects by severity: first holistic round found `0` P0 and `13`
   deduplicated P1 root causes, plus visible P2/P3 follow-ups;
-- remediation iterations to stable exact SHA: pending.
+- remediation iterations to a locally stable candidate: one specialist review
+  round followed by focused remediation and real-runtime follow-ups; final
+  exact-SHA re-review remains pending.
