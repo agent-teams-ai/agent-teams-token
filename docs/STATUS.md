@@ -65,6 +65,27 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   package tests, Linux-definition parity, canonical vectors, deterministic
   dependency/secret/license policy, 28 local-EVM tests and 3 isolated integration
   scenarios. No public RPC, real secret, real asset or paid gas was used.
+- The local Solana fixture now completes a real classic SPL Token lifecycle on
+  checksum-pinned Agave 4.2.1: supply `0 -> 1,000 -> 0`, freeze authority is
+  irreversibly removed for the fixture, signed restore/freeze attempts fail,
+  parallel runs remain isolated and no key material is retained. All 23 tests
+  pass locally at real asset cost `$0`.
+- The unsigned Ethereum deployment planner now binds the exact creation input,
+  immutable test-only trust roots, buffer, fee-history/block facts and strict
+  `blockTimestamp <= observedAt <= now < expiresAt` ordering. Its READY-last
+  output uses an exclusive owned `0700` directory and rejects symlink,
+  replacement and pre-existing-target attacks. All 24 tests pass, including a
+  fresh Forge build and real loopback Anvil estimate; there is no signer or
+  broadcast capability.
+- The pinned Slither gate now runs the real Trail of Bits image digest as its
+  immutable non-root user, mounts checksum-pinned Forge 1.8.0 and solc 0.8.36,
+  analyses the six-file production closure with all 101 expected detectors and
+  emits READY-last evidence. The real container reports 11 visible
+  informational findings and zero blocking findings; all 41 unit/contract
+  tests pass. This is static-analysis evidence, not an audit.
+- Engineering Foundation 0.20.0 governs all three new feature roots with exact
+  entrypoints and `domain -> application -> adapters -> composition` edges;
+  full coverage currently reports zero diagnostics.
 - Five exact-SHA implementation critics and their remediation ledger are recorded
   in [`GENESIS-CORE-CODE-REVIEW-2026-08-28.md`](research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md).
 - The first final review of exact SHA `ec735a6` accepted Solidity and the
@@ -83,8 +104,10 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 ## In progress
 
 - The three local zero-cost slices were explicitly owner-approved for E2E
-  implementation on 2026-08-29. Barrier 0 is closed; Barrier 0.5 toolchain and
-  architecture prerequisite is in progress. They do not depend on unresolved
+  implementation on 2026-08-29. Barriers 0, 0.5 and targeted implementation are
+  closed. Solana, the deployment planner and Slither are integrated locally;
+  the exact full repository gate, GitHub CI and mandatory four-specialist plus
+  one holistic hosted critique remain open. These slices do not depend on unresolved
   tokenomics, vesting, governance, CCIP or liquidity decisions. Concrete GitHub
   run IDs, exact SHAs and hosted verdicts remain part of immutable workflow/
   review evidence; a local workflow-definition check is never called remote CI.
@@ -98,14 +121,15 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   hosted `gpt-5.6-sol xhigh` critics reviewed exact draft SHA `1cd5515` without
   fast mode; all returned AMEND, none found P0, and accepted P1/P2 are recorded
   in `docs/research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md` and folded
-  into the plan. Implementation has not started.
+  into the plan. Implementation and exact-SHA evidence collection are in
+  progress.
 
 ## Designed, not implemented
 
 - Vesting and mocked cross-chain accounting remain later independent slices.
-  Local SPL is now the first proposed zero-cost follow-up slice but remains
-  unimplemented. Production manifest approval is intentionally not simulated by
-  a self-declared status or integrity hash.
+  The implemented local SPL fixture is test-only and proves neither production
+  mint authority nor CCIP. Production manifest approval is intentionally not
+  simulated by a self-declared status or integrity hash.
 - Feature-module standard from Agent Teams Orchestrator is adopted. The proposed
   two-context topology is recorded in the independently reviewed and amended
   ADR-0004 and awaits explicit product-owner acceptance. Acceptance records the

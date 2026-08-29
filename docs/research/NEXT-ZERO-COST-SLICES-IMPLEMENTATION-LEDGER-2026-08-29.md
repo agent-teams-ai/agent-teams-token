@@ -1,7 +1,7 @@
 # AGTMAI zero-cost slices: implementation ledger
 
-Status: Barrier 0 closed; Barrier 0.5 complete locally; prerequisite candidate
-awaiting its immutable commit SHA, 2026-08-29.
+Status: Barriers 0, 0.5 and 1 closed; Barrier 2 exact-SHA integration evidence
+in progress, 2026-08-29.
 
 This ledger is append-only evidence for
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](../NEXT_ZERO_COST_SLICES_PLAN.md). A changed
@@ -58,8 +58,11 @@ explicitly says otherwise.
   and verify all version outputs before analysis;
 - compatibility proof: exact Forge prebuild with tests and scripts skipped,
   followed by Slither `--foundry-ignore-compile`, analysed ten production
-  contracts with all 102 detectors. Slither JSON reported `success=true`;
-  policy findings remain distinct from environment or execution failure;
+  contracts. Slither JSON reported `success=true`; policy findings remain
+  distinct from environment or execution failure;
+- correction: the initial manual note counted `102` detectors. A clean read from
+  exact image digest `sha256:9c5836...82d0` reports `101` unique detector IDs.
+  The `102` count is superseded and cannot be used as acceptance evidence;
 - W3 must reproduce this tuple and enforce the production-source closure. The
   manual preflight is not final security-gate evidence.
 
@@ -67,7 +70,10 @@ explicitly says otherwise.
 
 - all three feature roots are governed by Foundation;
 - each root uses `domain -> application -> adapters -> composition` dependency
-  direction, with exact allowlists;
+  direction. The prerequisite defined the exact edges, while W1 integration
+  exposed that empty entrypoint declarations did not authorize any real
+  cross-layer import. Commit `6f55d10` adds explicit Solana entrypoints and
+  builtins; Foundation full coverage then passes with zero diagnostics;
 - negative tests reject an adapter dependency from domain, a missing domain
   edge, an absent governed root and an incomplete policy fixture;
 - prerequisite targeted result: 20 tests passed, zero failed; targeted
@@ -81,7 +87,8 @@ explicitly says otherwise.
 - full gate passed with the checksum-pinned project Node/pnpm/Foundry/solc,
   Foundation full coverage, lint, TypeScript, unit suites, Linux parity, Compose
   validation, Genesis vector, security checks and local-EVM adversarial tests;
-- final prerequisite commit SHA: pending.
+- final prerequisite commit SHA:
+  `b7a868f85d89c4bb7a9aeed1d854a5f949306a45`.
 
 ## Hosted implementation jobs
 
@@ -90,17 +97,33 @@ reasoning `medium`, no fast mode, separate jobs and isolated worktrees.
 
 | Job | Branch | Owned path | Base | Commit | Result |
 | --- | --- | --- | --- | --- | --- |
-| W1 Solana | `feat/local-solana-fixture` | `tooling/local-solana/**` | pending | pending | pending |
-| W2 deploy plan | `feat/deployment-cost-plan` | `tooling/deployment-plan/**` | pending | pending | pending |
-| W3 Slither | `ci/slither-security-gate` | `tooling/security/slither/**` | pending | pending | pending |
+| W1 Solana | `feat/local-solana-fixture` | `tooling/local-solana/**` | `b7a868f` | `4ce469a`, hardened by `104f5cc` | integrated; 23/23 including real and parallel Agave |
+| W2 deploy plan | `feat/deployment-cost-plan` | `tooling/deployment-plan/**` | `b7a868f` | `9bba062`, hardened by `66dcd22` | integrated; 24/24 including fresh Forge/real Anvil and adversarial output-path tests |
+| W3 Slither | `ci/slither-security-gate` | `tooling/security/slither/**` | `b7a868f` | `d55f2ac`, hardened by `dda858c` | integrated; 41/41 plus real pinned-image run, 101 detectors, zero blocking findings |
+
+The first hosted W2 remediation fixed compiler evidence and strict lint, but
+integrator review found three additional P1 gaps: the gas buffer/expiry were not
+fully trust-root-bound, independent RPC verification omitted quoted base fee and
+block facts, and output-directory ownership/substitution was not fail-closed.
+Commit `66dcd22` closes those gaps with regression tests. The first hosted W3
+remediation passed unit tests but failed against the real pinned image because
+it required a nonexistent image `PYTHONPATH`; subsequent real-container checks
+also exposed the wrong numeric user and missing Foundry output-directory flags.
+Commit `dda858c` closes all three runtime gaps and proves the complete container
+path. Green unit tests alone were deliberately not accepted as E2E evidence.
 
 ## Integration and exact-SHA evidence
 
-- prerequisite SHA: pending;
-- W1 feature and root-wiring commits: pending;
-- W2 feature and root-wiring commits: pending;
-- W3 feature and CI-wiring commits: pending;
-- integrated candidate SHA: pending;
+- prerequisite SHA: `b7a868f85d89c4bb7a9aeed1d854a5f949306a45`;
+- W1 feature commits: `4ce469a`, `104f5cc`; root-wiring commit: `6f55d10`;
+- W2 feature commits: `9bba062`, `66dcd22`;
+- W3 feature commits: `d55f2ac`, `dda858c`;
+- shared root/Foundation/CI wiring commit: `fc834c5`;
+- current pre-full-gate candidate SHA:
+  `fc834c5212628c715edde25487f524d8dfe7c0a6`;
+- targeted local evidence: Foundation full coverage with zero diagnostics;
+  deployment plan 24/24 with real Anvil; Slither 41/41 plus real pinned-image
+  clean policy result with 101 detectors and 11 visible informational findings;
 - local full gate: pending;
 - GitHub workflow/run/attempt/head/jobs evidence: pending.
 
