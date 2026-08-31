@@ -2,18 +2,19 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
 } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   abandonCleanupHandle,
   assertPinnedNodeRuntime,
+  assertReportedPnpmStore,
   basicRun,
   cleanupIdentityBoundDirectory,
   pnpmOfflineInstallArguments,
   strictToolPaths,
   toolPath,
+  trustedPnpmStore,
   validatePnpmWorkspaceLinks,
 } from "../proof-runtime.mjs";
 import { parseStrictTap } from "./gate-contract.mjs";
@@ -103,30 +104,18 @@ export function pinnedEnvironmentPreflight(root, {
     dockerPath,
   });
   const commandEnvironment = allowlistedChildEnvironment(process.env, { PATH: toolPath(tools) });
+  const trustedStore = trustedPnpmStore(join(root, ".tools", "pnpm-store"));
   const requestedStore = execute(
     "pnpm-store-path",
     tools.pnpm,
-    ["store", "path", "--silent"],
+    ["--agtmai-trusted-store=" + trustedStore, "store", "path", "--silent"],
     { cwd: root, env: commandEnvironment, timeout: 30_000 },
   ).trim();
-  if (!isAbsolute(requestedStore)) {
-    throw new Error("ROLLBACK_PNPM_STORE_NOT_ABSOLUTE path=" + requestedStore);
-  }
-  let store;
-  let storeEntry;
-  try {
-    store = realpathSync(requestedStore);
-    storeEntry = lstatSync(requestedStore);
-  } catch {
-    throw new Error("ROLLBACK_PNPM_STORE_UNAVAILABLE path=" + requestedStore);
-  }
-  if (store !== requestedStore || !storeEntry.isDirectory() || storeEntry.isSymbolicLink()) {
-    throw new Error("ROLLBACK_PNPM_STORE_UNSAFE path=" + requestedStore);
-  }
+  assertReportedPnpmStore(trustedStore, requestedStore);
   execute(
     "pnpm-frozen-offline-completeness",
     tools.pnpm,
-    pnpmOfflineInstallArguments(store),
+    pnpmOfflineInstallArguments(trustedStore),
     { cwd: root, env: commandEnvironment, timeout: 600_000 },
   );
   const links = validatePnpmWorkspaceLinks(root);
@@ -145,7 +134,7 @@ export function pinnedEnvironmentPreflight(root, {
   return {
     runtime,
     binaries: Object.keys(tools).toSorted(),
-    store,
+    store: trustedStore,
     workspaceLinkCount: links.length,
     slitherImage: assertPinnedSlitherImageInspection(inspection, pinned),
   };

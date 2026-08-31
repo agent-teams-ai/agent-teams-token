@@ -33,11 +33,11 @@
   ],
   "restoreFromBaseline": ["tooling/deployment-plan/src/README.md"],
   "reverseEdits": [
-    {"path": ".github/workflows/ci.yml", "beforeSha256": "fa82f90fb2703e58253cb15affae5ff54a4719e29c9942de1fa66b3c46ba1a1f", "afterSha256": "879bb82fbe53601b4c6611a862d44789b46aab2240f768d67e9e38a1ac534b38"},
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "8eeb075e48908123552be0e774221388484bac8c1f5ee9cd8c43c3c50c412fde", "afterSha256": "d04e9d5fdd24d0031992f913c61a95dffabc68445fd89901f9f6ce3835932788"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "8cb409de84c92339a6f0d69d04c3d7b10479688c118968f77b902ad906c363ee", "afterSha256": "3cfd7e558e4f1460712f893720886542d2d304c268fe3373a8c932e0c4758571"},
-    {"path": "package.json", "beforeSha256": "13ab02b8a321b3f04527f0e8e797f42170807022bc362fd17f5a5c3c3ca596ce", "afterSha256": "d3f6abb83f2c054daf56c0675a7f54823fdf07222145be7b570467ccbbb38628"},
+    {"path": "package.json", "beforeSha256": "65100d8a86c3cd97dbab8b9fe9a09e03222561f5d9603d951722b1166e93e085", "afterSha256": "7ff357526a261b493337e4f1867d425e82bd88f20f54833861bb41468137e7e4"},
     {"path": "scripts/deployment/estimate-local.ts", "beforeSha256": "e0311b72412dc6af1adba470cb4145ea1f08bdd94d3983ae97717a8c85abdbdd", "afterSha256": "absent"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "806fbcd9dc0dd0397b3d8b631cff143fb6eccab71add7c4d2928cb3de3fbd2ff", "afterSha256": "7e36fe537390d979192912ca167baaab3bcd7ed3a65564d2f5837d9948079df8"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "eccebb9ff60236b5e5ce1411e887f8712eea7b5f3ad70f5a420e2d35451f78ee", "afterSha256": "789df127bfc26383a036eae867d958479b8d56c741ecd920cd33b9b7ad0a77b3"},
     {"path": "tooling/deployment-plan/src/README.md", "beforeSha256": "absent", "afterSha256": "e497a44eec3f9c82b7a859f799e8d39266e9b7b207da6b262b165badf0200f62"}
   ],
   "sharedPaths": [

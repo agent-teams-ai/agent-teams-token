@@ -73,27 +73,24 @@ export function copyAndInstallOfflineEnvironment({
   ], { cwd: checkout, env: bootstrapEnvironment, timeout: 600_000 });
   const tools = strictToolPaths(checkout, { platform, requireSolana: true, requireDocker: false });
   const commandEnvironment = allowlistedChildEnvironment(process.env, { PATH: toolPath(tools) });
-  const storeResult = recorder.run(group, "pnpm-store-path", tools.pnpm, ["store", "path", "--silent"], {
+  const trustedStore = trustedPnpmStore(join(sourceRoot, ".tools", "pnpm-store"));
+  const storeResult = recorder.run(group, "pnpm-store-path", tools.pnpm, [
+    "--agtmai-trusted-store=" + trustedStore,
+    "store",
+    "path",
+    "--silent",
+  ], {
     cwd: checkout,
     env: commandEnvironment,
     timeout: 30_000,
   });
   const requestedStore = storeResult.stdout.trim();
-  let store;
-  try {
-    store = realpathSync(requestedStore);
-  } catch {
-    throw new Error("ROLLBACK_PNPM_STORE_UNAVAILABLE path=" + requestedStore);
-  }
-  const storeEntry = lstatSync(store);
-  if (!storeEntry.isDirectory() || storeEntry.isSymbolicLink()) {
-    throw new Error("ROLLBACK_PNPM_STORE_UNSAFE path=" + store);
-  }
+  assertReportedPnpmStore(trustedStore, requestedStore);
   recorder.run(
     group,
     "pnpm-frozen-offline-install",
     tools.pnpm,
-    pnpmOfflineInstallArguments(store),
+    pnpmOfflineInstallArguments(trustedStore),
     { cwd: checkout, env: commandEnvironment, timeout: 600_000 },
   );
   const links = recorder.stage(
@@ -102,7 +99,43 @@ export function copyAndInstallOfflineEnvironment({
     () => validatePnpmWorkspaceLinks(checkout),
     (value) => ({ linkCount: value.length }),
   );
-  return { platform, tools, store, copiedArchives: copied, workspaceLinks: links };
+  return { platform, tools, store: trustedStore, copiedArchives: copied, workspaceLinks: links };
+}
+
+export function assertReportedPnpmStore(trustedStore, requestedStore) {
+  const expected = join(trustedStore, "v11");
+  if (requestedStore !== expected) {
+    throw new Error("ROLLBACK_PNPM_STORE_MISMATCH expected=" + expected + " actual=" + requestedStore);
+  }
+  if (existsEntry(expected)) {trustedPnpmStore(expected);}
+}
+
+function existsEntry(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function trustedPnpmStore(path) {
+  if (!isAbsolute(path)) {
+    throw new Error("ROLLBACK_PNPM_STORE_NOT_ABSOLUTE path=" + path);
+  }
+  let canonical;
+  let entry;
+  try {
+    canonical = realpathSync(path);
+    entry = lstatSync(path, { bigint: true });
+  } catch {
+    throw new Error("ROLLBACK_PNPM_STORE_UNAVAILABLE path=" + path);
+  }
+  if (canonical !== path || !entry.isDirectory() || entry.isSymbolicLink()
+    || (entry.mode & 0o077n) !== 0n || String(entry.uid) !== String(process.getuid())) {
+    throw new Error("ROLLBACK_PNPM_STORE_UNSAFE path=" + path);
+  }
+  return canonical;
 }
 
 export function pnpmOfflineInstallArguments(store) {
@@ -110,12 +143,13 @@ export function pnpmOfflineInstallArguments(store) {
     throw new Error("ROLLBACK_PNPM_STORE_NOT_ABSOLUTE path=" + store);
   }
   return [
+    "--agtmai-trusted-store=" + store,
     "install",
     "--offline",
     "--frozen-lockfile",
     "--ignore-scripts",
     "--package-import-method=copy",
-    "--store-dir=" + store,
+    "--ignore-pnpmfile",
   ];
 }
 
@@ -271,7 +305,7 @@ export function strictToolPaths(root, {
   dockerPath = process.env.SLITHER_DOCKER_PATH ?? "/usr/bin/docker",
 } = {}) {
   const paths = {
-    node: join(root, ".tools", "node-v24.20.0-" + platform, "bin", "node"),
+    node: join(root, ".tools", "bin", "node"),
     pnpm: join(root, ".tools", "bin", "pnpm"),
     forge: join(root, ".tools", "foundry-v1.8.0-" + platform, "forge"),
     cast: join(root, ".tools", "foundry-v1.8.0-" + platform, "cast"),

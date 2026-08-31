@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -226,6 +227,50 @@ test("complete local history at the exact head passes", () => {
   }
 });
 
+test("history Git children reject hostile local filters, attributes, includes, hooks and overrides", () => {
+  for (const authority of ["filter", "attributes", "include", "hook", "semantic"]) {
+    const { boundary, checkout } = makeClone();
+    try {
+      const marker = join(boundary, `history-${authority}-attacker-marker`);
+      const helper = join(boundary, `history-${authority}-helper`);
+      writeFileSync(helper, `#!/bin/sh\nprintf executed >>${JSON.stringify(marker)}\n`);
+      chmodSync(helper, 0o755);
+      let configured;
+      if (authority === "filter") {
+        configured = run(git, ["config", "--local", "filter.evil.clean", helper], { cwd: checkout });
+      } else if (authority === "attributes") {
+        writeFileSync(join(checkout, ".git", "info", "attributes"), "*.md filter=evil\n");
+      } else if (authority === "include") {
+        const included = join(boundary, "included.gitconfig");
+        writeFileSync(included, `[filter "evil"]\n\tclean = ${helper}\n`);
+        configured = run(git, ["config", "--local", "include.path", included], { cwd: checkout });
+      } else if (authority === "hook") {
+        writeFileSync(join(checkout, ".git", "hooks", "pre-commit"), `#!/bin/sh\nexec ${helper}\n`);
+        chmodSync(join(checkout, ".git", "hooks", "pre-commit"), 0o755);
+      } else {
+        configured = run(git, ["config", "--local", "fsck.skipList", join(boundary, "skip")], {
+          cwd: checkout,
+        });
+      }
+      if (configured !== undefined) {assert.equal(configured.status, 0, configured.stderr);}
+      const result = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+      assert.notEqual(result.status, 0, authority);
+      assert.match(
+        result.stderr,
+        /ROLLBACK_GIT_(?:LOCAL_CONFIG_FORBIDDEN|INFO_AUTHORITY_FORBIDDEN|HOOK_FORBIDDEN)/u,
+        authority,
+      );
+      assert.equal(exists(marker), false, authority);
+      assert.doesNotMatch(result.stdout, /ROLLBACK_HISTORY_OK/u);
+    } finally {
+      rmSync(boundary, { recursive: true, force: true });
+    }
+  }
+  const source = readFileSync(historyScript, "utf8");
+  assert.match(source, /config --local --no-includes/u);
+  assert.doesNotMatch(source, /safe\.directory=\*/u);
+});
+
 test("byte-complete inventory rejects a stat-cache-preserving tracked-file substitution", () => {
   const { boundary, checkout } = makeClone();
   try {
@@ -288,11 +333,20 @@ test("a missing pinned baseline and a promisor checkout both fail closed", () =>
     assert.equal(config.status, 0, config.stderr);
     const partial = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
     assert.notEqual(partial.status, 0);
-    assert.match(partial.stderr, /ROLLBACK_HISTORY_PARTIAL_CLONE_FORBIDDEN/u);
+    assert.match(partial.stderr, /ROLLBACK_GIT_LOCAL_CONFIG_FORBIDDEN/u);
   } finally {
     rmSync(boundary, { recursive: true, force: true });
   }
 });
+
+function exists(path) {
+  try {
+    statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test("a present baseline outside exact-head ancestry fails closed", () => {
   const { boundary, checkout } = makeClone();

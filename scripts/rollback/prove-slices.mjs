@@ -12,6 +12,8 @@ export {
   gateCoverageSnapshot,
   parseStrictTap,
   rollbackGateCoverage,
+  stageExactWorktreePaths,
+  syntheticRollbackCommit,
   verifyAppliedState,
 } from "./slices/gate-contract.mjs";
 export {

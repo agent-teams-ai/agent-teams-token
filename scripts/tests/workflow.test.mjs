@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
@@ -229,7 +231,7 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   const commands = runs("solidity-security").join("\n");
   assert.match(commands, /pnpm security:solidity:prepare-image/);
   assert.match(commands, /pnpm security:solidity/);
-  assert.match(commands, /node tooling\/security\/slither\/src\/composition\/validate-evidence\.ts/);
+  assert.match(commands, /\.tools\/bin\/node tooling\/security\/slither\/src\/composition\/validate-evidence\.ts/);
   const validation = job.steps.find((step) => step.name === "Validate finalized Slither evidence");
   assert.equal(validation.id, "validate-slither-evidence");
   assert.equal(validation.if, "${{ always() }}");
@@ -239,6 +241,32 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   assert.equal(upload.with["if-no-files-found"], "error");
   assert.equal(upload.with["retention-days"], 14);
   assert.doesNotMatch(JSON.stringify(job), /continue-on-error|:latest\b/u);
+});
+
+test("actual workflow Node validation ignores inherited preload and proxy authority", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-workflow-node-authority-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const marker = join(root, "workflow-node-attacker-marker");
+  const preload = join(root, "preload.cjs");
+  writeFileSync(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed\\n");\n`);
+  const command = workflow.jobs["solidity-security"].steps
+    .find((step) => step.name === "Validate finalized Slither evidence").run;
+  const result = spawnSync("/bin/bash", ["-c", command], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ALL_PROXY: "http://sentinel.invalid/",
+      GITHUB_SHA: "invalid",
+      HTTP_PROXY: "http://sentinel.invalid/",
+      NODE_OPTIONS: `--require=${preload}`,
+      SLITHER_CANDIDATE_SHA: "invalid",
+    },
+    timeout: 30_000,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /one unambiguous exact candidate SHA is required/u);
+  assert.equal(existsSync(marker), false);
 });
 
 test("Compose is digest-pinned, local-only and hardened", () => {
@@ -270,11 +298,11 @@ test("owned environment files contain no public RPC, secret material or floating
 
 test("environment PATH keeps verified Core tools ahead of the package-manager bin", () => {
   const environmentText = readFileSync(join(repositoryRoot, "scripts/env.sh"), "utf8");
-  const node = environmentText.indexOf("node-v24.20.0-$token_env_platform/bin");
+  const wrapperBin = environmentText.indexOf('"$token_env_tools_root/bin"');
   const foundry = environmentText.indexOf("foundry-v1.8.0-$token_env_platform");
   const solc = environmentText.indexOf("solc-v0.8.36-$token_env_platform");
-  const packageBin = environmentText.indexOf('"$token_env_tools_root/bin"');
-  assert.ok(node >= 0 && node < foundry && foundry < solc && solc < packageBin);
+  assert.ok(wrapperBin >= 0 && wrapperBin < foundry && foundry < solc);
+  assert.doesNotMatch(environmentText, /node-v24\.20\.0-\$token_env_platform\/bin/u);
   assert.match(environmentText, /export PATH="\$token_env_path_prefix:\$PATH"/);
   assert.doesNotMatch(environmentText, /\bfind\b/);
 });

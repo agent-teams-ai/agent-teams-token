@@ -67,10 +67,10 @@
   ],
   "restoreFromBaseline": ["tooling/security/slither/src/README.md"],
   "reverseEdits": [
-    {"path": ".github/workflows/ci.yml", "beforeSha256": "fa82f90fb2703e58253cb15affae5ff54a4719e29c9942de1fa66b3c46ba1a1f", "afterSha256": "2cba9e7651f079d20795c9df6ad56da2e5671f50df25626aca9f3af1ba58a251"},
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "8eeb075e48908123552be0e774221388484bac8c1f5ee9cd8c43c3c50c412fde", "afterSha256": "2cba9e7651f079d20795c9df6ad56da2e5671f50df25626aca9f3af1ba58a251"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "8cb409de84c92339a6f0d69d04c3d7b10479688c118968f77b902ad906c363ee", "afterSha256": "5f7b6e5a8c3098a29aa26d9fb5e9c3d02cdbbf5185c3b4e2998ddadfcad5e96e"},
-    {"path": "package.json", "beforeSha256": "13ab02b8a321b3f04527f0e8e797f42170807022bc362fd17f5a5c3c3ca596ce", "afterSha256": "4bdca933b9563962e8a42b29d3e1452529630e4f9ac57c695c9bee527d0d4fd2"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "806fbcd9dc0dd0397b3d8b631cff143fb6eccab71add7c4d2928cb3de3fbd2ff", "afterSha256": "a607b74685115f2223885831cdf1cd60c117a107f326ac20af97211f5e2fb9f9"},
+    {"path": "package.json", "beforeSha256": "65100d8a86c3cd97dbab8b9fe9a09e03222561f5d9603d951722b1166e93e085", "afterSha256": "7dc11d514f480fdac5d1a9d4ae49530e6110bf301133d69da2caeba07f0bb2bf"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "eccebb9ff60236b5e5ce1411e887f8712eea7b5f3ad70f5a420e2d35451f78ee", "afterSha256": "3b2448996c8129fe79ea04b3fafc0e419f473b8008b31ca6b0224b29e3db0074"},
     {"path": "tooling/toolchain.lock.json", "beforeSha256": "03eeee5922c84bb5e0af3ee2a668fac644b8be571f652f3ec0176bf4e2b24f47", "afterSha256": "c5c1fb13a8819d7476138faf476a8a733f9bbbbc8f71f89b90cf01a7a897725f"},
     {"path": "tooling/security/slither/src/README.md", "beforeSha256": "a275519a6e9968341abfb4f3c574d08021a851866e58af338b8217df17cddcb2", "afterSha256": "cf05a9ce47005c3d7d2b70afe601113e3ff306e60832fe587487c9044f99e750"}
   ],

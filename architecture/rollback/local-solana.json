@@ -46,11 +46,11 @@
   ],
   "restoreFromBaseline": ["tooling/local-solana/src/README.md"],
   "reverseEdits": [
-    {"path": ".github/workflows/ci.yml", "beforeSha256": "fa82f90fb2703e58253cb15affae5ff54a4719e29c9942de1fa66b3c46ba1a1f", "afterSha256": "c510f84d55d4d0b66fa4af539048e94856e5c18639558804de718b889e1f4cc3"},
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "8eeb075e48908123552be0e774221388484bac8c1f5ee9cd8c43c3c50c412fde", "afterSha256": "f268248d07ba9f63765713e8b23b05d83a9db8731385b58ac29772602d753e6f"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "8cb409de84c92339a6f0d69d04c3d7b10479688c118968f77b902ad906c363ee", "afterSha256": "0d9d5fee8c9cb43be74b3a52101a59d72f5061904f2c56f1ab6cdf3f2b9d0f27"},
-    {"path": "package.json", "beforeSha256": "13ab02b8a321b3f04527f0e8e797f42170807022bc362fd17f5a5c3c3ca596ce", "afterSha256": "f04be3e87f2afce992ded0050b284d865513da9df70bc53cd8a87b92f3a80a4c"},
+    {"path": "package.json", "beforeSha256": "65100d8a86c3cd97dbab8b9fe9a09e03222561f5d9603d951722b1166e93e085", "afterSha256": "58dcdb86ac93a806b266b6a3cec3d082238112e7611ef4462b6fcc8b35680591"},
     {"path": "scripts/solana/local-fixture.ts", "beforeSha256": "6e0b5083a4e02d401680b07cb18a998aeeeddf6e1f8edce3bf761f8f2c419b39", "afterSha256": "absent"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "806fbcd9dc0dd0397b3d8b631cff143fb6eccab71add7c4d2928cb3de3fbd2ff", "afterSha256": "34a958a2750675597da899f4706e454fe62ee63bf6a4161b37ae06cb5f36334f"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "eccebb9ff60236b5e5ce1411e887f8712eea7b5f3ad70f5a420e2d35451f78ee", "afterSha256": "d3c744e595690558284e3ded8ab6cae5fab13543bc3ca1c64e55e595f9cec7b4"},
     {"path": "tooling/toolchain.lock.json", "beforeSha256": "03eeee5922c84bb5e0af3ee2a668fac644b8be571f652f3ec0176bf4e2b24f47", "afterSha256": "50133fa9ecb498077a6bd322256e3480d05dfa7f582333f96045ec36017fc1db"},
     {"path": "tooling/local-solana/src/README.md", "beforeSha256": "absent", "afterSha256": "4971eb4a5960a0647170b1963fd750cf2c47233efb78f1e6c1120d781cf76331"}
   ],

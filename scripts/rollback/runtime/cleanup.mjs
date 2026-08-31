@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   closeSync,
   fstatSync,
@@ -115,12 +116,67 @@ export function captureCleanupTreeSnapshot(handle) {
   return {
     schemaVersion: 1,
     result: "captured",
+    custodySha256: cleanupSnapshotSha256(snapshot),
     entryCount: state.count,
     limits: {
       maxDepth: CLEANUP_MAX_DEPTH,
       maxEntries: CLEANUP_MAX_ENTRIES,
       maxRelativeBytes: CLEANUP_MAX_RELATIVE_BYTES,
     },
+  };
+}
+
+export function assertCapturedCleanupTreeSnapshot(handle) {
+  validateCleanupHandle(handle);
+  const snapshot = cleanupTreeSnapshots.get(handle);
+  if (snapshot === undefined) {
+    throw new Error("ROLLBACK_CLEANUP_SNAPSHOT_REQUIRED");
+  }
+  assertHandleIdentities(handle);
+  assertCleanupTreeSnapshot(handle.descriptor, snapshot);
+  assertHandleIdentities(handle);
+  return cleanupSnapshotSha256(snapshot);
+}
+
+export function updateCleanupTreeSnapshot(handle, options = {}) {
+  validateCleanupHandle(handle);
+  if (options === null || typeof options !== "object" || Array.isArray(options)
+    || Object.keys(options).some((key) => !["allowAddedEntries", "allowRemovedEntries"].includes(key))) {
+    throw new Error("ROLLBACK_CLEANUP_CUSTODY_UPDATE_INVALID");
+  }
+  const allowAddedEntries = validateCustodyEntryChanges(options.allowAddedEntries ?? []);
+  const allowRemovedEntries = validateCustodyEntryChanges(options.allowRemovedEntries ?? []);
+  const previous = cleanupTreeSnapshots.get(handle);
+  if (previous === undefined) {
+    throw new Error("ROLLBACK_CLEANUP_SNAPSHOT_REQUIRED");
+  }
+  assertHandleIdentities(handle);
+  const state = { count: 0, nextSlot: 0 };
+  const next = preflightCleanupTree(handle, state);
+  const previousByName = new Map(previous.entries.map((entry) => [entry.name, entry]));
+  const nextByName = new Map(next.entries.map((entry) => [entry.name, entry]));
+  const added = next.entries.filter((entry) => !previousByName.has(entry.name)).map((entry) => entry.name);
+  const removed = previous.entries.filter((entry) => !nextByName.has(entry.name)).map((entry) => entry.name);
+  if (JSON.stringify(added.toSorted()) !== JSON.stringify(allowAddedEntries)
+    || JSON.stringify(removed.toSorted()) !== JSON.stringify(allowRemovedEntries)) {
+    throw new Error("ROLLBACK_CLEANUP_CUSTODY_ENTRY_SET_MISMATCH");
+  }
+  for (const [name, expected] of previousByName) {
+    const actual = nextByName.get(name);
+    if (actual !== undefined) {
+      assertRetainedCustodyIdentity(expected, actual, name);
+    }
+  }
+  assertHandleIdentities(handle);
+  assertCleanupTreeSnapshot(handle.descriptor, next);
+  cleanupTreeSnapshots.set(handle, next);
+  return {
+    schemaVersion: 1,
+    result: "updated",
+    custodySha256: cleanupSnapshotSha256(next),
+    entryCount: state.count,
+    addedEntries: added.toSorted(),
+    removedEntries: removed.toSorted(),
   };
 }
 
@@ -329,6 +385,41 @@ function validateAllowedEntries(value) {
     throw new Error("ROLLBACK_CLEANUP_ALLOWLIST_INVALID");
   }
   return entries;
+}
+
+function validateCustodyEntryChanges(value) {
+  if (!Array.isArray(value) || value.some((entry) =>
+    typeof entry !== "string" || !CLEANUP_ALLOWED_TOP_LEVEL.has(entry))) {
+    throw new Error("ROLLBACK_CLEANUP_CUSTODY_UPDATE_INVALID");
+  }
+  const entries = [...value].toSorted();
+  if (new Set(entries).size !== entries.length) {
+    throw new Error("ROLLBACK_CLEANUP_CUSTODY_UPDATE_INVALID");
+  }
+  return entries;
+}
+
+function assertRetainedCustodyIdentity(expected, actual, logicalPath) {
+  const fields = ["dev", "gid", "ino", "mode", "uid"];
+  if (expected.kind !== actual.kind
+    || fields.some((field) => String(expected.identity[field]) !== String(actual.identity[field]))) {
+    throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
+  }
+}
+
+function cleanupSnapshotSha256(snapshot) {
+  return createHash("sha256")
+    .update(JSON.stringify(snapshot.entries.map(cleanupSnapshotEntry)))
+    .digest("hex");
+}
+
+function cleanupSnapshotEntry(entry) {
+  return {
+    name: entry.name,
+    kind: entry.kind,
+    fingerprint: entry.fingerprint,
+    children: entry.children.map(cleanupSnapshotEntry),
+  };
 }
 
 function validateCleanupHandle(handle) {

@@ -48,6 +48,8 @@ import {
   preflightPinnedSlitherImage,
   removeOwnedEmptyDirectories,
   rollbackGateCoverage,
+  stageExactWorktreePaths,
+  syntheticRollbackCommit,
   validateManifestSet,
   verifyAppliedState,
 } from "../prove-slices.mjs";
@@ -131,9 +133,25 @@ function pinnedRuntimeFixture() {
   );
   mkdirSync(dirname(archive), { recursive: true });
   mkdirSync(join(root, "tooling"));
-  copyFileSync(process.execPath, archive);
-  chmodSync(archive, 0o755);
-  const executableSha256 = digestFile(archive);
+  const archiveSource = join(root, "runtime-archive-source");
+  const archiveExecutable = join(archiveSource, installDirectory, "bin", "node");
+  mkdirSync(dirname(archiveExecutable), { recursive: true });
+  copyFileSync(process.execPath, archiveExecutable);
+  chmodSync(archiveExecutable, 0o755);
+  mkdirSync(join(archiveSource, installDirectory, "lib"));
+  writeFileSync(
+    join(archiveSource, installDirectory, "lib", "runtime-metadata.json"),
+    '{"runtime":"pinned-fixture"}\n',
+  );
+  const executableSha256 = digestFile(archiveExecutable);
+  const archiveResult = spawnSync("/usr/bin/tar", [
+    "-cJf", archive, "-C", archiveSource, installDirectory,
+  ], {
+    encoding: "utf8",
+    env: { LANG: "C", LC_ALL: "C", PATH: "/usr/bin:/bin", XZ_OPT: "-0" },
+  });
+  assert.equal(archiveResult.status, 0, archiveResult.stderr);
+  rmSync(archiveSource, { recursive: true, force: true });
   const artifactSha256 = digestFile(archive);
   const artifact = {
     url: "https://nodejs.org/dist/v" + version + "/" + archiveName,
@@ -166,7 +184,7 @@ function pinnedRuntimeFixture() {
   const prepared = prepareVerifiedPayload({
     name: "node",
     platform: "linux-x64",
-    artifact: { ...artifact, archive: "executable" },
+    artifact,
     archive,
     toolsRoot: join(root, ".tools"),
     missingCode: "TEST_RUNTIME_ARCHIVE_MISSING",
@@ -310,6 +328,8 @@ export {
   preflightPinnedSlitherImage,
   removeOwnedEmptyDirectories,
   rollbackGateCoverage,
+  stageExactWorktreePaths,
+  syntheticRollbackCommit,
   validateManifestSet,
   verifyAppliedState,
   EvidenceRecorder,

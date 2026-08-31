@@ -34,6 +34,14 @@ function createRootFixture(context, { realBootstrap = false } = {}) {
   copyFileSync(join(repositoryRoot, "dev"), join(root, "dev"));
   if (realBootstrap) {
     copyFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), join(scripts, "bootstrap.sh"));
+    copyFileSync(join(repositoryRoot, "scripts/toolchain-cleanup.mjs"), join(scripts, "toolchain-cleanup.mjs"));
+    mkdirSync(join(scripts, "rollback", "runtime"), { recursive: true });
+    for (const name of ["cleanup.mjs", "cleanup-tree.mjs"]) {
+      copyFileSync(
+        join(repositoryRoot, "scripts", "rollback", "runtime", name),
+        join(scripts, "rollback", "runtime", name),
+      );
+    }
   } else {
     writeExecutable(join(scripts, "bootstrap.sh"), bootstrapProbe());
   }
@@ -83,10 +91,7 @@ function runRoot(fixture, args, extraEnvironment = {}) {
   });
 }
 
-function prepareBootstrapArchiveFixture(fixture, {
-  mutateHeldInodeDuringExtraction = false,
-  substituteDuringExtraction = false,
-} = {}) {
+function prepareBootstrapArchiveFixture(fixture, { snapshotAttack } = {}) {
   const host = bootstrapFixtureHost();
   const payloadRoot = join(fixture.root, "bootstrap-node-payload");
   const nodeDirectory = `node-test-${host.platform}`;
@@ -96,7 +101,12 @@ function prepareBootstrapArchiveFixture(fixture, {
     join(nodeBin, "node"),
     "#!/bin/bash\n"
       + "if [[ \"${1:-}\" == --version ]]; then printf '%s\\n' v24.20.0; exit 0; fi\n"
-      + `printf 'archive-node:%s\\n' "$*" >> '${fixture.log}'\n`,
+      + "if [[ \"${1:-}\" == *toolchain-cleanup.mjs ]]; then "
+      + `exec '${process.execPath}' "$@"; fi\n`
+      + "for token_test_fd in 7 8 9 10 11 12; do "
+      + "if [[ -e /dev/fd/$token_test_fd ]]; then printf 'descriptor-open:%s\\n' \"$token_test_fd\" "
+      + `>> '${fixture.log}'; exit 91; fi; done\n`
+      + `printf 'descriptors-settled\\narchive-node:%s\\n' "$*" >> '${fixture.log}'\n`,
   );
   const downloads = join(fixture.root, ".tools", "downloads");
   mkdirSync(downloads, { recursive: true });
@@ -116,35 +126,49 @@ function prepareBootstrapArchiveFixture(fixture, {
     assert.match(bootstrap, new RegExp(before.replaceAll(".", "\\."), "u"));
     bootstrap = bootstrap.replace(before, after);
   }
-  let renameProbe;
-  if (substituteDuringExtraction || mutateHeldInodeDuringExtraction) {
-    renameProbe = join(fixture.root, "archive-rename-probe.mjs");
-    const probeSource = substituteDuringExtraction
-      ? "import { renameSync, writeFileSync } from \"node:fs\";\n"
-        + "const archive = process.argv[2];\n"
-        + "renameSync(archive, `${archive}.held`);\n"
-        + "writeFileSync(archive, \"foreign archive at original pathname\\n\");\n"
-      : "import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from \"node:fs\";\n"
-        + "const archive = process.argv[2];\n"
-        + "const original = readFileSync(archive);\n"
-        + "const descriptor = openSync(archive, 'r+');\n"
-        + "writeSync(descriptor, Buffer.from([original[0] ^ 255]), 0, 1, 0);\n"
-        + "fsyncSync(descriptor);\n"
-        + "writeSync(descriptor, original, 0, original.length, 0);\n"
-        + "fsyncSync(descriptor);\n"
-        + "closeSync(descriptor);\n";
-    writeFileSync(renameProbe, probeSource);
-    const tarProbe = join(fixture.root, "tar-substitution-probe");
-    writeExecutable(
-      tarProbe,
-      "#!/bin/bash\n"
-        + `"${process.execPath}" "${renameProbe}" "${archive}"\n`
-        + "exec /usr/bin/tar \"$@\"\n",
+  let attackProbe;
+  let attackRecord;
+  if (snapshotAttack !== undefined) {
+    attackProbe = join(fixture.root, "snapshot-attack-probe.mjs");
+    attackRecord = join(fixture.root, "snapshot-attack-successor.txt");
+    const sources = {
+      hardlink: "import { linkSync, writeFileSync } from 'node:fs';\nconst successor = `${process.argv[2]}.hardlink`; linkSync(process.argv[2], successor); writeFileSync(process.argv[3], successor);\n",
+      rename: "import { renameSync, writeFileSync } from 'node:fs';\nconst successor = `${process.argv[2]}.renamed`; renameSync(process.argv[2], successor); writeFileSync(process.argv[3], successor);\n",
+      "same-second-mutation": "import { chmodSync, closeSync, fsyncSync, openSync, readFileSync, writeFileSync, writeSync } from 'node:fs';\n"
+        + "const path = process.argv[2]; const bytes = readFileSync(path); chmodSync(path, 0o600);\n"
+        + "const fd = openSync(path, 'r+'); writeSync(fd, Buffer.from([bytes[0] ^ 255]), 0, 1, 0); fsyncSync(fd);\n"
+        + "writeSync(fd, bytes, 0, bytes.length, 0); fsyncSync(fd); closeSync(fd); chmodSync(path, 0o400); writeFileSync(process.argv[3], path);\n",
+    };
+    assert.ok(sources[snapshotAttack], snapshotAttack);
+    writeFileSync(attackProbe, sources[snapshotAttack]);
+    bootstrap = bootstrap.replace(
+      "  local token_snapshot_pre_unlink_fingerprint\n",
+      `  "${process.execPath}" "${attackProbe}" "$token_snapshot_path" "${attackRecord}"\n`
+        + "  local token_snapshot_pre_unlink_fingerprint\n",
     );
-    bootstrap = bootstrap.replace("/usr/bin/tar --no-same-owner --no-same-permissions", `"${tarProbe}" --no-same-owner --no-same-permissions`);
   }
+  const snapshotLog = join(fixture.root, "snapshot-extraction.log");
+  const descriptorProbe = join(fixture.root, "snapshot-descriptor-probe.mjs");
+  writeFileSync(
+    descriptorProbe,
+    "import { appendFileSync, fstatSync } from 'node:fs';\n"
+      + `appendFileSync(${JSON.stringify(snapshotLog)}, \`nlink=\${fstatSync(Number(process.argv[2])).nlink}\\n\`);\n`,
+  );
+  const tarProbe = join(fixture.root, "tar-descriptor-probe");
+  writeExecutable(
+    tarProbe,
+    "#!/bin/bash\nset -euo pipefail\ntoken_test_archive=\n"
+      + "for token_test_argument in \"$@\"; do case \"$token_test_argument\" in /dev/fd/*) token_test_archive=$token_test_argument ;; esac; done\n"
+      + "[[ -n \"$token_test_archive\" ]]\n"
+      + `"${process.execPath}" "${descriptorProbe}" "\${token_test_archive##*/}"\n`
+      + "exec /usr/bin/tar \"$@\"\n",
+  );
+  bootstrap = bootstrap.replace(
+    "/usr/bin/tar --no-same-owner --no-same-permissions",
+    `"${tarProbe}" --no-same-owner --no-same-permissions`,
+  );
   writeExecutable(bootstrapPath, bootstrap);
-  return { archive, archiveSha256, renameProbe };
+  return { archive, archiveSha256, attackProbe, attackRecord, snapshotLog };
 }
 
 function bootstrapFixtureHost() {
@@ -272,45 +296,27 @@ test("bootstrap help is inert and direct doctor fails closed on missing archive 
 
 test("real bootstrap fixture accepts matching held-descriptor and pathname identities", (context) => {
   const fixture = createRootFixture(context, { realBootstrap: true });
-  prepareBootstrapArchiveFixture(fixture);
+  const prepared = prepareBootstrapArchiveFixture(fixture);
   const result = runRoot(fixture, ["bootstrap", "install", "--offline"]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(readFileSync(fixture.log, "utf8"), /archive-node:.*toolchain\.mjs install --offline/u);
+  assert.match(readFileSync(fixture.log, "utf8"), /descriptors-settled/u);
+  assert.equal(readFileSync(prepared.snapshotLog, "utf8"), "nlink=0\n");
   assert.equal(existsSync(fixture.marker), false);
 });
 
-test("real bootstrap fixture rejects pathname replacement after descriptor-backed extraction", (context) => {
-  const fixture = createRootFixture(context, { realBootstrap: true });
-  const prepared = prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction: true });
-  const result = runRoot(
-    fixture,
-    ["bootstrap", "install", "--offline"],
-    {},
-  );
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node/u);
-  assert.equal(
-    readFileSync(prepared.archive, "utf8"),
-    "foreign archive at original pathname\n",
-  );
-  assert.equal(
-    createHash("sha256").update(readFileSync(`${prepared.archive}.held`)).digest("hex"),
-    prepared.archiveSha256,
-  );
-  assert.equal(existsSync(fixture.log), false, "the archive-derived interpreter must not execute");
-  assert.equal(existsSync(fixture.marker), false);
-});
-
-test("real bootstrap rejects held-inode mutation and exact-byte restore before staged Node execution", (context) => {
-  const fixture = createRootFixture(context, { realBootstrap: true });
-  const prepared = prepareBootstrapArchiveFixture(fixture, { mutateHeldInodeDuringExtraction: true });
-  const result = runRoot(fixture, ["bootstrap", "install", "--offline"]);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node/u);
-  assert.equal(createHash("sha256").update(readFileSync(prepared.archive)).digest("hex"), prepared.archiveSha256);
-  assert.equal(existsSync(fixture.log), false, "the archive-derived interpreter must not execute");
-  assert.equal(existsSync(fixture.marker), false);
-});
+for (const snapshotAttack of ["hardlink", "rename", "same-second-mutation"]) {
+  test(`real bootstrap rejects snapshot ${snapshotAttack} before staged Node execution`, (context) => {
+    const fixture = createRootFixture(context, { realBootstrap: true });
+    const prepared = prepareBootstrapArchiveFixture(fixture, { snapshotAttack });
+    const result = runRoot(fixture, ["bootstrap", "install", "--offline"]);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SNAPSHOT_(?:SUBSTITUTED|UNSAFE)/u);
+    assert.equal(existsSync(fixture.log), false, "the archive-derived interpreter must not execute");
+    assert.equal(existsSync(fixture.marker), false);
+    assert.equal(existsSync(readFileSync(prepared.attackRecord, "utf8")), true);
+  });
+}
 
 test("doctor wiring verifies and executes through the archive-derived Node", () => {
   const dev = readFileSync(join(repositoryRoot, "dev"), "utf8");

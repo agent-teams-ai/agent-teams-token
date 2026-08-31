@@ -26,11 +26,10 @@ esac
 
 token_env_path_prefix=
 for token_env_bin_dir in \
-  "$token_env_tools_root/node-v24.20.0-$token_env_platform/bin" \
+  "$token_env_tools_root/bin" \
   "$token_env_tools_root/foundry-v1.8.0-$token_env_platform" \
   "$token_env_tools_root/solc-v0.8.36-$token_env_platform" \
-  "$token_env_tools_root/agave-v4.2.1-$token_env_platform/bin" \
-  "$token_env_tools_root/bin"
+  "$token_env_tools_root/agave-v4.2.1-$token_env_platform/bin"
 do
   if [[ -d "$token_env_bin_dir" ]]; then
     token_env_path_prefix="${token_env_path_prefix:+$token_env_path_prefix:}$token_env_bin_dir"

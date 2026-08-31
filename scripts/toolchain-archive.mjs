@@ -19,9 +19,11 @@ import {
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { assertExpectedFileHashes } from "./toolchain-policy.mjs";
 import {
+  assertCapturedCleanupTreeSnapshot,
   captureCleanupTreeSnapshot,
   cleanupIdentityBoundDirectory,
   createCleanupHandle,
+  updateCleanupTreeSnapshot,
 } from "./rollback/runtime/cleanup.mjs";
 import { allowlistedChildEnvironment } from "./toolchain-environment.mjs";
 import { toolchainProvenanceFile } from "./toolchain-provenance.mjs";
@@ -235,10 +237,14 @@ export function prepareVerifiedPayload({
   });
   const staged = join(stageRoot, "payload");
   let verified;
+  let internalTreeUpdateAllowed = false;
   try {
     mkdirSync(staged);
+    captureCleanupTreeSnapshot(cleanupHandle);
     verified = openVerifiedArchive({ name, platform, artifact, archive, missingCode });
     onArchiveVerified?.({ archive, descriptor: verified.descriptor });
+    assertCapturedCleanupTreeSnapshot(cleanupHandle);
+    internalTreeUpdateAllowed = true;
     if (artifact.archive === "executable") {
       const target = join(staged, artifact.expectedFiles[0]);
       mkdirSync(dirname(target), { recursive: true });
@@ -262,7 +268,11 @@ export function prepareVerifiedPayload({
       return [path, entry.sha256];
     }));
     assertExpectedFileHashes({ name, platform, artifact, files });
+    updateCleanupTreeSnapshot(cleanupHandle);
+    internalTreeUpdateAllowed = false;
     return {
+      artifact,
+      artifactAuthoritySha256: artifactAuthoritySha256(name, platform, artifact),
       cleanupHandle,
       files,
       inventory,
@@ -271,7 +281,18 @@ export function prepareVerifiedPayload({
       stageRoot,
     };
   } catch (error) {
-    cleanupPreparedPayload({ cleanupHandle, stageRoot }, { onBoundary: onCleanupBoundary });
+    try {
+      if (internalTreeUpdateAllowed) {
+        updateCleanupTreeSnapshot(cleanupHandle);
+      }
+      cleanupPreparedPayload({ cleanupHandle, stageRoot }, { onBoundary: onCleanupBoundary });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `${error instanceof Error ? error.message : String(error)}; cleanup=${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        { cause: cleanupError },
+      );
+    }
     throw error;
   } finally {
     if (verified !== undefined) {closeSync(verified.descriptor);}
@@ -282,8 +303,31 @@ export function cleanupPreparedPayload(prepared, options = {}) {
   if (prepared?.cleanupHandle === undefined) {
     throw new Error("TOOLCHAIN_CLEANUP_HANDLE_REQUIRED");
   }
-  captureCleanupTreeSnapshot(prepared.cleanupHandle);
   return cleanupIdentityBoundDirectory(prepared.cleanupHandle, options);
+}
+
+export function assertPreparedArtifactAuthority(prepared, { name, platform, artifact }) {
+  if (prepared?.artifact !== artifact
+    || prepared.artifactAuthoritySha256 !== artifactAuthoritySha256(name, platform, artifact)) {
+    throw new Error(`TOOLCHAIN_PREPARED_ARTIFACT_AUTHORITY_MISMATCH tool=${name} platform=${platform}`);
+  }
+  assertCapturedCleanupTreeSnapshot(prepared.cleanupHandle);
+}
+
+function artifactAuthoritySha256(name, platform, artifact) {
+  const authority = {
+    name,
+    platform,
+    archive: artifact?.archive,
+    archiveName: artifact?.archiveName,
+    sha256: artifact?.sha256,
+    installDirectory: artifact?.installDirectory,
+    expectedFiles: artifact?.expectedFiles,
+    expectedFileSha256: artifact?.expectedFileSha256 ?? null,
+    versionChecks: artifact?.versionChecks,
+    installationAuthority: artifact?.installationAuthority,
+  };
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
 function singleLine(value) {

@@ -24,6 +24,7 @@ import {
   applyExactSliceState,
   gateCoverageSnapshot,
   materializeCandidateCheckout,
+  stageExactWorktreePaths,
   syntheticRollbackCommit,
   verifyAppliedState,
 } from "./gate-contract.mjs";
@@ -343,10 +344,13 @@ function captureRollbackTreeAndInventory(context, preState) {
     "verify-rollback-owned-root-shape",
     "executed-rollback",
   );
-  recorder.run(group, "git-add-executed-rollback-state", gitExecutable(), ["add", "-A"], {
-    cwd: checkout,
-    timeout: 60_000,
-  });
+  stageExactWorktreePaths(
+    checkout,
+    [...new Set([...manifest.ownedPaths, ...manifest.sharedPaths])],
+    recorder,
+    group,
+    "executed-rollback-state",
+  );
   const tree = recorder.run(
     group,
     "git-write-executed-rollback-tree",

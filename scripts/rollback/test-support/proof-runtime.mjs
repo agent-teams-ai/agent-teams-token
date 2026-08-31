@@ -81,12 +81,13 @@ test("isolated pnpm links are required at every importing workspace package", ()
       /ROLLBACK_PNPM_LINK_MISSING.*yaml/u,
     );
     assert.deepEqual(pnpmOfflineInstallArguments("/cache/pnpm-store"), [
+      "--agtmai-trusted-store=/cache/pnpm-store",
       "install",
       "--offline",
       "--frozen-lockfile",
       "--ignore-scripts",
       "--package-import-method=copy",
-      "--store-dir=/cache/pnpm-store",
+      "--ignore-pnpmfile",
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -178,7 +179,34 @@ test("runtime proof rejects inventory injected after canonical installation", (c
   }
 });
 
-test("actual Git commands disable hostile system, global, local and command config", () => {
+test("runtime inventory remains anchored to the verified archive after coherent provenance rewrite", async (context) => {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    context.skip("Linux x64 provides the required /proc/self/exe binding");
+    return;
+  }
+  const fixture = pinnedRuntimeFixture();
+  try {
+    const archive = await import(new URL("../../toolchain-archive.mjs", import.meta.url));
+    const provenance = await import(new URL("../../toolchain-provenance.mjs", import.meta.url));
+    const installation = dirname(fixture.provenance);
+    writeFileSync(join(installation, "lib", "runtime-metadata.json"), '{"runtime":"forged"}\n');
+    const document = provenance.parseToolchainProvenance(readFileSync(fixture.provenance));
+    document.inventorySha256 = archive.inventorySha256(
+      archive.inventoryInstallation(installation, { exclude: [archive.provenanceFile] }),
+    );
+    writeFileSync(fixture.provenance, provenance.serializeToolchainProvenance(document));
+    const result = invokePinnedRuntime(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /ROLLBACK_RUNTIME_(?:PROVENANCE_MISMATCH|ARCHIVE_INVENTORY_MISMATCH)/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("actual Git commands disable hostile system, global and command config", () => {
   const fixture = gitFixture();
   const saved = Object.fromEntries(
     Object.keys(process.env)
@@ -199,9 +227,6 @@ test("actual Git commands disable hostile system, global, local and command conf
     const hostileConfig = `[core]\n\tfsmonitor = ${helper}\n[credential]\n\thelper = ${helper}\n`;
     writeFileSync(globalConfig, hostileConfig);
     writeFileSync(systemConfig, hostileConfig);
-    git(fixture.root, ["config", "core.fsmonitor", helper]);
-    git(fixture.root, ["config", "credential.helper", helper]);
-
     Object.assign(process.env, {
       GIT_CONFIG_COUNT: "2",
       GIT_CONFIG_KEY_0: "core.fsmonitor",
@@ -223,6 +248,57 @@ test("actual Git commands disable hostile system, global, local and command conf
       }
     }
     rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("local Git filters, attributes, includes, hooks and semantic overrides fail before staging", () => {
+  for (const authority of ["filter", "attributes", "include", "hook", "semantic"]) {
+    const fixture = gitFixture();
+    try {
+      const marker = join(fixture.boundary, `hostile-${authority}-executed`);
+      const helper = join(fixture.boundary, `hostile-${authority}-helper`);
+      writeExecutable(helper, `#!/bin/sh\n/bin/echo executed >>${JSON.stringify(marker)}\nexit 0\n`);
+      if (authority === "filter") {
+        rawGitConfig(fixture.root, "filter.evil.clean", helper);
+        writeFileSync(join(fixture.root, ".git", "info", "attributes"), "*.txt filter=evil\n");
+      } else if (authority === "attributes") {
+        writeFileSync(join(fixture.root, ".git", "info", "attributes"), "*.txt filter=evil\n");
+      } else if (authority === "include") {
+        const included = join(fixture.boundary, "included.gitconfig");
+        writeFileSync(included, `[filter "evil"]\n\tclean = ${helper}\n`);
+        rawGitConfig(fixture.root, "include.path", included);
+      } else if (authority === "hook") {
+        writeExecutable(join(fixture.root, ".git", "hooks", "pre-commit"), helper);
+      } else {
+        rawGitConfig(fixture.root, "fsck.skipList", join(fixture.boundary, "skip-list"));
+      }
+      writeFileSync(join(fixture.root, "alpha.txt"), "changed\n");
+      const evidence = join(fixture.boundary, "evidence");
+      mkdirSync(evidence);
+      const recorder = new EvidenceRecorder(evidence, { authority });
+      assert.throws(
+        () => authority === "filter"
+          ? proofSupport.syntheticRollbackCommit(
+              fixture.root,
+              { ownedPaths: ["alpha.txt"], sharedPaths: [], sliceId: "hostile-filter" },
+              fixture.sha,
+              recorder,
+              "git-authority",
+            )
+          : proofSupport.stageExactWorktreePaths(
+              fixture.root,
+              ["alpha.txt"],
+              recorder,
+              "git-authority",
+              "hostile",
+            ),
+        /TOOLCHAIN_GIT_(?:LOCAL_CONFIG_FORBIDDEN|HOOK_FORBIDDEN|INFO_AUTHORITY_FORBIDDEN)/u,
+        authority,
+      );
+      assert.equal(existsSync(marker), false, authority);
+    } finally {
+      rmSync(fixture.boundary, { recursive: true, force: true });
+    }
   }
 });
 
@@ -256,8 +332,10 @@ test("recorded offline children exclude proxy, npm, Node and Git authority", () 
     const gitResult = recorder.run("test", "git-command-contract", gitExecutable(), [
       "rev-parse", "--verify", "HEAD^{commit}",
     ], { cwd: gitCandidate.root, env: process.env });
-    assert.deepEqual(gitResult.entry.arguments.slice(0, 11), [
+    assert.deepEqual(gitResult.entry.arguments, [
       "-c", "core.fsmonitor=false",
+      "-c", "core.hooksPath=/dev/null",
+      "-c", "core.attributesFile=/dev/null",
       "-c", "credential.helper=",
       "-c", "credential.interactive=never",
       "-c", `safe.directory=${gitCandidate.root}`,
@@ -268,6 +346,23 @@ test("recorded offline children exclude proxy, npm, Node and Git authority", () 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function rawGitConfig(root, key, value) {
+  const result = spawnSync("/usr/bin/git", ["config", "--local", key, value], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      HOME: "/nonexistent",
+      LANG: "C",
+      LC_ALL: "C",
+      PATH: "/usr/bin:/bin",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+}
 
 test("runtime proof rejects a coherent binary and provenance forgery", (context) => {
   if (process.platform !== "linux" || process.arch !== "x64") {
@@ -317,29 +412,12 @@ test("runtime proof rejects process path and loaded-image identity mismatches", 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /ROLLBACK_RUNTIME_EXEC_PATH_MISMATCH/u);
 
-    const displaced = fixture.executable + ".loaded";
+    const displaced = join(fixture.root, "loaded-node");
     const setup = `
       const fs = await import("node:fs");
-      const archive = await import(${JSON.stringify(
-        new URL("../../toolchain-archive.mjs", import.meta.url).href,
-      )});
-      const provenance = await import(${JSON.stringify(
-        new URL("../../toolchain-provenance.mjs", import.meta.url).href,
-      )});
       fs.renameSync(${JSON.stringify(fixture.executable)}, ${JSON.stringify(displaced)});
       fs.copyFileSync(${JSON.stringify(displaced)}, ${JSON.stringify(fixture.executable)});
       fs.chmodSync(${JSON.stringify(fixture.executable)}, 0o755);
-      const document = provenance.parseToolchainProvenance(
-        fs.readFileSync(${JSON.stringify(fixture.provenance)}),
-      );
-      document.inventorySha256 = archive.inventorySha256(archive.inventoryInstallation(
-        ${JSON.stringify(dirname(fixture.provenance))},
-        { exclude: [archive.provenanceFile] },
-      ));
-      fs.writeFileSync(
-        ${JSON.stringify(fixture.provenance)},
-        provenance.serializeToolchainProvenance(document),
-      );
     `;
     result = invokePinnedRuntime(fixture, { setup });
     assert.notEqual(result.status, 0);
@@ -354,7 +432,7 @@ test("every strict native survivor prerequisite fails when its binary is missing
   const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
   const docker = join(root, "usr/bin/docker");
   const paths = [
-    join(root, ".tools/node-v24.20.0-" + platform + "/bin/node"),
+    join(root, ".tools/bin/node"),
     join(root, ".tools/bin/pnpm"),
     join(root, ".tools/foundry-v1.8.0-" + platform + "/forge"),
     join(root, ".tools/foundry-v1.8.0-" + platform + "/cast"),

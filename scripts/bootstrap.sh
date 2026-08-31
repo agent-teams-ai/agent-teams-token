@@ -74,10 +74,10 @@ token_descriptor_fingerprint() {
     darwin-arm64)
       # macOS must fstat the inherited descriptor itself. Statting /dev/fd/N
       # reports the devfs pseudo-device instead of the held file's device.
-      token_identity=$(/usr/bin/stat -f '%d:%i:%p:%u:%g:%z:%m:%c' <&"$token_descriptor") || return 1
+      token_identity=$(/usr/bin/stat -f '%d|%i|%p|%u|%g|%z|%Fm|%Fc|%l' <&"$token_descriptor") || return 1
       ;;
     linux-x64)
-      token_identity=$(/usr/bin/stat -L -c '%d:%i:%f:%u:%g:%s:%y:%z' "/proc/self/fd/$token_descriptor") || return 1
+      token_identity=$(/usr/bin/stat -L -c '%d|%i|%f|%u|%g|%s|%y|%z|%h' "/proc/self/fd/$token_descriptor") || return 1
       ;;
   esac
   [[ -n "$token_identity" ]] || return 1
@@ -89,14 +89,66 @@ token_path_fingerprint() {
   local token_identity
   case "$token_platform" in
     darwin-arm64)
-      token_identity=$(/usr/bin/stat -L -f '%d:%i:%p:%u:%g:%z:%m:%c' "$token_path") || return 1
+      token_identity=$(/usr/bin/stat -L -f '%d|%i|%p|%u|%g|%z|%Fm|%Fc|%l' "$token_path") || return 1
       ;;
     linux-x64)
-      token_identity=$(/usr/bin/stat -L -c '%d:%i:%f:%u:%g:%s:%y:%z' "$token_path") || return 1
+      token_identity=$(/usr/bin/stat -L -c '%d|%i|%f|%u|%g|%s|%y|%z|%h' "$token_path") || return 1
       ;;
   esac
   [[ -n "$token_identity" ]] || return 1
   printf '%s\n' "$token_identity"
+}
+
+token_fingerprint_inode_key() {
+  local token_without_links=${1%|*}
+  printf '%s\n' "${token_without_links%|*}"
+}
+
+token_fingerprint_size() {
+  local token_device token_inode token_mode token_uid token_gid token_size
+  local token_mtime token_ctime token_links
+  IFS='|' read -r token_device token_inode token_mode token_uid token_gid token_size \
+    token_mtime token_ctime token_links <<<"$1"
+  [[ "$token_size" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$token_size"
+}
+
+token_assert_archive_fingerprint() {
+  local token_fingerprint=$1
+  local token_expected_size=$2
+  local token_expected_links=${3:-}
+  local token_device token_inode token_mode token_uid token_gid token_size
+  local token_mtime token_ctime token_links
+  IFS='|' read -r token_device token_inode token_mode token_uid token_gid token_size \
+    token_mtime token_ctime token_links <<<"$token_fingerprint"
+  [[ -n "$token_device" && -n "$token_inode" && -n "$token_mtime" && -n "$token_ctime" ]] \
+    || return 1
+  [[ "$token_size" == "$token_expected_size" && "$token_links" =~ ^[0-9]+$ ]] || return 1
+  if [[ -n "$token_expected_links" && "$token_links" != "$token_expected_links" ]]; then
+    return 1
+  fi
+  case "$token_platform" in
+    darwin-arm64) [[ "$token_mode" == 100* ]] ;;
+    linux-x64) [[ "$token_mode" == 8* ]] ;;
+  esac
+}
+
+token_assert_private_snapshot_fingerprint() {
+  local token_fingerprint=$1
+  local token_expected_size=$2
+  local token_expected_links=$3
+  token_assert_archive_fingerprint \
+    "$token_fingerprint" "$token_expected_size" "$token_expected_links" || return 1
+  local token_device token_inode token_mode token_uid token_gid token_size
+  local token_mtime token_ctime token_links
+  IFS='|' read -r token_device token_inode token_mode token_uid token_gid token_size \
+    token_mtime token_ctime token_links <<<"$token_fingerprint"
+  [[ "$token_uid" == "$(/usr/bin/id -u)" && "$token_gid" == "$(/usr/bin/id -g)" ]] \
+    || return 1
+  case "$token_platform" in
+    darwin-arm64) [[ "$token_mode" == 100400 ]] ;;
+    linux-x64) [[ "$token_mode" == 8100 ]] ;;
+  esac
 }
 
 token_run_clean() {
@@ -124,7 +176,8 @@ token_cleanup_node_stage() {
         "$token_node_stage" \
         "$token_tools_root" \
         "$token_node_stage_device" \
-        "$token_node_stage_inode"; then
+        "$token_node_stage_inode" \
+        "$token_node_stage_custody_sha256"; then
         printf 'TOOLCHAIN_BOOTSTRAP_STAGE_PRESERVED path=%s\n' "$token_node_stage" >&2
         token_status=1
       fi
@@ -132,7 +185,7 @@ token_cleanup_node_stage() {
       printf 'TOOLCHAIN_BOOTSTRAP_STAGE_PRESERVED path=%s\n' "$token_node_stage" >&2
     fi
   fi
-  exec 6<&- 7<&- 8<&-
+  exec 6<&- 7<&- 8<&- 9<&- 10<&- 11<&- 12<&-
   exit "$token_status"
 }
 
@@ -164,22 +217,33 @@ token_prepare_pinned_node() {
     return 1
   fi
   exec 7<"$token_archive_path"
+  exec 8<"$token_archive_path"
+  exec 9<"$token_archive_path"
   local token_archive_fingerprint
+  local token_archive_copy_fingerprint
+  local token_archive_post_fingerprint
   local token_archive_path_fingerprint
   if ! token_archive_fingerprint=$(token_descriptor_fingerprint 7) \
+    || ! token_archive_copy_fingerprint=$(token_descriptor_fingerprint 8) \
+    || ! token_archive_post_fingerprint=$(token_descriptor_fingerprint 9) \
     || ! token_archive_path_fingerprint=$(token_path_fingerprint "$token_archive_path") \
+    || [[ "$token_archive_fingerprint" != "$token_archive_copy_fingerprint" ]] \
+    || [[ "$token_archive_fingerprint" != "$token_archive_post_fingerprint" ]] \
     || [[ "$token_archive_fingerprint" != "$token_archive_path_fingerprint" ]]; then
     printf 'TOOLCHAIN_ARCHIVE_IDENTITY_CHANGED tool=node path=%s\n' \
       "$token_archive_path" >&2
-    exec 7<&-
+    exec 7<&- 8<&- 9<&-
     return 1
   fi
+  local token_archive_size
+  token_archive_size=$(token_fingerprint_size "$token_archive_fingerprint")
+  token_assert_archive_fingerprint "$token_archive_fingerprint" "$token_archive_size"
   local token_archive_sha256
   token_archive_sha256=$(token_sha256 /dev/fd/7)
   if [[ "$token_archive_sha256" != "$token_node_sha256" ]]; then
     printf 'TOOLCHAIN_CHECKSUM_MISMATCH tool=node expected=%s actual=%s path=%s\n' \
       "$token_node_sha256" "$token_archive_sha256" "$token_archive_path" >&2
-    exec 7<&-
+    exec 7<&- 8<&- 9<&-
     return 1
   fi
 
@@ -188,51 +252,121 @@ token_prepare_pinned_node() {
   exec 6<"$token_node_stage"
   local token_node_stage_identity
   token_node_stage_identity=$(token_descriptor_fingerprint 6)
-  token_node_stage_device=${token_node_stage_identity%%:*}
-  local token_stage_remainder=${token_node_stage_identity#*:}
-  token_node_stage_inode=${token_stage_remainder%%:*}
+  token_node_stage_device=${token_node_stage_identity%%|*}
+  local token_stage_remainder=${token_node_stage_identity#*|}
+  token_node_stage_inode=${token_stage_remainder%%|*}
   trap token_cleanup_node_stage EXIT
 
   local token_snapshot_path="$token_node_stage/archive.snapshot"
-  token_run_clean /bin/cp /dev/fd/7 "$token_snapshot_path"
+  token_run_clean /bin/dd if=/dev/fd/8 of="$token_snapshot_path" bs=1048576
   token_run_clean /bin/chmod 400 "$token_snapshot_path"
-  exec 8<"$token_snapshot_path"
-  /bin/rm -f -- "$token_snapshot_path"
+  local token_archive_post_sha256
+  local token_archive_final_fingerprint
+  local token_archive_final_path_fingerprint
+  token_archive_post_sha256=$(token_sha256 /dev/fd/9)
+  if [[ "$token_archive_post_sha256" != "$token_node_sha256" ]] \
+    || ! token_archive_final_fingerprint=$(token_descriptor_fingerprint 9) \
+    || ! token_archive_final_path_fingerprint=$(token_path_fingerprint "$token_archive_path") \
+    || [[ "$token_archive_final_fingerprint" != "$token_archive_fingerprint" ]] \
+    || [[ "$token_archive_final_path_fingerprint" != "$token_archive_fingerprint" ]]; then
+    printf 'TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node path=%s\n' \
+      "$token_archive_path" >&2
+    return 1
+  fi
+  exec 7<&- 8<&- 9<&-
+
+  exec 10<"$token_snapshot_path"
+  exec 11<"$token_snapshot_path"
+  exec 12<"$token_snapshot_path"
   local token_snapshot_fingerprint
-  token_snapshot_fingerprint=$(token_descriptor_fingerprint 8)
+  local token_snapshot_extract_fingerprint
+  local token_snapshot_post_fingerprint
+  local token_snapshot_path_fingerprint
+  token_snapshot_fingerprint=$(token_descriptor_fingerprint 10)
+  token_snapshot_extract_fingerprint=$(token_descriptor_fingerprint 11)
+  token_snapshot_post_fingerprint=$(token_descriptor_fingerprint 12)
+  token_snapshot_path_fingerprint=$(token_path_fingerprint "$token_snapshot_path")
+  if [[ "$token_snapshot_fingerprint" != "$token_snapshot_extract_fingerprint" ]] \
+    || [[ "$token_snapshot_fingerprint" != "$token_snapshot_post_fingerprint" ]] \
+    || [[ "$token_snapshot_fingerprint" != "$token_snapshot_path_fingerprint" ]] \
+    || ! token_assert_private_snapshot_fingerprint \
+      "$token_snapshot_fingerprint" "$token_archive_size" 1; then
+    printf 'TOOLCHAIN_ARCHIVE_SNAPSHOT_UNSAFE tool=node path=%s\n' \
+      "$token_snapshot_path" >&2
+    return 1
+  fi
   local token_snapshot_sha256
-  token_snapshot_sha256=$(token_sha256 /dev/fd/8)
+  token_snapshot_sha256=$(token_sha256 /dev/fd/10)
   if [[ "$token_snapshot_sha256" != "$token_node_sha256" ]]; then
     printf 'TOOLCHAIN_CHECKSUM_MISMATCH tool=node expected=%s actual=%s snapshot=private\n' \
       "$token_node_sha256" "$token_snapshot_sha256" >&2
     return 1
   fi
 
-  token_run_clean /usr/bin/tar --no-same-owner --no-same-permissions \
-    "$token_node_tar_flag" /dev/fd/8 -C "$token_node_stage/payload"
-  local token_final_archive_fingerprint
-  local token_final_archive_path_fingerprint
-  local token_final_snapshot_fingerprint
-  local token_post_extract_archive_sha256
-  local token_post_extract_snapshot_sha256
-  token_post_extract_archive_sha256=$(token_sha256 /dev/fd/7)
-  token_post_extract_snapshot_sha256=$(token_sha256 /dev/fd/8)
-  if [[ "$token_post_extract_archive_sha256" != "$token_node_sha256" ]] \
-    || [[ "$token_post_extract_snapshot_sha256" != "$token_node_sha256" ]] \
-    || ! token_final_archive_fingerprint=$(token_descriptor_fingerprint 7) \
-    || ! token_final_archive_path_fingerprint=$(token_path_fingerprint "$token_archive_path") \
-    || ! token_final_snapshot_fingerprint=$(token_descriptor_fingerprint 8) \
-    || [[ "$token_final_archive_fingerprint" != "$token_archive_fingerprint" ]] \
-    || [[ "$token_final_archive_path_fingerprint" != "$token_archive_fingerprint" ]] \
-    || [[ "$token_final_snapshot_fingerprint" != "$token_snapshot_fingerprint" ]]; then
-    printf 'TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node path=%s\n' \
-      "$token_archive_path" >&2
+  local token_snapshot_pre_unlink_fingerprint
+  local token_snapshot_pre_unlink_extract_fingerprint
+  local token_snapshot_pre_unlink_post_fingerprint
+  local token_snapshot_pre_unlink_path_fingerprint
+  if ! token_snapshot_pre_unlink_fingerprint=$(token_descriptor_fingerprint 10) \
+    || ! token_snapshot_pre_unlink_extract_fingerprint=$(token_descriptor_fingerprint 11) \
+    || ! token_snapshot_pre_unlink_post_fingerprint=$(token_descriptor_fingerprint 12) \
+    || ! token_snapshot_pre_unlink_path_fingerprint=$(token_path_fingerprint "$token_snapshot_path") \
+    || [[ "$token_snapshot_pre_unlink_fingerprint" != "$token_snapshot_fingerprint" ]] \
+    || [[ "$token_snapshot_pre_unlink_extract_fingerprint" != "$token_snapshot_fingerprint" ]] \
+    || [[ "$token_snapshot_pre_unlink_post_fingerprint" != "$token_snapshot_fingerprint" ]] \
+    || [[ "$token_snapshot_pre_unlink_path_fingerprint" != "$token_snapshot_fingerprint" ]]; then
+    printf 'TOOLCHAIN_ARCHIVE_SNAPSHOT_SUBSTITUTED tool=node phase=before-unlink\n' >&2
     return 1
   fi
-  exec 7<&- 8<&-
+  /bin/rm -f -- "$token_snapshot_path"
+
+  local token_snapshot_held_fingerprint
+  local token_snapshot_held_extract_fingerprint
+  local token_snapshot_held_post_fingerprint
+  token_snapshot_held_fingerprint=$(token_descriptor_fingerprint 10)
+  token_snapshot_held_extract_fingerprint=$(token_descriptor_fingerprint 11)
+  token_snapshot_held_post_fingerprint=$(token_descriptor_fingerprint 12)
+  if [[ "$token_snapshot_held_fingerprint" != "$token_snapshot_held_extract_fingerprint" ]] \
+    || [[ "$token_snapshot_held_fingerprint" != "$token_snapshot_held_post_fingerprint" ]] \
+    || [[ "$(token_fingerprint_inode_key "$token_snapshot_held_fingerprint")" \
+      != "$(token_fingerprint_inode_key "$token_snapshot_fingerprint")" ]] \
+    || ! token_assert_private_snapshot_fingerprint \
+      "$token_snapshot_held_fingerprint" "$token_archive_size" 0; then
+    printf 'TOOLCHAIN_ARCHIVE_SNAPSHOT_NOT_PRIVATE tool=node phase=before-extraction\n' >&2
+    return 1
+  fi
+
+  token_run_clean /usr/bin/tar --no-same-owner --no-same-permissions \
+    "$token_node_tar_flag" /dev/fd/11 -C "$token_node_stage/payload"
+  local token_final_snapshot_fingerprint
+  local token_final_snapshot_extract_fingerprint
+  local token_final_snapshot_post_fingerprint
+  local token_post_extract_snapshot_sha256
+  token_post_extract_snapshot_sha256=$(token_sha256 /dev/fd/12)
+  if [[ "$token_post_extract_snapshot_sha256" != "$token_node_sha256" ]] \
+    || ! token_final_snapshot_fingerprint=$(token_descriptor_fingerprint 10) \
+    || ! token_final_snapshot_extract_fingerprint=$(token_descriptor_fingerprint 11) \
+    || ! token_final_snapshot_post_fingerprint=$(token_descriptor_fingerprint 12) \
+    || [[ "$token_final_snapshot_fingerprint" != "$token_snapshot_held_fingerprint" ]] \
+    || [[ "$token_final_snapshot_extract_fingerprint" != "$token_snapshot_held_fingerprint" ]] \
+    || [[ "$token_final_snapshot_post_fingerprint" != "$token_snapshot_held_fingerprint" ]] \
+    || ! token_assert_private_snapshot_fingerprint \
+      "$token_final_snapshot_fingerprint" "$token_archive_size" 0; then
+    printf 'TOOLCHAIN_ARCHIVE_SNAPSHOT_SUBSTITUTED tool=node phase=after-extraction\n' >&2
+    return 1
+  fi
+  exec 10<&- 11<&- 12<&-
   token_pinned_node="$token_node_stage/payload/$token_node_directory/bin/node"
-  [[ "$(token_run_node --version)" == v24.20.0 ]]
+  token_node_stage_custody_sha256=$(token_run_node \
+    "$token_repo_root/scripts/toolchain-cleanup.mjs" \
+    capture-bootstrap-stage-custody \
+    "$token_node_stage" \
+    "$token_tools_root" \
+    "$token_node_stage_device" \
+    "$token_node_stage_inode")
+  [[ "$token_node_stage_custody_sha256" =~ ^[a-f0-9]{64}$ ]]
   token_pinned_node_trusted=true
+  [[ "$(token_run_node --version)" == v24.20.0 ]]
 }
 
 case "$token_mode" in

@@ -14,8 +14,11 @@ import { descriptorChild } from "./common.mjs";
 import { validateRuntimeNodeLock } from "./node-runtime-lock.mjs";
 import { platformId } from "./offline-environment.mjs";
 import {
+  cleanupPreparedPayload,
+  inspectInstallationInventory,
   inventoryInstallation,
   inventorySha256,
+  prepareVerifiedPayload,
   provenanceFile,
 } from "../../toolchain-archive.mjs";
 import {
@@ -34,9 +37,18 @@ export function assertPinnedNodeRuntime(root) {
   assertSupportedRuntimePlatform(platform);
   const runtimeRoot = openRuntimeRoot(root);
   let executable;
+  let prepared;
   try {
     const expected = loadRuntimeExpectations(root, runtimeRoot, platform);
     assertRuntimeArchive(runtimeRoot, expected.artifact);
+    prepared = prepareVerifiedPayload({
+      name: "node",
+      platform,
+      artifact: expected.artifact,
+      archive: join(root, ".tools", "downloads", expected.artifact.archiveName),
+      toolsRoot: join(root, ".tools"),
+      missingCode: "ROLLBACK_RUNTIME_ARCHIVE_MISSING",
+    });
     executable = openRuntimeRegularFile(
       runtimeRoot,
       [".tools", expected.artifact.installDirectory, "bin", "node"],
@@ -49,7 +61,7 @@ export function assertPinnedNodeRuntime(root) {
       },
     );
     assertRuntimeExecutable(executable, expected.executableSha256);
-    assertRuntimeProvenance(runtimeRoot, platform, expected);
+    assertRuntimeProvenance(runtimeRoot, platform, expected, prepared);
     assertLoadedRuntimeImage(executable, expected.executableSha256);
     assertFinalRuntimeExecutable(runtimeRoot, executable, expected.artifact);
     assertRuntimeIdentity(
@@ -65,10 +77,9 @@ export function assertPinnedNodeRuntime(root) {
       executableSha256: expected.executableSha256,
     };
   } finally {
-    if (executable !== undefined) {
-      closeSync(executable.descriptor);
-    }
+    if (executable !== undefined) {closeSync(executable.descriptor);}
     closeSync(runtimeRoot.descriptor);
+    if (prepared !== undefined) {cleanupPreparedPayload(prepared);}
   }
 }
 
@@ -167,13 +178,14 @@ function assertRuntimeExecutable(executable, executableSha256) {
   }
 }
 
-function assertRuntimeProvenance(runtimeRoot, platform, expected) {
+function assertRuntimeProvenance(runtimeRoot, platform, expected, prepared) {
   const { node, artifact, executableSha256 } = expected;
   const expectedFields = {
     tool: "node",
     version: node.version,
     platform,
     artifactSha256: artifact.sha256,
+    inventorySha256: prepared.inventorySha256,
     files: { "bin/node": executableSha256 },
   };
   const provenanceEntry = openRuntimeRegularFile(
@@ -217,6 +229,15 @@ function assertRuntimeProvenance(runtimeRoot, platform, expected) {
   }
   if (inventorySha256(actualInventory) !== provenance.inventorySha256) {
     throw new Error("ROLLBACK_RUNTIME_PROVENANCE_INVENTORY_MISMATCH");
+  }
+  const authorityMismatch = inspectInstallationInventory(
+    join(runtimeRootPath(runtimeRoot), ".tools", artifact.installDirectory),
+    prepared.inventory,
+  );
+  if (authorityMismatch !== undefined) {
+    throw new Error(
+      "ROLLBACK_RUNTIME_ARCHIVE_INVENTORY_MISMATCH reason=" + authorityMismatch,
+    );
   }
 }
 

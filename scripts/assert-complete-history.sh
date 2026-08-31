@@ -4,6 +4,7 @@ set -euo pipefail
 rollback_expected_sha=${1:?expected commit SHA is required}
 rollback_baseline_sha=${2:?baseline commit SHA is required}
 rollback_git=/usr/bin/git
+rollback_safe_directory=$(pwd -P)
 
 rollback_sha256() {
   if [[ -x /usr/bin/sha256sum ]]; then
@@ -32,7 +33,7 @@ if [[ "${GIT_ALTERNATE_OBJECT_DIRECTORIES+x}" == x ]]; then
   exit 1
 fi
 
-rollback_git_canonical() {
+rollback_git_inspect() {
   /usr/bin/env \
     -i \
     HOME=/nonexistent \
@@ -51,9 +52,64 @@ rollback_git_canonical() {
     SSH_ASKPASS=/bin/false \
     "$rollback_git" \
     -c core.fsmonitor=false \
+    -c core.hooksPath=/dev/null \
+    -c core.attributesFile=/dev/null \
     -c credential.helper= \
     -c credential.interactive=never \
+    -c "safe.directory=$rollback_safe_directory" \
     "$@"
+}
+
+rollback_assert_git_authority() {
+  local rollback_key
+  while IFS= read -r rollback_key; do
+    case "$rollback_key" in
+      core.repositoryformatversion|core.filemode|core.bare|core.logallrefupdates|\
+      core.ignorecase|core.precomposeunicode|user.name|user.email)
+        ;;
+      remote.*.url|remote.*.fetch|branch.*.remote|branch.*.merge)
+        ;;
+      *)
+        printf 'ROLLBACK_GIT_LOCAL_CONFIG_FORBIDDEN key=%s\n' "$rollback_key" >&2
+        return 1
+        ;;
+    esac
+  done < <(rollback_git_inspect config --local --no-includes --name-only --list)
+
+  local rollback_common_directory
+  rollback_common_directory=$(rollback_git_inspect rev-parse --path-format=absolute --git-common-dir)
+  local rollback_git_directory
+  rollback_git_directory=$(rollback_git_inspect rev-parse --path-format=absolute --git-dir)
+  if [[ -e "$rollback_git_directory/config.worktree" || -L "$rollback_git_directory/config.worktree" ]]; then
+    printf 'ROLLBACK_GIT_WORKTREE_CONFIG_FORBIDDEN\n' >&2
+    return 1
+  fi
+  local rollback_path rollback_name
+  if [[ -d "$rollback_common_directory/hooks" ]]; then
+    for rollback_path in "$rollback_common_directory/hooks"/*; do
+      [[ -e "$rollback_path" || -L "$rollback_path" ]] || continue
+      rollback_name=${rollback_path##*/}
+      if [[ "$rollback_name" != *.sample || ! -f "$rollback_path" || -L "$rollback_path" ]]; then
+        printf 'ROLLBACK_GIT_HOOK_FORBIDDEN name=%s\n' "$rollback_name" >&2
+        return 1
+      fi
+    done
+  fi
+  if [[ -d "$rollback_common_directory/info" ]]; then
+    for rollback_path in "$rollback_common_directory/info"/*; do
+      [[ -e "$rollback_path" || -L "$rollback_path" ]] || continue
+      rollback_name=${rollback_path##*/}
+      if [[ "$rollback_name" != exclude || ! -f "$rollback_path" || -L "$rollback_path" ]]; then
+        printf 'ROLLBACK_GIT_INFO_AUTHORITY_FORBIDDEN name=%s\n' "$rollback_name" >&2
+        return 1
+      fi
+    done
+  fi
+}
+
+rollback_git_canonical() {
+  rollback_assert_git_authority
+  rollback_git_inspect "$@"
 }
 
 if [[ ! -x "$rollback_git" ]]; then

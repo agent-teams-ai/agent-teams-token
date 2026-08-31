@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -289,7 +289,13 @@ export function applyExactSliceState(root, manifest, candidateSha, candidateTree
 
 export function syntheticRollbackCommit(root, manifest, candidateSha, recorder, group) {
   const git = gitExecutable();
-  recorder.run(group, "git-add-rollback-state", git, ["add", "-A"], { cwd: root, timeout: 60_000 });
+  stageExactWorktreePaths(
+    root,
+    exactSliceTransitionPaths(manifest),
+    recorder,
+    group,
+    "rollback-state",
+  );
   const tree = recorder.run(group, "git-write-rollback-tree", git, ["write-tree"], {
     cwd: root,
     timeout: 60_000,
@@ -321,6 +327,45 @@ export function syntheticRollbackCommit(root, manifest, candidateSha, recorder, 
     (actualSha) => ({ sha: actualSha, tree }),
   );
   return { sha, tree };
+}
+
+export function stageExactWorktreePaths(root, paths, recorder, group, label) {
+  const git = gitExecutable();
+  let index = 0;
+  for (const path of [...paths].toSorted()) {
+    validateExactPath(path, group + ":" + label);
+    index += 1;
+    let entry;
+    try {
+      entry = lstatSync(join(root, path));
+    } catch (error) {
+      if (error?.code !== "ENOENT") {throw error;}
+      recorder.run(group, `${label}-remove-${index}`, git, [
+        "update-index", "--force-remove", "--", path,
+      ], { cwd: root, timeout: 60_000 });
+      continue;
+    }
+    let bytes;
+    let mode;
+    if (entry.isFile() && !entry.isSymbolicLink()) {
+      bytes = readFileSync(join(root, path));
+      mode = (entry.mode & 0o111) === 0 ? "100644" : "100755";
+    } else if (entry.isSymbolicLink()) {
+      bytes = Buffer.from(readlinkSync(join(root, path)), "utf8");
+      mode = "120000";
+    } else {
+      throw new Error(`ROLLBACK_STAGE_ENTRY_UNSUPPORTED path=${path}`);
+    }
+    const oid = recorder.run(group, `${label}-hash-${index}`, git, [
+      "hash-object", "-w", "--no-filters", "--stdin",
+    ], { cwd: root, input: bytes, timeout: 60_000 }).stdout.trim();
+    if (!/^[a-f0-9]{40}$/u.test(oid)) {
+      throw new Error(`ROLLBACK_STAGE_OBJECT_INVALID path=${path}`);
+    }
+    recorder.run(group, `${label}-index-${index}`, git, [
+      "update-index", "--add", "--cacheinfo", mode, oid, path,
+    ], { cwd: root, timeout: 60_000 });
+  }
 }
 
 export function gateEnvironment(root, gateTemporaryDirectory, tools) {

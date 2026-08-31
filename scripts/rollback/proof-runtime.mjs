@@ -25,11 +25,13 @@ export {
   createCleanupHandle,
 } from "./runtime/cleanup.mjs";
 export {
+  assertReportedPnpmStore,
   copyAndInstallOfflineEnvironment,
   platformId,
   pnpmOfflineInstallArguments,
   strictToolPaths,
   toolPath,
+  trustedPnpmStore,
   validatePnpmWorkspaceLinks,
 } from "./runtime/offline-environment.mjs";
 export { assertPinnedNodeRuntime } from "./runtime/node-runtime.mjs";

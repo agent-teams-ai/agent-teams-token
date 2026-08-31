@@ -480,7 +480,10 @@ function validatePublishedProof(evidenceDirectory, candidate, allowMissingReady)
   if (allowMissingReady) {
     argumentsList.push("--allow-missing-ready");
   }
-  basicRun(process.execPath, argumentsList, { cwd: repositoryRoot, timeout: 120_000 });
+  basicRun(join(repositoryRoot, ".tools", "bin", "node"), argumentsList, {
+    cwd: repositoryRoot,
+    timeout: 120_000,
+  });
   revalidateCandidate(
     candidate,
     allowMissingReady ? "post-seal-validator-candidate" : "post-ready-validator-candidate",

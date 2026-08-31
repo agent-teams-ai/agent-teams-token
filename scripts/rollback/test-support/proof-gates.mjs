@@ -18,7 +18,7 @@ test("non-pulling image preflight verifies exact cached Slither image identity",
   });
   try {
     for (const path of [
-      join(root, ".tools/node-v24.20.0-" + platform + "/bin/node"),
+      join(root, ".tools/bin/node"),
       join(root, ".tools/bin/pnpm"),
       join(root, ".tools/foundry-v1.8.0-" + platform + "/forge"),
       join(root, ".tools/foundry-v1.8.0-" + platform + "/cast"),
