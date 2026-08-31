@@ -20,13 +20,34 @@ fullScanPaths:
   - .github/workflows
   - .oxlintrc.json
   - architecture/foundation
+  - architecture/rollback
+  - dev
   - foundation.config.yaml
   - package.json
   - packages
   - pnpm-lock.yaml
   - pnpm-workspace.yaml
+  - scripts/assert-complete-history.sh
+  - scripts/bootstrap.sh
+  - scripts/doctor.mjs
+  - scripts/env.sh
+  - scripts/rollback
+  - scripts/tests/root-entrypoint.test.mjs
+  - scripts/tests/rollback-ci-history.test.mjs
+  - scripts/tests/rollback-cleanup-safety.test.mjs
+  - scripts/tests/rollback-evidence.test.mjs
+  - scripts/tests/rollback-proof.test.mjs
+  - scripts/tests/rollback-routing.test.mjs
+  - scripts/tests/toolchain-authority.test.mjs
+  - scripts/tests/toolchain-fixture.mjs
+  - scripts/tests/toolchain.test.mjs
+  - scripts/toolchain-archive.mjs
+  - scripts/toolchain-installation.mjs
+  - scripts/toolchain-policy.mjs
+  - scripts/toolchain.mjs
   - tooling/deployment-plan
   - tooling/local-evm
   - tooling/local-solana
   - tooling/security/slither
+  - tooling/toolchain.lock.json
   - tsconfig.json

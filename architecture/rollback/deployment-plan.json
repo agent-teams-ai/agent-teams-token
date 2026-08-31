@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "sliceId": "deployment-plan",
+  "baselineSha": "b7a868f85d89c4bb7a9aeed1d854a5f949306a45",
+  "ownedRoot": "tooling/deployment-plan",
+  "ownedPaths": [
+    "tooling/deployment-plan/README.md",
+    "tooling/deployment-plan/schema.v1.json",
+    "tooling/deployment-plan/schema.v2.json",
+    "tooling/deployment-plan/src/adapters/artifact.ts",
+    "tooling/deployment-plan/src/adapters/rpc.ts",
+    "tooling/deployment-plan/src/adapters/safe-output.ts",
+    "tooling/deployment-plan/src/adapters/strict-json.ts",
+    "tooling/deployment-plan/src/application/builder.ts",
+    "tooling/deployment-plan/src/application/ports.ts",
+    "tooling/deployment-plan/src/application/verifier.ts",
+    "tooling/deployment-plan/src/composition/index.ts",
+    "tooling/deployment-plan/src/domain/identity.ts",
+    "tooling/deployment-plan/src/domain/model.ts",
+    "tooling/deployment-plan/tests/adversarial.test.ts",
+    "tooling/deployment-plan/tests/anvil.integration.test.ts",
+    "tooling/deployment-plan/tests/artifact.test.ts",
+    "tooling/deployment-plan/tests/domain.test.ts",
+    "tooling/deployment-plan/tests/planner.test.ts",
+    "tooling/deployment-plan/tests/rpc.test.ts",
+    "tooling/deployment-plan/tests/safe-output.test.ts",
+    "tooling/deployment-plan/tests/schema.test.ts",
+    "tooling/deployment-plan/tests/structure.test.ts",
+    "tooling/deployment-plan/tests/verifier.test.ts",
+    "tooling/deployment-plan/trust-roots.v1.json",
+    "tooling/deployment-plan/trust-roots.v2.json",
+    "tooling/deployment-plan/tsconfig.json"
+  ],
+  "restoreFromBaseline": ["tooling/deployment-plan/src/README.md"],
+  "reverseEdits": [
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "577982797186f46f731f1507d2e4e54e9b29ab2b403f5a8a71484002dcd8575b", "afterSha256": "879bb82fbe53601b4c6611a862d44789b46aab2240f768d67e9e38a1ac534b38"},
+    {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "8cb409de84c92339a6f0d69d04c3d7b10479688c118968f77b902ad906c363ee", "afterSha256": "3cfd7e558e4f1460712f893720886542d2d304c268fe3373a8c932e0c4758571"},
+    {"path": "package.json", "beforeSha256": "15b30bdcbe6d1ee53ee55b6aef00502161da7b0f7ae2bd0e29f831166144f739", "afterSha256": "558c70074decb3bdc3d56e3bdefb27192b4fd3a1a3bd5f90a9cc4b1b13c5cb14"},
+    {"path": "scripts/deployment/estimate-local.ts", "beforeSha256": "e0311b72412dc6af1adba470cb4145ea1f08bdd94d3983ae97717a8c85abdbdd", "afterSha256": "absent"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "7ab4614142861859e2e70e99a45b6767bd03e916874fc5b8ac3c98b2f1815edf", "afterSha256": "f1a35be57c2179d6c3faf265a35be2e084545dddcef31a61ac1d0e1d97fe3644"},
+    {"path": "tooling/deployment-plan/src/README.md", "beforeSha256": "absent", "afterSha256": "e497a44eec3f9c82b7a859f799e8d39266e9b7b207da6b262b165badf0200f62"}
+  ],
+  "sharedPaths": [
+    ".github/workflows/ci.yml",
+    "architecture/foundation/source-dependencies.yaml",
+    "package.json",
+    "scripts/deployment/estimate-local.ts",
+    "scripts/tests/workflow.test.mjs",
+    "tooling/deployment-plan/src/README.md"
+  ],
+  "retainedSharedPaths": [
+    {"path": "architecture/foundation/repository-agent-workflow.yaml", "sha256": "c86b87232b37c9aa6f843fcd8122daaad652411abbc21994be30c49dacabdfe5", "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub"},
+    {"path": "scripts/tests/tooling-boundaries.test.mjs", "sha256": "4bf1757dd4380c21bbb0f93ba03c30cf4f66f2921ae949e26811712694aa5985", "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"}
+  ],
+  "survivingGates": ["local-solana", "slither"]
+}

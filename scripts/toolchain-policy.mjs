@@ -64,15 +64,3 @@ export function assertExpectedFileHashes({ name, platform, artifact, files }) {
     }
   }
 }
-
-export function lockedFileMismatch(artifact, path, actual) {
-  const expected = artifact.expectedFileSha256?.[path];
-  return expected === undefined ? false : expected !== actual;
-}
-
-export function inspectExpectedFile({ artifact, path, target, exists, isFile, sha256 }) {
-  if (!exists || !isFile) {return `file-missing:${path}`;}
-  const actual = sha256(target);
-  if (artifact.provenanceFiles?.[path] !== actual) {return `file-checksum:${path}`;}
-  return lockedFileMismatch(artifact, path, actual) ? `file-lock-checksum:${path}` : undefined;
-}

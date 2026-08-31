@@ -26,10 +26,18 @@ export function runDoctor({
     return 1;
   }
 
-  let failed = inspectCoreTools({ lock, toolsRoot, platform, write });
+  const coreInspection = inspectCoreTools({ lock, toolsRoot, platform, write });
+  let failed = coreInspection.failed;
   if (!coreOnly) {
-    const packageFailed = inspectPackages({ lock, toolsRoot, commandRunner, packageVersionReader, write });
-    failed ||= packageFailed;
+    if (coreInspection.packageRuntimeRejected.length === 0) {
+      const packageFailed = inspectPackages({ lock, toolsRoot, commandRunner, packageVersionReader, write });
+      failed ||= packageFailed;
+    } else {
+      write(
+        `PACKAGE_CHECKS_BLOCKED rejected=${coreInspection.packageRuntimeRejected.join(",")}`
+        + " action=restore-archive-verified-node-and-pnpm-before-package-checks",
+      );
+    }
   }
 
   const unsafeFlag = ["ALLOW_PUBLIC_NETWORK", "ENABLE_PUBLIC_RPC", "MAINNET_ENABLED"]
@@ -45,6 +53,7 @@ export function runDoctor({
 
 function inspectCoreTools({ lock, toolsRoot, platform, write }) {
   let failed = false;
+  const packageRuntimeRejected = [];
   for (const name of [...lock.coreTools, "pnpm"]) {
     const tool = lock.tools[name];
     const artifact = name === "pnpm" ? tool : tool.platforms[platform];
@@ -74,9 +83,10 @@ function inspectCoreTools({ lock, toolsRoot, platform, write }) {
         + " action=run-./dev-bootstrap-fetch-then-install---offline",
       );
       failed = true;
+      if (name === "node" || name === "pnpm") {packageRuntimeRejected.push(name);}
     }
   }
-  return failed;
+  return { failed, packageRuntimeRejected };
 }
 
 function inspectPackages({ lock, toolsRoot, commandRunner, packageVersionReader, write }) {

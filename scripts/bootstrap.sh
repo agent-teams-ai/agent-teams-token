@@ -1,10 +1,36 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+token_bootstrap_source=${BASH_SOURCE[0]}
+if [[ "$token_bootstrap_source" == */* ]]; then
+  token_bootstrap_directory=${token_bootstrap_source%/*}
+  [[ -n "$token_bootstrap_directory" ]] || token_bootstrap_directory=/
+else
+  token_bootstrap_directory=.
+fi
+token_repo_root=$(CDPATH= cd -- "$token_bootstrap_directory/.." && pwd -P)
 token_mode=${1:-all}
 token_tools_root="$token_repo_root/.tools"
 token_downloads="$token_tools_root/downloads"
+PATH=/usr/bin:/bin
+export PATH
+
+token_bootstrap_usage() {
+  printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all]\n' >&2
+}
+
+case "$token_mode" in
+  fetch|install|verify|all|doctor)
+    ;;
+  help|-h|--help)
+    token_bootstrap_usage
+    exit 0
+    ;;
+  *)
+    token_bootstrap_usage
+    exit 64
+    ;;
+esac
 
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64)
@@ -61,9 +87,41 @@ token_prepare_pinned_node() {
     fi
     mv "$token_part" "$token_archive_path"
   fi
+  # Open independent descriptors before checking the checksum. The checksum and
+  # extraction then remain bound to the same inode even if the archive pathname
+  # is replaced between those operations.
+  exec 7<"$token_archive_path"
+  exec 8<"$token_archive_path"
+  exec 9<"$token_archive_path"
+  if [[ ! /dev/fd/7 -ef /dev/fd/8 || ! /dev/fd/8 -ef /dev/fd/9 ]]; then
+    printf 'TOOLCHAIN_ARCHIVE_IDENTITY_CHANGED tool=node path=%s\n' \
+      "$token_archive_path" >&2
+    exec 7<&- 8<&- 9<&-
+    return 1
+  fi
+  local token_descriptor_sha256
+  token_descriptor_sha256=$(token_sha256 /dev/fd/8)
+  if [[ "$token_descriptor_sha256" != "$token_node_sha256" ]]; then
+    printf 'TOOLCHAIN_CHECKSUM_MISMATCH tool=node expected=%s actual=%s path=%s\n' \
+      "$token_node_sha256" "$token_descriptor_sha256" "$token_archive_path" >&2
+    exec 7<&- 8<&- 9<&-
+    return 1
+  fi
+
   token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
   trap 'rm -rf "$token_node_stage"' EXIT
-  /usr/bin/tar "$token_node_tar_flag" "$token_archive_path" -C "$token_node_stage"
+  /usr/bin/tar --no-same-owner --no-same-permissions \
+    "$token_node_tar_flag" /dev/fd/9 -C "$token_node_stage"
+  local token_post_extract_sha256
+  token_post_extract_sha256=$(token_sha256 /dev/fd/7)
+  if [[ "$token_post_extract_sha256" != "$token_node_sha256" ]] \
+    || [[ ! "$token_archive_path" -ef /dev/fd/7 ]]; then
+    printf 'TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node path=%s\n' \
+      "$token_archive_path" >&2
+    exec 7<&- 8<&- 9<&-
+    return 1
+  fi
+  exec 7<&- 8<&- 9<&-
   token_pinned_node="$token_node_stage/$token_node_directory/bin/node"
   [[ "$($token_pinned_node --version)" == v24.20.0 ]]
 }
@@ -81,6 +139,11 @@ case "$token_mode" in
     token_prepare_pinned_node false
     "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" verify "${@:2}"
     ;;
+  doctor)
+    token_prepare_pinned_node false
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" verify --offline
+    "$token_pinned_node" "$token_repo_root/scripts/doctor.mjs" "${@:2}"
+    ;;
   all)
     token_prepare_pinned_node true
     "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch
@@ -95,9 +158,5 @@ case "$token_mode" in
       exit 1
     fi
     pnpm install --frozen-lockfile
-    ;;
-  *)
-    printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all]\n' >&2
-    exit 64
     ;;
 esac

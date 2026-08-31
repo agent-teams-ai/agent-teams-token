@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "requestId": "rollback-proof-exact-sha-v1",
+  "status": "integrated-pending-execution",
+  "workflowPath": ".github/workflows/ci.yml",
+  "workflowEditOwnedBy": "external-ci-integration",
+  "integrationStrategy": "augment-existing-root-check-job",
+  "existingJobPatch": {
+    "jobId": "foundation-and-typescript",
+    "dedicated": false,
+    "needsChange": "none",
+    "runsOn": "ubuntu-24.04",
+    "timeoutMinutes": {
+      "from": 15,
+      "to": 120
+    },
+    "permissions": {
+      "contents": "read"
+    },
+    "environment": {
+      "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+      "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+      "SLITHER_REPOSITORY_ROOT": "${{ github.workspace }}",
+      "SLITHER_CANDIDATE_SHA": "${{ github.sha }}",
+      "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+      "SLITHER_DOCKER_PATH": "/usr/bin/docker",
+      "SLITHER_FORGE_PATH": "${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge",
+      "SLITHER_SOLC_PATH": "${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc"
+    },
+    "steps": [
+      {
+        "id": "checkout-complete-history-at-exact-head",
+        "position": "replace-existing-checkout",
+        "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "with": {
+          "ref": "${{ github.sha }}",
+          "fetch-depth": 0,
+          "persist-credentials": false
+        }
+      },
+      {
+        "id": "assert-complete-history-and-exact-clean-head-before",
+        "position": "before-bootstrap",
+        "shell": "bash",
+        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\""
+      },
+      {
+        "id": "fetch-pinned-core-and-solana-prerequisites",
+        "position": "replace-core-only-fetch",
+        "shell": "bash",
+        "run": "./dev bootstrap fetch\n./dev bootstrap fetch --scope=solana"
+      },
+      {
+        "id": "offline-install-and-verify-pinned-prerequisites",
+        "position": "replace-core-only-install-and-verify",
+        "shell": "bash",
+        "run": "./dev bootstrap install --offline\n./dev bootstrap install --offline --scope=solana\nsource scripts/env.sh\n./dev bootstrap verify --offline\n./dev bootstrap verify --offline --scope=solana\n./dev doctor --scope=core"
+      },
+      {
+        "id": "install-frozen-source-workspace-and-populate-store",
+        "position": "retain-before-root-check",
+        "shell": "bash",
+        "run": "source scripts/env.sh && pnpm install --frozen-lockfile"
+      },
+      {
+        "id": "preload-pinned-slither-image",
+        "position": "after-frozen-workspace-install",
+        "shell": "bash",
+        "run": "source scripts/env.sh && pnpm security:solidity:prepare-image"
+      },
+      {
+        "id": "non-pulling-rollback-environment-cache-preflight",
+        "position": "after-slither-image-preload-before-root-check",
+        "shell": "bash",
+        "run": "source scripts/env.sh && node scripts/rollback/prove-slices.mjs --preflight-only --expected-sha=\"$GITHUB_SHA\""
+      },
+      {
+        "id": "run-root-check-with-exact-rollback-proof",
+        "position": "retain-current-root-check",
+        "shell": "bash",
+        "run": "source scripts/env.sh && pnpm check"
+      },
+      {
+        "id": "assert-complete-history-and-exact-clean-head-after",
+        "position": "after-root-check",
+        "if": "${{ always() }}",
+        "shell": "bash",
+        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\""
+      },
+      {
+        "id": "validate-rollback-proof",
+        "position": "after-post-gate-history-revalidation",
+        "if": "${{ success() }}",
+        "shell": "bash",
+        "run": "source scripts/env.sh\nnode scripts/rollback/validate-evidence.mjs --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\""
+      },
+      {
+        "id": "upload-rollback-proof-evidence",
+        "position": "after-proof-validation",
+        "if": "${{ success() && steps.validate-rollback-proof.outcome == 'success' }}",
+        "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "with": {
+          "name": "rollback-proof-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+          "path": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "if-no-files-found": "error",
+          "retention-days": 14
+        },
+        "continue-on-error": false
+      },
+      {
+        "id": "upload-rollback-failure-diagnostics",
+        "position": "last",
+        "if": "${{ failure() }}",
+        "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "with": {
+          "name": "rollback-diagnostics-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+          "path": "${{ runner.temp }}/rollback-proof-${{ github.sha }}/diagnostics.json\n${{ runner.temp }}/rollback-proof-${{ github.sha }}/commands\n${{ runner.temp }}/rollback-proof-${{ github.sha }}/survivors",
+          "if-no-files-found": "warn",
+          "retention-days": 14
+        },
+        "continue-on-error": false
+      }
+    ],
+    "prohibitedChanges": [
+      "do not add a seventh job",
+      "do not add a skip flag",
+      "do not remove rollback:prove from the candidate root check",
+      "do not replace frozen or offline installs with a network fallback",
+      "do not use a shallow or partial checkout for the rollback proof",
+      "do not run any dependent quality gate before complete history, workspace, tool-cache, Docker and pinned-image preflight succeeds",
+      "do not replace the non-pulling preflight with prepare-image or another pull command"
+    ]
+  },
+  "proofContract": {
+    "candidate": "actions/checkout must detach the explicit github.sha with fetch-depth 0; GITHUB_SHA must equal the clean HEAD before and after the root check, and the proof independently checks the same identity before materialization",
+    "history": "the checkout must be non-shallow and non-partial, contain no replacement refs or legacy grafts, contain the pinned baseline b7a868f85d89c4bb7a9aeed1d854a5f949306a45, prove with replacement processing disabled that baseline is an ancestor of GITHUB_SHA, and contain every object reachable from the exact head; depth-one, grafted, replaced or ambiguous-ref evidence is invalid",
+    "workspace": "the source frozen install populates the verified pnpm store; every disposable checkout runs pnpm install --frozen-lockfile --offline and may not fetch",
+    "toolchain": "the proof copies checksum-verified cached core and Solana archives into each disposable checkout, then runs bootstrap install and verify offline",
+    "slither": "SLITHER_DOCKER_PATH is the explicit absolute Docker CLI; prepare-image may preload but is not verification, so the subsequent rollback --preflight-only command must non-pullingly inspect the reachable daemon and exact linux/amd64 image digest, platform and source revision before the root check; the proof repeats that preflight before any phase=gate command",
+    "preflightOrdering": "complete history, exact head, frozen workspace, every pinned archive/binary, Docker CLI/daemon and exact Slither image validation must finish before any dependent quality gate; any missing class yields zero rollback phase=gate command records",
+    "evidence": "volatile diagnostics remain separate from the strict closed deterministic proof statement; the runner independently validates the schema, exact gate coverage, artifact digests and canonical proof digest before publishing READY last, revalidates the sealed bundle and candidate inventory, uploads a verified proof only on success, and labels failure output as diagnostics rather than proof",
+    "skips": "the required real Solana, Anvil and Slither survivor gates may not skip or degrade to unit-only evidence"
+  },
+  "coordinatedExternalChanges": {
+    "workflowTests": [
+      "keep the workflow at exactly six jobs and do not add needs edges",
+      "allow timeout-minutes 120 only for foundation-and-typescript while retaining the existing limits for all other jobs",
+      "change the source upload-artifact count from one to three only after the final integrated workflow bytes exist: one existing Slither artifact, one success-only verified rollback proof and one failure-only diagnostics artifact",
+      "assert the foundation checkout pins github.sha, fetch-depth 0 and persist-credentials false, then rejects shallow/partial history, replacement refs, legacy grafts, an absent baseline, non-ancestor baseline or an exact-head mismatch before bootstrap",
+      "assert the exact rollback temp/evidence environment, pinned Forge/solc paths, explicit Docker path, reachable daemon, Solana-scope bootstrap, Slither preload followed by the concrete non-pulling rollback --preflight-only digest/platform/source-revision verifier before the root check, always complete-history/exact-clean-head assertion after it, independent proof validation before success-only proof upload, and separately named failure diagnostics",
+      "assert no surviving workflow command names a package script removed by a rollback"
+    ],
+    "rollbackTransforms": [
+      "because every operational slice removal strips rollback:test and rollback:prove from package.json, restore the foundation checkout to its pre-proof form, remove the complete-history assertion, proof-only timeout/environment, Solana cache/preload and non-pulling preflight additions, proof validation, verified-proof upload and diagnostic upload in every removed-slice workflow output",
+      "for every removal, editWorkflowTest must reverse the matching proof-only foundation assertions: no explicit github.sha/fetch-depth checkout or complete-history step, timeout 120 back to 15, and no rollback environment, Solana-cache, Slither-preload, rollback --preflight-only, proof-validation, proof-upload or rollback-diagnostics expectation",
+      "for local-solana and deployment-plan removal, rewrite the workflow-test upload count from three to one because the surviving solidity-security upload remains",
+      "for Slither removal, rewrite the workflow-test upload count from three to zero because the removed solidity-security upload and both proof-only foundation uploads are absent",
+      "for Slither removal, remove every foundation preload or environment reference to the deleted security:solidity:prepare-image script and Slither toolchain"
+    ],
+    "manifestRehash": {
+      "required": false,
+      "status": "rehashed-worktree-validated-pending-exact-head-full-proof",
+      "owner": "final-integrator",
+      "refreshInThisSlice": true,
+      "paths": [
+        ".github/workflows/ci.yml",
+        "architecture/foundation/source-dependencies.yaml",
+        "package.json",
+        "scripts/tests/workflow.test.mjs",
+        "tooling/toolchain.lock.json"
+      ],
+      "instruction": "the final integrator regenerated all three exact before/after SHA-256 transitions and manifest fingerprints after the feature and CI bytes were fixed; any later integration must immediately invalidate this status and repeat the regeneration",
+      "evidenceLimit": "the regenerated manifests pass exact current-worktree coverage and production apply regressions; no commit was authorized here, so clean exact-head validation, full per-slice gate proof and hosted exact-head CI execution remain pending and are not claimed"
+    },
+    "finalIntegrationManifestRegeneration": {
+      "required": false,
+      "status": "rehashed-worktree-validated-pending-exact-head-full-proof",
+      "owner": "final-integrator",
+      "blocksValidationPreparationAndProof": false,
+      "manifests": [
+        "architecture/rollback/local-solana.json",
+        "architecture/rollback/deployment-plan.json",
+        "architecture/rollback/slither.json"
+      ],
+      "knownStaleTransitions": [],
+      "recomputeAfterFinalBytes": [
+        "each manifest ownedPaths list against its final worker-owned root",
+        "every reverseEdits beforeSha256 and afterSha256 transition for .github/workflows/ci.yml, architecture/foundation/source-dependencies.yaml, package.json, scripts/tests/workflow.test.mjs, tooling/toolchain.lock.json and each slice-specific root entrypoint or restored stub declared by that manifest",
+        "every retainedSharedPaths digest and reason",
+        "the exact unique two-slice survivingGates complement and shared-path coverage"
+      ],
+      "acceptance": "exact current-worktree coverage and production apply regressions pass after regeneration; the externally created clean candidate must still pass validation, the full exact-head per-slice gate proof and hosted CI, and any later integration must return this status to pending before evidence can be cited"
+    }
+  }
+}

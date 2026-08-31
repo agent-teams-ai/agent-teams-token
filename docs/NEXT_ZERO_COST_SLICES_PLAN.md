@@ -1,20 +1,46 @@
 # AGTMAI: план трёх следующих локальных zero-cost slices
 
-Status: local/test-only candidate accepted; all nine retained `P2` and six
-retained `P3` have a locally green remediation candidate, 2026-08-29. Final
-acceptance still requires one clean exact-SHA CI run and repeated independent
-specialist plus holistic reviews of that same SHA.
+Status: historical candidate `4037e4b` remains accepted for local/test-only use.
+The later fifteen-item P2/P3 remediation had local evidence, but the R7 delivery
+review returned `AMEND` on 2026-08-29 and identified additional rollback-proof
+and direct-HTTP gaps. The rollback runner, identity-bound bounded cleanup,
+Linux runtime provenance, complete-history verifier, pre-gate environment
+preflight and exact-head CI wiring are now integrated, but the current rollback
+delivery is not accepted. Acceptance still requires the coordinated direct-HTTP
+lane, an exact/full rollback proof from a clean candidate `HEAD`, authoritative
+exact-SHA hosted CI and fresh independent specialist plus holistic reviews of
+that same SHA.
+
+The proxy-disabled adapter transport and its Foundation dependency declarations
+remain in the coordinated external transport lanes. This patch neither changes
+nor pre-approves those still-changing feature/global-manifest bytes and does not
+close the direct-HTTP P1.
+
+Historical-process correction, 2026-08-29: the published integration history
+does not contain three independently revertible conventional commit groups.
+Only published commit `4ce469a` is a direct child of prerequisite `b7a868f`;
+`9bba062` follows the integrated Solana chain, `d55f2ac` follows `9bba062`,
+`fc834c5` combines deployment and Slither wiring, and `e746ffa` changes all
+three slices. These published integration commits are not evidence of the
+original isolated worker commit identities; the identity is `unavailable` for
+W1, W2 and W3 because no retained handoff evidence exists. History will not be
+rewritten. Operational per-slice revertability must instead be established by
+the exact manifests in `architecture/rollback/` and the clean-candidate proof
+specified below. Preparation and structural validation alone are not that proof.
 
 Correction: the first Barrier 3 closure correctly proved no `P0/P1`, but it did
 not prove that every explicit requirement below was implemented. The final
 holistic review retained nine `P2` and six `P3`; several are direct requirements
 of sections 5-8 rather than optional future hardening. Therefore the three
-vertical slices remain accepted for local MVP use. The direct code gaps are now
-implemented and pass the complete local gate, real local Solana lifecycle, real
-local EVM lifecycle and real unsigned Anvil deployment-plan test. The stronger
-claim "this plan is fully accepted" remains suspended until the new exact-SHA
-CI and independent reviews finish. This correction does not expand scope into
-public networks, tokenomics, vesting, governance, CCIP or liquidity.
+vertical slices remain accepted for local MVP use. The direct feature gaps had
+locally green remediation evidence, including real local Solana and local EVM
+lifecycles and the unsigned Anvil deployment-plan test. The later R7 rollback
+implementation is present, but its final manifest verification, full local gate
+proof and exact-head hosted execution remain pending; the direct-HTTP P1 also
+stays open. The stronger claim "this plan is fully accepted" remains suspended
+until those results and independent reviews finish. This correction does not
+expand scope into public networks, tokenomics, vesting, governance, CCIP or
+liquidity.
 
 Этот документ описывает только три независимо полезных блока:
 
@@ -563,8 +589,16 @@ checkout; tool/policy/environment failures remain distinguishable and nonzero.
 
 - integrate one worker at a time with targeted checks after each;
 - apply one root-wiring commit per slice. A genuinely shared prerequisite must
-  already exist in the Barrier 0.5 commit; commit DAG and ownership are recorded
-  in the integration ledger so each slice can be independently reverted;
+  already exist in the Barrier 0.5 commit. This was the required process, but
+  the published history deviated from it: later feature and wiring commits are
+  mixed and cannot serve as per-slice rollback units;
+- record original worker-result identity separately from published integrated
+  commit identity. Where the original isolated SHA was not retained, mark it
+  `unavailable` rather than assigning an integrated SHA to the worker. The
+  current ledger records `unavailable` for W1, W2 and W3;
+- prove independent removal through the deterministic manifests under
+  `architecture/rollback/`, including exact worker-owned files, prerequisite
+  stub restoration and exact reverse edits for every shared wiring path;
 - add root commands/TS references and regenerate only necessary lock data;
 - run Foundation, lint, TS, package, Foundry, local EVM, local Solana,
   deployment-plan and Slither gates;
@@ -615,9 +649,75 @@ on the new exact SHA. Old reviews never prove a changed SHA.
 - Uncertain GitHub push/run: read remote state with `git`/`gh` before retry.
 - Security tool false positive: triage explicitly; never globally disable a
   detector to make CI green.
-- Each slice and its root/CI wiring are a separate conventional commit group.
-  Integration acceptance explicitly tests revertability of each group without
-  removing Genesis Core or breaking the two surviving slices.
+- Published history contains mixed commits and must not be rewritten or
+  relabelled. The local Solana, deployment-plan and Slither manifests become the
+  operational rollback authority only after their exact clean-candidate proof
+  passes. Each manifest must use normalized repository-relative exact paths and
+  fail on traversal, absolute/glob/broad targets, overlap, duplicate or unknown
+  gates, self-reference, a non-unique or incomplete survivor complement, missing
+  owned files and missing shared reversals.
+- The executable proof refuses a dirty candidate and binds itself to the exact
+  clean candidate `HEAD`. Integrated CI checks out explicit `github.sha` with
+  `fetch-depth: 0` and rejects shallow/partial history, replacement refs, legacy
+  grafts, `GIT_ALTERNATE_OBJECT_DIRECTORIES` and
+  `.git/objects/info/alternates`. It proves exact `HEAD == GITHUB_SHA`, verifies
+  that pinned baseline `b7a868f85d89c4bb7a9aeed1d854a5f949306a45`
+  exists and is its ancestor, and traverses/fscks complete reachable history
+  with replacement processing disabled. The proof constructs a disposable
+  checkout containing every tracked candidate byte, compares a byte-complete
+  inventory and never treats a dirty diff as candidate input. Workspace
+  dependencies come only from a populated frozen offline store with verified
+  complete workspace links; missing dependencies fail clearly and no
+  public-network fetch is allowed.
+- For each removed slice, the integrated proof stages only its exact owned files,
+  restores the exact Barrier 0.5 stub, reverses every declared shared transition,
+  then compares tracked bytes, status, full inventory and forbidden residue with
+  the pre-application state. Full mode runs genuine Genesis Core, Foundation,
+  lint, full typecheck/build, Foundry unit/fuzz/invariants and both strict
+  surviving slice gates. Real Solana, Anvil and Slither analyzer paths cannot
+  silently skip. Every external materialization and gate command retains status
+  plus complete stdout/stderr; in-process Git, manifest and inventory validation
+  retains stage status and digests in the same machine-readable evidence.
+- Before the first quality-gate command, the integrated non-pulling preflight
+  verifies complete history; immutable Node archive, inner executable,
+  provenance, `process.execPath` and Linux `/proc/self/exe`; every other offline
+  archive and installed binary; frozen pnpm store/workspace links; absolute
+  Docker client; and pinned Slither image digest/platform/revision. Darwin arm64
+  fails closed because loaded-image binding is unavailable. A missing cache class
+  yields zero gate records; checking Docker or the image after a gate is invalid
+  evidence.
+- Temporary-checkout cleanup remains bound to held parent/target/file/directory
+  identities, atomically quarantines exact allowlisted entries and is bounded by
+  entry, depth and relative-path-byte limits. It never follows symlinks or grants
+  recursive deletion from a pathname/prefix. Deterministic parent, child and
+  final-directory substitutions preserve the foreign identity and fail closed.
+  A continuously scheduled same-UID peer racing the final separate Node syscall
+  and a privileged peer are explicitly outside this local/test-only model.
+- Root `pnpm check` invokes cache/tool preflight before dependent gates and then
+  the rollback regressions/full proof. The existing `foundation-and-typescript`
+  CI job now checks out/asserts `$GITHUB_SHA`, establishes pinned Core/Solana
+  tools plus the frozen workspace, prepares the pinned Slither image, runs the
+  non-pulling `--preflight-only` verifier before root gates, reasserts complete
+  history/clean head, independently validates the closed-schema canonical proof
+  and uploads it only on success. Failure output is a separately named
+  diagnostics artifact and cannot be confused with proof. This source wiring is
+  `integrated-pending-execution`; no hosted success is claimed yet.
+- Foundry/pnpm installed bytes are authorized by direct comparison with payloads
+  re-derived from the descriptor-opened repository-hash-pinned archive; solc is
+  copied from its descriptor-opened executable archive. Mutable provenance is
+  never authority, absent archive authority fails explicitly, and no unsupported
+  inner hash is claimed. The deterministic statement/proof digest excludes
+  volatile command telemetry and READY is published last only after independent
+  schema, gate-completeness and artifact validation.
+- Accepted recovery-review changes invalidated the earlier manifest fingerprints.
+  Final shared/retained transitions were regenerated from exact current
+  worktree bytes; current-byte coverage and production apply regressions pass as
+  `REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`. Clean exact-head
+  validation awaits the externally created candidate commit, and no stale
+  structural result is carried forward. The
+  current host lacks the complete offline Foundry/solc/pnpm/Agave caches and
+  cached Slither image, so full local proof remains unclaimed even after a
+  structural pass.
 
 ## 10. Final acceptance checklist
 
@@ -629,6 +729,9 @@ on the new exact SHA. Old reviews never prove a changed SHA.
 - Slither gate is reproducible, fail-closed and honestly described as static
   analysis, not an audit;
 - every slice has unit, adversarial and real local integration evidence;
+- every per-slice rollback manifest passes ownership/coverage/safety validation
+  and the exact clean disposable-checkout proof with both strict real surviving
+  gates and retained machine-readable evidence;
 - Foundation and full exact-SHA CI pass;
 - all accepted P0/P1 are closed with regression tests;
 - final holistic hosted review returns `ACCEPT` on exact candidate SHA;

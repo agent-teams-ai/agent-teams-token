@@ -1,27 +1,56 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+token_dev_source=${BASH_SOURCE[0]}
+if [[ "$token_dev_source" == */* ]]; then
+  token_dev_directory=${token_dev_source%/*}
+  [[ -n "$token_dev_directory" ]] || token_dev_directory=/
+else
+  token_dev_directory=.
+fi
+token_repo_root=$(CDPATH= cd -- "$token_dev_directory" && pwd -P)
 token_command=${1:-help}
-shift || true
+if (($# > 0)); then
+  shift
+fi
 
-# Bootstrap and doctor deliberately run before project-local directories are
-# added to PATH. Offline install therefore validates/replaces a present install
-# without executing binaries from that install first.
+# Bootstrap recovery and inert help do not require a previously trusted install.
+# Doctor delegates to bootstrap so both offline verification and the diagnostic
+# execute through Node extracted from the checksum-pinned archive.
 case "$token_command" in
   bootstrap)
     exec "$token_repo_root/scripts/bootstrap.sh" "$@"
     ;;
   doctor)
-    exec node "$token_repo_root/scripts/doctor.mjs" "$@"
+    exec "$token_repo_root/scripts/bootstrap.sh" doctor "$@"
+    ;;
+  help)
+    ;;
+  check|evm-up|evm-down|solana)
+    ;;
+  *)
+    token_command=help
     ;;
 esac
 
-source "$token_repo_root/scripts/env.sh"
+# Every tool-executing root command fails closed on archive-backed offline
+# verification before env.sh can add installed candidates to PATH.
+case "$token_command" in
+  check|evm-up|evm-down)
+    "$token_repo_root/scripts/bootstrap.sh" verify --offline
+    ;;
+  solana)
+    "$token_repo_root/scripts/bootstrap.sh" verify --offline --scope=solana
+    ;;
+esac
+
+if [[ "$token_command" != help ]]; then
+  source "$token_repo_root/scripts/env.sh"
+fi
 
 case "$token_command" in
   check)
-    exec pnpm check "$@"
+    exec "$token_repo_root/.tools/bin/pnpm" check "$@"
     ;;
   evm-up)
     exec docker compose -f "$token_repo_root/compose.yaml" up -d --wait anvil
@@ -30,7 +59,7 @@ case "$token_command" in
     exec docker compose -f "$token_repo_root/compose.yaml" down
     ;;
   solana)
-    mkdir -p "$token_repo_root/.local/solana-ledger"
+    /bin/mkdir -p "$token_repo_root/.local/solana-ledger"
     exec solana-test-validator \
       --reset \
       --ledger "$token_repo_root/.local/solana-ledger" \
@@ -38,7 +67,7 @@ case "$token_command" in
       --faucet-port 9900 \
       "$@"
     ;;
-  help|*)
+  help)
     printf '%s\n' \
       'Usage: ./dev <command>' \
       '  bootstrap  Fetch/install pinned darwin-arm64 or linux-x64 tools' \

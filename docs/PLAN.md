@@ -1042,13 +1042,57 @@ security/CI matrix являются следующими independently-green sli
 Три zero-cost slice после Genesis Core исполняются по
 [`NEXT_ZERO_COST_SLICES_PLAN.md`](NEXT_ZERO_COST_SLICES_PLAN.md). Их кандидат
 `4037e4b` принят для local/test-only использования и прошёл exact-SHA CI без
-`P0/P1`, однако это не означает полного выполнения каждой строки плана. Девять
-`P2` и шесть `P3` из финального review реализованы в локально green remediation-
-кандидате: закрыты Foundation full-scan, authenticated owned-process recovery,
-Solana failure/publication evidence, полный compiler-input digest и независимая
-Slither evidence validation. Заявление о финальном принятии плана разрешено
-только после нового exact-SHA CI и повторных specialist/holistic reviews.
-Публичные сети и спорные product rules в эту remediation не входят.
+`P0/P1`, однако это не означает полного выполнения каждой строки плана. Более
+ранняя remediation девяти `P2` и шести `P3` имела локально green evidence для
+Foundation full-scan, authenticated owned-process recovery, Solana
+failure/publication evidence, полного compiler-input digest и независимой
+Slither evidence validation.
+
+Superseding correction, 2026-08-29: R7 вернул `AMEND` для текущего rollback
+delivery. Published history смешивает slices и не доказывает
+independent commit-group rollback; original isolated worker identity для W1, W2
+и W3 недоступна. Remediation implementation теперь integrated: production
+runner доказывает per-slice apply -> rollback -> exact byte/status equivalence,
+использует bounded allowlisted descriptor/quarantine cleanup и сохраняет
+substituted child/final-directory identity; root preflight проверяет complete
+history, offline archives/binaries, pnpm store/workspace links, Docker и pinned
+Slither image до gates. Complete-history verifier отвергает object alternates.
+Linux x64 runtime связан с archive hash, immutable inner `bin/node` SHA-256,
+canonical provenance, exact `process.execPath` и `/proc/self/exe`; Darwin arm64
+fail closed. Continuously scheduled same-UID final-syscall micro-window и
+privileged peer остаются вне local/test-only threat model. Exact-head,
+full-history wiring уже integrated в существующий CI job, но hosted execution
+этого candidate ещё pending. Текущий patch не принят. Superseding
+recovery-review correction, 2026-08-31: byte-complete inventory
+теперь фиксируется сразу после exact-head/full-history validation, до bootstrap,
+cache или workspace executable, и повторно проверяется после gates. Foundry и
+pnpm installed bytes сравниваются с payload, повторно полученным из
+descriptor-opened archive под repository-pinned archive SHA-256; solc binary
+копируется из его descriptor-opened executable archive. Mutable provenance не
+является authority, а отсутствующий archive даёт явный
+`TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE`. Отдельные inner-file hashes
+для Foundry/pnpm не заявляются. Recovery proof отделяет volatile diagnostics от
+closed-schema deterministic statement/proof digest, independently validates
+exact gate coverage и artifacts, публикует `READY` last, а CI загружает proof
+только после validation; failure upload явно называется diagnostics. Все
+`architecture/rollback/**`, `scripts/rollback/**`, history verifier и rollback
+tests mandatory routed в Foundation full scan с negative coverage. Из-за этих
+подтверждённых изменений прежний manifest rehash был недействителен. Финальные
+shared/retained transitions теперь rehashed из точных current worktree bytes;
+current-byte coverage и production apply regressions проходят со статусом
+`REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`. Clean exact-head
+`--validate-only` требует внешне созданного candidate commit и здесь не
+заявляется согласно запрету на commit. Полный local gate proof в
+этом окружении не заявлен: отсутствуют полные offline Foundry/solc/pnpm/Agave
+caches и cached Slither Docker image, поэтому preflight прекращает execution до
+dependent gates. Proxy-disabled transport adapters и соответствующие
+Foundation dependency declarations принадлежат отдельным coordinated lanes,
+остаются pending и не изменяются или pre-approve этим patch; direct-HTTP `P1`
+не закрыт. Structural rollback tests или preparation не являются полным proof.
+Текущий patch не принят; authoritative exact-SHA CI и повторные
+specialist/holistic reviews также остаются обязательными. Это local/test-only
+engineering remediation, не audit, production, Devnet/Mainnet readiness или
+разрешение на public network, signer либо broadcast.
 
 Исполнение `Core-12h` использует production-hosted subscription-runtime:
 W1 manifest и W2 Solidity идут параллельно до cross-language barrier, затем W3

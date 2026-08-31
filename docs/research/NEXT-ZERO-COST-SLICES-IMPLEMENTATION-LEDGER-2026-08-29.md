@@ -323,3 +323,130 @@ audit, Mainnet approval, tokenomics decision or permission to sign/broadcast.
 - remediation iterations to a locally stable candidate: two specialist review
   rounds followed by focused remediation and real-runtime follow-ups; the final
   exact-SHA four-plus-one review returned `ACCEPT` with no P0/P1.
+
+## Superseding correction — rollback provenance and current AMEND state
+
+This appended correction supersedes the historical commit-DAG and per-slice
+commit-group claims above without deleting, relabelling or rewriting them. The
+published integration history does not contain three independently revertible
+conventional commit groups. Published `4ce469a` is a direct child of prerequisite
+`b7a868f`, but `9bba062` follows integrated Solana wiring `6f55d10`, `d55f2ac`
+follows `9bba062`, `66dcd22` follows that integrated Slither change and
+`dda858c` follows `66dcd22`. Commit `fc834c5` mixes deployment-plan and Slither
+wiring, while later `e746ffa` changes all three slices.
+
+Published commit ancestry is not original-worker provenance. No retained
+isolated handoff identity is available for any of the three workers, so the
+explicit provenance field below is `unavailable` for every row. A published
+integrated commit must never be substituted into that field.
+
+| Job | Historical branch | Owned path | Recorded brief base | Original isolated worker identity | Published integrated identities |
+| --- | --- | --- | --- | --- | --- |
+| W1 Solana | `feat/local-solana-fixture` | `tooling/local-solana/**` | `b7a868f` | `unavailable` | `4ce469a`, `104f5cc`; root wiring `6f55d10` |
+| W2 deploy plan | `feat/deployment-cost-plan` | `tooling/deployment-plan/**` | `b7a868f` | `unavailable` | `9bba062`, `66dcd22`; mixed wiring `fc834c5` |
+| W3 Slither | `ci/slither-security-gate` | `tooling/security/slither/**` | `b7a868f` | `unavailable` | `d55f2ac`, `dda858c`; mixed wiring `fc834c5` |
+
+The R7 delivery review verdict is `AMEND`, not acceptance. Per-slice rollback
+manifests and an executable proof are being remediated, but preparation or
+structural validation alone is not an exact/full rollback proof. Acceptance
+requires a clean exact candidate `HEAD`, a byte-complete tracked inventory and
+hash, reproducible offline workspace dependencies, exact survivor complements,
+genuine Genesis Core, Foundation, lint, typecheck, build and Foundry gates, two
+strict real survivor gates with retained machine-readable command evidence, and
+identity-bound cleanup that cannot recursively delete a substituted path. The
+authoritative exact-SHA CI proof and fresh independent reviews remain pending.
+
+The three rollback manifests deliberately keep their candidate-local
+fingerprints while the feature lanes are still changing. In particular, every
+`architecture/foundation/source-dependencies.yaml` reverse transition is known
+stale after unrelated transport-manifest preparation was removed. Every
+manifest-consuming validation, preparation or full-proof mode must stop as
+`ROLLBACK_INTEGRATOR_REHASH_REQUIRED` before destructive work or gates. The
+non-pulling environment-only preflight remains available and is not rollback
+evidence. After the local-Solana, deployment-plan, Slither and external CI bytes
+are final, the final integrator must regenerate each exact owned-path inventory,
+all declared shared before/after transitions (workflow, Foundation, package,
+workflow test, toolchain and slice entrypoint/stub paths) and retained-path
+fingerprints. This is a pending integration requirement, not proven evidence.
+
+The proxy-disabled local-Solana, deployment-plan and local-EVM transports and
+their Foundation dependency declarations belong to coordinated external lanes
+and remain pending. This rollback patch neither changes nor pre-approves those
+still-changing feature/global-manifest bytes and does not close the direct-HTTP
+P1. This correction is local engineering state only; it is not an audit,
+production, Devnet or Mainnet readiness, or permission to sign or broadcast.
+
+## Implementation update — integrated remediation, evidence still pending
+
+This append-only update leaves every historical and superseding entry above
+unchanged. The R7 delivery verdict remains `AMEND`, not acceptance. The current
+candidate now integrates the concrete rollback remediation: exact owned/shared
+manifest transformations, disposable complete-inventory materialization,
+per-slice apply -> production rollback -> byte/status/inventory equivalence,
+strict survivor gate coverage, forbidden-residue checks and retained
+machine-readable command/stage evidence.
+
+Production cleanup is descriptor-anchored and atomically quarantines only exact
+allowlisted `checkout`/`gate-tmp` entries beneath private mode-`0700` parents. It
+is bounded by entry count, depth and relative-path bytes, does not follow
+symlinks, and does not authorize deletion from a pathname or prefix alone.
+Adversarial boundary tests substitute children and final directories on the
+real cleanup path; the foreign identity is preserved and cleanup fails closed.
+The explicitly local/test-only model still excludes a continuously scheduled
+same-UID peer in the micro-window between the last identity comparison and the
+separate Node `rename`/`unlink`/`rmdir` syscall, as well as privileged peers,
+kernel/process compromise, crash and resource-exhaustion guarantees.
+
+No native cleanup helper is shipped. On Linux x64 the production runner now
+requires checksum-pinned Node `24.20.0`, archive SHA-256
+`2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2`
+and independently pinned inner `bin/node` SHA-256
+`89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7`.
+It descriptor-verifies the lock, archive, binary and canonical provenance,
+requires exact `process.execPath`/realpath, and binds `/proc/self/exe` to the same
+loaded file identity and digest. Darwin arm64 fails closed because an equivalent
+loaded-image binding is unavailable.
+
+The existing `foundation-and-typescript` workflow job now contains the actual
+exact-head/full-history integration. Its checkout uses explicit `github.sha`,
+`fetch-depth: 0` and no persisted credentials. The verifier rejects shallow or
+partial history, replacement refs, grafts, environment-provided alternates and
+`.git/objects/info/alternates`; proves the pinned baseline ancestry and complete
+reachable objects with replacements disabled; and runs both before gates and
+under `if: always()` afterward. The first check also binds every tracked mode,
+type and byte before Core/Solana bootstrap, frozen workspace install, Slither
+image preload or the concrete non-pulling rollback preflight; the inventory is
+revalidated afterward. Verified proof is uploaded only after independent
+validation, while failure output is a separately named diagnostics artifact. The wiring is
+integrated in source, but hosted execution at the final exact head remains
+pending and no new CI success is recorded here.
+
+Root and full-proof preflight now verifies the pinned runtime and every required
+repository-pinned archive. Foundry/pnpm installed expected files are compared
+with payloads re-derived from the verified open archive descriptor; solc is
+copied from its descriptor-opened executable archive. Mutable provenance is
+checked but cannot authorize bytes, missing archive authority is reported
+explicitly and no separate Foundry/pnpm inner-file digest is claimed. It also
+verifies the pnpm store and complete workspace links, absolute Docker client and
+cached Slither image digest/platform/revision before
+any dependent gate. This host lacks the complete offline
+Foundry/solc/pnpm/Agave archive set and cached Docker image, so it must stop with
+zero dependent gates and cannot produce full local proof evidence.
+
+Recovery evidence now separates volatile diagnostics from a strict closed-
+schema deterministic statement, canonical proof digest and seal. The
+independent validator enforces exact baseline/slice/gate completeness and
+referenced artifact bytes before READY-last publication; CI validates again
+before a proof-labelled upload. Rollback architecture, scripts, history verifier
+and every rollback test are mandatory full-scan routes with negative coverage.
+
+These accepted recovery-review changes invalidated the prior manifest hashes.
+Final shared/retained transitions were regenerated from exact current worktree
+bytes. Current-byte coverage and production apply regressions pass as
+`REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`; clean exact-head
+validation awaits the externally created candidate commit, so no stale or
+uncommitted-head result is claimed. The proxy-disabled transports and Foundation dependency
+declarations stay with their coordinated external lanes and the direct-HTTP P1
+remains open. This update uses no network or public chain and is not an audit,
+production, Devnet or Mainnet readiness, or permission to use a real identity,
+sign or broadcast.

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
@@ -9,21 +8,27 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
   fetchArtifacts,
   hostPlatform,
   installArtifacts,
   loadLock,
+  prepareVerifiedPayload,
   validateLock,
   verifyCache,
 } from "../toolchain.mjs";
 import { runDoctor } from "../doctor.mjs";
+import { registerToolchainAuthorityTests } from "./toolchain-authority.test.mjs";
+import { digest, makeFixture, writeExecutable } from "./toolchain-fixture.mjs";
+
+registerToolchainAuthorityTests();
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
@@ -126,6 +131,17 @@ test("Bash bootstrap starts from checksum-pinned Node without a system Node fall
   assert.match(bootstrap, /node-v24\.20\.0-darwin-arm64\.tar\.gz/);
   assert.match(bootstrap, /40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8/);
   assert.match(bootstrap, /\.part/);
+  assert.match(bootstrap, /\/usr\/bin\/tar --no-same-owner --no-same-permissions/u);
+  assert.match(bootstrap, /exec 7<"\$token_archive_path"/u);
+  assert.match(bootstrap, /exec 8<"\$token_archive_path"/u);
+  assert.match(bootstrap, /exec 9<"\$token_archive_path"/u);
+  assert.match(bootstrap, /\/dev\/fd\/7 -ef \/dev\/fd\/8/u);
+  assert.match(bootstrap, /\/dev\/fd\/8 -ef \/dev\/fd\/9/u);
+  assert.match(bootstrap, /token_sha256 \/dev\/fd\/8/u);
+  assert.match(bootstrap, /"\$token_node_tar_flag" \/dev\/fd\/9/u);
+  assert.match(bootstrap, /token_sha256 \/dev\/fd\/7/u);
+  assert.match(bootstrap, /"\$token_archive_path" -ef \/dev\/fd\/7/u);
+  assert.doesNotMatch(bootstrap, /"\$token_node_tar_flag" "\$token_archive_path"/u);
   assert.match(bootstrap, /token_pinned_node.*scripts\/toolchain\.mjs/);
   assert.doesNotMatch(bootstrap, /TOKEN_BOOTSTRAP_NODE|\$\{[^}]+:-node\}/);
 });
@@ -257,7 +273,7 @@ test("failed extraction preserves the present install and a verified retry repla
 
   assert.throws(
     () => installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true }),
-    /Command failed.*tar/s,
+    /TOOLCHAIN_ARCHIVE_EXTRACTION_FAILED/u,
   );
   assert.equal(readFileSync(forge, "utf8"), "tampered-present-install\n");
   assert.deepEqual(readdirSync(fixture.toolsRoot).filter((name) => name.startsWith(".install-part-")), []);
@@ -299,8 +315,12 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
     /TOOLCHAIN_INSTALL_INVALID tool=pnpm.*wrapper-missing-or-tampered/,
   );
   installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
-  assert.match(readFileSync(wrapper, "utf8"), /pnpm-test\/bin\/pnpm\.cjs/);
-  assert.match(readFileSync(wrapper, "utf8"), /--config\.auto-install-peers=false/);
+  const wrapperText = readFileSync(wrapper, "utf8");
+  assert.match(wrapperText, /^#!\/bin\/bash/u);
+  assert.match(wrapperText, /pnpm-test\/bin\/pnpm\.cjs/);
+  assert.match(wrapperText, /--config\.auto-install-peers=false/);
+  assert.match(wrapperText, /--config\.verify-deps-before-run=false/);
+  assert.doesNotMatch(wrapperText, /\/usr\/bin\/env|\bdirname\b/u);
 
   const payload = join(fixture.toolsRoot, "pnpm-test", "bin", "pnpm.cjs");
   writeFileSync(payload, "tampered-payload\n");
@@ -310,6 +330,112 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
   );
   installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
   verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
+});
+
+test("coherent forged payload and mutable provenance cannot self-attest Foundry, solc or pnpm", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
+  installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
+
+  const forgeries = [
+    {
+      directory: "foundry-test-linux-x64",
+      path: "forge",
+      contents: "#!/bin/sh\necho 'forge Version: 1.8.0'\n# forged no-op\n",
+      tool: "foundry",
+    },
+    {
+      directory: "solc-test-linux-x64",
+      path: "solc",
+      contents: "#!/bin/sh\necho 'Version: 0.8.36+commit.8a079791.Linux.g++'\n# forged compiler\n",
+      tool: "solc",
+    },
+    {
+      directory: "pnpm-test",
+      path: "bin/pnpm.cjs",
+      contents: "process.stdout.write('11.24.0\\n'); // forged package manager\n",
+      tool: "pnpm",
+    },
+  ];
+  for (const forgery of forgeries) {
+    const directory = join(fixture.toolsRoot, forgery.directory);
+    const payload = join(directory, forgery.path);
+    writeFileSync(payload, forgery.contents);
+    if (forgery.tool !== "pnpm") {chmodSync(payload, 0o755);}
+    const provenancePath = join(directory, ".agtmai-toolchain-install.json");
+    const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+    provenance.files[forgery.path] = digest(payload);
+    writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`);
+    assert.throws(
+      () => verifyCache({
+        lock: fixture.lock,
+        platform: "linux-x64",
+        toolsRoot: fixture.toolsRoot,
+        offline: true,
+      }),
+      new RegExp(`TOOLCHAIN_INSTALL_INVALID tool=${forgery.tool}.*file-checksum:${forgery.path.replace("/", "\\/")}`),
+    );
+    installArtifacts({
+      lock: fixture.lock,
+      platform: "linux-x64",
+      toolsRoot: fixture.toolsRoot,
+      offline: true,
+    });
+  }
+});
+
+test("verification reports unavailable pinned payload authority instead of trusting an installed tool", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
+  installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
+  rmSync(join(
+    fixture.toolsRoot,
+    "downloads",
+    fixture.lock.tools.foundry.platforms["linux-x64"].archiveName,
+  ));
+  assert.throws(
+    () => verifyCache({
+      lock: fixture.lock,
+      platform: "linux-x64",
+      toolsRoot: fixture.toolsRoot,
+      offline: true,
+    }),
+    /TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE tool=foundry platform=linux-x64/u,
+  );
+});
+
+test("verified archive descriptors remain the copy and extraction source and pathname substitution fails closed", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
+
+  for (const [name, artifact] of [
+    ["foundry", fixture.lock.tools.foundry.platforms["linux-x64"]],
+    ["solc", fixture.lock.tools.solc.platforms["linux-x64"]],
+  ]) {
+    const archive = join(fixture.toolsRoot, "downloads", artifact.archiveName);
+    assert.throws(
+      () => prepareVerifiedPayload({
+        name,
+        platform: "linux-x64",
+        artifact,
+        archive,
+        toolsRoot: fixture.toolsRoot,
+        missingCode: "TOOLCHAIN_CACHE_MISSING",
+        onArchiveVerified() {
+          renameSync(archive, `${archive}.held`);
+          writeFileSync(archive, "forged archive at the verified pathname\n");
+        },
+      }),
+      new RegExp(`TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=${name}`),
+    );
+    assert.deepEqual(
+      readdirSync(fixture.toolsRoot).filter((entry) => entry.startsWith(".install-part-")),
+      [],
+    );
+  }
 });
 
 test("doctor identifies a cached installation for the wrong platform", (context) => {
@@ -359,175 +485,3 @@ test("doctor reports exact checksums and actionable mismatch without exposing en
   }), 1);
   assert.match(mismatch.join("\n"), /TOOL_MISMATCH tool=solc .*install=file-checksum:solc .*action=/);
 });
-
-function makeFixture() {
-  const root = mkdtempSync(join(tmpdir(), "agtmai-toolchain-test-"));
-  const artifacts = join(root, "artifacts");
-  const toolsRoot = join(root, "tools");
-  mkdirSync(artifacts);
-
-  const nodePayload = join(root, "node-payload", "node-test-linux-x64", "bin");
-  mkdirSync(nodePayload, { recursive: true });
-  writeExecutable(
-    join(nodePayload, "node"),
-    "#!/bin/sh\ncase \"${1:-}\" in *pnpm.cjs) echo '11.24.0' ;; *) echo 'v24.20.0' ;; esac\n",
-  );
-  const nodeArchive = join(artifacts, "node-test.tar.gz");
-  execFileSync("tar", ["-czf", nodeArchive, "-C", join(root, "node-payload"), "node-test-linux-x64"]);
-
-  const foundryPayload = join(root, "foundry-payload", "foundry-test-linux-x64");
-  mkdirSync(foundryPayload, { recursive: true });
-  for (const command of ["forge", "cast", "anvil", "chisel"]) {
-    writeExecutable(join(foundryPayload, command), `#!/bin/sh\necho '${command} Version: 1.8.0'\n`);
-  }
-  const foundryArchive = join(artifacts, "foundry-test.tar.gz");
-  execFileSync("tar", ["-czf", foundryArchive, "-C", join(root, "foundry-payload"), "foundry-test-linux-x64"]);
-
-  const solcArchive = join(artifacts, "solc-test");
-  writeExecutable(solcArchive, "#!/bin/sh\necho 'Version: 0.8.36+commit.8a079791.Linux.g++'\n");
-
-  const agavePayload = join(root, "agave-payload", "solana-release", "bin");
-  mkdirSync(agavePayload, { recursive: true });
-  const agaveVersions = {
-    solana: "solana-cli 4.2.1 (src:test; feat:test, client:Agave)",
-    "solana-keygen": "solana-keygen 4.2.1 (src:test; feat:test, client:Agave)",
-    "solana-test-validator": "solana-test-validator 4.2.1 (src:test; feat:test, client:Agave)",
-    "spl-token": "spl-token-cli 5.6.1",
-  };
-  for (const [command, version] of Object.entries(agaveVersions)) {
-    writeExecutable(join(agavePayload, command), `#!/bin/sh\necho '${version}'\n`);
-  }
-  const agaveArchive = join(artifacts, "agave-test.tar.bz2");
-  execFileSync("tar", ["-cjf", agaveArchive, "-C", join(root, "agave-payload"), "solana-release"]);
-
-  const pnpmPayload = join(root, "pnpm-payload", "package");
-  mkdirSync(join(pnpmPayload, "bin"), { recursive: true });
-  writeFileSync(join(pnpmPayload, "bin", "pnpm.cjs"), "process.stdout.write('11.24.0\\n');\n");
-  writeFileSync(join(pnpmPayload, "package.json"), '{"name":"pnpm","version":"11.24.0"}\n');
-  const pnpmArchive = join(artifacts, "pnpm-test.tgz");
-  execFileSync("tar", ["-czf", pnpmArchive, "-C", join(root, "pnpm-payload"), "package"]);
-
-  const definitions = {
-    node: artifact({ name: "node-test.tar.gz", path: nodeArchive, archive: "tar.gz", installDirectory: "node-test-linux-x64", expectedFiles: ["bin/node"], versionPath: "bin/node", pattern: "^v24\\.20\\.0$" }),
-    foundry: artifact({ name: "foundry-test.tar.gz", path: foundryArchive, archive: "tar.gz", installDirectory: "foundry-test-linux-x64", expectedFiles: ["forge", "cast", "anvil", "chisel"], versionPath: "forge", pattern: "^forge Version: 1\\.8\\.0$" }),
-    solc: artifact({ name: "solc-test", path: solcArchive, archive: "executable", installDirectory: "solc-test-linux-x64", expectedFiles: ["solc"], versionPath: "solc", pattern: "Version: 0\\.8\\.36\\+commit\\.8a079791\\." }),
-    agave: artifact({
-      name: "agave-test.tar.bz2",
-      path: agaveArchive,
-      archive: "tar.bz2",
-      installDirectory: "agave-test-linux-x64",
-      expectedFiles: Object.keys(agaveVersions).map((name) => `bin/${name}`),
-      versionPath: "bin/solana",
-      pattern: "^solana-cli 4\\.2\\.1 .*client:Agave\\)$",
-    }),
-  };
-  definitions.agave.versionChecks = Object.keys(agaveVersions).map((name) => ({
-    name,
-    path: `bin/${name}`,
-    args: ["--version"],
-    pattern: name === "spl-token"
-      ? "^spl-token-cli 5\\.6\\.1$"
-      : `^${name === "solana" ? "solana-cli" : name} 4\\.2\\.1 .*client:Agave\\)$`,
-  }));
-  definitions.agave.expectedFileSha256 = Object.fromEntries(
-    Object.keys(agaveVersions).map((name) => [`bin/${name}`, digest(join(agavePayload, name))]),
-  );
-  const lock = {
-    schemaVersion: 2,
-    platforms: ["darwin-arm64", "linux-x64"],
-    coreTools: ["node", "foundry", "solc"],
-    fixtureTools: ["agave"],
-    tools: {
-      node: coreTool("24.20.0", definitions.node),
-      foundry: coreTool("1.8.0", definitions.foundry),
-      solc: coreTool("0.8.36", definitions.solc),
-      pnpm: packageManagerTool(pnpmArchive),
-      typescript: packageTool("7.0.2"),
-      oxlint: packageTool("1.80.0"),
-      engineeringFoundation: packageTool("0.20.0"),
-      agave: {
-        scope: "local-solana-fixture",
-        enabledForCore: false,
-        version: "4.2.1",
-        splTokenVersion: "5.6.1",
-        sourceRelease: "https://github.com/anza-xyz/agave/releases/tag/v4.2.1",
-        platforms: { "darwin-arm64": definitions.agave, "linux-x64": definitions.agave },
-      },
-      ccipSdk: futureTool(),
-      ccipSolanaPrograms: futureTool(),
-    },
-    securityImages: { slither: securityImage() },
-  };
-  validateLock(lock);
-  return {
-    root,
-    toolsRoot,
-    lock,
-    downloader: (url, part) => {
-      copyFileSync(join(artifacts, basename(url)), part);
-      return 0;
-    },
-  };
-}
-
-function artifact({ name, path, archive, installDirectory, expectedFiles, versionPath, pattern }) {
-  return {
-    url: `https://fixtures.invalid/${name}`,
-    checksumSource: "https://fixtures.invalid/checksums",
-    sha256: digest(path),
-    archive,
-    archiveName: name,
-    installDirectory,
-    expectedFiles,
-    versionChecks: [{ name: versionPath.split("/").at(-1), path: versionPath, args: ["--version"], pattern }],
-  };
-}
-
-function coreTool(version, definition) {
-  return { scope: "genesis-core", version, platforms: { "darwin-arm64": definition, "linux-x64": definition } };
-}
-function packageTool(version) {
-  return { version, source: `https://registry.invalid/package-${version}.tgz` };
-}
-function packageManagerTool(path) {
-  return {
-    scope: "genesis-core-package-manager",
-    version: "11.24.0",
-    source: "https://fixtures.invalid/pnpm-test.tgz",
-    sha256: digest(path),
-    archive: "tar.gz",
-    archiveName: "pnpm-test.tgz",
-    installDirectory: "pnpm-test",
-    expectedFiles: ["bin/pnpm.cjs", "package.json"],
-  };
-}
-function futureTool() {
-  return { scope: "future-non-core", enabledForCore: false };
-}
-function securityImage() {
-  return {
-    scope: "solidity-security", repository: "ghcr.io/trailofbits/eth-security-toolbox",
-    sourceRepository: "https://github.com/trailofbits/eth-security-toolbox", sourceRevision: "8cad443280f7eeb5920a901b5f58f5a91872d9aa",
-    tag: "nightly-20260824",
-    indexDigest: "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8", platform: "linux/amd64",
-    manifestDigest: "sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0",
-    versions: {
-      slither: "0.11.6",
-      cryticCompile: "0.4.2",
-      solc: "0.8.36+commit.8a079791.Linux.g++",
-      forge: "1.8.0",
-    },
-    toolOverrides: {
-      forge: "tools.foundry.platforms.linux-x64",
-      solc: "tools.solc.platforms.linux-x64",
-    },
-    compatibilityMode: "official-image-with-read-only-pinned-project-tool-overrides" };
-}
-function digest(path) {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
-}
-
-function writeExecutable(path, contents) {
-  writeFileSync(path, contents);
-  chmodSync(path, 0o755);
-}

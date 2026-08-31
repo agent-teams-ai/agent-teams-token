@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-29.
+Last updated: 2026-08-30.
 
 Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
 clearance remains required.
@@ -119,24 +119,91 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
 
 ## In progress
 
-- All nine retained P2 and six P3 zero-cost-slice findings now have a locally
-  green remediation candidate. It adds Foundation full-scan routing, decoded-
-  byte creation-input hashing, authenticated local-EVM orphan recovery, owned
-  dynamic Anvil ports, durable deployment publication, full compiler-input
-  identity, independently derived Slither evidence, fail-closed Solana lease
-  and publication binding, sanitized post-mutation failure evidence, strict
-  real-Solana CI and one canonical Slither job. The remaining acceptance work is
-  a clean exact-SHA GitHub run plus repeated specialist and holistic reviews of
-  that same SHA. This still grants no permission for public deployment.
+- The earlier remediation of nine retained P2 and six P3 zero-cost-slice
+  findings has local evidence for Foundation full-scan routing, decoded-byte
+  creation-input hashing, authenticated local-EVM recovery, owned Anvil ports,
+  durable deployment publication, compiler-input identity, independent Slither
+  evidence and fail-closed Solana evidence. R7 nevertheless returned `AMEND` on
+  the current rollback delivery. Published history mixes slices and original
+  isolated worker identities are `unavailable`. The remediation implementation
+  is now integrated: each manifest application is followed by production-path
+  rollback, exact tracked-byte/status/inventory comparison, strict survivor
+  gates and a forbidden-residue check. Cleanup is descriptor-anchored,
+  quarantined, exact-target allowlisted and bounded by entry/depth/path limits;
+  symlinks are unlinked as link objects and deterministic child/final-directory
+  substitution preserves the foreign identity and fails closed. Structural
+  validation or preparation alone is still not the required exact/full proof.
+- The accepted recovery review found five additional proof defects. Current
+  remediation captures the byte-complete candidate immediately after
+  exact-head/full-history validation and before checkout bootstrap/cache/
+  workspace execution, then revalidates it afterward. Foundry and pnpm
+  installations are compared against payloads freshly derived from the
+  descriptor-opened repository-hash-pinned archives; solc is compared with its
+  descriptor-opened executable archive. Mutable install provenance is not byte
+  authority, no new inner digest was invented, and absent archive authority is
+  reported explicitly. Recovery evidence now has a strict closed schema,
+  independent exact-gate/artifact validation, deterministic canonical proof
+  digest outside volatile telemetry and validated READY-last publication. CI
+  uploads verified proof only after success and labels failure output as
+  diagnostics. Every rollback architecture/script/history/test surface is
+  mandatory Foundation full-scan routed with negative coverage.
+- Final rollback-manifest shared/retained transitions were regenerated from the
+  exact current worktree bytes. Current-byte coverage and production apply
+  regressions pass as
+  `REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`; the earlier
+  structural result remains invalid and must not be cited. Clean exact-head
+  `--validate-only` awaits an externally created candidate commit because this
+  remediation is explicitly no-commit. The current host lacks the complete offline Foundry, solc, pnpm and
+  Agave archive cache set and cached Slither Docker image, so preflight stops
+  before dependent gates and no full local proof is claimed.
+- The rollback threat model is isolated local/CI execution at an exact commit
+  with zero-cost identities; network access, public RPC and real secrets/assets
+  are disabled. Kernel/filesystem descriptor semantics, fixed runtime,
+  repository object database, the executing process and held descriptors are
+  trusted; manifests, caches, command output and pathnames are
+  untrusted. Symlink, mount and parent/child/final-name substitution before
+  atomic quarantine or final identity revalidation are in scope and preserve a
+  foreign identity. A continuously scheduled same-UID peer racing the separate
+  final Node identity-check and unlink/rmdir syscalls, or the destination-
+  absence check and following rename syscall, is explicitly out of scope, as is
+  a root, capability-bearing or otherwise OS-privileged peer able
+  to bypass mode `0700`, kernel or process-memory/descriptor compromise, and
+  hostile runtime replacement. This proof is therefore not evidence against
+  same-UID final-syscall races or privileged local peers; crash or `SIGKILL` may
+  leave owned residue but never broadens cleanup.
+- No custom cleanup helper remains. Linux x64 runtime provenance is now bound to
+  the checksum-pinned Node `24.20.0` archive, independently pinned inner
+  `bin/node` SHA-256, canonical install record, exact `process.execPath` and the
+  loaded `/proc/self/exe` file identity/digest. Coherent binary/provenance
+  substitution therefore fails the immutable inner hash. Darwin arm64 fails
+  closed because an equivalent loaded-image binding is unavailable. The fixed
+  Linux runtime is trusted only after these checks; later hostile replacement
+  remains out of scope. This work is not an audit or production,
+  Devnet or Mainnet readiness.
+- Exact-head/full-history wiring is integrated into the existing
+  `foundation-and-typescript` CI job. It checks out explicit `github.sha` with
+  full history, rejects shallow/partial history, replacement refs, grafts and
+  both environment/file object alternates, verifies pinned-baseline ancestry,
+  captures complete tracked bytes before provisioning, runs non-pulling
+  cache/tool preflight before root gates, reasserts history/clean identity, and
+  uploads a verified proof only after independent validation; failures upload a
+  separately named diagnostic subset.
+  Hosted execution for these exact bytes remains pending, so no new CI success
+  is claimed.
 - Ethereum Mainnet deployment remains a mandatory owner TODO. Exact final
   constructor gas, every additional contract, live fees, total-cost guard and
   unsigned-plan review must be completed before any public broadcast. The
   current cheap local core estimate is not a whole-launch estimate.
 - The three zero-cost follow-up slices (local SPL fixture, unsigned Ethereum
   deployment-cost plan and Slither/Linux security evidence) are implemented and
-  accepted for local/test-only use. Their P2/P3 remediation is locally green but
-  awaits exact-SHA external acceptance; public-chain work remains separately
-  gated.
+  historically accepted for local/test-only use at `4037e4b`; the current
+  rollback patch is not accepted. The proxy-disabled local-Solana,
+  deployment-plan and local-EVM adapters and their Foundation dependency
+  declarations belong to coordinated external lanes, remain pending and are
+  neither changed nor pre-approved here; the direct-HTTP P1 stays open. They are
+  followed by authoritative exact-SHA CI and fresh specialist/holistic review.
+  CI source integration is present but its hosted result remains pending, and
+  public-chain work remains separately gated.
 
 ## Designed, not implemented
 

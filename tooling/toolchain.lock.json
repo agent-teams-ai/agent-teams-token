@@ -23,6 +23,7 @@
           "archive": "tar.gz",
           "archiveName": "node-v24.20.0-darwin-arm64.tar.gz",
           "installDirectory": "node-v24.20.0-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["bin/node"],
           "versionChecks": [{"name": "node", "path": "bin/node", "args": ["--version"], "pattern": "^v24\\.20\\.0$"}]
         },
@@ -33,7 +34,11 @@
           "archive": "tar.xz",
           "archiveName": "node-v24.20.0-linux-x64.tar.xz",
           "installDirectory": "node-v24.20.0-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["bin/node"],
+          "expectedFileSha256": {
+            "bin/node": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7"
+          },
           "versionChecks": [{"name": "node", "path": "bin/node", "args": ["--version"], "pattern": "^v24\\.20\\.0$"}]
         }
       }
@@ -46,8 +51,9 @@
       "archive": "tar.gz",
       "archiveName": "pnpm-11.24.0.tgz",
       "installDirectory": "pnpm-11.24.0",
+      "installationAuthority": "pinned-archive-complete-tree-v1",
       "expectedFiles": ["bin/pnpm.cjs", "package.json"],
-      "integrityAuthority": "checksum-pinned npm package installed and executed by the checksum-pinned Node binary"
+      "integrityAuthority": "checksum-pinned npm archive; every extracted entry, normalized mode, file digest and symlink target is re-derived before checksum-pinned Node or pnpm executes"
     },
     "typescript": {
       "scope": "genesis-core-package",
@@ -79,6 +85,7 @@
           "archive": "tar.gz",
           "archiveName": "foundry-v1.8.0-darwin-arm64.tar.gz",
           "installDirectory": "foundry-v1.8.0-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["forge", "cast", "anvil", "chisel"],
           "versionChecks": [
             {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
@@ -94,6 +101,7 @@
           "archive": "tar.gz",
           "archiveName": "foundry-v1.8.0-linux-amd64.tar.gz",
           "installDirectory": "foundry-v1.8.0-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["forge", "cast", "anvil", "chisel"],
           "versionChecks": [
             {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
@@ -116,6 +124,7 @@
           "archive": "executable",
           "archiveName": "solc-v0.8.36-darwin-amd64",
           "installDirectory": "solc-v0.8.36-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["solc"],
           "versionChecks": [{"name": "solc", "path": "solc", "args": ["--version"], "pattern": "Version: 0\\.8\\.36\\+commit\\.8a079791\\."}],
           "requires": "Rosetta 2 because upstream publishes macosx-amd64"
@@ -127,6 +136,7 @@
           "archive": "executable",
           "archiveName": "solc-v0.8.36-linux-amd64",
           "installDirectory": "solc-v0.8.36-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["solc"],
           "versionChecks": [{"name": "solc", "path": "solc", "args": ["--version"], "pattern": "Version: 0\\.8\\.36\\+commit\\.8a079791\\."}]
         }
@@ -146,6 +156,7 @@
           "archive": "tar.bz2",
           "archiveName": "solana-release-aarch64-apple-darwin.tar.bz2",
           "installDirectory": "agave-v4.2.1-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["bin/solana", "bin/solana-keygen", "bin/solana-test-validator", "bin/spl-token"],
           "expectedFileSha256": {
             "bin/solana": "77ac4b1d4a9f10c8f026217bb0943828358581aa26e65f66db53353a2edb04a2",
@@ -167,6 +178,7 @@
           "archive": "tar.bz2",
           "archiveName": "solana-release-x86_64-unknown-linux-gnu.tar.bz2",
           "installDirectory": "agave-v4.2.1-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["bin/solana", "bin/solana-keygen", "bin/solana-test-validator", "bin/spl-token"],
           "expectedFileSha256": {
             "bin/solana": "b7401a94540013670c7d5ab696842ca0bb3134e10120f7ce3d05438ec82202d8",
