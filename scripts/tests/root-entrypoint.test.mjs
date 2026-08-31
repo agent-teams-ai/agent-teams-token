@@ -113,13 +113,21 @@ function prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction = 
     assert.match(bootstrap, new RegExp(before.replaceAll(".", "\\."), "u"));
     bootstrap = bootstrap.replace(before, after);
   }
+  let renameProbe;
   if (substituteDuringExtraction) {
+    renameProbe = join(fixture.root, "archive-rename-probe.mjs");
+    writeFileSync(
+      renameProbe,
+      "import { renameSync, writeFileSync } from \"node:fs\";\n"
+        + "const archive = process.argv[2];\n"
+        + "renameSync(archive, `${archive}.held`);\n"
+        + "writeFileSync(archive, \"foreign archive at original pathname\\n\");\n",
+    );
     const tarProbe = join(fixture.root, "tar-substitution-probe");
     writeExecutable(
       tarProbe,
       "#!/bin/bash\n"
-        + "/usr/bin/mv -- \"$TOKEN_TEST_ARCHIVE\" \"$TOKEN_TEST_ARCHIVE.held\"\n"
-        + "printf '%s\\n' 'foreign archive at original pathname' > \"$TOKEN_TEST_ARCHIVE\"\n"
+        + "\"$TOKEN_TEST_RENAME_NODE\" \"$TOKEN_TEST_RENAME_PROBE\" \"$TOKEN_TEST_ARCHIVE\"\n"
         + "exec /usr/bin/tar \"$@\"\n",
     );
     bootstrap = bootstrap.replace(
@@ -128,7 +136,7 @@ function prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction = 
     );
   }
   writeExecutable(bootstrapPath, bootstrap);
-  return { archive, archiveSha256 };
+  return { archive, archiveSha256, renameProbe };
 }
 
 function bootstrapFixtureHost() {
@@ -269,7 +277,11 @@ test("real bootstrap fixture rejects pathname replacement after descriptor-backe
   const result = runRoot(
     fixture,
     ["bootstrap", "install", "--offline"],
-    { TOKEN_TEST_ARCHIVE: prepared.archive },
+    {
+      TOKEN_TEST_ARCHIVE: prepared.archive,
+      TOKEN_TEST_RENAME_NODE: process.execPath,
+      TOKEN_TEST_RENAME_PROBE: prepared.renameProbe,
+    },
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node/u);

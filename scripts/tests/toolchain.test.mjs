@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -158,7 +159,9 @@ test("environment helper requires Bash and runs Zsh portability where required o
   mkdirSync(scripts, { recursive: true });
   mkdirSync(bin, { recursive: true });
   copyFileSync(join(repositoryRoot, "scripts/env.sh"), join(scripts, "env.sh"));
-  writeExecutable(join(bin, "agtmai-env-probe"), "#!/bin/sh\nexit 0\n");
+  const probe = join(bin, "agtmai-env-probe");
+  writeExecutable(probe, "#!/bin/sh\nexit 0\n");
+  const canonicalProbe = realpathSync(probe);
   assert.equal(existsSync("/bin/bash"), true, "Bash is a required portability dependency");
   const shells = ["/bin/bash"];
   const zsh = ["/bin/zsh", "/usr/bin/zsh"].find(existsSync);
@@ -171,7 +174,7 @@ test("environment helper requires Bash and runs Zsh portability where required o
   for (const shell of shells) {
     const result = spawnSync(shell, ["-c", `source '${join(scripts, "env.sh")}' && command -v agtmai-env-probe`], { encoding: "utf8" });
     assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
-    assert.equal(result.stdout.trim(), join(bin, "agtmai-env-probe"));
+    assert.equal(result.stdout.trim(), canonicalProbe);
   }
 });
 
