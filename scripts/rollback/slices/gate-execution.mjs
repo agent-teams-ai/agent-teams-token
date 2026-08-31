@@ -17,6 +17,7 @@ import {
   validatePnpmWorkspaceLinks,
 } from "../proof-runtime.mjs";
 import { parseStrictTap } from "./gate-contract.mjs";
+import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
 import {
   assertRollbackWorkspaceHandle,
   closeRollbackWorkspaceHandle,
@@ -87,10 +88,9 @@ export function pinnedEnvironmentPreflight(root, {
   execute = directPreflightCommand,
 }) {
   const runtime = assertPinnedNodeRuntime(root);
-  const bootstrapEnvironment = {
-    ...process.env,
+  const bootstrapEnvironment = allowlistedChildEnvironment(process.env, {
     PATH: "/usr/local/bin:/usr/bin:/bin:/usr/lib/git-core",
-  };
+  });
   execute("bootstrap-core-cache-verify", "/bin/bash", [
     "./dev", "bootstrap", "verify", "--offline",
   ], { cwd: root, env: bootstrapEnvironment, timeout: 600_000 });
@@ -102,7 +102,7 @@ export function pinnedEnvironmentPreflight(root, {
     requireDocker: true,
     dockerPath,
   });
-  const commandEnvironment = { ...process.env, PATH: toolPath(tools) };
+  const commandEnvironment = allowlistedChildEnvironment(process.env, { PATH: toolPath(tools) });
   const requestedStore = execute(
     "pnpm-store-path",
     tools.pnpm,
@@ -139,7 +139,7 @@ export function pinnedEnvironmentPreflight(root, {
     "{{json .}}",
   ], {
     cwd: root,
-    env: { ...process.env, PATH: "/usr/bin:/bin" },
+    env: allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
     timeout: 30_000,
   });
   return {
@@ -168,7 +168,11 @@ export function preflightPinnedSlitherImage(root, {
   const pinned = pinnedSlitherImage(root);
   const inspection = basicRun(tools.docker, [
     "image", "inspect", pinned.reference, "--format", "{{json .}}",
-  ], { cwd: root, env: { ...process.env, PATH: "/usr/bin:/bin" }, timeout: 30_000 });
+  ], {
+    cwd: root,
+    env: allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
+    timeout: 30_000,
+  });
   return assertPinnedSlitherImageInspection(inspection, pinned);
 }
 
@@ -199,7 +203,12 @@ export function preflightQualityGateEnvironment(root, manifest, recorder, group)
       "slither-pinned-image-cache-preflight",
       tools.docker,
       ["image", "inspect", pinned.reference, "--format", "{{json .}}"],
-      { cwd: root, env: { ...process.env, PATH: "/usr/bin:/bin" }, phase: "preflight", timeout: 30_000 },
+      {
+        cwd: root,
+        env: allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
+        phase: "preflight",
+        timeout: 30_000,
+      },
     );
     recorder.stage(
       group,

@@ -14,6 +14,7 @@ import {
   tail,
   validateTrackedPath,
 } from "./common.mjs";
+import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 
 const SHA_256 = /^[a-f0-9]{64}$/u;
 const GIT_SHA = /^[a-f0-9]{40}$/u;
@@ -33,10 +34,13 @@ export function gitExecutable() {
 }
 
 export function basicRun(command, arguments_, options = {}) {
-  const result = spawnSync(command, arguments_, {
+  const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
+    workingDirectory: options.cwd,
+  });
+  const result = spawnSync(command, invocation.arguments, {
     cwd: options.cwd,
     encoding: "utf8",
-    env: options.env ?? process.env,
+    env: invocation.environment,
     input: options.input,
     maxBuffer: 128 * 1024 * 1024,
     timeout: options.timeout ?? 600_000,
@@ -53,10 +57,13 @@ export function basicRun(command, arguments_, options = {}) {
 }
 
 function basicRunBuffer(command, arguments_, options = {}) {
-  const result = spawnSync(command, arguments_, {
+  const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
+    workingDirectory: options.cwd,
+  });
+  const result = spawnSync(command, invocation.arguments, {
     cwd: options.cwd,
     encoding: null,
-    env: options.env ?? process.env,
+    env: invocation.environment,
     maxBuffer: 256 * 1024 * 1024,
     timeout: options.timeout ?? 600_000,
   });

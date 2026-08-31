@@ -4,17 +4,33 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   inspectInstallationInventory,
+  cleanupPreparedPayload,
   prepareVerifiedPayload,
   provenanceFile,
 } from "./toolchain-archive.mjs";
+import {
+  abandonCleanupHandle,
+  captureCleanupTreeSnapshot,
+  cleanupIdentityBoundDirectory,
+  createCleanupHandle,
+} from "./rollback/runtime/cleanup.mjs";
+import {
+  allowlistedChildEnvironment,
+  trustedNodeEnvironmentKeys,
+} from "./toolchain-environment.mjs";
+import {
+  parseToolchainProvenance,
+  serializeToolchainProvenance,
+} from "./toolchain-provenance.mjs";
 
 const unknown = "unknown";
 
@@ -29,21 +45,20 @@ function inspectProvenance({ name, tool, artifact, platform, destination, prepar
   }
   let provenance;
   try {
-    provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
-  } catch {
-    return "provenance-invalid";
+    provenance = parseToolchainProvenance(readFileSync(provenancePath), {
+      tool: name,
+      version: tool.version,
+      platform,
+      artifactSha256: artifact.sha256,
+      inventorySha256: prepared.inventorySha256,
+      files: prepared.files,
+    });
+  } catch (error) {
+    return error instanceof Error && error.message.startsWith("TOOLCHAIN_PROVENANCE_MISMATCH")
+      ? "provenance-mismatch"
+      : "provenance-invalid";
   }
-  if (
-    provenance.schemaVersion !== 2
-    || provenance.tool !== name
-    || provenance.version !== tool.version
-    || provenance.platform !== platform
-    || provenance.artifactSha256 !== artifact.sha256
-    || provenance.inventorySha256 !== prepared.inventorySha256
-    || JSON.stringify(provenance.files) !== JSON.stringify(prepared.files)
-  ) {
-    return "provenance-mismatch";
-  }
+  if (provenance.inventorySha256 !== prepared.inventorySha256) {return "provenance-mismatch";}
   return;
 }
 
@@ -93,23 +108,39 @@ function inspectPinnedNodeAuthority({ lock, platform, toolsRoot }) {
       error instanceof Error ? error.message : String(error),
     );
   } finally {
-    if (prepared !== undefined) {rmSync(prepared.stageRoot, { recursive: true, force: true });}
+    if (prepared !== undefined) {cleanupPreparedPayload(prepared);}
   }
 }
 
-function inspectPnpmWrapper({ lock, platform, toolsRoot }) {
+function inspectPnpmWrapper({ lock, toolsRoot }) {
   const wrapper = join(toolsRoot, "bin", "pnpm");
   if (!existsSync(wrapper)) {return "wrapper-missing-or-tampered";}
   const stats = lstatSync(wrapper);
   if (!stats.isFile() || (stats.mode & 0o777) !== 0o755) {return "wrapper-missing-or-tampered";}
-  return readFileSync(wrapper, "utf8") === pnpmWrapper(lock, platform)
+  return readFileSync(wrapper, "utf8") === pnpmWrapper(lock)
     ? undefined
     : "wrapper-missing-or-tampered";
+}
+
+function inspectTrustedNodeWrapper({ lock, platform, toolsRoot }) {
+  const wrapper = join(toolsRoot, "bin", "node");
+  if (!existsSync(wrapper)) {return "trusted-node-wrapper-missing-or-tampered";}
+  const stats = lstatSync(wrapper);
+  if (!stats.isFile() || (stats.mode & 0o777) !== 0o755) {
+    return "trusted-node-wrapper-missing-or-tampered";
+  }
+  return readFileSync(wrapper, "utf8") === trustedNodeWrapper(lock, platform)
+    ? undefined
+    : "trusted-node-wrapper-missing-or-tampered";
 }
 
 function inspectPreparedInstallation(args) {
   const authority = inspectAuthority(args);
   if (!authority.ok) {return authority;}
+  if (args.name === "node") {
+    const wrapperCode = inspectTrustedNodeWrapper(args);
+    if (wrapperCode) {return failure(wrapperCode);}
+  }
   if (args.name === "pnpm") {
     const nodeAuthority = inspectPinnedNodeAuthority(args);
     if (!nodeAuthority.ok) {return failure(`pinned-node-${nodeAuthority.code}`, nodeAuthority.actualVersion);}
@@ -150,11 +181,21 @@ export function inspectInstallation(args) {
       error instanceof Error ? error.message : String(error),
     );
   } finally {
-    if (derived !== undefined) {rmSync(derived.stageRoot, { recursive: true, force: true });}
+    if (derived !== undefined) {cleanupPreparedPayload(derived);}
   }
 }
 
-export function installPreparedArtifact({ name, tool, artifact, prepared, destination, platform, toolsRoot, lock }) {
+export function installPreparedArtifact({
+  name,
+  tool,
+  artifact,
+  prepared,
+  destination,
+  platform,
+  toolsRoot,
+  lock,
+  onPublishBoundary,
+}) {
   if (name === "pnpm") {
     const nodeAuthority = inspectPinnedNodeAuthority({ lock, platform, toolsRoot });
     if (!nodeAuthority.ok) {
@@ -168,33 +209,79 @@ export function installPreparedArtifact({ name, tool, artifact, prepared, destin
   } else {
     executeVersionChecks(prepared.source, artifact);
   }
-  atomicPublish({ name, tool, artifact, prepared, destination, platform, toolsRoot, lock });
+  atomicPublish({
+    name,
+    tool,
+    artifact,
+    prepared,
+    destination,
+    platform,
+    toolsRoot,
+    lock,
+    onPublishBoundary,
+  });
 }
 
-function atomicPublish({ name, tool, artifact, prepared, destination, platform, toolsRoot, lock }) {
+function atomicPublish({
+  name,
+  tool,
+  artifact,
+  prepared,
+  destination,
+  platform,
+  toolsRoot,
+  lock,
+  onPublishBoundary,
+}) {
   let backup;
-  writeFileSync(join(prepared.source, provenanceFile), `${JSON.stringify({
-    schemaVersion: 2,
+  writeFileSync(join(prepared.source, provenanceFile), serializeToolchainProvenance({
     tool: name,
     version: tool.version,
     platform,
     artifactSha256: artifact.sha256,
     inventorySha256: prepared.inventorySha256,
     files: prepared.files,
-  }, null, 2)}\n`, { mode: 0o644 });
+  }), { mode: 0o644 });
   try {
     if (existsSync(destination)) {
-      backup = `${destination}.replace-${process.pid}-${Date.now()}`;
-      renameSync(destination, backup);
+      const root = mkdtempSync(join(toolsRoot, ".install-backup-"));
+      backup = {
+        root,
+        payload: join(root, "payload"),
+        handle: createCleanupHandle(root, {
+          temporaryRoot: toolsRoot,
+          targetPrefix: ".install-backup-",
+          allowedEntries: ["payload"],
+        }),
+      };
+      renameSync(destination, backup.payload);
+      onPublishBoundary?.("after-backup", { backup: backup.root, destination });
     }
     renameSync(prepared.source, destination);
+    if (name === "node") {writeTrustedNodeWrapper({ lock, toolsRoot, platform });}
     if (name === "pnpm") {writePnpmWrapper({ lock, toolsRoot, platform });}
-    if (backup) {rmSync(backup, { force: true, recursive: true });}
+    if (backup) {
+      onPublishBoundary?.("before-backup-cleanup", { backup: backup.root, destination });
+      cleanupPrivatePublication(backup.handle);
+      backup = undefined;
+    }
   } catch (error) {
-    if (existsSync(destination)) {rmSync(destination, { force: true, recursive: true });}
-    if (backup && !existsSync(destination)) {renameSync(backup, destination);}
+    if (backup && !existsSync(destination) && existsSync(backup.payload)) {
+      renameSync(backup.payload, destination);
+      cleanupPrivatePublication(backup.handle);
+      backup = undefined;
+    }
+    if (backup) {
+      abandonCleanupHandle(backup.handle);
+      backup = undefined;
+    }
     throw error;
   }
+}
+
+function cleanupPrivatePublication(handle) {
+  captureCleanupTreeSnapshot(handle);
+  cleanupIdentityBoundDirectory(handle);
 }
 
 function pinnedNode(lock, toolsRoot, platform) {
@@ -208,26 +295,52 @@ function executePnpmVersionCheck({ root, nodeExecutable, tool }) {
   }
   const actual = execFileSync(nodeExecutable, [join(root, "bin", "pnpm.cjs"), "--version"], {
     encoding: "utf8",
-    env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", COREPACK_ENABLE_PROJECT_SPEC: "0" },
+    env: allowlistedChildEnvironment(process.env, {
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+      COREPACK_ENABLE_PROJECT_SPEC: "0",
+    }),
     timeout: 15_000,
   }).trim();
   if (actual !== tool.version) {throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`);}
   return `pnpm=${actual}`;
 }
 
-function pnpmWrapper(lock, platform) {
-  const nodeDirectory = lock.tools.node.platforms[platform].installDirectory;
+function pnpmWrapper(lock) {
   const pnpmDirectory = lock.tools.pnpm.installDirectory;
-  return `#!/bin/bash\nset -euo pipefail\ntoken_pnpm_source=\${BASH_SOURCE[0]}\nif [[ "$token_pnpm_source" == */* ]]; then\n  token_pnpm_directory=\${token_pnpm_source%/*}\n  [[ -n "$token_pnpm_directory" ]] || token_pnpm_directory=/\nelse\n  token_pnpm_directory=.\nfi\ntoken_pnpm_tools_root=$(CDPATH= cd -- "$token_pnpm_directory/.." && pwd -P)\nunset token_pnpm_source token_pnpm_directory\nexport COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nexport COREPACK_ENABLE_PROJECT_SPEC=0\nexec "$token_pnpm_tools_root/${nodeDirectory}/bin/node" "$token_pnpm_tools_root/${pnpmDirectory}/bin/pnpm.cjs" --config.auto-install-peers=false --config.verify-deps-before-run=false "$@"\n`;
+  return `#!/bin/bash\nset -euo pipefail\ntoken_pnpm_source=\${BASH_SOURCE[0]}\nif [[ "$token_pnpm_source" == */* ]]; then\n  token_pnpm_directory=\${token_pnpm_source%/*}\n  [[ -n "$token_pnpm_directory" ]] || token_pnpm_directory=/\nelse\n  token_pnpm_directory=.\nfi\ntoken_pnpm_tools_root=$(CDPATH= cd -- "$token_pnpm_directory/.." && pwd -P)\nunset token_pnpm_source token_pnpm_directory\nexport COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nexport COREPACK_ENABLE_PROJECT_SPEC=0\nexec "$token_pnpm_tools_root/bin/node" "$token_pnpm_tools_root/${pnpmDirectory}/bin/pnpm.cjs" --config.auto-install-peers=false --config.verify-deps-before-run=false "$@"\n`;
 }
 
-function writePnpmWrapper({ lock, toolsRoot, platform }) {
-  const bin = join(toolsRoot, "bin");
-  const target = join(bin, "pnpm");
+function trustedNodeWrapper(lock, platform) {
+  const nodeDirectory = lock.tools.node.platforms[platform].installDirectory;
+  const foundryDirectory = lock.tools.foundry?.platforms?.[platform]?.installDirectory;
+  const solcDirectory = lock.tools.solc?.platforms?.[platform]?.installDirectory;
+  const agaveDirectory = lock.tools.agave?.platforms?.[platform]?.installDirectory;
+  const directories = [
+    `${nodeDirectory}/bin`,
+    foundryDirectory,
+    solcDirectory,
+    "bin",
+    agaveDirectory ? `${agaveDirectory}/bin` : undefined,
+  ].filter(Boolean);
+  const keys = trustedNodeEnvironmentKeys.filter((key) =>
+    !["LANG", "LC_ALL", "PATH", "TZ"].includes(key));
+  return `#!/bin/bash\nset -euo pipefail\ntoken_node_source=\${BASH_SOURCE[0]}\nif [[ "$token_node_source" == */* ]]; then\n  token_node_directory=\${token_node_source%/*}\n  [[ -n "$token_node_directory" ]] || token_node_directory=/\nelse\n  token_node_directory=.\nfi\ntoken_node_tools_root=$(CDPATH= cd -- "$token_node_directory/.." && pwd -P)\ntoken_node_git_root=$(pwd -P)\ntoken_node_environment=(/usr/bin/env -i LANG=C LC_ALL=C TZ=UTC PATH="$token_node_tools_root/${directories.join(`:$token_node_tools_root/`)}:/usr/local/bin:/usr/bin:/bin:/usr/lib/git-core" GCM_INTERACTIVE=never GIT_ASKPASS=/bin/false GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=4 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1= GIT_CONFIG_KEY_2=credential.interactive GIT_CONFIG_VALUE_2=never GIT_CONFIG_KEY_3=safe.directory GIT_CONFIG_VALUE_3="$token_node_git_root" GIT_NO_REPLACE_OBJECTS=1 GIT_SSH_COMMAND=/bin/false GIT_TERMINAL_PROMPT=0 SSH_ASKPASS=/bin/false)\nunset token_node_git_root\nfor token_node_key in ${keys.join(" ")}; do\n  if [[ -v $token_node_key ]]; then\n    token_node_environment+=("$token_node_key=\${!token_node_key}")\n  fi\ndone\nexec "\${token_node_environment[@]}" "$token_node_tools_root/${nodeDirectory}/bin/node" "$@"\n`;
+}
+
+function writeTrustedNodeWrapper({ lock, toolsRoot, platform }) {
+  writeWrapper(join(toolsRoot, "bin", "node"), trustedNodeWrapper(lock, platform));
+}
+
+function writePnpmWrapper({ lock, toolsRoot }) {
+  writeWrapper(join(toolsRoot, "bin", "pnpm"), pnpmWrapper(lock));
+}
+
+function writeWrapper(target, contents) {
+  const bin = dirname(target);
   const part = `${target}.part`;
   mkdirSync(bin, { recursive: true });
   rmSync(part, { force: true });
-  writeFileSync(part, pnpmWrapper(lock, platform), { mode: 0o755 });
+  writeFileSync(part, contents, { mode: 0o755 });
   chmodSync(part, 0o755);
   renameSync(part, target);
 }
@@ -236,7 +349,7 @@ function executeVersionChecks(root, artifact) {
   return artifact.versionChecks.map((check) => {
     const actual = execFileSync(join(root, check.path), check.args, {
       encoding: "utf8",
-      env: { ...process.env, PATH: "/usr/bin:/bin" },
+      env: allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
       timeout: 15_000,
     }).trim();
     if (!new RegExp(check.pattern).test(actual)) {

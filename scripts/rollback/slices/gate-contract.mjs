@@ -22,6 +22,7 @@ import {
 import {
   assertRollbackWorkspaceHandle,
 } from "./workspace-handle.mjs";
+import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
 
 function run(command, commandArguments, options = {}) {
   return basicRun(command === "git" ? gitExecutable() : command, commandArguments, {
@@ -293,15 +294,14 @@ export function syntheticRollbackCommit(root, manifest, candidateSha, recorder, 
     cwd: root,
     timeout: 60_000,
   }).stdout.trim();
-  const identityEnvironment = {
-    ...process.env,
+  const identityEnvironment = allowlistedChildEnvironment(process.env, {
     GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
     GIT_AUTHOR_EMAIL: "rollback-proof@invalid.example",
     GIT_AUTHOR_NAME: "AGTMAI Rollback Proof",
     GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
     GIT_COMMITTER_EMAIL: "rollback-proof@invalid.example",
     GIT_COMMITTER_NAME: "AGTMAI Rollback Proof",
-  };
+  });
   const sha = recorder.run(group, "git-commit-rollback-tree", git, [
     "commit-tree",
     tree,
@@ -332,8 +332,7 @@ export function gateEnvironment(root, gateTemporaryDirectory, tools) {
   for (const path of [privateHome, xdgCache, xdgConfig, xdgData, xdgRuntime]) {
     mkdirSync(path, { mode: 0o700 });
   }
-  return {
-    ...process.env,
+  return allowlistedChildEnvironment(process.env, {
     AGTMAI_ANVIL_BINARY: tools.anvil,
     AGTMAI_FORGE_BINARY: tools.forge,
     AGTMAI_SOLC_BINARY: tools.solc,
@@ -351,5 +350,5 @@ export function gateEnvironment(root, gateTemporaryDirectory, tools) {
     XDG_CONFIG_HOME: xdgConfig,
     XDG_DATA_HOME: xdgData,
     XDG_RUNTIME_DIR: xdgRuntime,
-  };
+  });
 }

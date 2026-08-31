@@ -20,6 +20,7 @@ test("every operational package rollback strips proof recursion", () => {
       assert.equal(transformed.scripts["rollback:preflight"], undefined);
       assert.equal(transformed.scripts["rollback:test"], undefined);
       assert.equal(transformed.scripts["rollback:prove"], undefined);
+      assert.equal(transformed.scripts["check:linux"], undefined);
       assert.doesNotMatch(transformed.scripts.check, /rollback:(?:preflight|test|prove)/u);
       const manifest = manifests().find(({ sliceId }) => sliceId === slice);
       const expected = manifest.reverseEdits.find(({ path }) => path === "package.json").afterSha256;

@@ -83,7 +83,10 @@ function runRoot(fixture, args, extraEnvironment = {}) {
   });
 }
 
-function prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction = false } = {}) {
+function prepareBootstrapArchiveFixture(fixture, {
+  mutateHeldInodeDuringExtraction = false,
+  substituteDuringExtraction = false,
+} = {}) {
   const host = bootstrapFixtureHost();
   const payloadRoot = join(fixture.root, "bootstrap-node-payload");
   const nodeDirectory = `node-test-${host.platform}`;
@@ -93,7 +96,7 @@ function prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction = 
     join(nodeBin, "node"),
     "#!/bin/bash\n"
       + "if [[ \"${1:-}\" == --version ]]; then printf '%s\\n' v24.20.0; exit 0; fi\n"
-      + "printf 'archive-node:%s\\n' \"$*\" >> \"$TOKEN_TEST_LOG\"\n",
+      + `printf 'archive-node:%s\\n' "$*" >> '${fixture.log}'\n`,
   );
   const downloads = join(fixture.root, ".tools", "downloads");
   mkdirSync(downloads, { recursive: true });
@@ -114,26 +117,31 @@ function prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction = 
     bootstrap = bootstrap.replace(before, after);
   }
   let renameProbe;
-  if (substituteDuringExtraction) {
+  if (substituteDuringExtraction || mutateHeldInodeDuringExtraction) {
     renameProbe = join(fixture.root, "archive-rename-probe.mjs");
-    writeFileSync(
-      renameProbe,
-      "import { renameSync, writeFileSync } from \"node:fs\";\n"
+    const probeSource = substituteDuringExtraction
+      ? "import { renameSync, writeFileSync } from \"node:fs\";\n"
         + "const archive = process.argv[2];\n"
         + "renameSync(archive, `${archive}.held`);\n"
-        + "writeFileSync(archive, \"foreign archive at original pathname\\n\");\n",
-    );
+        + "writeFileSync(archive, \"foreign archive at original pathname\\n\");\n"
+      : "import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from \"node:fs\";\n"
+        + "const archive = process.argv[2];\n"
+        + "const original = readFileSync(archive);\n"
+        + "const descriptor = openSync(archive, 'r+');\n"
+        + "writeSync(descriptor, Buffer.from([original[0] ^ 255]), 0, 1, 0);\n"
+        + "fsyncSync(descriptor);\n"
+        + "writeSync(descriptor, original, 0, original.length, 0);\n"
+        + "fsyncSync(descriptor);\n"
+        + "closeSync(descriptor);\n";
+    writeFileSync(renameProbe, probeSource);
     const tarProbe = join(fixture.root, "tar-substitution-probe");
     writeExecutable(
       tarProbe,
       "#!/bin/bash\n"
-        + "\"$TOKEN_TEST_RENAME_NODE\" \"$TOKEN_TEST_RENAME_PROBE\" \"$TOKEN_TEST_ARCHIVE\"\n"
+        + `"${process.execPath}" "${renameProbe}" "${archive}"\n`
         + "exec /usr/bin/tar \"$@\"\n",
     );
-    bootstrap = bootstrap.replace(
-      "/usr/bin/tar --no-same-owner --no-same-permissions",
-      `"${tarProbe}" --no-same-owner --no-same-permissions`,
-    );
+    bootstrap = bootstrap.replace("/usr/bin/tar --no-same-owner --no-same-permissions", `"${tarProbe}" --no-same-owner --no-same-permissions`);
   }
   writeExecutable(bootstrapPath, bootstrap);
   return { archive, archiveSha256, renameProbe };
@@ -277,11 +285,7 @@ test("real bootstrap fixture rejects pathname replacement after descriptor-backe
   const result = runRoot(
     fixture,
     ["bootstrap", "install", "--offline"],
-    {
-      TOKEN_TEST_ARCHIVE: prepared.archive,
-      TOKEN_TEST_RENAME_NODE: process.execPath,
-      TOKEN_TEST_RENAME_PROBE: prepared.renameProbe,
-    },
+    {},
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node/u);
@@ -297,6 +301,17 @@ test("real bootstrap fixture rejects pathname replacement after descriptor-backe
   assert.equal(existsSync(fixture.marker), false);
 });
 
+test("real bootstrap rejects held-inode mutation and exact-byte restore before staged Node execution", (context) => {
+  const fixture = createRootFixture(context, { realBootstrap: true });
+  const prepared = prepareBootstrapArchiveFixture(fixture, { mutateHeldInodeDuringExtraction: true });
+  const result = runRoot(fixture, ["bootstrap", "install", "--offline"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node/u);
+  assert.equal(createHash("sha256").update(readFileSync(prepared.archive)).digest("hex"), prepared.archiveSha256);
+  assert.equal(existsSync(fixture.log), false, "the archive-derived interpreter must not execute");
+  assert.equal(existsSync(fixture.marker), false);
+});
+
 test("doctor wiring verifies and executes through the archive-derived Node", () => {
   const dev = readFileSync(join(repositoryRoot, "dev"), "utf8");
   const bootstrap = readFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), "utf8");
@@ -305,7 +320,8 @@ test("doctor wiring verifies and executes through the archive-derived Node", () 
   assert.doesNotMatch(dev, /exec node .*doctor/u);
   const doctorCase = bootstrap.slice(bootstrap.indexOf("  doctor)"), bootstrap.indexOf("  all)"));
   assert.ok(doctorCase.indexOf("toolchain.mjs\" verify --offline") < doctorCase.indexOf("doctor.mjs"));
-  assert.equal([...doctorCase.matchAll(/"\$token_pinned_node"/gu)].length, 2);
+  assert.equal([...doctorCase.matchAll(/token_run_node/gu)].length, 2);
+  assert.match(bootstrap, /\/usr\/bin\/env -i/u);
   assert.match(bootstrap, /^#!\/bin\/bash/u);
   assert.match(bootstrap, /^PATH=\/usr\/bin:\/bin$/mu);
 });

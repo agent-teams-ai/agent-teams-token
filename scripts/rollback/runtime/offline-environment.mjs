@@ -12,6 +12,7 @@ import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import { basicRun, gitExecutable } from "./candidate.mjs";
 import { sha256 } from "./common.mjs";
+import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
 
 const SHA_256 = /^[a-f0-9]{64}$/u;
 
@@ -51,10 +52,9 @@ export function copyAndInstallOfflineEnvironment({
     chmodSync(destination, 0o600);
     copied.push({ archiveName: artifact.archiveName, byteLength: bytes.length, sha256: digest });
   }
-  const bootstrapEnvironment = {
-    ...process.env,
+  const bootstrapEnvironment = allowlistedChildEnvironment(process.env, {
     PATH: "/usr/local/bin:/usr/bin:/bin:/usr/lib/git-core",
-  };
+  });
   recorder.run(group, "bootstrap-core-install", "/bin/bash", ["./dev", "bootstrap", "install", "--offline"], {
     cwd: checkout,
     env: bootstrapEnvironment,
@@ -72,10 +72,7 @@ export function copyAndInstallOfflineEnvironment({
     "./dev", "bootstrap", "verify", "--offline", "--scope=solana",
   ], { cwd: checkout, env: bootstrapEnvironment, timeout: 600_000 });
   const tools = strictToolPaths(checkout, { platform, requireSolana: true, requireDocker: false });
-  const commandEnvironment = {
-    ...process.env,
-    PATH: toolPath(tools),
-  };
+  const commandEnvironment = allowlistedChildEnvironment(process.env, { PATH: toolPath(tools) });
   const storeResult = recorder.run(group, "pnpm-store-path", tools.pnpm, ["store", "path", "--silent"], {
     cwd: checkout,
     env: commandEnvironment,

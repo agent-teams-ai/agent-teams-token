@@ -14,6 +14,11 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  allowlistedChildEnvironment,
+  canonicalGitArguments,
+  canonicalGitEnvironment,
+} from "../toolchain-environment.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const historyScript = join(repositoryRoot, "scripts/assert-complete-history.sh");
@@ -22,10 +27,20 @@ const bash = "/usr/bin/bash";
 const baselineSha = "b7a868f85d89c4bb7a9aeed1d854a5f949306a45";
 
 function run(command, arguments_, options = {}) {
-  return spawnSync(command, arguments_, {
+  const sourceEnvironment = { ...process.env, PATH: "/usr/bin:/bin", ...options.env };
+  const safeDirectories = command === git
+    ? [repositoryRoot, join(repositoryRoot, ".git"), ...(options.cwd && resolve(options.cwd) !== repositoryRoot
+      ? [resolve(options.cwd)]
+      : [])].flatMap((path) => ["-c", `safe.directory=${path}`])
+    : [];
+  return spawnSync(command, command === git
+    ? [...canonicalGitArguments, ...safeDirectories, ...arguments_]
+    : arguments_, {
     cwd: options.cwd,
     encoding: "utf8",
-    env: { ...process.env, PATH: "/usr/bin:/bin", ...options.env },
+    env: command === git
+      ? canonicalGitEnvironment(sourceEnvironment)
+      : allowlistedChildEnvironment(sourceEnvironment, { PATH: "/usr/bin:/bin" }),
   });
 }
 
@@ -38,13 +53,19 @@ assert.match(candidateSha, /^[a-f0-9]{40}$/u);
 
 function makeClone({ depth } = {}) {
   const boundary = mkdtempSync(join(tmpdir(), "agtmai-rollback-history-test-"));
+  const bundle = join(boundary, "source.bundle");
+  const source = join(boundary, "source.git");
   const checkout = join(boundary, "checkout");
+  let result = run(git, ["bundle", "create", bundle, "--all"], { cwd: repositoryRoot });
+  assert.equal(result.status, 0, result.stderr);
+  result = run(git, ["clone", "--quiet", "--bare", bundle, source]);
+  assert.equal(result.status, 0, result.stderr);
   const cloneArguments = ["clone", "--quiet"];
   if (depth !== undefined) {
     cloneArguments.push("--depth", String(depth));
   }
-  cloneArguments.push(`file://${repositoryRoot}`, checkout);
-  const result = run(git, cloneArguments);
+  cloneArguments.push(`file://${source}`, checkout);
+  result = run(git, cloneArguments);
   assert.equal(result.status, 0, result.stderr);
   return { boundary, checkout };
 }
@@ -109,10 +130,10 @@ test("integrated CI requires complete exact-head history before cache and qualit
   assert.ok(steps.indexOf(preflight) < steps.indexOf(rootCheck));
   assert.equal(
     preflight.run,
-    "source scripts/env.sh && node scripts/rollback/prove-slices.mjs --preflight-only --expected-sha=\"$GITHUB_SHA\"",
+    "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\"",
   );
   assert.ok(foundation.includes("run: " + preflight.run));
-  assert.ok(foundation.includes("run: source scripts/env.sh && pnpm check"));
+  assert.ok(foundation.includes("run: source scripts/env.sh && pnpm check:linux"));
   const historyAfter = steps.find(
     ({ id }) => id === "assert-complete-history-and-exact-clean-head-after",
   );
@@ -130,7 +151,7 @@ test("integrated CI requires complete exact-head history before cache and qualit
   );
   assert.match(
     foundation,
-    /id: validate-rollback-proof[\s\S]*?if: \$\{\{ success\(\) \}\}[\s\S]*?validate-evidence\.mjs[\s\S]*?id: upload-rollback-proof-evidence[\s\S]*?if: \$\{\{ success\(\) && steps\.validate-rollback-proof\.outcome == 'success' \}\}[\s\S]*?path: \$\{\{ runner\.temp \}\}\/rollback-proof-\$\{\{ github\.sha \}\}[\s\S]*?if-no-files-found: error/u,
+    /id: validate-rollback-proof[\s\S]*?if: \$\{\{ success\(\) \}\}[\s\S]*?rollback:evidence:validate[\s\S]*?id: upload-rollback-proof-evidence[\s\S]*?if: \$\{\{ success\(\) && steps\.validate-rollback-proof\.outcome == 'success' \}\}[\s\S]*?path: \$\{\{ runner\.temp \}\}\/rollback-proof-\$\{\{ github\.sha \}\}[\s\S]*?if-no-files-found: error/u,
   );
   assert.match(
     foundation,
@@ -400,9 +421,13 @@ test("reachable objects supplied only by an alternate database fail closed", () 
     assert.doesNotMatch(fileAlternate.stdout, /ROLLBACK_HISTORY_OK/u);
 
     rmSync(alternatesFile);
-    const environmentAlternate = run(bash, [historyScript, head, baselineSha], {
+    const environmentAlternate = spawnSync(bash, [historyScript, head, baselineSha], {
       cwd: checkout,
-      env: { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateRoot },
+      encoding: "utf8",
+      env: {
+        ...allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateRoot,
+      },
     });
     assert.notEqual(environmentAlternate.status, 0);
     assert.match(

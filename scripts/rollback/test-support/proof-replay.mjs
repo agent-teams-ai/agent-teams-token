@@ -1,6 +1,7 @@
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
+const { cloneRepository } = proofSupport;
 
 test("per-slice rollback replay requires exact status, byte tree and forbidden-residue equivalence", () => {
   const fixture = gitFixture();
@@ -189,9 +190,7 @@ test("production manifest rollback executes in quarantine and verifies the trans
   const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
   let workspaceHandle;
   try {
-    basicRun(gitExecutable(), [
-      "clone", "--quiet", "--no-hardlinks", repositoryRoot, checkout,
-    ], { cwd: boundary });
+    cloneRepository(repositoryRoot, checkout, boundary);
     copyCurrentRollbackSharedState(checkout, manifest);
     mkdirSync(quarantineRoot, { mode: 0o700 });
     workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
@@ -230,9 +229,7 @@ test("production baseline restoration creates absent files and overwrites existi
     const restoredPath = manifest.restoreFromBaseline[0];
     let workspaceHandle;
     try {
-      basicRun(gitExecutable(), [
-        "clone", "--quiet", "--no-hardlinks", repositoryRoot, checkout,
-      ], { cwd: boundary });
+      cloneRepository(repositoryRoot, checkout, boundary);
       copyCurrentRollbackSharedState(checkout, manifest);
       mkdirSync(quarantineRoot, { mode: 0o700 });
       assert.equal(
@@ -267,9 +264,7 @@ test("production manifest and empty-directory rollback preserve substituted iden
   let directoryWorkspaceHandle;
   let ancestorWorkspaceHandle;
   try {
-    basicRun(gitExecutable(), [
-      "clone", "--quiet", "--no-hardlinks", repositoryRoot, checkout,
-    ], { cwd: boundary });
+    cloneRepository(repositoryRoot, checkout, boundary);
     copyCurrentRollbackSharedState(checkout, manifest);
     mkdirSync(quarantineRoot, { mode: 0o700 });
     checkoutWorkspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);

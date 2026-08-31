@@ -14,14 +14,20 @@ import {
   readlinkSync,
   readSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { assertExpectedFileHashes } from "./toolchain-policy.mjs";
+import {
+  captureCleanupTreeSnapshot,
+  cleanupIdentityBoundDirectory,
+  createCleanupHandle,
+} from "./rollback/runtime/cleanup.mjs";
+import { allowlistedChildEnvironment } from "./toolchain-environment.mjs";
+import { toolchainProvenanceFile } from "./toolchain-provenance.mjs";
 
 export const completeTreeAuthority = "pinned-archive-complete-tree-v1";
-export const provenanceFile = ".agtmai-toolchain-install.json";
+export const provenanceFile = toolchainProvenanceFile;
 
 export function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -115,7 +121,11 @@ function extractDescriptor(descriptor, artifact, staged) {
   const result = spawnSync(
     "/usr/bin/tar",
     ["--no-same-owner", "--no-same-permissions", flag, "/dev/fd/3", "-C", staged],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe", descriptor] },
+    {
+      encoding: "utf8",
+      env: allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
+      stdio: ["ignore", "pipe", "pipe", descriptor],
+    },
   );
   if (result.error || result.status !== 0) {
     throw new Error(
@@ -215,8 +225,14 @@ export function prepareVerifiedPayload({
   toolsRoot,
   missingCode,
   onArchiveVerified,
+  onCleanupBoundary,
 }) {
   const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
+  const cleanupHandle = createCleanupHandle(stageRoot, {
+    temporaryRoot: toolsRoot,
+    targetPrefix: ".install-part-",
+    allowedEntries: ["payload"],
+  });
   const staged = join(stageRoot, "payload");
   let verified;
   try {
@@ -232,7 +248,7 @@ export function prepareVerifiedPayload({
       extractDescriptor(verified.descriptor, artifact, staged);
     }
     assertArchiveStable({ name, platform, artifact, archive, verified });
-    const source = installationSource(staged);
+    const source = artifact.archive === "executable" ? staged : installationSource(staged);
     normalizeTreeMetadata(source);
     const inventory = inventoryInstallation(source);
     if (inventory[provenanceFile] !== undefined) {
@@ -246,13 +262,28 @@ export function prepareVerifiedPayload({
       return [path, entry.sha256];
     }));
     assertExpectedFileHashes({ name, platform, artifact, files });
-    return { files, inventory, inventorySha256: inventorySha256(inventory), source, stageRoot };
+    return {
+      cleanupHandle,
+      files,
+      inventory,
+      inventorySha256: inventorySha256(inventory),
+      source,
+      stageRoot,
+    };
   } catch (error) {
-    rmSync(stageRoot, { recursive: true, force: true });
+    cleanupPreparedPayload({ cleanupHandle, stageRoot }, { onBoundary: onCleanupBoundary });
     throw error;
   } finally {
     if (verified !== undefined) {closeSync(verified.descriptor);}
   }
+}
+
+export function cleanupPreparedPayload(prepared, options = {}) {
+  if (prepared?.cleanupHandle === undefined) {
+    throw new Error("TOOLCHAIN_CLEANUP_HANDLE_REQUIRED");
+  }
+  captureCleanupTreeSnapshot(prepared.cleanupHandle);
+  return cleanupIdentityBoundDirectory(prepared.cleanupHandle, options);
 }
 
 function singleLine(value) {

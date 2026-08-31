@@ -11,9 +11,18 @@ import {
 import { isAbsolute, join, resolve } from "node:path";
 
 import { descriptorChild } from "./common.mjs";
+import { validateRuntimeNodeLock } from "./node-runtime-lock.mjs";
 import { platformId } from "./offline-environment.mjs";
+import {
+  inventoryInstallation,
+  inventorySha256,
+  provenanceFile,
+} from "../../toolchain-archive.mjs";
+import {
+  parseToolchainProvenance,
+  serializeToolchainProvenance,
+} from "../../toolchain-provenance.mjs";
 
-const SHA_256 = /^[a-f0-9]{64}$/u;
 const RUNTIME_LOCK_MAX_BYTES = 2 * 1024 * 1024;
 const RUNTIME_PROVENANCE_MAX_BYTES = 64 * 1024;
 const RUNTIME_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
@@ -160,15 +169,14 @@ function assertRuntimeExecutable(executable, executableSha256) {
 
 function assertRuntimeProvenance(runtimeRoot, platform, expected) {
   const { node, artifact, executableSha256 } = expected;
-  const expectedBytes = Buffer.from(`${JSON.stringify({
-    schemaVersion: 1,
+  const expectedFields = {
     tool: "node",
     version: node.version,
     platform,
     artifactSha256: artifact.sha256,
     files: { "bin/node": executableSha256 },
-  }, null, 2)}\n`, "utf8");
-  const provenanceFile = openRuntimeRegularFile(
+  };
+  const provenanceEntry = openRuntimeRegularFile(
     runtimeRoot,
     [".tools", artifact.installDirectory, ".agtmai-toolchain-install.json"],
     {
@@ -181,17 +189,39 @@ function assertRuntimeProvenance(runtimeRoot, platform, expected) {
   let actualBytes;
   try {
     actualBytes = readRuntimeFile(
-      provenanceFile,
+      provenanceEntry,
       "ROLLBACK_RUNTIME_PROVENANCE_UNSAFE",
       { captureBytes: true },
     ).bytes;
   } finally {
-    closeSync(provenanceFile.descriptor);
+    closeSync(provenanceEntry.descriptor);
   }
-  parseRuntimeJson(actualBytes, "ROLLBACK_RUNTIME_PROVENANCE_INVALID");
-  if (!actualBytes.equals(expectedBytes)) {
+  let provenance;
+  try {
+    provenance = parseToolchainProvenance(actualBytes, expectedFields);
+  } catch (error) {
+    throw new Error("ROLLBACK_RUNTIME_PROVENANCE_MISMATCH", { cause: error });
+  }
+  const canonicalBytes = Buffer.from(serializeToolchainProvenance(provenance), "utf8");
+  if (!actualBytes.equals(canonicalBytes)) {
     throw new Error("ROLLBACK_RUNTIME_PROVENANCE_MISMATCH");
   }
+  let actualInventory;
+  try {
+    actualInventory = inventoryInstallation(
+      join(runtimeRootPath(runtimeRoot), ".tools", artifact.installDirectory),
+      { exclude: [provenanceFile] },
+    );
+  } catch (error) {
+    throw new Error("ROLLBACK_RUNTIME_PROVENANCE_INVENTORY_UNSAFE", { cause: error });
+  }
+  if (inventorySha256(actualInventory) !== provenance.inventorySha256) {
+    throw new Error("ROLLBACK_RUNTIME_PROVENANCE_INVENTORY_MISMATCH");
+  }
+}
+
+function runtimeRootPath(runtimeRoot) {
+  return realpathSync(descriptorChild(runtimeRoot.descriptor, "."));
 }
 
 function assertLoadedRuntimeImage(executable, executableSha256) {
@@ -456,54 +486,6 @@ function parseRuntimeJson(bytes, code) {
   } catch (error) {
     throw new Error(code, { cause: error });
   }
-}
-
-function validateRuntimeNodeLock(lock, platform) {
-  const node = lock?.tools?.node;
-  const artifact = node?.platforms?.[platform];
-  if (!validRuntimeNodeMetadata(lock, node)) {
-    throw new Error("ROLLBACK_RUNTIME_LOCK_INVALID platform=" + platform);
-  }
-  const expectedVersionCheck = [{
-    name: "node",
-    path: "bin/node",
-    args: ["--version"],
-    pattern: "^v" + node.version.replaceAll(".", "\\.") + "$",
-  }];
-  const expectedArchiveName = "node-v" + node.version + "-linux-x64.tar.xz";
-  const expectedFileHashes = artifact?.expectedFileSha256;
-  if (!validRuntimeArtifactLocation(node, artifact, expectedArchiveName)
-    || !validRuntimeArtifactHashes(artifact, expectedFileHashes)
-    || JSON.stringify(artifact.versionChecks) !== JSON.stringify(expectedVersionCheck)) {
-    throw new Error("ROLLBACK_RUNTIME_LOCK_INVALID platform=" + platform);
-  }
-  return { node, artifact, executableSha256: expectedFileHashes["bin/node"] };
-}
-
-function validRuntimeNodeMetadata(lock, node) {
-  return lock?.schemaVersion === 2
-    && node?.scope === "genesis-core"
-    && typeof node.version === "string"
-    && /^\d+\.\d+\.\d+$/u.test(node.version);
-}
-
-function validRuntimeArtifactLocation(node, artifact, expectedArchiveName) {
-  return artifact?.archive === "tar.xz"
-    && artifact.archiveName === expectedArchiveName
-    && artifact.installDirectory === "node-v" + node.version + "-linux-x64"
-    && artifact.url === "https://nodejs.org/dist/v" + node.version + "/" + expectedArchiveName
-    && artifact.checksumSource
-      === "https://nodejs.org/dist/v" + node.version + "/SHASUMS256.txt";
-}
-
-function validRuntimeArtifactHashes(artifact, expectedFileHashes) {
-  return SHA_256.test(artifact.sha256 ?? "")
-    && JSON.stringify(artifact.expectedFiles) === JSON.stringify(["bin/node"])
-    && expectedFileHashes !== null
-    && typeof expectedFileHashes === "object"
-    && !Array.isArray(expectedFileHashes)
-    && JSON.stringify(Object.keys(expectedFileHashes)) === JSON.stringify(["bin/node"])
-    && SHA_256.test(expectedFileHashes["bin/node"] ?? "");
 }
 
 function assertRuntimeIdentity(expected, actual, code) {

@@ -2,15 +2,21 @@ import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
 
-test("root check preflights before gates and exact-head CI wiring is integrated pending execution", () => {
+test("portable root check and mandatory Linux proof wiring are integrated pending execution", () => {
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
   assert.equal(
     packageJson.scripts["rollback:preflight"],
-    "node scripts/rollback/prove-slices.mjs --preflight-only",
+    ".tools/bin/node scripts/rollback/prove-slices.mjs --preflight-only",
   );
-  assert.equal(packageJson.scripts["rollback:test"], "node --test scripts/tests/rollback-*.test.mjs");
-  assert.match(packageJson.scripts.check, /^pnpm rollback:preflight && /u);
-  assert.match(packageJson.scripts.check, /pnpm rollback:test && pnpm rollback:prove$/u);
+  assert.equal(
+    packageJson.scripts["rollback:test"],
+    ".tools/bin/node --test scripts/tests/rollback-*.test.mjs",
+  );
+  assert.doesNotMatch(packageJson.scripts.check, /rollback:(?:preflight|prove)/u);
+  assert.equal(
+    packageJson.scripts["check:linux"],
+    "pnpm rollback:preflight && pnpm check && pnpm rollback:prove",
+  );
   assert.doesNotMatch(packageJson.scripts.check, /ROLLBACK.*SKIP|--if-present/u);
 
   const request = JSON.parse(readFileSync(
@@ -33,7 +39,7 @@ test("root check preflights before gates and exact-head CI wiring is integrated 
   assert.match(patch.environment.SLITHER_FORGE_PATH, /foundry-v1\.8\.0-linux-x64\/forge$/u);
   assert.match(patch.environment.SLITHER_SOLC_PATH, /solc-v0\.8\.36-linux-x64\/solc$/u);
   const rootCheck = patch.steps.find(({ id }) => id === "run-root-check-with-exact-rollback-proof");
-  assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check");
+  assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check:linux");
   const preload = patch.steps.find(({ id }) => id === "preload-pinned-slither-image");
   assert.match(preload.run, /security:solidity:prepare-image/u);
   const preflight = patch.steps.find(
@@ -41,7 +47,7 @@ test("root check preflights before gates and exact-head CI wiring is integrated 
   );
   assert.equal(
     preflight.run,
-    "source scripts/env.sh && node scripts/rollback/prove-slices.mjs --preflight-only --expected-sha=\"$GITHUB_SHA\"",
+    "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\"",
   );
   const cleanAfter = patch.steps.find(
     ({ id }) => id === "assert-complete-history-and-exact-clean-head-after",
@@ -51,7 +57,7 @@ test("root check preflights before gates and exact-head CI wiring is integrated 
   assert.match(cleanAfter.run, /assert-clean-head\.sh/u);
   const validation = patch.steps.find(({ id }) => id === "validate-rollback-proof");
   assert.equal(validation.if, "${{ success() }}");
-  assert.match(validation.run, /validate-evidence\.mjs/u);
+  assert.match(validation.run, /pnpm rollback:evidence:validate --/u);
   assert.match(validation.run, /assert-complete-history\.sh/u);
   assert.match(validation.run, /assert-clean-head\.sh/u);
   const upload = patch.steps.find(({ id }) => id === "upload-rollback-proof-evidence");

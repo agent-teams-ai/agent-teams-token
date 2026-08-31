@@ -95,17 +95,17 @@ export function editPackage(root, sliceId, options = {}) {
     );
     document.scripts.check = replaceExactly(
       document.scripts.check,
-      "pnpm rollback:preflight && ",
+      " && pnpm rollback:test",
       "",
-      `${sliceId}:rollback-preflight-prefix`,
+      `${sliceId}:rollback-test-suffix`,
     );
-    document.scripts.check = replaceExactly(
-      document.scripts.check,
-      " && pnpm rollback:test && pnpm rollback:prove",
-      "",
-      `${sliceId}:rollback-proof-suffix`,
-    );
-    for (const key of ["rollback:evidence:validate", "rollback:preflight", "rollback:prove", "rollback:test"]) {
+    for (const key of [
+      "check:linux",
+      "rollback:evidence:validate",
+      "rollback:preflight",
+      "rollback:prove",
+      "rollback:test",
+    ]) {
       if (!(key in document.scripts)) {
         throw new Error(`ROLLBACK_PACKAGE_SCRIPT_MISSING key=${key}`);
       }

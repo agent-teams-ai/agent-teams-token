@@ -67,10 +67,10 @@
   ],
   "restoreFromBaseline": ["tooling/security/slither/src/README.md"],
   "reverseEdits": [
-    {"path": ".github/workflows/ci.yml", "beforeSha256": "577982797186f46f731f1507d2e4e54e9b29ab2b403f5a8a71484002dcd8575b", "afterSha256": "2cba9e7651f079d20795c9df6ad56da2e5671f50df25626aca9f3af1ba58a251"},
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "fa82f90fb2703e58253cb15affae5ff54a4719e29c9942de1fa66b3c46ba1a1f", "afterSha256": "2cba9e7651f079d20795c9df6ad56da2e5671f50df25626aca9f3af1ba58a251"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "8cb409de84c92339a6f0d69d04c3d7b10479688c118968f77b902ad906c363ee", "afterSha256": "5f7b6e5a8c3098a29aa26d9fb5e9c3d02cdbbf5185c3b4e2998ddadfcad5e96e"},
-    {"path": "package.json", "beforeSha256": "15b30bdcbe6d1ee53ee55b6aef00502161da7b0f7ae2bd0e29f831166144f739", "afterSha256": "d57ce200cfba6c134525feca849460f4411c5e9a4198eb5687deca3b382c5a52"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "7ab4614142861859e2e70e99a45b6767bd03e916874fc5b8ac3c98b2f1815edf", "afterSha256": "b7d8ec5b3d0e10d80b03ee3bbf512bc059a6666dee4795c7cfe620f08ba6517e"},
+    {"path": "package.json", "beforeSha256": "13ab02b8a321b3f04527f0e8e797f42170807022bc362fd17f5a5c3c3ca596ce", "afterSha256": "4bdca933b9563962e8a42b29d3e1452529630e4f9ac57c695c9bee527d0d4fd2"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "806fbcd9dc0dd0397b3d8b631cff143fb6eccab71add7c4d2928cb3de3fbd2ff", "afterSha256": "a607b74685115f2223885831cdf1cd60c117a107f326ac20af97211f5e2fb9f9"},
     {"path": "tooling/toolchain.lock.json", "beforeSha256": "03eeee5922c84bb5e0af3ee2a668fac644b8be571f652f3ec0176bf4e2b24f47", "afterSha256": "c5c1fb13a8819d7476138faf476a8a733f9bbbbc8f71f89b90cf01a7a897725f"},
     {"path": "tooling/security/slither/src/README.md", "beforeSha256": "a275519a6e9968341abfb4f3c574d08021a851866e58af338b8217df17cddcb2", "afterSha256": "cf05a9ce47005c3d7d2b70afe601113e3ff306e60832fe587487c9044f99e750"}
   ],
@@ -83,7 +83,7 @@
     "tooling/security/slither/src/README.md"
   ],
   "retainedSharedPaths": [
-    {"path": "architecture/foundation/repository-agent-workflow.yaml", "sha256": "c86b87232b37c9aa6f843fcd8122daaad652411abbc21994be30c49dacabdfe5", "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub"},
+    {"path": "architecture/foundation/repository-agent-workflow.yaml", "sha256": "1deb26483ff60e8e91bcb59731aeb3b890ef9d505d422275cd67676a52d27c54", "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub"},
     {"path": "scripts/tests/tooling-boundaries.test.mjs", "sha256": "4bf1757dd4380c21bbb0f93ba03c30cf4f66f2921ae949e26811712694aa5985", "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"}
   ],
   "survivingGates": ["local-solana", "deployment-plan"]

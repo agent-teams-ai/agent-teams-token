@@ -124,16 +124,16 @@ test("foundation job proves complete exact history and preflights every rollback
   const preflight = byId("non-pulling-rollback-environment-cache-preflight");
   assert.equal(
     preflight.run,
-    'source scripts/env.sh && node scripts/rollback/prove-slices.mjs --preflight-only --expected-sha="$GITHUB_SHA"',
+    'source scripts/env.sh && pnpm rollback:preflight -- --expected-sha="$GITHUB_SHA"',
   );
   const rootCheck = byId("run-root-check-with-exact-rollback-proof");
-  assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check");
+  assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check:linux");
   const historyAfter = byId("assert-complete-history-and-exact-clean-head-after");
   assert.equal(historyAfter.if, "${{ always() }}");
   assert.equal(historyAfter.run.trim(), historyBefore.run.trim());
   const validation = byId("validate-rollback-proof");
   assert.equal(validation.if, "${{ success() }}");
-  assert.match(validation.run, /validate-evidence\.mjs/u);
+  assert.match(validation.run, /pnpm rollback:evidence:validate --/u);
   assert.match(validation.run, /--expected-sha="\$GITHUB_SHA"/u);
   assert.match(validation.run, /assert-complete-history\.sh "\$GITHUB_SHA"/u);
   assert.match(validation.run, /assert-clean-head\.sh "\$GITHUB_SHA"/u);
@@ -292,6 +292,20 @@ test("package-manager policy disables implicit downloads and the final check has
   for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built", "test:local-solana", "test:deployment-plan", "security:slither:test"]) {
     assert.match(packageJson.scripts.check, new RegExp(`pnpm ${command.replaceAll(":", "\\:")}`));
   }
+  assert.match(
+    packageJson.scripts["test:linux-parity"],
+    /scripts\/tests\/toolchain-hardening\.test\.mjs/u,
+  );
+  assert.doesNotMatch(packageJson.scripts.check, /rollback:(?:preflight|prove)/u);
+  assert.equal(
+    packageJson.scripts["check:linux"],
+    "pnpm rollback:preflight && pnpm check && pnpm rollback:prove",
+  );
+  assert.match(
+    workflow.jobs["foundation-and-typescript"].steps
+      .find((step) => step.id === "run-root-check-with-exact-rollback-proof").run,
+    /pnpm check:linux$/u,
+  );
   assert.doesNotMatch(packageJson.scripts.check, /\|\|\s*true|--if-present/);
 });
 

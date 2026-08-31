@@ -32,6 +32,10 @@ const CLEANUP_MAX_RELATIVE_BYTES = 16_384;
 const CLEANUP_MKDTEMP_SUFFIX = /^[A-Za-z0-9]{6}$/u;
 // Every accepted target is an exact production mkdtemp namespace.
 const CLEANUP_TARGET_PREFIX_ALLOWLIST = new Set([
+  ".bootstrap-node-part.",
+  ".install-backup-",
+  ".install-failed-",
+  ".install-part-",
   "agtmai-rollback-local-solana-",
   "agtmai-rollback-deployment-plan-",
   "agtmai-rollback-slither-",
@@ -39,7 +43,7 @@ const CLEANUP_TARGET_PREFIX_ALLOWLIST = new Set([
   "agtmai-rollback-hashes-deployment-plan-",
   "agtmai-rollback-hashes-slither-",
 ]);
-const CLEANUP_ALLOWED_TOP_LEVEL = new Set(["checkout", "gate-tmp"]);
+const CLEANUP_ALLOWED_TOP_LEVEL = new Set(["checkout", "gate-tmp", "payload"]);
 const cleanupTreeSnapshots = new WeakMap();
 
 export function createCleanupHandle(path, policy) {

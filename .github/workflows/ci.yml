@@ -83,11 +83,11 @@ jobs:
       - name: Validate rollback environment and caches without pulling
         id: non-pulling-rollback-environment-cache-preflight
         shell: bash
-        run: source scripts/env.sh && node scripts/rollback/prove-slices.mjs --preflight-only --expected-sha="$GITHUB_SHA"
+        run: source scripts/env.sh && pnpm rollback:preflight -- --expected-sha="$GITHUB_SHA"
       - name: Final repository check
         id: run-root-check-with-exact-rollback-proof
         shell: bash
-        run: source scripts/env.sh && pnpm check
+        run: source scripts/env.sh && pnpm check:linux
       - name: Reassert complete history and exact clean checkout
         id: assert-complete-history-and-exact-clean-head-after
         if: ${{ always() }}
@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           source scripts/env.sh
-          node scripts/rollback/validate-evidence.mjs \
+          pnpm rollback:evidence:validate -- \
             --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" \
             --expected-sha="$GITHUB_SHA"
           scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45

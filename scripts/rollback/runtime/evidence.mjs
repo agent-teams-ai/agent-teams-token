@@ -14,6 +14,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
+import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 
 const EVIDENCE_ENVIRONMENT_KEYS = [
   "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY",
@@ -98,11 +99,14 @@ export class EvidenceRecorder {
     const startedAt = new Date();
     const started = Date.now();
     let result;
+    const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
+      workingDirectory: options.cwd,
+    });
     try {
       try {
-        result = spawnSync(command, arguments_, {
+        result = spawnSync(command, invocation.arguments, {
           cwd: options.cwd,
-          env: options.env ?? process.env,
+          env: invocation.environment,
           input: options.input,
           stdio: [options.input === undefined ? "ignore" : "pipe", stdoutDescriptor, stderrDescriptor],
           timeout: options.timeout ?? 600_000,
@@ -123,9 +127,9 @@ export class EvidenceRecorder {
       id,
       phase: options.phase ?? "preparation",
       command,
-      arguments: arguments_,
+      arguments: invocation.arguments,
       cwd: options.cwd,
-      environment: selectedEnvironment(options.env ?? process.env),
+      environment: selectedEnvironment(invocation.environment),
       startedAt: startedAt.toISOString(),
       durationMs: Date.now() - started,
       exitCode: result.status,

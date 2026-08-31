@@ -23,6 +23,15 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
+import {
+  cleanupPreparedPayload,
+  installPreparedArtifact,
+  prepareVerifiedPayload,
+} from "../../toolchain.mjs";
+import {
+  parseToolchainProvenance,
+  serializeToolchainProvenance,
+} from "../../toolchain-provenance.mjs";
 
 import {
   applyManifest,
@@ -112,6 +121,7 @@ function pinnedRuntimeFixture() {
   const installDirectory = "node-v" + version + "-linux-x64";
   const archiveName = installDirectory + ".tar.xz";
   const executable = join(root, ".tools", installDirectory, "bin", "node");
+  const trustedNode = join(root, ".tools", "bin", "node");
   const archive = join(root, ".tools", "downloads", archiveName);
   const provenance = join(
     root,
@@ -119,13 +129,11 @@ function pinnedRuntimeFixture() {
     installDirectory,
     ".agtmai-toolchain-install.json",
   );
-  mkdirSync(dirname(executable), { recursive: true });
   mkdirSync(dirname(archive), { recursive: true });
   mkdirSync(join(root, "tooling"));
-  copyFileSync(process.execPath, executable);
-  chmodSync(executable, 0o755);
-  writeFileSync(archive, "pinned runtime archive fixture\n");
-  const executableSha256 = digestFile(executable);
+  copyFileSync(process.execPath, archive);
+  chmodSync(archive, 0o755);
+  const executableSha256 = digestFile(archive);
   const artifactSha256 = digestFile(archive);
   const artifact = {
     url: "https://nodejs.org/dist/v" + version + "/" + archiveName,
@@ -136,6 +144,7 @@ function pinnedRuntimeFixture() {
     installDirectory,
     expectedFiles: ["bin/node"],
     expectedFileSha256: { "bin/node": executableSha256 },
+    installationAuthority: "pinned-archive-complete-tree-v1",
     versionChecks: [{
       name: "node",
       path: "bin/node",
@@ -143,7 +152,7 @@ function pinnedRuntimeFixture() {
       pattern: "^v" + version.replaceAll(".", "\\.") + "$",
     }],
   };
-  writeFileSync(join(root, "tooling/toolchain.lock.json"), `${JSON.stringify({
+  const lock = {
     schemaVersion: 2,
     tools: {
       node: {
@@ -152,22 +161,42 @@ function pinnedRuntimeFixture() {
         platforms: { "linux-x64": artifact },
       },
     },
-  }, null, 2)}\n`);
-  const writeProvenance = (binarySha256 = executableSha256) => {
-    writeFileSync(provenance, `${JSON.stringify({
-      schemaVersion: 1,
-      tool: "node",
-      version,
-      platform: "linux-x64",
-      artifactSha256,
-      files: { "bin/node": binarySha256 },
-    }, null, 2)}\n`);
   };
-  writeProvenance();
+  writeFileSync(join(root, "tooling/toolchain.lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
+  const prepared = prepareVerifiedPayload({
+    name: "node",
+    platform: "linux-x64",
+    artifact: { ...artifact, archive: "executable" },
+    archive,
+    toolsRoot: join(root, ".tools"),
+    missingCode: "TEST_RUNTIME_ARCHIVE_MISSING",
+  });
+  try {
+    installPreparedArtifact({
+      name: "node",
+      tool: lock.tools.node,
+      artifact,
+      prepared,
+      destination: join(root, ".tools", installDirectory),
+      platform: "linux-x64",
+      toolsRoot: join(root, ".tools"),
+      lock,
+    });
+  } finally {
+    cleanupPreparedPayload(prepared);
+  }
+  const writeProvenance = (binarySha256 = executableSha256) => {
+    const current = parseToolchainProvenance(readFileSync(provenance));
+    writeFileSync(provenance, serializeToolchainProvenance({
+      ...current,
+      files: { "bin/node": binarySha256 },
+    }));
+  };
   return {
     root,
     version,
     executable,
+    trustedNode,
     archive,
     provenance,
     executableSha256,
@@ -176,7 +205,11 @@ function pinnedRuntimeFixture() {
   };
 }
 
-function invokePinnedRuntime(fixture, { executable = fixture.executable, setup = "" } = {}) {
+function invokePinnedRuntime(fixture, {
+  executable = fixture.trustedNode,
+  setup = "",
+  environment = process.env,
+} = {}) {
   const source = `
     import { assertPinnedNodeRuntime } from ${JSON.stringify(proofRuntimeModuleUrl)};
     ${setup}
@@ -185,6 +218,7 @@ function invokePinnedRuntime(fixture, { executable = fixture.executable, setup =
   return spawnSync(executable, ["--input-type=module", "--eval", source], {
     encoding: "utf8",
     maxBuffer: 4 * 1024 * 1024,
+    env: environment,
     timeout: 60_000,
   });
 }
@@ -207,6 +241,31 @@ function gitFixture() {
   git(root, ["add", "-A"]);
   git(root, ["commit", "--quiet", "-m", "test: inventory fixture"]);
   return { boundary, root, sha: git(root, ["rev-parse", "HEAD"]).trim() };
+}
+
+function cloneRepository(source, destination, cwd = dirname(destination)) {
+  if (typeof process.getuid !== "function"
+    || String(lstatSync(source, { bigint: true }).uid) === String(process.getuid())) {
+    basicRun(gitExecutable(), [
+      "clone", "--quiet", "--no-hardlinks", source, destination,
+    ], { cwd });
+    return;
+  }
+
+  const transport = temporaryDirectory("agtmai-rollback-clone-transport-");
+  const bundle = join(transport, "source.bundle");
+  const bare = join(transport, "source.git");
+  try {
+    basicRun(gitExecutable(), ["bundle", "create", bundle, "--all"], { cwd: source });
+    basicRun(gitExecutable(), ["clone", "--quiet", "--bare", bundle, bare], {
+      cwd: transport,
+    });
+    basicRun(gitExecutable(), [
+      "clone", "--quiet", "--no-hardlinks", bare, destination,
+    ], { cwd });
+  } finally {
+    rmSync(transport, { recursive: true, force: true });
+  }
 }
 
 
@@ -287,4 +346,5 @@ export {
   invokePinnedRuntime,
   git,
   gitFixture,
+  cloneRepository,
 };

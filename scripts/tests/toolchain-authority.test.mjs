@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  cleanupPreparedPayload,
   fetchArtifacts,
   inspectInstallation,
   installArtifacts,
@@ -95,7 +96,7 @@ test("official pnpm archive yields a complete canonical transitive inventory", (
     assert.equal(prepared.inventory["dist/pnpm.mjs"].type, "file");
     assert.ok(Object.keys(prepared.inventory).length > 400);
   } finally {
-    rmSync(prepared.stageRoot, { recursive: true, force: true });
+    cleanupPreparedPayload(prepared);
   }
 });
 

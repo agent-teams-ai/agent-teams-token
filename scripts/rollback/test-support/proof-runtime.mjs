@@ -110,7 +110,7 @@ test("committed Linux Node runtime has an immutable inner-binary pin and Darwin 
   );
 });
 
-test("production runtime proof binds process.execPath, procfs image, archive and provenance", (context) => {
+test("actual installPreparedArtifact output crosses assertPinnedNodeRuntime and preflight", (context) => {
   if (process.platform !== "linux" || process.arch !== "x64") {
     context.skip("Linux x64 provides the required /proc/self/exe binding");
     return;
@@ -128,6 +128,144 @@ test("production runtime proof binds process.execPath, procfs image, archive and
     });
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("trusted pinned Node wrapper rejects hostile preload, proxy and npm authority", (context) => {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    context.skip("Linux x64 provides the required /proc/self/exe binding");
+    return;
+  }
+  const fixture = pinnedRuntimeFixture();
+  try {
+    const marker = join(fixture.root, "hostile-node-options-executed");
+    const preload = join(fixture.root, "hostile-preload.cjs");
+    writeFileSync(
+      preload,
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed\\n");\n`,
+    );
+    const result = invokePinnedRuntime(fixture, {
+      environment: {
+        ...process.env,
+        ALL_PROXY: "sentinel-all-proxy",
+        HTTPS_PROXY: "sentinel-https-proxy",
+        HTTP_PROXY: "sentinel-http-proxy",
+        NODE_OPTIONS: `--require=${preload}`,
+        NODE_PATH: join(fixture.root, "hostile-node-path"),
+        npm_config_registry: "https://sentinel.invalid/",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("runtime proof rejects inventory injected after canonical installation", (context) => {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    context.skip("Linux x64 provides the required /proc/self/exe binding");
+    return;
+  }
+  const fixture = pinnedRuntimeFixture();
+  try {
+    writeFileSync(join(dirname(fixture.executable), "foreign-sentinel"), "foreign\n");
+    const result = invokePinnedRuntime(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /ROLLBACK_RUNTIME_PROVENANCE_INVENTORY_MISMATCH/u);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("actual Git commands disable hostile system, global, local and command config", () => {
+  const fixture = gitFixture();
+  const saved = Object.fromEntries(
+    Object.keys(process.env)
+      .filter((key) => key.startsWith("GIT_CONFIG_"))
+      .map((key) => [key, process.env[key]]),
+  );
+  const hostileKeys = [
+    "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0", "GIT_CONFIG_VALUE_1", "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_SYSTEM",
+  ];
+  try {
+    const marker = join(fixture.boundary, "hostile-git-authority-executed");
+    const helper = join(fixture.boundary, "hostile-git-helper");
+    const globalConfig = join(fixture.boundary, "global.gitconfig");
+    const systemConfig = join(fixture.boundary, "system.gitconfig");
+    writeExecutable(helper, `#!/bin/sh\n/bin/echo executed >>${JSON.stringify(marker)}\nexit 0\n`);
+    const hostileConfig = `[core]\n\tfsmonitor = ${helper}\n[credential]\n\thelper = ${helper}\n`;
+    writeFileSync(globalConfig, hostileConfig);
+    writeFileSync(systemConfig, hostileConfig);
+    git(fixture.root, ["config", "core.fsmonitor", helper]);
+    git(fixture.root, ["config", "credential.helper", helper]);
+
+    Object.assign(process.env, {
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "core.fsmonitor",
+      GIT_CONFIG_KEY_1: "credential.helper",
+      GIT_CONFIG_VALUE_0: helper,
+      GIT_CONFIG_VALUE_1: helper,
+      GIT_CONFIG_GLOBAL: globalConfig,
+      GIT_CONFIG_NOSYSTEM: "0",
+      GIT_CONFIG_SYSTEM: systemConfig,
+    });
+    assert.equal(assertExactCleanCandidate(fixture.root, fixture.sha), fixture.sha);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    for (const key of hostileKeys) {
+      if (saved[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = saved[key];
+      }
+    }
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("recorded offline children exclude proxy, npm, Node and Git authority", () => {
+  const root = temporaryDirectory("agtmai-rollback-evidence-environment-");
+  const gitCandidate = gitFixture();
+  try {
+    const evidence = join(root, "evidence");
+    mkdirSync(evidence);
+    const recorder = new EvidenceRecorder(evidence, { test: "hostile-environment" });
+    const sentinel = "agtmai-hostile-environment-sentinel";
+    const result = recorder.run("test", "environment", "/usr/bin/env", [], {
+      cwd: root,
+      env: {
+        ...process.env,
+        ALL_PROXY: sentinel,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.fsmonitor",
+        GIT_CONFIG_VALUE_0: sentinel,
+        HTTPS_PROXY: sentinel,
+        HTTP_PROXY: sentinel,
+        NODE_OPTIONS: `--require=${sentinel}`,
+        NODE_PATH: sentinel,
+        npm_config_registry: `https://${sentinel}.invalid/`,
+      },
+    });
+    assert.doesNotMatch(result.stdout, new RegExp(sentinel, "u"));
+    assert.equal(Object.values(result.entry.environment).includes(sentinel), false);
+    assert.deepEqual(result.entry.arguments, []);
+
+    const gitResult = recorder.run("test", "git-command-contract", gitExecutable(), [
+      "rev-parse", "--verify", "HEAD^{commit}",
+    ], { cwd: gitCandidate.root, env: process.env });
+    assert.deepEqual(gitResult.entry.arguments.slice(0, 11), [
+      "-c", "core.fsmonitor=false",
+      "-c", "credential.helper=",
+      "-c", "credential.interactive=never",
+      "-c", `safe.directory=${gitCandidate.root}`,
+      "rev-parse", "--verify", "HEAD^{commit}",
+    ]);
+  } finally {
+    rmSync(gitCandidate.boundary, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -182,9 +320,26 @@ test("runtime proof rejects process path and loaded-image identity mismatches", 
     const displaced = fixture.executable + ".loaded";
     const setup = `
       const fs = await import("node:fs");
+      const archive = await import(${JSON.stringify(
+        new URL("../../toolchain-archive.mjs", import.meta.url).href,
+      )});
+      const provenance = await import(${JSON.stringify(
+        new URL("../../toolchain-provenance.mjs", import.meta.url).href,
+      )});
       fs.renameSync(${JSON.stringify(fixture.executable)}, ${JSON.stringify(displaced)});
       fs.copyFileSync(${JSON.stringify(displaced)}, ${JSON.stringify(fixture.executable)});
       fs.chmodSync(${JSON.stringify(fixture.executable)}, 0o755);
+      const document = provenance.parseToolchainProvenance(
+        fs.readFileSync(${JSON.stringify(fixture.provenance)}),
+      );
+      document.inventorySha256 = archive.inventorySha256(archive.inventoryInstallation(
+        ${JSON.stringify(dirname(fixture.provenance))},
+        { exclude: [archive.provenanceFile] },
+      ));
+      fs.writeFileSync(
+        ${JSON.stringify(fixture.provenance)},
+        provenance.serializeToolchainProvenance(document),
+      );
     `;
     result = invokePinnedRuntime(fixture, { setup });
     assert.notEqual(result.status, 0);

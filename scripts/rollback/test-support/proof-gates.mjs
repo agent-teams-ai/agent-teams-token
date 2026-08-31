@@ -1,6 +1,7 @@
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
+const { cloneRepository } = proofSupport;
 
 test("non-pulling image preflight verifies exact cached Slither image identity", () => {
   const root = temporaryDirectory("agtmai-rollback-preflight-");
@@ -241,9 +242,7 @@ test("clean-candidate CLI fails stale validation and unpinned hash maintenance f
   const checkout = join(boundary, "candidate");
   const temporaryRoot = join(boundary, "tmp");
   try {
-    basicRun(gitExecutable(), [
-      "clone", "--quiet", "--no-hardlinks", repositoryRoot, checkout,
-    ], { cwd: boundary });
+    cloneRepository(repositoryRoot, checkout, boundary);
     cpSync(join(repositoryRoot, "architecture/rollback"), join(checkout, "architecture/rollback"), {
       recursive: true,
     });
@@ -254,6 +253,14 @@ test("clean-candidate CLI fails stale validation and unpinned hash maintenance f
       join(repositoryRoot, "scripts/assert-complete-history.sh"),
       join(checkout, "scripts/assert-complete-history.sh"),
     );
+    for (const path of [
+      "scripts/toolchain-archive.mjs",
+      "scripts/toolchain-environment.mjs",
+      "scripts/toolchain-policy.mjs",
+      "scripts/toolchain-provenance.mjs",
+    ]) {
+      cpSync(join(repositoryRoot, path), join(checkout, path));
+    }
     cpSync(
       join(repositoryRoot, "architecture/foundation/repository-agent-workflow.yaml"),
       join(checkout, "architecture/foundation/repository-agent-workflow.yaml"),
@@ -273,6 +280,10 @@ test("clean-candidate CLI fails stale validation and unpinned hash maintenance f
       "scripts/assert-complete-history.sh",
       "scripts/rollback",
       "scripts/tests/tooling-boundaries.test.mjs",
+      "scripts/toolchain-archive.mjs",
+      "scripts/toolchain-environment.mjs",
+      "scripts/toolchain-policy.mjs",
+      "scripts/toolchain-provenance.mjs",
       "package.json",
     ]);
     git(checkout, ["commit", "--quiet", "-m", "test: integrated rollback candidate"]);

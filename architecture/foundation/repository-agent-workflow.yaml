@@ -40,10 +40,15 @@ fullScanPaths:
   - scripts/tests/rollback-routing.test.mjs
   - scripts/tests/toolchain-authority.test.mjs
   - scripts/tests/toolchain-fixture.mjs
+  - scripts/tests/toolchain-hardening.test.mjs
   - scripts/tests/toolchain.test.mjs
+  - scripts/tests/workflow.test.mjs
   - scripts/toolchain-archive.mjs
+  - scripts/toolchain-cleanup.mjs
+  - scripts/toolchain-environment.mjs
   - scripts/toolchain-installation.mjs
   - scripts/toolchain-policy.mjs
+  - scripts/toolchain-provenance.mjs
   - scripts/toolchain.mjs
   - tooling/deployment-plan
   - tooling/local-evm

@@ -1,6 +1,7 @@
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
+const { cloneRepository } = proofSupport;
 
 test("all three rollback manifest schemas have complete, non-overlapping exact ownership", () => {
   assert.equal(validateManifestSet(manifests()).length, 3);
@@ -17,9 +18,7 @@ test("every production manifest verifies declared hashes through the default app
     const quarantineRoot = join(boundary, "gate-tmp");
     let workspaceHandle;
     try {
-      basicRun(gitExecutable(), [
-        "clone", "--quiet", "--no-hardlinks", repositoryRoot, checkout,
-      ], { cwd: boundary });
+      cloneRepository(repositoryRoot, checkout, boundary);
       copyCurrentRollbackSharedState(checkout, manifest);
       mkdirSync(quarantineRoot, { mode: 0o700 });
       workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
@@ -46,9 +45,7 @@ test("held shared ancestor descriptors reject an equal-shape replacement", {
   const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
   let workspaceHandle;
   try {
-    basicRun(gitExecutable(), [
-      "clone", "--quiet", "--no-hardlinks", repositoryRoot, checkout,
-    ], { cwd: boundary });
+    cloneRepository(repositoryRoot, checkout, boundary);
     copyCurrentRollbackSharedState(checkout, manifest);
     mkdirSync(quarantineRoot, { mode: 0o700 });
     mkdirSync(heldChildren, { mode: 0o700 });

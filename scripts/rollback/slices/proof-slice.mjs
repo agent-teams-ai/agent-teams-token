@@ -40,6 +40,7 @@ import {
   assertRollbackWorkspaceHandle,
   createRollbackWorkspaceHandle,
 } from "./workspace-handle.mjs";
+import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
 
 export function proveSlice({
   manifest,
@@ -164,7 +165,7 @@ function validateCandidateStructure(context, environment) {
     ["--test", "scripts/tests/rollback-proof.test.mjs"],
     {
       cwd: checkout,
-      env: { ...process.env, PATH: toolPath(environment.tools) },
+      env: allowlistedChildEnvironment(process.env, { PATH: toolPath(environment.tools) }),
       phase: "candidate-validation",
       timeout: 120_000,
     },

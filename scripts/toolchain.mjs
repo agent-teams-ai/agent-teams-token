@@ -15,6 +15,7 @@ import {
   validateSecurityImage,
 } from "./toolchain-policy.mjs";
 import {
+  cleanupPreparedPayload,
   completeTreeAuthority,
   prepareVerifiedPayload,
   sha256,
@@ -23,8 +24,15 @@ import {
   inspectInstallation,
   installPreparedArtifact,
 } from "./toolchain-installation.mjs";
+import { allowlistedChildEnvironment } from "./toolchain-environment.mjs";
 
-export { inspectInstallation, prepareVerifiedPayload, sha256 };
+export {
+  cleanupPreparedPayload,
+  inspectInstallation,
+  installPreparedArtifact,
+  prepareVerifiedPayload,
+  sha256,
+};
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -218,7 +226,10 @@ function downloadWithCurl(url, part) {
   return spawnSync(
     "/usr/bin/curl",
     ["--fail", "--location", "--proto", "=https", "--show-error", "--output", part, url],
-    { stdio: "inherit" },
+    {
+      env: allowlistedChildEnvironment(process.env, { PATH: "/usr/bin:/bin" }),
+      stdio: "inherit",
+    },
   ).status ?? 1;
 }
 
@@ -272,7 +283,7 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
         + `${present.code === "missing" ? "" : ` replaced=${present.code}`}\n`,
       );
     } finally {
-      rmSync(prepared.stageRoot, { recursive: true, force: true });
+      cleanupPreparedPayload(prepared);
     }
   }
 }
@@ -311,7 +322,7 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
         `VERIFY_OK tool=${name} platform=${platform} version=${installation.actualVersion} sha256=${artifact.sha256}\n`,
       );
     } finally {
-      rmSync(prepared.stageRoot, { recursive: true, force: true });
+      cleanupPreparedPayload(prepared);
     }
   }
 }

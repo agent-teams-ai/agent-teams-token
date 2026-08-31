@@ -34,15 +34,26 @@ fi
 
 rollback_git_canonical() {
   /usr/bin/env \
-    -u GIT_DIR \
-    -u GIT_WORK_TREE \
-    -u GIT_COMMON_DIR \
-    -u GIT_OBJECT_DIRECTORY \
-    -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-    -u GIT_NAMESPACE \
-    -u GIT_REPLACE_REF_BASE \
+    -i \
+    HOME=/nonexistent \
+    LANG=C \
+    LC_ALL=C \
+    PATH=/usr/bin:/bin \
+    GCM_INTERACTIVE=never \
+    GIT_ASKPASS=/bin/false \
+    GIT_CONFIG_COUNT=0 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_SYSTEM=/dev/null \
     GIT_NO_REPLACE_OBJECTS=1 \
-    "$rollback_git" "$@"
+    GIT_SSH_COMMAND=/bin/false \
+    GIT_TERMINAL_PROMPT=0 \
+    SSH_ASKPASS=/bin/false \
+    "$rollback_git" \
+    -c core.fsmonitor=false \
+    -c credential.helper= \
+    -c credential.interactive=never \
+    "$@"
 }
 
 if [[ ! -x "$rollback_git" ]]; then
