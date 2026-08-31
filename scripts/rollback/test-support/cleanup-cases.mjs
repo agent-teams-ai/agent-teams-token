@@ -255,35 +255,33 @@ test("strict cleanup fingerprints reject same-inode content mutation", () => {
   }
 });
 
-test("strict cleanup fingerprints preserve an unlink-recreated inode substitute", () => {
+test("strict cleanup fingerprints preserve an unlink-recreated substitute without assuming inode reuse", () => {
   const current = fixture();
   try {
     const root = checkout(current.target);
     const victim = join(root, "owned");
     writeFileSync(victim, "owned-before\n");
     const handle = createCleanupHandle(current.target, current.policy);
-    let inode;
+    let sizes;
     const error = caught(
       () => cleanupIdentityBoundDirectory(handle, {
         onBoundary(event) {
           if (event.stage === "before-target-quarantine") {
             const before = lstatSync(victim, { bigint: true });
             unlinkSync(victim);
-            writeFileSync(victim, "foreign-now\n");
+            writeFileSync(victim, "foreign-unlink-recreated\n");
             const after = lstatSync(victim, { bigint: true });
-            inode = { before: String(before.ino), after: String(after.ino) };
+            sizes = { before: String(before.size), after: String(after.size) };
           }
         },
       }),
-      /ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=checkout/u,
+      /ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=checkout(?:\/owned)?/u,
     );
-    if (process.platform === "linux") {
-      assert.equal(inode.after, inode.before, "fixture must exercise same-device inode reuse");
-    }
+    assert.notEqual(sizes.after, sizes.before, "fixture must deterministically change the strict size fingerprint");
     const quarantine = preservedQuarantine(error);
     assert.equal(
       readFileSync(join(quarantine, "tree", "checkout", "owned"), "utf8"),
-      "foreign-now\n",
+      "foreign-unlink-recreated\n",
     );
   } finally {
     rmSync(current.boundary, { recursive: true, force: true });

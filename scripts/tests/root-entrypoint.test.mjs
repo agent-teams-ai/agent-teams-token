@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -80,6 +81,78 @@ function runRoot(fixture, args, extraEnvironment = {}) {
       ...extraEnvironment,
     },
   });
+}
+
+function prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction = false } = {}) {
+  const host = bootstrapFixtureHost();
+  const payloadRoot = join(fixture.root, "bootstrap-node-payload");
+  const nodeDirectory = `node-test-${host.platform}`;
+  const nodeBin = join(payloadRoot, nodeDirectory, "bin");
+  mkdirSync(nodeBin, { recursive: true });
+  writeExecutable(
+    join(nodeBin, "node"),
+    "#!/bin/bash\n"
+      + "if [[ \"${1:-}\" == --version ]]; then printf '%s\\n' v24.20.0; exit 0; fi\n"
+      + "printf 'archive-node:%s\\n' \"$*\" >> \"$TOKEN_TEST_LOG\"\n",
+  );
+  const downloads = join(fixture.root, ".tools", "downloads");
+  mkdirSync(downloads, { recursive: true });
+  const archiveName = `node-test-${host.platform}.${host.extension}`;
+  const archive = join(downloads, archiveName);
+  execFileSync("/usr/bin/tar", [host.createFlag, archive, "-C", payloadRoot, nodeDirectory]);
+  const archiveSha256 = createHash("sha256").update(readFileSync(archive)).digest("hex");
+
+  const bootstrapPath = join(fixture.root, "scripts", "bootstrap.sh");
+  let bootstrap = readFileSync(bootstrapPath, "utf8");
+  const replacements = [
+    [`token_node_archive=${host.productionArchive}`, `token_node_archive=${archiveName}`],
+    [`token_node_directory=${host.productionDirectory}`, `token_node_directory=${nodeDirectory}`],
+    [`token_node_sha256=${host.productionSha256}`, `token_node_sha256=${archiveSha256}`],
+  ];
+  for (const [before, after] of replacements) {
+    assert.match(bootstrap, new RegExp(before.replaceAll(".", "\\."), "u"));
+    bootstrap = bootstrap.replace(before, after);
+  }
+  if (substituteDuringExtraction) {
+    const tarProbe = join(fixture.root, "tar-substitution-probe");
+    writeExecutable(
+      tarProbe,
+      "#!/bin/bash\n"
+        + "/usr/bin/mv -- \"$TOKEN_TEST_ARCHIVE\" \"$TOKEN_TEST_ARCHIVE.held\"\n"
+        + "printf '%s\\n' 'foreign archive at original pathname' > \"$TOKEN_TEST_ARCHIVE\"\n"
+        + "exec /usr/bin/tar \"$@\"\n",
+    );
+    bootstrap = bootstrap.replace(
+      "/usr/bin/tar --no-same-owner --no-same-permissions",
+      `"${tarProbe}" --no-same-owner --no-same-permissions`,
+    );
+  }
+  writeExecutable(bootstrapPath, bootstrap);
+  return { archive, archiveSha256 };
+}
+
+function bootstrapFixtureHost() {
+  if (process.platform === "linux" && process.arch === "x64") {
+    return {
+      platform: "linux-x64",
+      extension: "tar.xz",
+      createFlag: "-cJf",
+      productionArchive: "node-v24.20.0-linux-x64.tar.xz",
+      productionDirectory: "node-v24.20.0-linux-x64",
+      productionSha256: "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+    };
+  }
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return {
+      platform: "darwin-arm64",
+      extension: "tar.gz",
+      createFlag: "-czf",
+      productionArchive: "node-v24.20.0-darwin-arm64.tar.gz",
+      productionDirectory: "node-v24.20.0-darwin-arm64",
+      productionSha256: "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8",
+    };
+  }
+  throw new Error(`unsupported bootstrap fixture host ${process.platform}-${process.arch}`);
 }
 
 function installFixture(context) {
@@ -178,6 +251,37 @@ test("bootstrap help is inert and direct doctor fails closed on missing archive 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /TOOLCHAIN_OFFLINE_CACHE_MISS tool=node/u);
   assert.equal(existsSync(fixture.log), false);
+  assert.equal(existsSync(fixture.marker), false);
+});
+
+test("real bootstrap fixture accepts matching held-descriptor and pathname identities", (context) => {
+  const fixture = createRootFixture(context, { realBootstrap: true });
+  prepareBootstrapArchiveFixture(fixture);
+  const result = runRoot(fixture, ["bootstrap", "install", "--offline"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(readFileSync(fixture.log, "utf8"), /archive-node:.*toolchain\.mjs install --offline/u);
+  assert.equal(existsSync(fixture.marker), false);
+});
+
+test("real bootstrap fixture rejects pathname replacement after descriptor-backed extraction", (context) => {
+  const fixture = createRootFixture(context, { realBootstrap: true });
+  const prepared = prepareBootstrapArchiveFixture(fixture, { substituteDuringExtraction: true });
+  const result = runRoot(
+    fixture,
+    ["bootstrap", "install", "--offline"],
+    { TOKEN_TEST_ARCHIVE: prepared.archive },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node/u);
+  assert.equal(
+    readFileSync(prepared.archive, "utf8"),
+    "foreign archive at original pathname\n",
+  );
+  assert.equal(
+    createHash("sha256").update(readFileSync(`${prepared.archive}.held`)).digest("hex"),
+    prepared.archiveSha256,
+  );
+  assert.equal(existsSync(fixture.log), false, "the archive-derived interpreter must not execute");
   assert.equal(existsSync(fixture.marker), false);
 });
 

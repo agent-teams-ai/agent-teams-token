@@ -34,6 +34,7 @@ esac
 
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64)
+    token_platform=darwin-arm64
     token_node_archive=node-v24.20.0-darwin-arm64.tar.gz
     token_node_directory=node-v24.20.0-darwin-arm64
     token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz
@@ -43,6 +44,7 @@ case "$(uname -s):$(uname -m)" in
     token_sha256_argument=-a
     ;;
   Linux:x86_64)
+    token_platform=linux-x64
     token_node_archive=node-v24.20.0-linux-x64.tar.xz
     token_node_directory=node-v24.20.0-linux-x64
     token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz
@@ -63,6 +65,38 @@ token_sha256() {
   else
     "$token_sha256_program" "$1" | /usr/bin/awk '{print $1}'
   fi
+}
+
+token_descriptor_identity() {
+  local token_descriptor=$1
+  local token_identity
+  case "$token_platform" in
+    darwin-arm64)
+      # macOS must fstat the inherited descriptor itself. Statting /dev/fd/N
+      # reports the devfs pseudo-device instead of the held file's device.
+      token_identity=$(/usr/bin/stat -f '%d:%i' <&"$token_descriptor") || return 1
+      ;;
+    linux-x64)
+      token_identity=$(/usr/bin/stat -L -c '%d:%i' "/proc/self/fd/$token_descriptor") || return 1
+      ;;
+  esac
+  [[ "$token_identity" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  printf '%s\n' "$token_identity"
+}
+
+token_path_identity() {
+  local token_path=$1
+  local token_identity
+  case "$token_platform" in
+    darwin-arm64)
+      token_identity=$(/usr/bin/stat -L -f '%d:%i' "$token_path") || return 1
+      ;;
+    linux-x64)
+      token_identity=$(/usr/bin/stat -L -c '%d:%i' "$token_path") || return 1
+      ;;
+  esac
+  [[ "$token_identity" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  printf '%s\n' "$token_identity"
 }
 
 token_prepare_pinned_node() {
@@ -93,7 +127,14 @@ token_prepare_pinned_node() {
   exec 7<"$token_archive_path"
   exec 8<"$token_archive_path"
   exec 9<"$token_archive_path"
-  if [[ ! /dev/fd/7 -ef /dev/fd/8 || ! /dev/fd/8 -ef /dev/fd/9 ]]; then
+  local token_descriptor_7_identity
+  local token_descriptor_8_identity
+  local token_descriptor_9_identity
+  if ! token_descriptor_7_identity=$(token_descriptor_identity 7) \
+    || ! token_descriptor_8_identity=$(token_descriptor_identity 8) \
+    || ! token_descriptor_9_identity=$(token_descriptor_identity 9) \
+    || [[ "$token_descriptor_7_identity" != "$token_descriptor_8_identity" ]] \
+    || [[ "$token_descriptor_8_identity" != "$token_descriptor_9_identity" ]]; then
     printf 'TOOLCHAIN_ARCHIVE_IDENTITY_CHANGED tool=node path=%s\n' \
       "$token_archive_path" >&2
     exec 7<&- 8<&- 9<&-
@@ -114,8 +155,21 @@ token_prepare_pinned_node() {
     "$token_node_tar_flag" /dev/fd/9 -C "$token_node_stage"
   local token_post_extract_sha256
   token_post_extract_sha256=$(token_sha256 /dev/fd/7)
+  local token_final_descriptor_7_identity
+  local token_final_descriptor_8_identity
+  local token_final_descriptor_9_identity
+  local token_final_path_identity
   if [[ "$token_post_extract_sha256" != "$token_node_sha256" ]] \
-    || [[ ! "$token_archive_path" -ef /dev/fd/7 ]]; then
+    || ! token_final_descriptor_7_identity=$(token_descriptor_identity 7) \
+    || ! token_final_descriptor_8_identity=$(token_descriptor_identity 8) \
+    || ! token_final_descriptor_9_identity=$(token_descriptor_identity 9) \
+    || ! token_final_path_identity=$(token_path_identity "$token_archive_path") \
+    || [[ "$token_final_descriptor_7_identity" != "$token_descriptor_7_identity" ]] \
+    || [[ "$token_final_descriptor_8_identity" != "$token_descriptor_8_identity" ]] \
+    || [[ "$token_final_descriptor_9_identity" != "$token_descriptor_9_identity" ]] \
+    || [[ "$token_final_descriptor_7_identity" != "$token_final_descriptor_8_identity" ]] \
+    || [[ "$token_final_descriptor_8_identity" != "$token_final_descriptor_9_identity" ]] \
+    || [[ "$token_final_path_identity" != "$token_final_descriptor_7_identity" ]]; then
     printf 'TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=node path=%s\n' \
       "$token_archive_path" >&2
     exec 7<&- 8<&- 9<&-
