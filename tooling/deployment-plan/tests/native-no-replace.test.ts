@@ -3,7 +3,39 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createNativeNoReplaceCapability } from "../src/adapters/native-no-replace.ts";
+import {
+  createNativeNoReplaceCapability,
+  isExecutableCustodySafe,
+} from "../src/adapters/native-no-replace.ts";
+
+const SAFE_EXECUTABLE = {
+  isFile: true,
+  uid: 501,
+  nlink: 1,
+  mode: 0o100755,
+} as const;
+
+test("compiler custody permits macOS root-owned multi-hardlink system executables", () => {
+  assert.equal(isExecutableCustodySafe(
+    { ...SAFE_EXECUTABLE, uid: 0, nlink: 3 },
+    { expectedUid: 501, allowRootOwnedMultipleLinks: true },
+  ), true);
+  assert.equal(isExecutableCustodySafe(
+    { ...SAFE_EXECUTABLE, uid: 0, nlink: 3, mode: 0o100775 },
+    { expectedUid: 501, allowRootOwnedMultipleLinks: true },
+  ), false);
+});
+
+test("compiler custody does not relax multi-hardlink policy for user-owned executables", () => {
+  assert.equal(isExecutableCustodySafe(
+    { ...SAFE_EXECUTABLE, nlink: 2 },
+    { expectedUid: 501, allowRootOwnedMultipleLinks: true },
+  ), false);
+  assert.equal(isExecutableCustodySafe(
+    { ...SAFE_EXECUTABLE, uid: 0, nlink: 2 },
+    { expectedUid: 501, allowRootOwnedMultipleLinks: false },
+  ), false);
+});
 
 test("native helper performs exclusive rename and fails closed on an occupied target", async () => {
   const parent = await realpath(await mkdtemp(join(tmpdir(), "native-no-replace-test-")));

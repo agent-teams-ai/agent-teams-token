@@ -339,9 +339,14 @@ test("READY is committed only after durable publication", async () => {
   const parent = await canonicalTemporaryDirectory();
   const operations: string[] = [];
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
-    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async noReplaceDirectoryRename(source, target) {
+      operations.push(target.endsWith("READY") ? "ready-rename" : "publish-rename");
+      await testOnlyNoReplaceDirectoryRename(source, target);
+    },
     async afterParentDirectorySync() { operations.push("published-durable"); },
     async beforeFinalMarkerRename() { operations.push("ready-commit"); },
+    async beforeFinalMarkerDirectorySync() { operations.push("before-ready-directory-sync"); },
+    async afterFinalMarkerDirectorySync() { operations.push("after-ready-directory-sync"); },
   });
   try {
     await assert.rejects(
@@ -351,8 +356,68 @@ test("READY is committed only after durable publication", async () => {
     await claim.writeExclusive("payload", Buffer.from("payload"));
     await claim.publish();
     await claim.finalizeReady("READY", Buffer.from("ready"));
-    assert.deepEqual(operations, ["published-durable", "ready-commit"]);
+    assert.deepEqual(operations, [
+      "publish-rename", "published-durable", "ready-commit",
+      "ready-rename", "before-ready-directory-sync", "after-ready-directory-sync",
+    ]);
     assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
+  } finally {
+    await claim.close();
+  }
+});
+
+test("post-rename READY sync uncertainty preserves target and READY", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async finalMarkerDirectorySync() { throw new Error("injected READY directory fsync failure"); },
+  });
+  try {
+    await claim.writeExclusive("payload", Buffer.from("payload"));
+    await claim.publish();
+    await assert.rejects(
+      claim.finalizeReady("READY", Buffer.from("ready")),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "OUTPUT_PUBLICATION_UNCERTAIN",
+    );
+    assert.equal(await readFile(join(parent, "bundle", "payload"), "utf8"), "payload");
+    assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
+  } finally {
+    await claim.close();
+  }
+  assert.deepEqual(
+    (await readdir(join(parent, "bundle"))).toSorted(),
+    ["payload", "READY"].toSorted(),
+  );
+});
+
+test("READY finalization cannot succeed before its post-rename directory sync", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  let releaseSync: (() => void) | undefined;
+  let reportSyncEntered: (() => void) | undefined;
+  const syncEntered = new Promise<void>((resolvePromise) => { reportSyncEntered = resolvePromise; });
+  const allowSync = new Promise<void>((resolvePromise) => { releaseSync = resolvePromise; });
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async finalMarkerDirectorySync() {
+      reportSyncEntered?.();
+      await allowSync;
+    },
+  });
+  try {
+    await claim.writeExclusive("payload", Buffer.from("payload"));
+    await claim.publish();
+    let finalized = false;
+    const finalization = claim.finalizeReady("READY", Buffer.from("ready")).then(() => {
+      finalized = true;
+    });
+    await syncEntered;
+    assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
+    assert.equal(finalized, false);
+    releaseSync?.();
+    await finalization;
+    assert.equal(finalized, true);
   } finally {
     await claim.close();
   }

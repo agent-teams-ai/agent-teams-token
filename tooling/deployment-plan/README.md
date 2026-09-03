@@ -52,19 +52,21 @@ after rename its owned parent directory is synchronised as well. A failure at
 either durability boundary fails closed and is covered by injected-failure
 tests.
 Only after those durability checks and a second identity/content validation is
-a synced hidden marker atomically renamed to `READY`. Losing that final rename
-on crash is a safe false negative. A post-rename durability or identity failure
-returns typed `OUTPUT_PUBLICATION_UNCERTAIN`, preserves the target, and never
-creates READY; a published pathname is never deleted after identity can change.
+a synced hidden marker atomically renamed to `READY`; the already-open
+published directory is then synced again to make that final name durable. A
+post-rename sync failure returns typed `OUTPUT_PUBLICATION_UNCERTAIN` and
+preserves both the target and READY. A failure after the earlier directory
+publication but before the READY rename preserves the target without READY; a
+published pathname is never deleted after identity can change.
 Unpublished staging directories are reclaimed on close only while their held
 filesystem identity and each created leaf identity still match. Cleanup first
 quarantines those identities and never recursively removes a substituted or
 foreign tree; close reports those paths as rejected rather than hiding a failed
 reclamation.
 READY is the sole post-publication leaf. Its data and hidden name are synced
-before an atomic no-replace name commit. The held directory identity and exact
-payload bytes are checked after rename, so substitution and ABA races fail
-before acceptable evidence exists.
+before an atomic no-replace name commit, and its published name is synced before
+success. The held directory identity and exact payload bytes are checked before
+rename, so substitution and ABA races fail before acceptable evidence exists.
 Bundles contain `deployment-plan.v2.json`, `fee-quote.v2.json`, then `READY`.
 The independent verifier recomputes identity, fee math, cap and freshness and
 checks READY digests using no-follow file reads. The planner independently
@@ -119,4 +121,7 @@ before every direct, no-shell use. Linux calls `renameat2(RENAME_NOREPLACE)`;
 macOS calls `renameatx_np(RENAME_EXCL)`. Occupied targets return `EEXIST`
 without changing either path. The callback stays injectable for deterministic
 unit races. Missing, unsupported, substituted, or failed native capability is
-fail-closed; there is no shell or replace-capable fallback.
+fail-closed; there is no shell or replace-capable fallback. On macOS only, a
+root-owned compiler on the immutable system volume may have multiple hardlinks;
+that compiler remains admissible when it is not group/world writable. User-
+owned compilers and the privately built helper continue to require one link.

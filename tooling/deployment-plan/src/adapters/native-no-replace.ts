@@ -27,6 +27,18 @@ interface ExecutableIdentity {
   readonly sha256: `0x${string}`;
 }
 
+export interface ExecutableCustodyMetadata {
+  readonly isFile: boolean;
+  readonly uid: number;
+  readonly nlink: number;
+  readonly mode: number;
+}
+
+export interface ExecutableCustodyPolicy {
+  readonly expectedUid: number | undefined;
+  readonly allowRootOwnedMultipleLinks: boolean;
+}
+
 export interface NativeNoReplaceCapability {
   readonly rename: NoReplaceDirectoryRename;
   readonly executableSha256: `0x${string}`;
@@ -48,7 +60,11 @@ export async function createNativeNoReplaceCapability(): Promise<NativeNoReplace
     fail("NO_REPLACE_COMPILER_UNSAFE", "AGTMAI_CC_BINARY must be an absolute path");
   }
   const compiler = await realpath(configuredCompiler);
-  const compilerIdentity = await executableIdentity(compiler, "NO_REPLACE_COMPILER_UNSAFE");
+  const compilerIdentity = await executableIdentity(
+    compiler,
+    "NO_REPLACE_COMPILER_UNSAFE",
+    process.platform === "darwin",
+  );
   const custody = await realpath(await mkdtemp(join(tmpdir(), "agtmai-no-replace-")));
   await chmod(custody, 0o700);
   const executable = join(custody, "no-replace");
@@ -60,7 +76,11 @@ export async function createNativeNoReplaceCapability(): Promise<NativeNoReplace
     await chmod(executable, 0o500);
     const builtIdentity = await executableIdentity(executable, "NO_REPLACE_EXECUTABLE_UNSAFE");
     assertSameExecutable(
-      await executableIdentity(compiler, "NO_REPLACE_COMPILER_UNSAFE"),
+      await executableIdentity(
+        compiler,
+        "NO_REPLACE_COMPILER_UNSAFE",
+        process.platform === "darwin",
+      ),
       compilerIdentity,
       "NO_REPLACE_COMPILER_SUBSTITUTED",
     );
@@ -101,19 +121,37 @@ export async function createNativeNoReplaceCapability(): Promise<NativeNoReplace
   }
 }
 
-async function executableIdentity(path: string, code: string): Promise<ExecutableIdentity> {
+export function isExecutableCustodySafe(
+  metadata: ExecutableCustodyMetadata,
+  policy: ExecutableCustodyPolicy,
+): boolean {
+  const ownedByCaller = policy.expectedUid !== undefined && metadata.uid === policy.expectedUid;
+  const rootOwned = metadata.uid === 0;
+  const linkCountSafe = metadata.nlink === 1
+    || (policy.allowRootOwnedMultipleLinks && rootOwned && metadata.nlink > 1);
+  return policy.expectedUid !== undefined
+    && metadata.isFile
+    && linkCountSafe
+    && (ownedByCaller || rootOwned)
+    && (metadata.mode & 0o022) === 0
+    && (metadata.mode & constants.S_IXUSR) !== 0;
+}
+
+async function executableIdentity(
+  path: string,
+  code: string,
+  allowRootOwnedMultipleLinks = false,
+): Promise<ExecutableIdentity> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await file.stat();
     const expectedUid = process.getuid?.();
-    if (
-      !metadata.isFile()
-      || metadata.nlink !== 1
-      || expectedUid === undefined
-      || (metadata.uid !== expectedUid && metadata.uid !== 0)
-      || (metadata.mode & 0o022) !== 0
-      || (metadata.mode & constants.S_IXUSR) === 0
-    ) {
+    if (!isExecutableCustodySafe({
+      isFile: metadata.isFile(),
+      uid: metadata.uid,
+      nlink: metadata.nlink,
+      mode: metadata.mode,
+    }, { expectedUid, allowRootOwnedMultipleLinks })) {
       fail(code, "native executable identity or custody is unsafe");
     }
     return {

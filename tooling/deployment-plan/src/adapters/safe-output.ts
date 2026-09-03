@@ -48,8 +48,12 @@ export interface OutputFaultInjection {
   readonly beforeParentDirectorySync?: () => Promise<void>;
   readonly afterParentDirectorySync?: () => Promise<void>;
   readonly beforeFinalMarkerRename?: () => Promise<void>;
+  readonly beforeFinalMarkerDirectorySync?: () => Promise<void>;
+  readonly afterFinalMarkerDirectorySync?: () => Promise<void>;
   /** Replaces the parent fsync operation for deterministic failure injection. */
   readonly parentDirectorySync?: () => Promise<void>;
+  /** Replaces the post-READY-rename directory fsync for deterministic tests. */
+  readonly finalMarkerDirectorySync?: () => Promise<void>;
   /** Filesystem no-replace rename supplied by a pinned native helper. */
   readonly noReplaceDirectoryRename?: NoReplaceDirectoryRename;
 }
@@ -263,15 +267,40 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await file.close();
     }
     // The pending marker and its data are durable before the atomic name commit.
-    // If the final rename is lost on crash, readers see no READY (a safe false
-    // negative); there is deliberately no fallible operation after that commit.
+    // The held directory is synced again after that rename so a successful
+    // return proves the final READY name is durable too.
     await this.stagingHandle.sync();
     await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
     assertSameFileIdentity(await lstat(pending), pendingIdentity, "OUTPUT_READY_SUBSTITUTED");
     await this.faultInjection.beforeFinalMarkerRename?.();
     await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
-    await noReplaceRename(pending, ready);
-    this.leaves.set(name, pendingIdentity);
+    let markerMayBePublished = false;
+    try {
+      try {
+        await noReplaceRename(pending, ready);
+      } catch (error) {
+        if (nodeErrorCode(error) === "EEXIST") {
+          fail("OUTPUT_READY_EXISTS", "READY was already created");
+        }
+        // The helper may have completed the atomic syscall before its result
+        // became unavailable. From this point both target and READY are kept.
+        markerMayBePublished = true;
+        throw error;
+      }
+      markerMayBePublished = true;
+      this.leaves.set(name, pendingIdentity);
+      await this.faultInjection.beforeFinalMarkerDirectorySync?.();
+      await (this.faultInjection.finalMarkerDirectorySync?.() ?? this.stagingHandle.sync());
+      await this.faultInjection.afterFinalMarkerDirectorySync?.();
+    } catch (error) {
+      if (markerMayBePublished) {
+        fail(
+          "OUTPUT_PUBLICATION_UNCERTAIN",
+          "READY durability is uncertain; target and READY preserved: " + errorMessage(error),
+        );
+      }
+      throw error;
+    }
   }
 
   async assertStagingStable(): Promise<void> {
