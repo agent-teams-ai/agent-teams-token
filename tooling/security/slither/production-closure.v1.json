@@ -1,32 +1,131 @@
 {
   "schemaVersion": 1,
-  "targets": [{"path":"contracts/evm/src/features/token-genesis/AGTMAIToken.sol","contract":"AGTMAIToken"}],
-  "expectedContracts": ["AGTMAIToken", "Context", "ERC20", "IERC1155Errors", "IERC20", "IERC20Errors", "IERC20Metadata", "IERC721Errors"],
+  "targets": [
+    {
+      "path": "contracts/evm/src/features/token-genesis/AGTMAIToken.sol",
+      "contract": "AGTMAIToken"
+    }
+  ],
+  "expectedContracts": [
+    "AGTMAIToken",
+    "Context",
+    "ERC20",
+    "IERC1155Errors",
+    "IERC20",
+    "IERC20Errors",
+    "IERC20Metadata",
+    "IERC721Errors"
+  ],
   "sources": [
-    {"path":"contracts/evm/src/features/token-genesis/AGTMAIToken.sol","sha256":"eae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989"},
-    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol","sha256":"50f34ae16a067a41c2c1091445d11d63788e54c717677cb6d6b0e4cdea2ad21d"},
-    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol","sha256":"01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c"},
-    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol","sha256":"0b7132f17d14d1d84b41b0bb429be62dafdff00fd3470f68724d8018eb07f57a"},
-    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/utils/Context.sol","sha256":"847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6"},
-    {"path":"contracts/evm/lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol","sha256":"fa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30"}
+    {
+      "path": "contracts/evm/src/features/token-genesis/AGTMAIToken.sol",
+      "sha256": "eae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989"
+    },
+    {
+      "path": "contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol",
+      "sha256": "50f34ae16a067a41c2c1091445d11d63788e54c717677cb6d6b0e4cdea2ad21d"
+    },
+    {
+      "path": "contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+      "sha256": "01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c"
+    },
+    {
+      "path": "contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+      "sha256": "0b7132f17d14d1d84b41b0bb429be62dafdff00fd3470f68724d8018eb07f57a"
+    },
+    {
+      "path": "contracts/evm/lib/openzeppelin-contracts/contracts/utils/Context.sol",
+      "sha256": "847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6"
+    },
+    {
+      "path": "contracts/evm/lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol",
+      "sha256": "fa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30"
+    }
   ],
   "config": [
-    {"path":"contracts/evm/foundry.toml","sha256":"0b51698e8636e4b29c0de9b427dc4649cfaf603f85996f9ae3ebbd28a0a9db92"},
-    {"path":"contracts/evm/remappings.txt","sha256":"c785eebf11718ba3e656056f1fa1b940912c6d72c532e32b73a77d411441af81"},
-    {"path":"contracts/evm/lib/openzeppelin-contracts/PINNED_VERSION","sha256":"3a1c9fbbf1233e552070cfac330a40acfb727ef14eb5ff3051548842870e7d79"},
-    {"path":"tooling/security/slither/slither.config.json","sha256":"ff9706dac47ce7a116e2e42c68e8bdf8fbb8da761c0d476f6d5ed2959c222370"},
-    {"path":"tooling/security/slither/slither-inventory.py","sha256":"c3c6d98c6e6e73e51195dd9f0591da184d2c561eb541301a0653a05226dac566"},
-    {"path":"tooling/security/slither/suppressions.v1.json","sha256":"2721471bedaf3d0ae3e0a600a7bac4a2d150d0c8f0929afbe69a0fd050d7a3dc"},
-    {"path":"tooling/security/slither/suppression-ledger.schema.v1.json","sha256":"7ed9bfe880d078500da9697982189d80cc3a3e1ab4b54df2239e656f3de63386"},
-    {"path":"tooling/security/slither/triage.v1.json","sha256":"38a02ae3f51fedb31680af7456f3cbbcd2d2c41cd82da12e05a0e6f5ce907029"},
-    {"path":"tooling/security/slither/triage-ledger.schema.v1.json","sha256":"9800595693b0578607c9422022bcf7be989ef1626a05472afb882f371d676087"},
-    {"path":"tooling/security/slither/evidence-report.schema.v1.json","sha256":"4edd95cd6079f88721a70a3031a68760bae08821aac26dfe7be678ecdb38a8e6"},
-    {"path":"tooling/security/slither/output-failure.schema.v1.json","sha256":"25fa44e4ecfbcbafc2063a2075a73b50021dc070b6dfcc05ebb422c339f0db9b"},
-    {"path":"tooling/security/slither/tool-failure.schema.v1.json","sha256":"43ed9485a6a4ccafe49d9739f1d7f3bb6c2fb5625209322fa90175a6541b4c54"},
-    {"path":"tooling/security/slither/environment-failure.schema.v1.json","sha256":"fd5304a6418e612cbd556bad59d19d81381b5be88a80e62776ad281de8718764"}
+    {
+      "path": "contracts/evm/foundry.toml",
+      "sha256": "0b51698e8636e4b29c0de9b427dc4649cfaf603f85996f9ae3ebbd28a0a9db92"
+    },
+    {
+      "path": "contracts/evm/remappings.txt",
+      "sha256": "c785eebf11718ba3e656056f1fa1b940912c6d72c532e32b73a77d411441af81"
+    },
+    {
+      "path": "contracts/evm/lib/openzeppelin-contracts/PINNED_VERSION",
+      "sha256": "3a1c9fbbf1233e552070cfac330a40acfb727ef14eb5ff3051548842870e7d79"
+    },
+    {
+      "path": "tooling/security/slither/slither.config.json",
+      "sha256": "ff9706dac47ce7a116e2e42c68e8bdf8fbb8da761c0d476f6d5ed2959c222370"
+    },
+    {
+      "path": "tooling/security/slither/slither-inventory.py",
+      "sha256": "c3c6d98c6e6e73e51195dd9f0591da184d2c561eb541301a0653a05226dac566"
+    },
+    {
+      "path": "tooling/security/slither/suppressions.v1.json",
+      "sha256": "2721471bedaf3d0ae3e0a600a7bac4a2d150d0c8f0929afbe69a0fd050d7a3dc"
+    },
+    {
+      "path": "tooling/security/slither/suppression-ledger.schema.v1.json",
+      "sha256": "7ed9bfe880d078500da9697982189d80cc3a3e1ab4b54df2239e656f3de63386"
+    },
+    {
+      "path": "tooling/security/slither/triage.v1.json",
+      "sha256": "38a02ae3f51fedb31680af7456f3cbbcd2d2c41cd82da12e05a0e6f5ce907029"
+    },
+    {
+      "path": "tooling/security/slither/triage-ledger.schema.v1.json",
+      "sha256": "9800595693b0578607c9422022bcf7be989ef1626a05472afb882f371d676087"
+    },
+    {
+      "path": "tooling/security/slither/evidence-report.schema.v1.json",
+      "sha256": "94e7db57baac71b125ed909822a585da018c91ab0415381727176bcb413593d4"
+    },
+    {
+      "path": "tooling/security/slither/output-failure.schema.v1.json",
+      "sha256": "774c832f019322b70b4e11e3bf6bca14cadb4aa2af2248552de597becfdd7191"
+    },
+    {
+      "path": "tooling/security/slither/tool-failure.schema.v1.json",
+      "sha256": "43ed9485a6a4ccafe49d9739f1d7f3bb6c2fb5625209322fa90175a6541b4c54"
+    },
+    {
+      "path": "tooling/security/slither/environment-failure.schema.v1.json",
+      "sha256": "8b0f35f31a2a758af6c64803101b4f2e1643f5cfa08815b03d0feec746129c4b"
+    }
   ],
-  "compiler": {"version":"0.8.36+commit.8a079791","evmVersion":"paris","optimizerEnabled":true,"optimizerRuns":200,"bytecodeHash":"ipfs","cborMetadata":true,"useLiteralContent":false,"viaIR":false,"experimental":false,"remappings":["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"]},
-  "tools": {"forgeArchiveSha256":"8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57","forgeBinarySha256":"c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f","solcBinarySha256":"c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6"},
+  "compiler": {
+    "version": "0.8.36+commit.8a079791",
+    "evmVersion": "paris",
+    "optimizerEnabled": true,
+    "optimizerRuns": 200,
+    "bytecodeHash": "ipfs",
+    "cborMetadata": true,
+    "useLiteralContent": false,
+    "viaIR": false,
+    "experimental": false,
+    "remappings": [
+      "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+      "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"
+    ]
+  },
+  "tools": {
+    "forgeArchiveSha256": "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57",
+    "forgeBinarySha256": "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f",
+    "solcBinarySha256": "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6"
+  },
   "creationBytecodeSha256": "56d021ec13df6cccbc5d330ccad2acd567f5b4cb75665a0d9982604306c92493",
-  "detectorInventory": {"path":"tooling/security/slither/detector-inventory.v1.json","sha256":"e073e66b11dcbe1e549e61040814aa09be1bdb0a9572b72c956ff0f3c9634f22"}
+  "detectorInventory": {
+    "path": "tooling/security/slither/detector-inventory.v1.json",
+    "sha256": "e073e66b11dcbe1e549e61040814aa09be1bdb0a9572b72c956ff0f3c9634f22"
+  },
+  "vulnerableFixture": {
+    "source": {
+      "path": "tooling/security/slither/tests/fixtures/Vulnerable.sol",
+      "sha256": "b830c9a461b466027248680ed8950a566cb34a05e8152f562bfa93ed7532fc4e"
+    },
+    "creationBytecodeSha256": "533f8e0f5752adb0c75003392f5090dedf3765318dbe130c90bb9bd26b594ee9"
+  }
 }

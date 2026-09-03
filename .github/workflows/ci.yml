@@ -248,12 +248,12 @@ jobs:
         shell: bash
         run: |
           test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
-      - name: Create minimal prerequisite-failure evidence
-        if: ${{ always() && needs.solidity.result != 'success' }}
+      - name: Create minimal environment-failure evidence
+        if: ${{ always() }}
         shell: bash
         env:
           SLITHER_FAILURE_STAGE: ci-prerequisite
-          SLITHER_FAILURE_CODE: CI_PREREQUISITE_FAILED
+          SLITHER_FAILURE_CODE: ${{ needs.solidity.result != 'success' && 'CI_PREREQUISITE_FAILED' || 'UNEXPECTED_ENVIRONMENT_FAILURE' }}
         run: |
           if ! test -f "$SLITHER_EVIDENCE_DIRECTORY/READY"; then
             source scripts/env.sh

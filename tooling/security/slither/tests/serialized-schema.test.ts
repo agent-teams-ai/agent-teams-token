@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { assertSerializedAgainstSchema } from "../src/adapters/json-schema.ts";
 import { writeFailureEvidence } from "../src/adapters/evidence.ts";
 import { makeTestDirectory } from "./test-directory.ts";
+import { testPublication } from "./test-publication.ts";
 
 const schemaDirectory = "tooling/security/slither";
 
@@ -30,7 +31,7 @@ test("cross-category failure mutations are impossible to publish", async () => {
     await assert.rejects(writeFailureEvidence({
       output: join(parent, "bundle"), candidateSha: "a".repeat(40), category: "tool-failure",
       exitCode: 30, stage: "artifact-parsing", errorCode: "MALFORMED_JSON",
-      schemaDirectory, assertReadyPrecondition: async () => {},
+      schemaDirectory, assertReadyPrecondition: async () => {}, publication: testPublication(),
     }), /exhaustive registry/u);
   } finally {await rm(parent, { recursive: true, force: true });}
 });

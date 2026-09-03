@@ -56,8 +56,8 @@ export function evaluatePolicy(request: PolicyRequest): PolicyDecision {
   };
 }
 
-export function evaluateVulnerableFixture(findings: readonly Finding[]): PolicyDecision {
-  const blocking = findings.filter(({ impact }) => impact === "High" || impact === "Medium");
+export function evaluateVulnerableFixture(findings: readonly Finding[], fixtureSourceSha256: string): PolicyDecision {
+  const blocking = findings.filter(({ impact, detectorId, location }) => (impact === "High" || impact === "Medium") && detectorId === "suicidal" && location.path === "contracts/evm/src/Vulnerable.sol" && location.sourceHash === `sha256:${fixtureSourceSha256}`);
   if (blocking.length === 0) {
     return { category: "output-failure", exitCode: 40, blocking: [], visible: findings, suppressed: [], errors: ["vulnerable fixture produced no blocking detector finding"] };
   }

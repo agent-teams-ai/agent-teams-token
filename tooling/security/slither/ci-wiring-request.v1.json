@@ -12,10 +12,14 @@
     "path": ".github/workflows/ci.yml",
     "canonicalJobSource": ".github/workflows/ci.yml#jobs.solidity-security",
     "jobId": "solidity-security",
-    "needs": ["solidity"],
+    "needs": [
+      "solidity"
+    ],
     "runsOn": "ubuntu-24.04",
     "timeoutMinutes": 20,
-    "permissions": {"contents":"read"},
+    "permissions": {
+      "contents": "read"
+    },
     "checkoutAction": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "uploadAction": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "requirements": [
@@ -24,7 +28,7 @@
       "fetch, offline-install and verify the pinned Linux core toolchain before installing the frozen workspace",
       "set SLITHER_FORGE_PATH=$PWD/.tools/foundry-v1.8.0-linux-x64/forge, SLITHER_SOLC_PATH=$PWD/.tools/solc-v0.8.36-linux-x64/solc and SLITHER_DOCKER_PATH=/usr/bin/docker",
       "set SLITHER_REPOSITORY_ROOT=$PWD, SLITHER_CANDIDATE_SHA=$GITHUB_SHA and a fresh /tmp/slither-evidence-$GITHUB_SHA directory",
-      "run pnpm security:solidity:prepare-image, then pnpm security:solidity; do not use a pipeline, continue-on-error, job-level if, or permissive step if",
+      "run with job-level if: always(), preserve needs: [solidity], explicitly fail unless needs.solidity.result is success, then run preparation and analysis only after a successful prerequisite; do not use a pipeline or continue-on-error",
       "immediately before upload run node tooling/security/slither/src/composition/validate-evidence.ts under if: always(), and permit upload only when that independent finalized-bundle validation succeeds",
       "upload the evidence directory with always() plus successful validator outcome, if-no-files-found: error, retention-days: 14 and name slither-evidence-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT",
       "the upload step itself must not continue on error; a skipped job, missing READY, cancellation, timeout or absent artifact is not acceptable evidence"

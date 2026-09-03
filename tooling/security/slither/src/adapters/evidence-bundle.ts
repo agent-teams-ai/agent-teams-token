@@ -6,7 +6,7 @@ import { classifyGateFailure, isGateErrorCode } from "../application/failure.ts"
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
 
 const ANALYSIS_FILES = [
-  "READY", "detector-inventory.json", "evidence.json", "slither-inventory.json",
+  "READY", "artifact.json", "build-info.json", "detector-inventory.json", "evidence.json", "fixture-artifact.json", "fixture-build-info.json", "slither-inventory.json",
   "slither-status.json", "slither.json", "summary.md",
 ] as const;
 const VARIANTS = {
@@ -86,6 +86,8 @@ interface DerivedBundle {
   readonly suppressed: ReadonlySet<string>;
   readonly triaged: ReadonlySet<string>;
   readonly tools: JsonObject;
+  readonly compiler: JsonObject;
+  readonly fixture: JsonObject;
 }
 
 async function deriveRawBundle(output: string, directory: string, schemaDirectory: string): Promise<DerivedBundle> {
@@ -103,6 +105,7 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
   assertRawFindingSources(findings, canonicalInputs.manifest);
   const policies = await readCanonicalPolicies(canonicalDirectory, canonicalSchemaDirectory, findings);
   const tools = await readCanonicalTools(canonicalInputs.repositoryRoot, canonicalInputs.manifest);
+  const builds = await deriveCompiler(output, canonicalInputs.manifest);
   return {
     manifest: canonicalInputs.manifest,
     findings,
@@ -115,7 +118,7 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
     triageHash: `sha256:${hex(policies.triageBytes)}`,
     suppressed: policies.suppressed,
     triaged: policies.triaged,
-    tools,
+    tools, compiler: builds.compiler, fixture: builds.fixture,
   };
 }
 
@@ -143,11 +146,12 @@ function isWithin(parent: string, child: string): boolean {
 async function readCanonicalInputs(directory: string, schemaDirectory: string): Promise<CanonicalInputs> {
   const manifestRaw = (await readStableCanonicalFile(join(directory, "production-closure.v1.json"), "production manifest")).toString("utf8");
   const manifest = object(parseJsonWithoutDuplicateKeys(manifestRaw), "production manifest");
+  assertExactKeys(manifest, ["schemaVersion","targets","expectedContracts","sources","config","compiler","tools","creationBytecodeSha256","vulnerableFixture","detectorInventory"], "production manifest");
   if (manifest.schemaVersion !== 1) {throw invalid("production manifest version is invalid");}
   const targets = uniqueStrings(manifest.expectedContracts, "manifest.expectedContracts");
   const sourcePaths = uniqueStrings(array(manifest.sources, "manifest.sources").map((entry) => object(entry, "source").path), "manifest source paths");
   const sources = sourcePaths.map((path) => path.replace(/^contracts\/evm\//u, ""));
-  const manifestTargets = array(manifest.targets, "manifest.targets").map((entry) => object(entry, "manifest target"));
+  const manifestTargets = array(manifest.targets, "manifest.targets").map((entry) => {const target=object(entry, "manifest target"); assertExactKeys(target,["path","contract"],"manifest target"); assertStrictRelativePath(stringValue(target.path)); if(!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(stringValue(target.contract))) throw invalid("manifest contract is unsafe"); return target;});
   if (manifestTargets.length === 0 || manifestTargets.some((entry) => !targets.includes(stringValue(entry.contract))
     || !sourcePaths.includes(stringValue(entry.path)))) {throw invalid("canonical target manifest is malformed");}
   const closure = [
@@ -156,16 +160,19 @@ async function readCanonicalInputs(directory: string, schemaDirectory: string): 
     object(manifest.detectorInventory, "manifest.detectorInventory"),
   ];
   const repositoryRoot = await realpath(join(schemaDirectory, "../../.."));
+  const canonicalBase = directory === schemaDirectory ? repositoryRoot : directory;
   for (const rawEntry of closure) {
     const entry = object(rawEntry, "closure entry");
     const relativePath = stringValue(entry.path);
     assertStrictRelativePath(relativePath);
-    const base = directory === schemaDirectory ? repositoryRoot : directory;
-    const bytes = await readStableCanonicalFile(join(base, relativePath), relativePath);
+    const bytes = await readStableCanonicalFile(join(canonicalBase, relativePath), relativePath);
     if (hex(bytes) !== entry.sha256) {throw invalid(`canonical closure input differs: ${relativePath}`);}
   }
+  const vulnerable = object(manifest.vulnerableFixture, "vulnerable fixture"); assertExactKeys(vulnerable,["source","creationBytecodeSha256"],"vulnerable fixture");
+  const fixtureSource=object(vulnerable.source,"vulnerable fixture source"); assertExactKeys(fixtureSource,["path","sha256"],"vulnerable fixture source"); assertStrictRelativePath(stringValue(fixtureSource.path));
+  const fixtureBytes=await readStableCanonicalFile(join(canonicalBase,stringValue(fixtureSource.path)),"vulnerable fixture source"); if(hex(fixtureBytes)!==fixtureSource.sha256) throw invalid("vulnerable fixture source pin differs");
   const detectorEntry = object(manifest.detectorInventory, "manifest.detectorInventory");
-  const acceptedDetectorBytes = await readStableCanonicalFile(join(directory, stringValue(detectorEntry.path)), "detector inventory");
+  const acceptedDetectorBytes = await readStableCanonicalFile(join(canonicalBase, stringValue(detectorEntry.path)), "detector inventory");
   if (hex(acceptedDetectorBytes) !== detectorEntry.sha256) {throw invalid("canonical detector inventory hash differs from manifest");}
   const acceptedDetectorDocument = object(parseJsonWithoutDuplicateKeys(acceptedDetectorBytes.toString("utf8")), "canonical detector inventory");
   if (acceptedDetectorDocument.schemaVersion !== 1 || acceptedDetectorDocument.slitherVersion !== "0.11.6") {
@@ -288,6 +295,32 @@ function deriveTriage(findings: readonly JsonObject[], suppressed: ReadonlySet<s
   return triaged;
 }
 
+async function deriveCompiler(output: string, manifest: JsonObject): Promise<{compiler: JsonObject; fixture: JsonObject}> {
+  const target=object(array(manifest.targets,"manifest targets")[0],"manifest target");
+  const compiler=await deriveOneBuild(output,"build-info.json","artifact.json",stringValue(target.path).replace(/^contracts\/evm\//u,""),stringValue(target.contract));
+  const vulnerable=object(manifest.vulnerableFixture,"vulnerable fixture"); const fixtureSource=object(vulnerable.source,"vulnerable fixture source");
+  const fixtureBuild=await deriveOneBuild(output,"fixture-build-info.json","fixture-artifact.json","src/Vulnerable.sol","Vulnerable");
+  if (compiler.creationBytecodeSha256 !== `sha256:${manifest.creationBytecodeSha256}` || fixtureBuild.creationBytecodeSha256 !== `sha256:${vulnerable.creationBytecodeSha256}` || !array(fixtureBuild.sourceHashes,"fixture source hashes").some((item)=>{const entry=object(item,"fixture source hash");return entry.path==="src/Vulnerable.sol"&&entry.sha256===`sha256:${fixtureSource.sha256}`;})) {throw invalid("compiler creation bytecode differs from manifest pins");}
+  const expectedSources=new Map(array(manifest.sources,"manifest sources").map((item)=>{const entry=object(item,"source"); return [stringValue(entry.path).replace(/^contracts\/evm\//u,""),`sha256:${entry.sha256}`] as const;}));
+  const observed=array(compiler.sourceHashes,"compiler source hashes").map((item)=>object(item,"source hash"));
+  if(observed.length!==expectedSources.size || observed.some((entry)=>expectedSources.get(stringValue(entry.path))!==entry.sha256)) throw invalid("compiler per-source hashes differ from the pinned closure");
+  return {compiler,fixture:{sourceSha256:`sha256:${fixtureSource.sha256}`,buildInfoSha256:fixtureBuild.buildInfoSha256,artifactSha256:fixtureBuild.artifactSha256,abiSha256:fixtureBuild.abiSha256,creationBytecodeSha256:fixtureBuild.creationBytecodeSha256}};
+}
+async function deriveOneBuild(output:string,buildName:string,artifactName:string,sourceName:string,contractName:string):Promise<JsonObject>{
+  const buildBytes=await readStableOutputFile(join(output,buildName)); const artifactBytes=await readStableOutputFile(join(output,artifactName));
+  const build=object(parseJsonWithoutDuplicateKeys(buildBytes.toString("utf8")),buildName); const input=object(build.input,"compiler input"); const settings=object(input.settings,"compiler settings");
+  const optimizer=object(settings.optimizer,"optimizer"); const metadata=object(settings.metadata,"metadata"); const libraries=object(settings.libraries,"libraries"); const remappings=array(settings.remappings,"remappings").map(stringValue).toSorted();
+  if(build.solcVersion!=="0.8.36+commit.8a079791"||settings.evmVersion!=="paris"||optimizer.enabled!==true||optimizer.runs!==200||metadata.bytecodeHash!=="ipfs"||metadata.appendCBOR!==true||metadata.useLiteralContent!==false||settings.viaIR!==false||settings.experimental!==false||Object.keys(libraries).length!==0||JSON.stringify(remappings)!==JSON.stringify(["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])) throw invalid("raw compiler settings differ from the pinned profile");
+  const sources=object(input.sources,"compiler sources"); const sourceHashes=Object.entries(sources).map(([path,value])=>{assertStrictRelativePath(path); const source=object(value,"compiler source"); const content=stringValue(source.content); return {path,sha256:`sha256:${hex(content)}`};}).toSorted((a,b)=>a.path.localeCompare(b.path));
+  const artifact=object(parseJsonWithoutDuplicateKeys(artifactBytes.toString("utf8")),artifactName); const abi=array(artifact.abi,"artifact ABI"); const bytecode=stringValue(object(artifact.bytecode,"artifact bytecode").object); const normalized=bytecode.startsWith("0x")?bytecode:`0x${bytecode}`;
+  if(!/^0x(?:[0-9a-fA-F]{2})+$/u.test(normalized)) throw invalid("artifact creation bytecode is malformed");
+  const contracts=object(object(build.output,"compiler output").contracts,"compiler contracts");
+  const sourceOutput=object(contracts[sourceName],"source output"); const contractOutput=object(sourceOutput[contractName],"contract output");
+  const evm=object(contractOutput.evm,"evm"); const fromBuild=stringValue(object(evm.bytecode,"build bytecode").object);
+  if(Buffer.from(fromBuild.replace(/^0x/u,""),"hex").compare(Buffer.from(normalized.slice(2),"hex"))!==0) throw invalid("artifact and build-info bytecode differ");
+  return {buildInfoSha256:`sha256:${hex(buildBytes)}`,compilerInputSha256:`sha256:${hex(JSON.stringify(input))}`,compilerSettingsSha256:`sha256:${hex(JSON.stringify(settings))}`,compilerInput:input,compilerSettings:settings,sourceHashes,artifactSha256:`sha256:${hex(artifactBytes)}`,abiSha256:`sha256:${hex(JSON.stringify(abi))}`,creationBytecode:normalized,creationBytecodeSha256:`sha256:${hex(Buffer.from(normalized.slice(2),"hex"))}`};
+}
+
 async function readCanonicalTools(repositoryRoot: string, manifest: JsonObject): Promise<JsonObject> {
   const lock = object(parseJsonWithoutDuplicateKeys((await readStableCanonicalFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "toolchain.lock.json")).toString("utf8")), "toolchain lock");
   const image = object(object(lock.securityImages, "securityImages").slither, "slither image");
@@ -373,7 +406,8 @@ function assertDerivedAnalysis(value: JsonObject, context: AnalysisContext, deri
     throw invalid("summary targets, sources, detectors or findings differ from raw evidence");
   }
   const evidenceTools = object(value.tools, "tools");
-  if (analysis.creationBytecodeSha256 !== `sha256:${derived.manifest.creationBytecodeSha256}`
+  if (!deepEqual(analysis.compiler, derived.compiler) || !deepEqual(analysis.fixture, derived.fixture)
+    || analysis.creationBytecodeSha256 !== `sha256:${derived.manifest.creationBytecodeSha256}`
     || Object.keys(derived.tools).some((field) => evidenceTools[field] !== derived.tools[field])
     || Object.keys(evidenceTools).length !== Object.keys(derived.tools).length) {
     throw invalid("bytecode or tool identity differs from canonical inputs");
@@ -454,8 +488,8 @@ function canonical(value: unknown): unknown {
 const hex = (value: string | Uint8Array): string => createHash("sha256").update(value).digest("hex");
 const stringValue = (value: unknown): string => {if (typeof value !== "string") {throw invalid("expected string");} return value;};
 function schemaName(variant: Variant): string {return variant === "evidence.json" ? "evidence-report.schema.v1.json" : `${variant.slice(0, -5)}.schema.v1.json`;}
-async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("bundle is not a regular directory");}}
-async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) {throw invalid("bundle entry is not a regular file");}}
+async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o777n) !== 0o700n || info.uid !== BigInt(process.getuid?.() ?? -1)) {throw invalid("bundle is not a regular directory");}}
+async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || (info.mode & 0o777n) !== 0o600n || info.uid !== BigInt(process.getuid?.() ?? -1)) {throw invalid("bundle entry is not a regular file");}}
 async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path, { bigint: true }); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw invalid("raw output is not a sealed regular file");} const handle = await (await import("node:fs/promises")).open(path, 0 | 131072); try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) {throw invalid("raw output identity changed");} const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw invalid("raw output changed during read");} return bytes; } finally { await handle.close(); } }
 function assertStrictRelativePath(value: string): void {
   if (!value || value.startsWith("/") || value.includes("\\") || value.split("/").some((part) => !part || part === "." || part === "..")) {throw invalid(`unsafe canonical path: ${value}`);}

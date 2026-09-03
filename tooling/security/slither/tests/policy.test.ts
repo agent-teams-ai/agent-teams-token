@@ -4,7 +4,9 @@ import { findingFingerprint, normalizedIdentityHash, sha256, sourceLocation } fr
 import { evaluatePolicy } from "../src/application/policy.ts";
 import type { AnalysisInput, Finding, GateManifest, Suppression } from "../src/domain/model.ts";
 import { parseCompilerProfile } from "../src/domain/model.ts";
+import { makeCompilerEvidence } from "./test-compiler-evidence.ts";
 
+const testBuild = makeCompilerEvidence("contract A { function x() external {} }");
 const expectedDetectors = ["suicidal", "tx-origin"];
 const manifest: GateManifest = {
   schemaVersion: 1,
@@ -32,7 +34,8 @@ const manifest: GateManifest = {
     forgeBinarySha256: "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f",
     solcBinarySha256: "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6",
   },
-  creationBytecodeSha256: "b",
+  creationBytecodeSha256: testBuild.compilerEvidence.creationBytecodeSha256,
+  vulnerableFixture: testBuild.vulnerableFixture,
   detectorInventory: { path: "detectors.json", sha256: "d".repeat(64) },
 };
 const source = "contract A { function x() external {} }";
@@ -60,11 +63,12 @@ function input(findings: readonly Finding[]): AnalysisInput {
     closure: [...manifest.sources, manifest.detectorInventory],
     detectorInventory: expectedDetectors,
     compiler: manifest.compiler,
-    creationBytecodeSha256: "b",
-    freshFoundryCreationBytecodeSha256: "b",
+    creationBytecodeSha256: testBuild.compilerEvidence.creationBytecodeSha256,
+    freshFoundryCreationBytecodeSha256: testBuild.compilerEvidence.creationBytecodeSha256,
     analysisErrors: [],
     forgeBinarySha256: manifest.tools.forgeBinarySha256,
     solcBinarySha256: manifest.tools.solcBinarySha256,
+    compilerEvidence: testBuild.compilerEvidence, fixtureProof: testBuild.fixtureProof,
   };
 }
 

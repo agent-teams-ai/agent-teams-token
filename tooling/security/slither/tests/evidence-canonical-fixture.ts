@@ -9,6 +9,7 @@ export async function writeCanonicalFixture(
   input: AnalysisInput,
 ): Promise<{ readonly config: string; readonly policy: string; readonly triage: string; readonly manifest: GateManifest }> {
   await mkdir(join(directory, "contracts/evm/src"), { recursive: true });
+  await mkdir(join(directory, "tooling/security/slither/tests/fixtures"), { recursive: true });
   const source = "contract A {}\n";
   const sourceHash = sha256(source);
   const detectors = `${JSON.stringify({ schemaVersion: 1, slitherVersion: "0.11.6", detectors: input.detectorInventory }, null, 2)}\n`;
@@ -18,6 +19,7 @@ export async function writeCanonicalFixture(
   const accepted = { ...manifest, sources: manifest.sources.map((entry) => ({ ...entry, sha256: sourceHash })), detectorInventory: { path: "detector-inventory.v1.json", sha256: sha256(detectors) } };
   await Promise.all([
     writeFile(join(directory, "contracts/evm/src/A.sol"), source),
+    writeFile(join(directory, accepted.vulnerableFixture.source.path), input.fixtureProof.rawBuildInfo.includes("Vulnerable") ? "contract Vulnerable {}\n" : "contract Vulnerable {}\n"),
     writeFile(join(directory, "production-closure.v1.json"), `${JSON.stringify(accepted, null, 2)}\n`),
     writeFile(join(directory, "detector-inventory.v1.json"), detectors),
     writeFile(join(directory, "slither.config.json"), config),

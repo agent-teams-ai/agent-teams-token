@@ -16,7 +16,7 @@ export type GateErrorCode =
   | "MALFORMED_JSON" | "POLICY_SHAPE_INVALID" | "PRODUCTION_SOURCE_UNASSIGNED"
   | "SLITHER_EXIT_INVALID" | "SLITHER_INVENTORY_EMPTY" | "SOLC_PIN_MISMATCH"
   | "SUPPRESSION_SHAPE_INVALID" | "TARGET_MANIFEST_INVALID" | "TOOLCHAIN_LOCK_INVALID"
-  | "TOOL_VERSION_MISMATCH" | "UNEXPECTED_ENVIRONMENT_FAILURE"
+  | "TOOL_VERSION_MISMATCH" | "UNEXPECTED_ENVIRONMENT_FAILURE" | "CONTAINER_ID_INVALID" | "CGROUP_RUNTIME_UNPROVEN" | "TEMP_ROOT_INVALID" | "PUBLICATION_UNAVAILABLE"
   | "VULNERABLE_FIXTURE_NOT_BLOCKED" | "WORKTREE_NOT_CLEAN";
 
 export interface SourceLocation {
@@ -79,6 +79,7 @@ export interface GateManifest {
     readonly solcBinarySha256: "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6";
   };
   readonly creationBytecodeSha256: string;
+  readonly vulnerableFixture: { readonly source: ClosureEntry; readonly creationBytecodeSha256: string };
   readonly detectorInventory: ClosureEntry;
 }
 
@@ -87,6 +88,9 @@ export interface DetectorInventoryDocument {
   readonly slitherVersion: "0.11.6";
   readonly detectors: readonly string[];
 }
+
+export interface CompilerEvidence { readonly buildInfoSha256: string; readonly compilerInputSha256: string; readonly compilerSettingsSha256: string; readonly compilerInput: Readonly<Record<string, unknown>>; readonly compilerSettings: Readonly<Record<string, unknown>>; readonly sourceHashes: readonly ClosureEntry[]; readonly artifactSha256: string; readonly abiSha256: string; readonly creationBytecode: string; readonly creationBytecodeSha256: string; readonly rawBuildInfo: string; readonly rawArtifact: string }
+export interface FixtureProof { readonly sourceSha256: string; readonly buildInfoSha256: string; readonly artifactSha256: string; readonly abiSha256: string; readonly creationBytecodeSha256: string; readonly rawBuildInfo: string; readonly rawArtifact: string }
 
 export interface AnalysisInput {
   readonly success: boolean;
@@ -101,6 +105,8 @@ export interface AnalysisInput {
   readonly analysisErrors: readonly string[];
   readonly forgeBinarySha256: string;
   readonly solcBinarySha256: string;
+  readonly compilerEvidence: CompilerEvidence;
+  readonly fixtureProof: FixtureProof;
 }
 
 export interface FindingTriage {
