@@ -109,7 +109,12 @@ export class JsonRpcAdapter implements RpcPort {
     return new Promise((resolve, reject) => {
       let settled = false;
       const fail = (cause: unknown) => { if (settled) return; settled = true; reject(cause instanceof LocalSolanaError ? cause : new LocalSolanaError("SOLANA_RPC_RESPONSE", cause instanceof Error ? cause.message : "RPC transport failed")); };
-      const request = httpRequest({ protocol: "http:", hostname: "127.0.0.1", port, path: "/", method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) }, signal }, (response) => {
+      // This fixture RPC must never inherit ambient proxy settings. Node 24's
+      // `node:http` consults NODE_USE_ENV_PROXY/HTTP_PROXY unless proxyEnv is
+      // explicitly disabled; use a direct, non-pooled socket as an additional
+      // guard so the peer identity check always observes the owned validator.
+      const options = { protocol: "http:", hostname: "127.0.0.1", port, path: "/", method: "POST", agent: false, proxyEnv: {}, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) }, signal } as Parameters<typeof httpRequest>[0];
+      const request = httpRequest(options, (response) => {
         if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) { response.resume(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", `RPC HTTP status ${response.statusCode ?? 0}`)); return; }
         let size = 0; const chunks: Buffer[] = [];
         response.on("data", (chunk: Buffer | string) => { size += Buffer.byteLength(chunk); if (size > 1_048_576) { response.destroy(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC response body exceeds limit")); } else { chunks.push(Buffer.from(chunk)); } });
