@@ -19,6 +19,12 @@ const hash = `0x${"a".repeat(64)}` as const;
 const otherHash = `0x${"b".repeat(64)}` as const;
 const creationInput = "0x0103" as const;
 const creationInputHash = sha256Hex(Buffer.from(creationInput.slice(2), "hex"));
+const creationBytecode = "0x01" as const;
+const creationBytecodeHash = sha256Hex(Buffer.from(creationBytecode.slice(2), "hex"));
+const constructorAbiBytes = "0x02" as const;
+const constructorAbiHash = sha256Hex(Buffer.from(constructorAbiBytes.slice(2), "hex"));
+const constructorArguments = "0x03" as const;
+const constructorArgumentsHash = sha256Hex(Buffer.from(constructorArguments.slice(2), "hex"));
 const roots: TrustRoots = {
   schemaVersion: 2,
   testOnly: true,
@@ -39,7 +45,7 @@ const roots: TrustRoots = {
   abiSha256: hash,
   fixtureSha256: hash,
   fixtureReadySha256: hash,
-  constructorArgumentsHash: hash,
+  constructorArgumentsHash,
   creationInputHash,
   sourceDependencyClosure: {},
 };
@@ -52,12 +58,12 @@ const artifact: ApprovedArtifact = {
   buildInfoSolcVersion: roots.buildInfoSolcVersion,
   compilerInputSha256: roots.compilerInputSha256,
   compilerSettings: {},
-  creationBytecode: "0x01",
-  creationBytecodeHash: hash,
-  constructorAbiBytes: "0x02",
-  constructorAbiHash: hash,
-  constructorArguments: "0x03",
-  constructorArgumentsHash: hash,
+  creationBytecode,
+  creationBytecodeHash,
+  constructorAbiBytes,
+  constructorAbiHash,
+  constructorArguments,
+  constructorArgumentsHash,
   creationInput,
   creationInputHash,
 };
@@ -115,6 +121,15 @@ test("trust roots bind buffer, exact expiry and the complete time ordering", () 
     /blockTimestamp|observedAt/u,
   );
   assert.throws(() => verify(quote, 170n), /blockTimestamp|expiresAt/u);
+});
+
+test("forged component hashes are rejected even when bytes are unchanged", () => {
+  const plan = buildStablePlan(artifact, roots, observation);
+  const quote = buildFeeQuote(plan, observation, roots);
+  for (const field of ["creationBytecodeHash", "constructorAbiHash", "constructorArgumentsHash", "creationInputHash"] as const) {
+    const forged = { ...artifact, [field]: hash };
+    assert.throws(() => independentlyVerify({ plan, quote, roots, expected: forged, ready: readyFor(plan.planId), nowSeconds: 110n }), /forged|untrusted|binding|mismatch|approved build input/u);
+  }
 });
 
 test("quote expiry addition is uint256 overflow checked", () => {

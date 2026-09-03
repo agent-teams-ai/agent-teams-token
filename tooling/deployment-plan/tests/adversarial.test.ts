@@ -13,6 +13,12 @@ import { main as estimateLocalMain } from "../../../scripts/deployment/estimate-
 
 const hash = `0x${"a".repeat(64)}` as const;
 const inputHash = sha256Hex(Buffer.from("0103", "hex"));
+const creationBytecode = "0x01" as const;
+const creationBytecodeHash = sha256Hex(Buffer.from(creationBytecode.slice(2), "hex"));
+const constructorAbiBytes = "0x02" as const;
+const constructorAbiHash = sha256Hex(Buffer.from(constructorAbiBytes.slice(2), "hex"));
+const constructorArguments = "0x03" as const;
+const constructorArgumentsHash = sha256Hex(Buffer.from(constructorArguments.slice(2), "hex"));
 const roots: TrustRoots = {
   schemaVersion: 2,
   testOnly: true,
@@ -33,7 +39,7 @@ const roots: TrustRoots = {
   abiSha256: hash,
   fixtureSha256: hash,
   fixtureReadySha256: hash,
-  constructorArgumentsHash: hash,
+  constructorArgumentsHash,
   creationInputHash: inputHash,
   sourceDependencyClosure: {},
 };
@@ -46,12 +52,12 @@ const artifact: ApprovedArtifact = {
   buildInfoSolcVersion: roots.buildInfoSolcVersion,
   compilerInputSha256: roots.compilerInputSha256,
   compilerSettings: {},
-  creationBytecode: "0x01",
-  creationBytecodeHash: hash,
-  constructorAbiBytes: "0x02",
-  constructorAbiHash: hash,
-  constructorArguments: "0x03",
-  constructorArgumentsHash: hash,
+  creationBytecode,
+  creationBytecodeHash,
+  constructorAbiBytes,
+  constructorAbiHash,
+  constructorArguments,
+  constructorArgumentsHash,
   creationInput: "0x0103",
   creationInputHash: inputHash,
 };

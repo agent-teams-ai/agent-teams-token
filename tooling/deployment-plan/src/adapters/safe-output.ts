@@ -103,6 +103,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   private readonly faultInjection: OutputFaultInjection;
   private readonly leaves = new Map<string, DirectoryIdentity>();
   private published = false;
+  private stagingDisposed = false;
   private reservedTargetIdentity?: DirectoryIdentity;
 
   constructor(input: {
@@ -188,6 +189,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       if (names.includes("READY")) ordered.push("READY");
       for (const name of ordered) await rename(join(this.path, name), join(this.target, name));
       await rmdir(this.path);
+      this.stagingDisposed = true;
       await this.faultInjection.afterPublishRename?.();
       await this.assertParentStable();
       const publishedMetadata = await lstat(this.target);
@@ -258,6 +260,19 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   }
 
   private async cleanupStaging(): Promise<void> {
+    if (this.stagingDisposed) {
+      // A post-rename failure has already consumed staging. Check that the
+      // reserved target was not replaced; rollback may legitimately remove it.
+      try {
+        const targetMetadata = await lstat(this.target);
+        if (this.reservedTargetIdentity !== undefined) {
+          assertSameIdentity(targetMetadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+        }
+      } catch (error) {
+        if (nodeErrorCode(error) !== "ENOENT") throw error;
+      }
+      return;
+    }
     await this.assertStagingStable();
     await this.assertCleanupLeaves(this.path);
     const quarantine = join(
