@@ -1,4 +1,4 @@
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
@@ -22,7 +22,7 @@ export interface ToolchainLock {
     readonly solc: { readonly platforms: Record<string, { readonly sha256: string; readonly installDirectory: string }> };
   };
   readonly securityImages: { readonly slither: {
-    readonly repository: string; readonly tag: string; readonly manifestDigest: string;
+    readonly repository: string; readonly tag: string; readonly indexDigest: string; readonly manifestDigest: string;
     readonly sourceRevision: string; readonly platform: string;
     readonly versions: { readonly slither: string; readonly cryticCompile: string; readonly forge: string; readonly solc: string };
     readonly runtime: { readonly containerUser: string; readonly pythonPath: string; readonly forgeMountPath: string; readonly solcMountPath: string };
@@ -201,6 +201,7 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   parseCompilerProfile(manifest.compiler);
   assertSuppressionShape(suppressionDocument.suppressions);
   const inventoryDocument = await readDetectorInventory(repositoryRoot, manifest.detectorInventory);
+  await assertCanonicalConfig(join(base, "slither.config.json"));
   const lock = parseTypedJson(await readFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8"), "TOOLCHAIN_LOCK_INVALID", "toolchain lock") as ToolchainLock;
   assertSlitherToolchainBinding(lock);
   const foundryArtifact = lock.tools.foundry.platforms["linux-x64"];
@@ -358,22 +359,35 @@ async function readDetectorInventory(
   return document as DetectorInventoryDocument;
 }
 
+async function assertCanonicalConfig(path: string): Promise<void> {
+  const raw = await readStableRegularFile(path, "slither.config.json");
+  let value: unknown; try { value = parseJsonWithoutDuplicateKeys(raw.toString("utf8")); } catch { throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config is not unambiguous JSON"); }
+  if (JSON.stringify(value) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config contains unsupported exclusions or fields");
+}
+
 const safePathList = (value: string): boolean => value.split(":").every((entry) => entry.startsWith("/") && !entry.includes("..") && !entry.includes("\n"));
 
 async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
-  const source = join(root, entry.path); const content = await readFile(source);
+  const source = join(root, entry.path); const content = await readStableRegularFile(source, entry.path);
   if (sha256(content) !== entry.sha256) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input differs: ${entry.path}`);}
-  const target = join(destination, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 }); await copyFile(source, target);
+  const target = join(destination, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 }); await writeFile(target, content, { mode: 0o444, flag: "wx" });
+}
+
+async function readStableRegularFile(path: string, label: string): Promise<Buffer> {
+  const before = await lstat(path);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { const opened = await handle.stat(); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); const content = await handle.readFile(); const after = await handle.stat(); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); return content; } finally { await handle.close(); }
 }
 
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
-  return await Promise.all(entries.map(async ({ path }) => ({ path, sha256: sha256(await readFile(join(root, path))) })));
+  return await Promise.all(entries.map(async ({ path }) => ({ path, sha256: sha256(await readStableRegularFile(join(root, path), path)) })));
 }
 
 async function verifyVersions(output: string): Promise<void> {
   const checks: [string, RegExp][] = [
-    ["forge.version", /Version: 1\.8\.0/u], ["solc.version", /Version: 0\.8\.36\+commit\.8a079791/u],
-    ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /0\.4\.2/u],
+    ["forge.version", /^forge Version: 1\.8\.0\s*$/u], ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\s*$/u],
+    ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /^crytic-compile 0\.4\.2\s*$/u],
   ];
   for (const [file, pattern] of checks) {
     if (!pattern.test(await readFile(join(output, file), "utf8"))) {
@@ -396,7 +410,7 @@ async function parseCompiledOutput(output: string): Promise<{ compiler: GateMani
 
 function validateBuildCompiler(build: BuildInfo): GateManifest["compiler"] {
   const settings = build.input?.settings;
-  if (!settings || typeof build.solcVersion !== "string" || !build.solcVersion.startsWith("0.8.36")) {
+  if (!settings || build.solcVersion !== "0.8.36+commit.8a079791") {
     throw new SlitherGateError("BUILD_INFO_INVALID", "fresh build-info lacks compiler identity");
   }
   const remappings = stringArray(settings.remappings).toSorted();
@@ -473,9 +487,10 @@ export function assertSlitherToolchainBinding(lock: ToolchainLock, runtime: Slit
 }): void {
   const image = lock.securityImages?.slither;
   if (!image || `${image.repository}:${image.tag}@${image.manifestDigest}` !== runtime.image
+    || image.indexDigest !== "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8"
     || image.sourceRevision !== runtime.revision || image.platform !== runtime.platform
     || image.versions.slither !== runtime.slither || image.versions.cryticCompile !== runtime.cryticCompile
-    || image.versions.forge !== runtime.forge || !image.versions.solc.startsWith(runtime.solcPrefix)
+    || image.versions.forge !== runtime.forge || image.versions.solc !== `${runtime.solcPrefix}.Linux.g++`
     || image.runtime.containerUser !== runtime.containerUser || image.runtime.pythonPath !== runtime.pythonPath
     || image.runtime.forgeMountPath !== runtime.forgeMountPath || image.runtime.solcMountPath !== runtime.solcMountPath) {
     throw new SlitherGateError("TOOLCHAIN_LOCK_INVALID", "Slither runtime differs from the canonical toolchain lock");

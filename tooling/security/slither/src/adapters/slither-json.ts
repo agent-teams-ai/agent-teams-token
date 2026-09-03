@@ -25,6 +25,7 @@ export async function parseSlitherJson(raw: string, repositoryRoot: string): Pro
   let decoded: unknown;
   try { decoded = parseJsonWithoutDuplicateKeys(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither output is not unambiguous JSON"); }
   const root = object(decoded, "output");
+  if (Object.keys(root).some((key) => !["success", "results", "error"].includes(key))) throw new SlitherGateError("MALFORMED_JSON", "output contains unexpected fields");
   if (typeof root.success !== "boolean") {throw new SlitherGateError("MALFORMED_JSON", "success must be boolean");}
   const results = root.results === undefined && root.success === false ? {} : object(root.results, "results");
   if (root.success === true && !Array.isArray(results.detectors)) {throw new SlitherGateError("MALFORMED_JSON", "results.detectors must be an array");}
@@ -87,6 +88,7 @@ async function parseFinding(
   repositoryRoot: string,
 ): Promise<Finding> {
   const detector = object(rawDetector, `detector[${index}]`);
+  if (Object.keys(detector).some((key) => !["check", "impact", "confidence", "description", "markdown", "elements"].includes(key))) throw new SlitherGateError("MALFORMED_JSON", "detector contains unexpected fields");
   const detectorId = string(detector.check, "check");
   const impact = parseImpact(detector.impact);
   const confidence = string(detector.confidence, "confidence");
@@ -148,7 +150,10 @@ function findingPath(mapping: JsonObject): string {
 }
 
 export function parseDetectorInventory(raw: string): readonly string[] {
-  const ids = [...raw.matchAll(/^\|\s*\d+\s*\|\s*`?([a-z0-9-]+)`?\s*\|/gmu)].map((match) => match[1]!);
+  const lines = raw.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  const row = /^\|\s*\d+\s*\|\s*`?([a-z0-9-]+)`?\s*\|/u;
+  for (const line of lines) { if (!row.test(line) && !/^\s*\|?\s*(?:Detector|ID|[-| ]+)\s*\|?/u.test(line)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory contains an unrecognised line"); }
+  const ids = lines.flatMap((line) => { const match = row.exec(line); return match ? [match[1]!] : []; });
   const unique = [...new Set(ids)].toSorted();
   if (unique.length !== ids.length || unique.length === 0) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is empty or duplicated");}
   return unique;

@@ -126,6 +126,7 @@ function executionIdentity(): Record<string, string> {
 }
 
 async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>): Promise<void> {
+  if (!output.startsWith("/") || (await lstat(output).catch(() => null)) !== null) { throw new Error("evidence output must be an absolute fresh path"); }
   const staging = await mkdtemp(join(dirname(output), `.${basename(output)}.staging-`));
   try {
     const info = await lstat(staging);

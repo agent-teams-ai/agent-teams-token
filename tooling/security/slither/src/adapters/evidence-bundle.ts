@@ -28,7 +28,8 @@ interface ValidationRequest {
 
 /** Independently derives the uploaded result from raw, normalized analyzer inputs. */
 export async function validateFinalizedEvidenceBundle(request: ValidationRequest): Promise<void> {
-  if (!request.output.startsWith("/") || !/^[0-9a-f]{40}$/u.test(request.candidateSha)) {
+  const repositoryRoot = join(request.schemaDirectory, "../../..");
+  if (!request.output.startsWith("/") || request.output === repositoryRoot || request.output.startsWith(`${repositoryRoot}/`) || !/^[0-9a-f]{40}$/u.test(request.candidateSha)) {
     throw invalid("an absolute bundle path and exact candidate SHA are required");
   }
   await assertRegularDirectory(request.output);
@@ -160,10 +161,10 @@ async function readRawAnalysis(
   sources: readonly string[],
   acceptedDetectors: readonly string[],
 ): Promise<JsonObject[]> {
-  const rawAnalysis = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "slither.json"), "utf8")), "slither.json");
-  const rawInventory = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "slither-inventory.json"), "utf8")), "slither-inventory.json");
-  const rawDetectors = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "detector-inventory.json"), "utf8")), "detector-inventory.json");
-  const status = object(parseJsonWithoutDuplicateKeys(await readFile(join(output, "slither-status.json"), "utf8")), "slither-status.json");
+  const rawAnalysis = object(parseJsonWithoutDuplicateKeys((await readStableOutputFile(join(output, "slither.json"))).toString("utf8")), "slither.json");
+  const rawInventory = object(parseJsonWithoutDuplicateKeys((await readStableOutputFile(join(output, "slither-inventory.json"))).toString("utf8")), "slither-inventory.json");
+  const rawDetectors = object(parseJsonWithoutDuplicateKeys((await readStableOutputFile(join(output, "detector-inventory.json"))).toString("utf8")), "detector-inventory.json");
+  const status = object(parseJsonWithoutDuplicateKeys((await readStableOutputFile(join(output, "slither-status.json"))).toString("utf8")), "slither-status.json");
   assertExactKeys(rawAnalysis, ["schemaVersion", "success", "errors", "findings"], "slither.json");
   assertExactKeys(rawInventory, ["schemaVersion", "success", "contracts", "sources", "errors"], "slither-inventory.json");
   assertExactKeys(rawDetectors, ["schemaVersion", "detectors"], "detector-inventory.json");
@@ -220,6 +221,8 @@ async function readCanonicalPolicies(
   findings: readonly JsonObject[],
 ): Promise<CanonicalPolicies> {
   const configBytes = await readFile(join(directory, "slither.config.json"));
+  let config: unknown; try { config = parseJsonWithoutDuplicateKeys(configBytes.toString("utf8")); } catch { throw invalid("Slither config is not unambiguous JSON"); }
+  if (JSON.stringify(config) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) throw invalid("Slither config contains unsupported exclusions or fields");
   const policyBytes = await readFile(join(directory, "suppressions.v1.json"));
   const triageBytes = await readFile(join(directory, "triage.v1.json"));
   await assertSerializedAgainstSchema(policyBytes.toString("utf8"), join(schemaDirectory, "suppression-ledger.schema.v1.json"));
@@ -432,7 +435,8 @@ const hex = (value: string | Uint8Array): string => createHash("sha256").update(
 const stringValue = (value: unknown): string => {if (typeof value !== "string") {throw invalid("expected string");} return value;};
 function schemaName(variant: Variant): string {return variant === "evidence.json" ? "evidence-report.schema.v1.json" : `${variant.slice(0, -5)}.schema.v1.json`;}
 async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path); if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("bundle is not a regular directory");}}
-async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink()) {throw invalid("bundle entry is not a regular file");}}
+async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {throw invalid("bundle entry is not a regular file");}}
+async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw invalid("raw output is not a sealed regular file"); const bytes = await readFile(path); const after = await lstat(path); if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.nlink !== 1) throw invalid("raw output changed during read"); return bytes; }
 function object(value: unknown, name: string): JsonObject {if (value === null || typeof value !== "object" || Array.isArray(value)) {throw invalid(`${name} is not an object`);} return value as JsonObject;}
 function array(value: unknown, name: string): unknown[] {if (!Array.isArray(value)) {throw invalid(`${name} is not an array`);} return value;}
 function invalid(message: string): SlitherGateError {return new SlitherGateError("EVIDENCE_BUNDLE_INVALID", message);}

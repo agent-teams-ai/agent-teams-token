@@ -171,7 +171,7 @@ async function makeIndependentGoldenBundle(output: string): Promise<void> {
   const canonicalDirectory = join(dirname(output), "canonical");
   const detectors = [...Array.from({ length: 100 }, (_, index) => `d-${index}`), "fixture-detector"].toSorted();
   const detectorBytes = json({ schemaVersion: 1, slitherVersion: "0.11.6", detectors });
-  const configBytes = json({ filter_paths: [] });
+  const configBytes = json({ exclude_dependencies: false, legacy_ast: false });
   const policyBytes = json({ schemaVersion: 1, suppressions: [] });
   const triageBytes = json({ schemaVersion: 1, findings: [{ schemaVersion: 1, fingerprint: golden.finding.fingerprint,
     owner: "fixture-security", disposition: "accepted-design", rationale: "Independently reviewed golden evidence fixture finding.",
