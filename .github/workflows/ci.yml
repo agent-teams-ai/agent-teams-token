@@ -206,15 +206,15 @@ jobs:
       SLITHER_SOLC_PATH: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
       SLITHER_DOCKER_PATH: /usr/bin/docker
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Assert solidity prerequisite completed successfully
         if: ${{ always() }}
         shell: bash
         run: |
           test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
       - name: Assert exact clean checkout
         shell: bash
         run: scripts/assert-clean-head.sh "$GITHUB_SHA"
@@ -227,12 +227,15 @@ jobs:
           ./dev bootstrap verify --offline
           ./dev doctor --scope=core
       - name: Install frozen workspace
+        if: ${{ needs.solidity.result == 'success' }}
         shell: bash
         run: source scripts/env.sh && pnpm install --frozen-lockfile
       - name: Pull exact toolbox platform manifest
+        if: ${{ needs.solidity.result == 'success' }}
         shell: bash
         run: source scripts/env.sh && pnpm security:solidity:prepare-image
       - name: Run exact Slither policy gate
+        if: ${{ needs.solidity.result == 'success' }}
         shell: bash
         run: source scripts/env.sh && pnpm security:solidity
       - name: Assert gate kept the exact checkout clean
@@ -245,7 +248,7 @@ jobs:
         run: |
           test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
       - name: Create minimal prerequisite-failure evidence
-        if: ${{ failure() }}
+        if: ${{ always() && needs.solidity.result != 'success' }}
         shell: bash
         env:
           SLITHER_FAILURE_STAGE: ci-prerequisite

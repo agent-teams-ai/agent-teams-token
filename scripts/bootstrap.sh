@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export PATH=/usr/bin:/bin
 set -euo pipefail
 
 token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -76,7 +77,7 @@ token_prepare_pinned_node() {
       token_publish_stat=$(/usr/bin/stat -f '%i:%d:%l:%HT' "$token_part")
     fi
     [[ "$token_publish_stat" == "$token_part_stat" ]] || { printf '%s\n' 'TOOLCHAIN_FETCH_PART_UNSTABLE tool=node' >&2; return 1; }
-    mv "$token_part" "$token_archive_path"
+    /usr/bin/mv "$token_part" "$token_archive_path"
   fi
   token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
   trap 'rm -rf "$token_node_stage"' EXIT
