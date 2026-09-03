@@ -60,7 +60,7 @@ export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
   match(root.from, ADDRESS, "TRUST_ROOTS_SCHEMA", "from");
   decimals(root, ["maximumWorstCaseWei", "gasBufferBps", "quoteTtlSeconds", "maximumHeadLag"]);
   hashes(root, ["compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash"]);
-  if (root.buildInfoSha256 !== undefined) match(root.buildInfoSha256, HASH, "TRUST_ROOTS_SCHEMA", "buildInfoSha256");
+  if (root.buildInfoSha256 !== undefined) {match(root.buildInfoSha256, HASH, "TRUST_ROOTS_SCHEMA", "buildInfoSha256");}
   object(root.compilerSettings, "TRUST_ROOTS_SCHEMA");
   hashMap(root.sourceDependencyClosure, "TRUST_ROOTS_SCHEMA");
   return root as unknown as TrustRoots;

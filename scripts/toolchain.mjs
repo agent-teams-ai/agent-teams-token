@@ -17,9 +17,8 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-  writeSync,
+  writeSync,constants as fsConstants
 } from "node:fs";
-import { constants as fsConstants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -284,8 +283,8 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
 function verifyArchive({ name, platform, artifact, archive, missingCode }) {
   let actual;
   try { actual = readVerifiedBytes(archive); }
-  catch (error) { if (error?.code === "ENOENT") throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`, { cause: error }); throw error; }
-  if (actual.hash !== artifact.sha256) throw new Error(`TOOLCHAIN_OFFLINE_UNVERIFIED_CACHE tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual.hash}`);
+  catch (error) { if (error?.code === "ENOENT") {throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`, { cause: error });} throw error; }
+  if (actual.hash !== artifact.sha256) {throw new Error(`TOOLCHAIN_OFFLINE_UNVERIFIED_CACHE tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual.hash}`);}
   return actual.bytes;
 }
 
@@ -293,11 +292,11 @@ function readVerifiedBytes(path) {
   const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID");
+    if (!before.isFile() || before.nlink !== 1) {throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID");}
     const bytes = readFileSync(fd);
     const hash = createHash("sha256").update(bytes).digest("hex");
     const pathStat = lstatSync(path); const after = fstatSync(fd);
-    if (!pathStat.isFile() || pathStat.nlink !== 1 || after.ino !== before.ino || after.dev !== before.dev || pathStat.ino !== before.ino || pathStat.dev !== before.dev) throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
+    if (!pathStat.isFile() || pathStat.nlink !== 1 || after.ino !== before.ino || after.dev !== before.dev || pathStat.ino !== before.ino || pathStat.dev !== before.dev) {throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
     return { bytes, hash };
   } finally { closeSync(fd); }
 }
@@ -424,18 +423,18 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
 }
 
 function inspectStableExpectedFile({ artifact, path, target, exists }) {
-  if (!exists) return `file-missing:${path}`;
+  if (!exists) {return `file-missing:${path}`;}
   let fd;
   try {
     fd = openSync(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) return `file-missing:${path}`;
+    if (!before.isFile() || before.nlink !== 1) {return `file-missing:${path}`;}
     const bytes = readFileSync(fd); const actual = createHash("sha256").update(bytes).digest("hex");
     const after = fstatSync(fd); const pathStat = lstatSync(target);
-    if (after.ino !== before.ino || after.dev !== before.dev || pathStat.ino !== before.ino || pathStat.dev !== before.dev || pathStat.nlink !== 1) return `file-checksum:${path}`;
-    if (artifact.provenanceFiles?.[path] !== actual) return `file-checksum:${path}`;
+    if (after.ino !== before.ino || after.dev !== before.dev || pathStat.ino !== before.ino || pathStat.dev !== before.dev || pathStat.nlink !== 1) {return `file-checksum:${path}`;}
+    if (artifact.provenanceFiles?.[path] !== actual) {return `file-checksum:${path}`;}
     return lockedFileMismatch(artifact, path, actual) ? `file-lock-checksum:${path}` : undefined;
-  } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) closeSync(fd); }
+  } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) {closeSync(fd);} }
 }
 
 export function canonicalizeTrustedPath(path, { platform = process.platform } = {}) {
@@ -444,14 +443,14 @@ export function canonicalizeTrustedPath(path, { platform = process.platform } = 
   for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
     current = current === "/" ? `/${part}` : join(current, part);
     let st; try { st = lstatSync(current); } catch { continue; }
-    if (!st.isSymbolicLink()) continue;
+    if (!st.isSymbolicLink()) {continue;}
     const allowed = platform === "darwin" && ((current === "/var" && trustedAliasTarget(current, "/private/var")) || (current === "/tmp" && trustedAliasTarget(current, "/private/tmp")));
-    if (!allowed) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
+    if (!allowed) {throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");}
   }
   if (platform === "darwin") {
     for (const [alias, target] of [["/var", "/private/var"], ["/tmp", "/private/tmp"]]) {
       if (absolute === alias || absolute.startsWith(`${alias}/`)) {
-        try { if (lstatSync(alias).isSymbolicLink() && trustedAliasTarget(alias, target)) return `${target}${absolute.slice(alias.length)}`; } catch { /* unresolved roots remain lexical */ }
+        try { if (lstatSync(alias).isSymbolicLink() && trustedAliasTarget(alias, target)) {return `${target}${absolute.slice(alias.length)}`;} } catch { /* unresolved roots remain lexical */ }
       }
     }
   }
@@ -470,14 +469,14 @@ function assertOwnedDirectoryChain(path, { platform = process.platform } = {}) {
     let st; try { st = lstatSync(current); } catch { continue; }
     const trustedSystemAncestor = platform === "darwin" && ["/private", "/private/var", "/private/var/folders", "/private/tmp"].includes(current);
     const trustedTempAncestor = current === "/tmp";
-    if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1 || ((st.mode & 0o022) !== 0 && !trustedSystemAncestor && !trustedTempAncestor)) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
-    if (typeof process.getuid === "function" && st.uid !== process.getuid() && current !== "/" && !trustedSystemAncestor) throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");
+    if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1 || ((st.mode & 0o022) !== 0 && !trustedSystemAncestor && !trustedTempAncestor)) {throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");}
+    if (typeof process.getuid === "function" && st.uid !== process.getuid() && current !== "/" && !trustedSystemAncestor) {throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");}
   }
 }
 
 function canonicalArchiveFileHashes({ artifact, archive }) {
   const bytes = verifyArchive({ name: "canonical", platform: "canonical", artifact, archive, missingCode: "TOOLCHAIN_ARCHIVE_MISSING" });
-  if (artifact.archive === "executable") return { [artifact.expectedFiles[0]]: createHash("sha256").update(bytes).digest("hex") };
+  if (artifact.archive === "executable") {return { [artifact.expectedFiles[0]]: createHash("sha256").update(bytes).digest("hex") };}
   const root = mkdtempSync(join(dirname(archive), ".inspect-archive-")); const snapshot = join(root, "archive");
   try {
     writeFileSync(snapshot, bytes, { mode: 0o600 });
@@ -503,7 +502,7 @@ function executePnpmVersionCheck({ root, nodeExecutable, tool }) {
     env: minimalSubprocessEnv(),
     timeout: 15_000,
   }).trim();
-  if (!samePathIdentity(pnpmPath, identity)) throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
+  if (!samePathIdentity(pnpmPath, identity)) {throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
   if (actual !== tool.version) {throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`);}
   return `pnpm=${actual}`;
 }
@@ -521,23 +520,23 @@ function writePnpmWrapper({ lock, toolsRoot, platform }) {
   assertOwnedDirectoryChain(bin, { platform });
   const target = join(bin, "pnpm");
   const part = `${target}.part`;
-  if (existsSync(part)) { const stale = lstatSync(part); if (!stale.isFile() || stale.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE"); rmSync(part); }
+  if (existsSync(part)) { const stale = lstatSync(part); if (!stale.isFile() || stale.nlink !== 1) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE");} rmSync(part); }
   const fd = openSync(part, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o700);
   try {
     const contents = pnpmWrapper(lock, platform);
     writeSync(fd, contents);
     const st = fstatSync(fd);
-    if (!st.isFile() || st.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
+    if (!st.isFile() || st.nlink !== 1) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");}
   } finally { closeSync(fd); }
   const check = lstatSync(part);
-  if (!check.isFile() || check.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
+  if (!check.isFile() || check.nlink !== 1) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");}
   renameSync(part, target);
-  const published = lstatSync(target); if (!published.isFile() || published.nlink !== 1 || readFileSync(target, "utf8") !== pnpmWrapper(lock, platform)) throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
+  const published = lstatSync(target); if (!published.isFile() || published.nlink !== 1 || readFileSync(target, "utf8") !== pnpmWrapper(lock, platform)) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");}
 }
 
 function stablePathIdentity(path) {
   const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-  try { const st = fstatSync(fd); if (!st.isFile() || st.nlink !== 1) throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID"); return { ino: st.ino, dev: st.dev }; }
+  try { const st = fstatSync(fd); if (!st.isFile() || st.nlink !== 1) {throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID");} return { ino: st.ino, dev: st.dev }; }
   finally { closeSync(fd); }
 }
 function samePathIdentity(path, identity) {
@@ -553,7 +552,7 @@ function executeVersionChecks(root, artifact) {
       env: minimalSubprocessEnv(),
       timeout: 15_000,
     }).trim();
-    if (!samePathIdentity(executable, identity)) throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
+    if (!samePathIdentity(executable, identity)) {throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
     if (!new RegExp(check.pattern).test(actual)) {
       throw new Error(`version-mismatch:${check.name}:actual=${singleLine(actual)}`);
     }

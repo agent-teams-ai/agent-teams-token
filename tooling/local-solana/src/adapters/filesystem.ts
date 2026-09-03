@@ -198,9 +198,9 @@ async function processExited(pid: number): Promise<boolean> {
   if (!processAlive(pid)) { return true; }
   if (process.platform !== "linux") { return false; }
   try {
-    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
-    const end = stat.lastIndexOf(")");
-    const state = end < 0 ? undefined : stat.slice(end + 2).trim().split(/\s+/u)[0];
+    const procStat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const end = procStat.lastIndexOf(")");
+    const state = end < 0 ? undefined : procStat.slice(end + 2).trim().split(/\s+/u)[0];
     return state === "Z";
   } catch { return false; }
 }

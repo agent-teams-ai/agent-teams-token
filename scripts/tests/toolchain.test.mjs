@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -134,7 +133,7 @@ test("canonicalizes the macOS system temp aliases but rejects attacker symlink r
 });
 
 test("macOS canonical root accepts trusted root-owned temp ancestors", (context) => {
-  if (process.platform !== "darwin") return;
+  if (process.platform !== "darwin") {return;}
   const fixture = makeFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
   const macToolsRoot = join("/tmp", basename(fixture.toolsRoot));

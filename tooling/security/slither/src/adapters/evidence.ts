@@ -128,7 +128,7 @@ function executionIdentity(): Record<string, string> {
 async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>): Promise<void> {
   if (!output.startsWith("/") || (await lstat(output).catch(() => null)) !== null) { throw new Error("evidence output must be an absolute fresh path"); }
   const parent = dirname(output); const parentReal = await realpath(parent).catch(() => { throw new Error("evidence output parent must exist and be realpath-resolvable"); });
-  if (parentReal !== parent || output.includes("/../") || output.includes("//")) throw new Error("evidence output parent must be canonical and non-symlinked");
+  if (parentReal !== parent || output.includes("/../") || output.includes("//")) {throw new Error("evidence output parent must be canonical and non-symlinked");}
   const staging = await mkdtemp(join(dirname(output), `.${basename(output)}.staging-`));
   try {
     const info = await lstat(staging);
@@ -136,7 +136,7 @@ async function publish(output: string, build: (staging: string) => Promise<void>
     await build(staging);
     await writeFile(join(staging, "READY"), "", { mode: 0o600, flag: "wx" });
     await finalize(staging);
-    if ((await lstat(output).catch(() => null)) !== null) throw new Error("evidence output was created concurrently");
+    if ((await lstat(output).catch(() => null)) !== null) {throw new Error("evidence output was created concurrently");}
     await rename(staging, output);
   } catch (error) {
     await rm(staging, { recursive: true, force: true });

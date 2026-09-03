@@ -137,7 +137,7 @@ async function assertExactBundle(directory: string, rejectStaging = true): Promi
   if (rejectStaging && (directory.toLocaleLowerCase().includes(".bundle.staging-") || /\.staging-[0-9a-f]+$/iu.test(directory))) {
     fail("BUNDLE_STAGING_REJECTED", "staging directories cannot be verified");
   }
-  if (await realpath(directory) !== directory) fail("BUNDLE_DIRECTORY_UNSAFE", "bundle path must be canonical");
+  if (await realpath(directory) !== directory) {fail("BUNDLE_DIRECTORY_UNSAFE", "bundle path must be canonical");}
   const names = (await readdir(directory)).toSorted();
   const expected = [PLAN, QUOTE, READY].toSorted();
   if (names.length !== expected.length || names.some((name, index) => name !== expected[index])) {

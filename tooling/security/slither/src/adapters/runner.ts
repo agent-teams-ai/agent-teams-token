@@ -267,10 +267,10 @@ export async function assertContainerResult(
 
 async function sealRawOutput(directory: string): Promise<void> {
   const info = await lstat(directory, { bigint: true });
-  if (!info.isDirectory() || info.isSymbolicLink() || info.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", "analyzer output directory is not a sealed directory");
+  if (!info.isDirectory() || info.isSymbolicLink() || info.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", "analyzer output directory is not a sealed directory");}
   for (const name of await readdir(directory)) {
     const path = join(directory, name); const entry = await lstat(path, { bigint: true });
-    if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `analyzer output entry is not a sealed file: ${name}`);
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `analyzer output entry is not a sealed file: ${name}`);}
     await chmod(path, 0o444);
   }
   await chmod(directory, 0o555);
@@ -379,36 +379,36 @@ async function readDetectorInventory(
 async function assertCanonicalConfig(path: string): Promise<void> {
   const raw = await readStableRegularFile(path, "slither.config.json");
   let value: unknown; try { value = parseJsonWithoutDuplicateKeys(raw.toString("utf8")); } catch { throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config is not unambiguous JSON"); }
-  if (JSON.stringify(value) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config contains unsupported exclusions or fields");
+  if (JSON.stringify(value) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) {throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config contains unsupported exclusions or fields");}
 }
 
 function assertManifestPath(path: string): void {
-  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) throw new SlitherGateError("TARGET_MANIFEST_INVALID", `manifest path is not canonical: ${path}`);
+  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) {throw new SlitherGateError("TARGET_MANIFEST_INVALID", `manifest path is not canonical: ${path}`);}
 }
 async function readConfinedStableFile(root: string, relative: string, label: string): Promise<Buffer> {
   assertManifestPath(relative);
   const canonicalRoot = await realpath(root).catch(() => { throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root is not realpath-resolvable"); });
   const rootInfo = await lstat(canonicalRoot, { bigint: true });
-  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root is not a regular directory");
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root is not a regular directory");}
   const parts = relative.split("/");
   const rootHandle = await open(canonicalRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   let current = rootHandle;
   try {
     for (const part of parts.slice(0, -1)) {
       const next = await open(`/proc/self/fd/${current.fd}/${part}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      if (current !== rootHandle) await current.close();
+      if (current !== rootHandle) {await current.close();}
       current = next;
     }
     const handle = await open(`/proc/self/fd/${current.fd}/${parts.at(-1)!}`, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const before = await handle.stat({ bigint: true });
-      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not a sealed regular file: ${label}`);
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not a sealed regular file: ${label}`);}
       const bytes = await handle.readFile();
       const after = await handle.stat({ bigint: true });
-      if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);
+      if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);}
       return bytes;
     } finally { await handle.close(); }
-  } finally { if (current !== rootHandle) await current.close(); await rootHandle.close().catch(() => {}); }
+  } finally { if (current !== rootHandle) {await current.close();} await rootHandle.close().catch(() => {}); }
 }
 
 const safePathList = (value: string): boolean => value.split(":").every((entry) => entry.startsWith("/") && !entry.includes("..") && !entry.includes("\n"));
@@ -421,9 +421,9 @@ async function copyPinned(root: string, destination: string, entry: ClosureEntry
 
 async function readStableRegularFile(path: string, label: string): Promise<Buffer> {
   const before = await lstat(path, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);}
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); const content = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); return content; } finally { await handle.close(); }
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);} const content = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);} return content; } finally { await handle.close(); }
 }
 
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
@@ -447,7 +447,7 @@ export async function verifyVersions(output: string): Promise<void> {
   try { forgeRaw = await readStableRegularFile(join(output, "forge.version"), "forge.version"); }
   catch { throw new SlitherGateError("TOOL_VERSION_MISMATCH", "forge.version is missing or unreadable"); }
   const forgeLines = forgeRaw.toString("utf8").split(/\r?\n/u);
-  if (forgeLines.at(-1) === "") forgeLines.pop();
+  if (forgeLines.at(-1) === "") {forgeLines.pop();}
   if (forgeLines.length === 0 || forgeLines[0] !== "forge Version: 1.8.0" || forgeLines.slice(1).some((line) => line !== "" && !/^(?:Commit SHA|Build Timestamp|Build Profile): .+$/u.test(line))) {
     throw new SlitherGateError("TOOL_VERSION_MISMATCH", "forge.version did not report the exact pinned version");
   }

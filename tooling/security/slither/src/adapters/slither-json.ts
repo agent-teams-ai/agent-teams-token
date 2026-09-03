@@ -26,7 +26,7 @@ export async function parseSlitherJson(raw: string, repositoryRoot: string): Pro
   let decoded: unknown;
   try { decoded = parseJsonWithoutDuplicateKeys(raw); } catch { throw new SlitherGateError("MALFORMED_JSON", "Slither output is not unambiguous JSON"); }
   const root = object(decoded, "output");
-  if (Object.keys(root).some((key) => !["success", "results", "error"].includes(key))) throw new SlitherGateError("MALFORMED_JSON", "output contains unexpected fields");
+  if (Object.keys(root).some((key) => !["success", "results", "error"].includes(key))) {throw new SlitherGateError("MALFORMED_JSON", "output contains unexpected fields");}
   if (typeof root.success !== "boolean") {throw new SlitherGateError("MALFORMED_JSON", "success must be boolean");}
   const results = root.results === undefined && root.success === false ? {} : object(root.results, "results");
   if (root.success === true && !Array.isArray(results.detectors)) {throw new SlitherGateError("MALFORMED_JSON", "results.detectors must be an array");}
@@ -89,7 +89,7 @@ async function parseFinding(
   repositoryRoot: string,
 ): Promise<Finding> {
   const detector = object(rawDetector, `detector[${index}]`);
-  if (Object.keys(detector).some((key) => !["check", "impact", "confidence", "description", "markdown", "elements"].includes(key))) throw new SlitherGateError("MALFORMED_JSON", "detector contains unexpected fields");
+  if (Object.keys(detector).some((key) => !["check", "impact", "confidence", "description", "markdown", "elements"].includes(key))) {throw new SlitherGateError("MALFORMED_JSON", "detector contains unexpected fields");}
   const detectorId = string(detector.check, "check");
   const impact = parseImpact(detector.impact);
   const confidence = string(detector.confidence, "confidence");
@@ -153,25 +153,25 @@ function findingPath(mapping: JsonObject): string {
 export function parseDetectorInventory(raw: string): readonly string[] {
   const lines = raw.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.length > 0);
   const row = /^\|\s*(\d+)\s*\|\s*`?([a-z0-9-]+)`?\s*\|/u;
-  if (lines.length === 0) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is empty");
+  if (lines.length === 0) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is empty");}
   const rows = lines.map((line) => row.exec(line)).filter((m): m is RegExpExecArray => m !== null);
   if (rows.length !== lines.length) {
     const header = /^\|?\s*Detector\s*\|/u.test(lines[0] ?? "");
     const separator = /^\|?[\s:-]+\|/u.test(lines[1] ?? "");
-    if (!(header && separator && rows.length === lines.length - 2)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory grammar is invalid");
+    if (!(header && separator && rows.length === lines.length - 2)) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory grammar is invalid");}
   }
   const numbers = rows.map((m) => Number(m[1]));
-  if (numbers.some((n, i) => n !== i + 1)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory numbering is not contiguous");
-  const ids = rows.map((m) => m[2]!); if (new Set(ids).size !== ids.length) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is duplicated");
+  if (numbers.some((n, i) => n !== i + 1)) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory numbering is not contiguous");}
+  const ids = rows.map((m) => m[2]!); if (new Set(ids).size !== ids.length) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is duplicated");}
   return ids.toSorted();
 }
 
 async function readStableSource(root: string, relative: string): Promise<Buffer> {
   const canonical = await realpath(root);
   const path = await realpath(`${canonical}/${relative}`);
-  if (!path.startsWith(`${canonical}/`)) throw new SlitherGateError("MALFORMED_JSON", "finding source escapes repository");
+  if (!path.startsWith(`${canonical}/`)) {throw new SlitherGateError("MALFORMED_JSON", "finding source escapes repository");}
   const before = await lstat(path, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new SlitherGateError("MALFORMED_JSON", "finding source is not a sealed file");
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("MALFORMED_JSON", "finding source is not a sealed file");}
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) throw new SlitherGateError("MALFORMED_JSON", "finding source changed"); const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.ino !== opened.ino || after.dev !== opened.dev || after.nlink !== 1n) throw new SlitherGateError("MALFORMED_JSON", "finding source mutated"); return bytes; } finally { await handle.close(); }
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) {throw new SlitherGateError("MALFORMED_JSON", "finding source changed");} const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.ino !== opened.ino || after.dev !== opened.dev || after.nlink !== 1n) {throw new SlitherGateError("MALFORMED_JSON", "finding source mutated");} return bytes; } finally { await handle.close(); }
 }

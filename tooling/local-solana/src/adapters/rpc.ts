@@ -108,7 +108,7 @@ export class JsonRpcAdapter implements RpcPort {
     const port = Number(url.port);
     return new Promise((resolve, reject) => {
       let settled = false;
-      const fail = (cause: unknown) => { if (settled) return; settled = true; reject(cause instanceof LocalSolanaError ? cause : new LocalSolanaError("SOLANA_RPC_RESPONSE", cause instanceof Error ? cause.message : "RPC transport failed")); };
+      const fail = (cause: unknown) => { if (settled) {return;} settled = true; reject(cause instanceof LocalSolanaError ? cause : new LocalSolanaError("SOLANA_RPC_RESPONSE", cause instanceof Error ? cause.message : "RPC transport failed")); };
       // This fixture RPC must never inherit ambient proxy settings. Node 24's
       // `node:http` consults NODE_USE_ENV_PROXY/HTTP_PROXY unless proxyEnv is
       // explicitly disabled; use a direct, non-pooled socket as an additional
@@ -123,7 +123,7 @@ export class JsonRpcAdapter implements RpcPort {
       });
       request.on("socket", (socket) => {
         const verify = () => { if (socket.remoteAddress !== "127.0.0.1" || socket.remotePort !== port) { request.destroy(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC socket peer is not the owned validator")); } };
-        if (socket.connecting) socket.once("connect", verify); else verify();
+        if (socket.connecting) {socket.once("connect", verify);} else {verify();}
       });
       request.on("error", fail);
       request.setTimeout(10_000, () => { request.destroy(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC transport timed out")); });

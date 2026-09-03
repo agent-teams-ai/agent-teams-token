@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { IMPACTS, SlitherGateError } from "../domain/model.ts";
 import { classifyGateFailure, isGateErrorCode } from "../application/failure.ts";
@@ -34,7 +34,7 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
     throw invalid("an absolute bundle path and exact candidate SHA are required");
   }
   const canonicalOutput = await realpath(request.output).catch(() => { throw invalid("bundle output is not realpath-resolvable"); });
-  if (canonicalOutput === repositoryRoot || canonicalOutput.startsWith(`${repositoryRoot}/`)) throw invalid("bundle output must remain outside the repository boundary");
+  if (canonicalOutput === repositoryRoot || canonicalOutput.startsWith(`${repositoryRoot}/`)) {throw invalid("bundle output must remain outside the repository boundary");}
   await assertRegularDirectory(request.output);
   const entries = (await readdir(request.output)).toSorted();
   const variants = (Object.keys(VARIANTS) as Variant[]).filter((name) => entries.includes(name));
@@ -91,7 +91,7 @@ interface DerivedBundle {
 async function deriveRawBundle(output: string, directory: string, schemaDirectory: string): Promise<DerivedBundle> {
   const canonicalSchemaDirectory = await assertCanonicalRoot(schemaDirectory);
   const repositoryRoot = await realpath(join(canonicalSchemaDirectory, "../../.."));
-  if (!isWithin(repositoryRoot, canonicalSchemaDirectory)) throw invalid("schema root escapes the repository boundary");
+  if (!isWithin(repositoryRoot, canonicalSchemaDirectory)) {throw invalid("schema root escapes the repository boundary");}
   const canonicalDirectory = await assertCanonicalRoot(directory);
   const canonicalInputs = await readCanonicalInputs(canonicalDirectory, canonicalSchemaDirectory);
   const findings = await readRawAnalysis(
@@ -131,7 +131,7 @@ interface CanonicalInputs {
 async function assertCanonicalRoot(directory: string): Promise<string> {
   const resolved = await realpath(directory).catch(() => { throw invalid("canonical input root is not realpath-resolvable"); });
   const info = await lstat(resolved, { bigint: true });
-  if (!info.isDirectory() || info.isSymbolicLink()) throw invalid("canonical input root is not a sealed directory");
+  if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("canonical input root is not a sealed directory");}
   return resolved;
 }
 
@@ -158,11 +158,11 @@ async function readCanonicalInputs(directory: string, schemaDirectory: string): 
   const repositoryRoot = await realpath(join(schemaDirectory, "../../.."));
   for (const rawEntry of closure) {
     const entry = object(rawEntry, "closure entry");
-    const relative = stringValue(entry.path);
-    assertStrictRelativePath(relative);
+    const relativePath = stringValue(entry.path);
+    assertStrictRelativePath(relativePath);
     const base = directory === schemaDirectory ? repositoryRoot : directory;
-    const bytes = await readStableCanonicalFile(join(base, relative), relative);
-    if (hex(bytes) !== entry.sha256) throw invalid(`canonical closure input differs: ${relative}`);
+    const bytes = await readStableCanonicalFile(join(base, relativePath), relativePath);
+    if (hex(bytes) !== entry.sha256) {throw invalid(`canonical closure input differs: ${relativePath}`);}
   }
   const detectorEntry = object(manifest.detectorInventory, "manifest.detectorInventory");
   const acceptedDetectorBytes = await readStableCanonicalFile(join(directory, stringValue(detectorEntry.path)), "detector inventory");
@@ -242,7 +242,7 @@ async function readCanonicalPolicies(
 ): Promise<CanonicalPolicies> {
   const configBytes = await readStableCanonicalFile(join(directory, "slither.config.json"), "slither.config.json");
   let config: unknown; try { config = parseJsonWithoutDuplicateKeys(configBytes.toString("utf8")); } catch { throw invalid("Slither config is not unambiguous JSON"); }
-  if (JSON.stringify(config) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) throw invalid("Slither config contains unsupported exclusions or fields");
+  if (JSON.stringify(config) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) {throw invalid("Slither config contains unsupported exclusions or fields");}
   const policyBytes = await readStableCanonicalFile(join(directory, "suppressions.v1.json"), "suppressions.v1.json");
   const triageBytes = await readStableCanonicalFile(join(directory, "triage.v1.json"), "triage.v1.json");
   await assertSerializedAgainstSchema(policyBytes.toString("utf8"), join(schemaDirectory, "suppression-ledger.schema.v1.json"));
@@ -456,22 +456,22 @@ const stringValue = (value: unknown): string => {if (typeof value !== "string") 
 function schemaName(variant: Variant): string {return variant === "evidence.json" ? "evidence-report.schema.v1.json" : `${variant.slice(0, -5)}.schema.v1.json`;}
 async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("bundle is not a regular directory");}}
 async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) {throw invalid("bundle entry is not a regular file");}}
-async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path, { bigint: true }); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw invalid("raw output is not a sealed regular file"); const handle = await (await import("node:fs/promises")).open(path, 0 | 131072); try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) throw invalid("raw output identity changed"); const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) throw invalid("raw output changed during read"); return bytes; } finally { await handle.close(); } }
+async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path, { bigint: true }); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw invalid("raw output is not a sealed regular file");} const handle = await (await import("node:fs/promises")).open(path, 0 | 131072); try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) {throw invalid("raw output identity changed");} const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw invalid("raw output changed during read");} return bytes; } finally { await handle.close(); } }
 function assertStrictRelativePath(value: string): void {
-  if (!value || value.startsWith("/") || value.includes("\\") || value.split("/").some((part) => !part || part === "." || part === "..")) throw invalid(`unsafe canonical path: ${value}`);
+  if (!value || value.startsWith("/") || value.includes("\\") || value.split("/").some((part) => !part || part === "." || part === "..")) {throw invalid(`unsafe canonical path: ${value}`);}
 }
 
 async function readStableCanonicalFile(path: string, label: string): Promise<Buffer> {
   let parent = dirname(path);
   while (parent !== dirname(parent)) {
     const parentInfo = await lstat(parent, { bigint: true });
-    if (parentInfo.isSymbolicLink() || !parentInfo.isDirectory()) throw invalid(`canonical input parent is symlinked or invalid: ${label}`);
+    if (parentInfo.isSymbolicLink() || !parentInfo.isDirectory()) {throw invalid(`canonical input parent is symlinked or invalid: ${label}`);}
     parent = dirname(parent);
   }
   const info = await lstat(path, { bigint: true });
-  if (!info.isFile() || info.isSymbolicLink()) throw invalid(`canonical input is not a sealed regular file: ${label}`);
+  if (!info.isFile() || info.isSymbolicLink()) {throw invalid(`canonical input is not a sealed regular file: ${label}`);}
   const handle = await (await import("node:fs/promises")).open(path, 0 | 131072);
-  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== info.ino || opened.dev !== info.dev || opened.nlink !== 1n) throw invalid(`canonical input identity changed: ${label}`); const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) throw invalid(`canonical input changed during read: ${label}`); return bytes; } finally { await handle.close(); }
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== info.ino || opened.dev !== info.dev || opened.nlink !== 1n) {throw invalid(`canonical input identity changed: ${label}`);} const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw invalid(`canonical input changed during read: ${label}`);} return bytes; } finally { await handle.close(); }
 }
 
 function object(value: unknown, name: string): JsonObject {if (value === null || typeof value !== "object" || Array.isArray(value)) {throw invalid(`${name} is not an object`);} return value as JsonObject;}

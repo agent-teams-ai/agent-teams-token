@@ -30,7 +30,7 @@ function compareCodePoints(left: string, right: string): number {
   const a = Array.from(left, (char) => char.codePointAt(0) as number);
   const b = Array.from(right, (char) => char.codePointAt(0) as number);
   for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+    if (a[index] !== b[index]) {return a[index] < b[index] ? -1 : 1;}
   }
   return a.length - b.length;
 }

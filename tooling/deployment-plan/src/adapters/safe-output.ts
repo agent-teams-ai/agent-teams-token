@@ -189,7 +189,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       try {
         await noReplaceRename(this.path, this.target);
       } catch (error) {
-        if (nodeErrorCode(error) === "EEXIST") fail("OUTPUT_TARGET_EXISTS", "output target already exists");
+        if (nodeErrorCode(error) === "EEXIST") {fail("OUTPUT_TARGET_EXISTS", "output target already exists");}
         throw error;
       }
       this.publishedTargetIdentity = identity(await lstat(this.target));
@@ -198,7 +198,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.assertParentStable();
       const publishedMetadata = await lstat(this.target);
       assertOwnedPrivateDirectory(publishedMetadata, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      if (this.publishedTargetIdentity !== undefined) assertSameIdentity(publishedMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+      if (this.publishedTargetIdentity !== undefined) {assertSameIdentity(publishedMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");}
       await this.faultInjection.beforeParentDirectorySync?.();
       await (this.faultInjection.parentDirectorySync?.() ?? this.parentHandle.sync());
       await this.faultInjection.afterParentDirectorySync?.();
@@ -257,7 +257,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     const metadata = await lstat(this.target);
     if (this.publishedTargetIdentity !== undefined && metadata.isDirectory() && metadata.uid === process.getuid?.()) {
       assertSameIdentity(metadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      for (const name of await readdir(this.target)) await unlink(join(this.target, name)).catch(() => {});
+      for (const name of await readdir(this.target)) {await unlink(join(this.target, name)).catch(() => {});}
       await rmdir(this.target).catch(() => {});
     }
     await this.parentHandle.sync().catch(() => {});
