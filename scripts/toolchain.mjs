@@ -437,8 +437,8 @@ function inspectStableExpectedFile({ artifact, path, target, exists }) {
   } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) {closeSync(fd);} }
 }
 
-export function canonicalizeTrustedPath(path, { platform = process.platform, hostPlatform } = {}) {
-  platform = hostPlatform ?? platform;
+export function canonicalizeTrustedPath(path, { platform = process.platform, hostPlatform: hostOs } = {}) {
+  platform = hostOs ?? platform;
   const absolute = resolve(path);
   const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
   for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
@@ -463,8 +463,8 @@ function trustedAliasTarget(alias, target) {
   return link === target || link === target.slice(1);
 }
 
-function assertOwnedDirectoryChain(path, { platform = process.platform, hostPlatform } = {}) {
-  platform = hostPlatform ?? platform;
+function assertOwnedDirectoryChain(path, { platform = process.platform, hostPlatform: hostOs } = {}) {
+  platform = hostOs ?? platform;
   const absolute = canonicalizeTrustedPath(path, { platform }); const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
   for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
     current = current === "/" ? `/${part}` : join(current, part);

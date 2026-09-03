@@ -146,7 +146,7 @@ test("macOS canonical root accepts trusted root-owned temp ancestors", (context)
 });
 
 test("macOS /var/folders canonical hierarchy rejects descendant symlinks", (context) => {
-  if (process.platform !== "darwin") return;
+  if (process.platform !== "darwin") {return;}
   const folders = canonicalizeTrustedPath("/var/folders", { platform: "darwin" });
   assert.equal(folders, "/private/var/folders");
   const macTemp = canonicalizeTrustedPath(tmpdir(), { platform: "darwin" });
