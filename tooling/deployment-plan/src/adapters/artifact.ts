@@ -96,10 +96,16 @@ function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
 }
 
 function normalizeBuildInfo(value: unknown, parentKey?: string): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((item) => normalizeBuildInfo(item, parentKey));
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeBuildInfo(item, parentKey));
+  }
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
-    if (parentKey === "input" && key === "basePath" && typeof entry === "string") return [key, "$AGTMAI_ABSOLUTE_PATH"];
+    if (parentKey === "input" && key === "basePath" && typeof entry === "string") {
+      return [key, "$AGTMAI_ABSOLUTE_PATH"];
+    }
     if (parentKey === "input" && (key === "allowPaths" || key === "includePaths") && Array.isArray(entry)
       && entry.every((item) => typeof item === "string" && item.startsWith("/"))) {
       return [key, entry.map(() => "$AGTMAI_ABSOLUTE_PATH")];
@@ -248,7 +254,9 @@ function compareCanonical(left: string, right: string): number {
   const a = Array.from(left, (char) => char.codePointAt(0) as number);
   const b = Array.from(right, (char) => char.codePointAt(0) as number);
   for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+    if (a[index] !== b[index]) {
+      return a[index] < b[index] ? -1 : 1;
+    }
   }
   return a.length - b.length;
 }

@@ -178,7 +178,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await mkdir(this.target, { mode: 0o700 });
       this.reservedTargetIdentity = identity(await lstat(this.target));
     } catch (error) {
-      if (nodeErrorCode(error) === "EEXIST") fail("OUTPUT_TARGET_EXISTS", "output target already exists");
+      if (nodeErrorCode(error) === "EEXIST") {
+        fail("OUTPUT_TARGET_EXISTS", "output target already exists");
+      }
       throw error;
     }
     try {
@@ -186,15 +188,21 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.assertStagingStable();
       const names = (await readdir(this.path)).toSorted();
       const ordered = names.filter((name) => name !== "READY");
-      if (names.includes("READY")) ordered.push("READY");
-      for (const name of ordered) await rename(join(this.path, name), join(this.target, name));
+      if (names.includes("READY")) {
+        ordered.push("READY");
+      }
+      for (const name of ordered) {
+        await rename(join(this.path, name), join(this.target, name));
+      }
       await rmdir(this.path);
       this.stagingDisposed = true;
       await this.faultInjection.afterPublishRename?.();
       await this.assertParentStable();
       const publishedMetadata = await lstat(this.target);
       assertOwnedPrivateDirectory(publishedMetadata, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      if (this.reservedTargetIdentity !== undefined) assertSameIdentity(publishedMetadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+      if (this.reservedTargetIdentity !== undefined) {
+        assertSameIdentity(publishedMetadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+      }
       await this.faultInjection.beforeParentDirectorySync?.();
       await (this.faultInjection.parentDirectorySync?.() ?? this.parentHandle.sync());
       await this.faultInjection.afterParentDirectorySync?.();
@@ -253,7 +261,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     const metadata = await lstat(this.target);
     if (this.reservedTargetIdentity !== undefined && metadata.isDirectory() && metadata.uid === process.getuid?.()) {
       assertSameIdentity(metadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      for (const name of await readdir(this.target)) await unlink(join(this.target, name)).catch(() => {});
+      for (const name of await readdir(this.target)) {
+        await unlink(join(this.target, name)).catch(() => {});
+      }
       await rmdir(this.target).catch(() => {});
     }
     await this.parentHandle.sync().catch(() => {});
@@ -269,7 +279,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
           assertSameIdentity(targetMetadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
         }
       } catch (error) {
-        if (nodeErrorCode(error) !== "ENOENT") throw error;
+        if (nodeErrorCode(error) !== "ENOENT") {
+          throw error;
+        }
       }
       return;
     }
