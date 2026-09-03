@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   approveForgeArtifact,
+  canonicalBuildInfoSha256,
   encodeConstructor,
   portableCompilerInputSha256,
   type TrustRoots,
 } from "../src/adapters/artifact.ts";
-import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
+import { sha256Hex } from "../src/domain/identity.ts";
 import { UINT256_MAX } from "../src/domain/model.ts";
 
 const source = "contract X {}";
@@ -33,10 +34,14 @@ const constructor = {
 };
 const abi = [constructor];
 const bytecode = "60016000";
+const forgeRoot = "/workspace/contracts/evm";
 const build = {
   solcVersion: "0.8.36",
   solcLongVersion: "0.8.36",
   input: {
+    allowPaths: [forgeRoot, `${forgeRoot}/lib`],
+    basePath: forgeRoot,
+    includePaths: [forgeRoot],
     settings,
     sources: { "src/features/token-genesis/AGTMAIToken.sol": { content: source } },
   },
@@ -79,8 +84,8 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "1",
   buildInfoSolcVersion: build.solcVersion,
-  buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
-  compilerInputSha256: sha256Hex(canonicalJson(build.input)),
+  canonicalBuildInfoSha256: canonicalBuildInfoSha256(build),
+  compilerInputSha256: portableCompilerInputSha256(build.input),
   compilerSettings: settings,
   artifactSha256: sha256Hex(inputs.artifactBytes),
   abiSha256: sha256Hex(inputs.abiBytes),
@@ -125,14 +130,14 @@ test("full canonical compiler input is an immutable trust root", () => {
     assert.throws(
       () => approveForgeArtifact(
         { ...inputs, buildInfoBytes },
-        { ...roots, buildInfoSha256: sha256Hex(buildInfoBytes) },
+        { ...roots, canonicalBuildInfoSha256: canonicalBuildInfoSha256({ ...build, input }) },
       ),
       /compiler input/u,
     );
   }
 });
 
-test("compiler input identity is portable but validates Forge root paths exactly", () => {
+test("canonical build-info is portable, raw bytes differ, and paths are exact", () => {
   const firstRoot = "/Users/example/project/contracts/evm";
   const secondRoot = "/home/runner/work/project/contracts/evm";
   const withRoot = (basePath: string) => ({
@@ -141,6 +146,24 @@ test("compiler input identity is portable but validates Forge root paths exactly
     basePath,
     includePaths: [basePath],
   });
+  const firstBuild = { ...build, input: withRoot(firstRoot) };
+  const secondBuild = { ...build, input: withRoot(secondRoot) };
+  assert.equal(
+    canonicalBuildInfoSha256(firstBuild),
+    canonicalBuildInfoSha256(secondBuild),
+  );
+  assert.notEqual(sha256Hex(bytes(firstBuild)), sha256Hex(bytes(secondBuild)));
+  const firstApproved = approveForgeArtifact(
+    { ...inputs, buildInfoBytes: bytes(firstBuild) }, roots,
+  );
+  const secondApproved = approveForgeArtifact(
+    { ...inputs, buildInfoBytes: bytes(secondBuild) }, roots,
+  );
+  assert.equal(
+    firstApproved.canonicalBuildInfoSha256,
+    secondApproved.canonicalBuildInfoSha256,
+  );
+  assert.notEqual(firstApproved.rawBuildInfoSha256, secondApproved.rawBuildInfoSha256);
   assert.equal(
     portableCompilerInputSha256(withRoot(firstRoot)),
     portableCompilerInputSha256(withRoot(secondRoot)),
@@ -152,13 +175,18 @@ test("compiler input identity is portable but validates Forge root paths exactly
     }),
     /compiler input Forge paths/u,
   );
-  assert.throws(
-    () => portableCompilerInputSha256({
-      ...withRoot(firstRoot),
-      basePath: `${firstRoot}/../evm`,
-    }),
-    /compiler input Forge paths/u,
-  );
+  for (const invalid of [
+    { ...withRoot(firstRoot), basePath: `${firstRoot}/../evm` },
+    { ...withRoot(firstRoot), basePath: "relative/contracts/evm" },
+    { ...withRoot(firstRoot), basePath: `${firstRoot}/` },
+    { ...withRoot(firstRoot), includePaths: [`${firstRoot}/src`] },
+    { settings: build.input.settings, sources: build.input.sources },
+  ]) {
+    assert.throws(
+      () => portableCompilerInputSha256(invalid),
+      /compiler input Forge paths/u,
+    );
+  }
 });
 
 test("constructor integers enforce the exact uint256 boundary", () => {
@@ -195,11 +223,13 @@ test("build/artifact/ABI/constructor mismatches fail independently", () => {
   );
 });
 
-test("exact build-info bytes are an independent trust root", () => {
+test("unrelated mutation fails canonical trust even though the published raw hash changes", () => {
+  const approved = approveForgeArtifact(inputs, roots);
   const alteredBytes = bytes({ ...build, solcLongVersion: "0.8.36+untrusted-label" });
+  assert.notEqual(approved.rawBuildInfoSha256, sha256Hex(alteredBytes));
   assert.throws(
     () => approveForgeArtifact({ ...inputs, buildInfoBytes: alteredBytes }, roots),
-    /build-info digest/u,
+    /canonical build-info digest/u,
   );
 });
 
@@ -213,7 +243,7 @@ test("compiler trust binds Forge build-info solcVersion exactly", () => {
   assert.throws(
     () => approveForgeArtifact(
       { ...inputs, buildInfoBytes },
-      { ...roots, buildInfoSha256: sha256Hex(buildInfoBytes) },
+      { ...roots, canonicalBuildInfoSha256: canonicalBuildInfoSha256(alteredBuild) },
     ),
     /solcVersion/u,
   );

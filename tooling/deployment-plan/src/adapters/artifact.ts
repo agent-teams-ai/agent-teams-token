@@ -19,7 +19,8 @@ interface ParsedArtifactInputs {
   readonly artifactSha256: `0x${string}`;
   readonly abiSha256: `0x${string}`;
   readonly fixtureSha256: `0x${string}`;
-  readonly buildInfoSha256: `0x${string}`;
+  readonly rawBuildInfoSha256: `0x${string}`;
+  readonly canonicalBuildInfoSha256: `0x${string}`;
 }
 
 interface BuildContract {
@@ -58,7 +59,8 @@ export function approveForgeArtifact(
   const constructorAbiBytes = utf8Hex(canonicalJson(constructor));
 
   const approved: ApprovedArtifact = {
-    buildInfoSha256: parsed.buildInfoSha256,
+    rawBuildInfoSha256: parsed.rawBuildInfoSha256,
+    canonicalBuildInfoSha256: parsed.canonicalBuildInfoSha256,
     artifactSha256: parsed.artifactSha256,
     abiSha256: parsed.abiSha256,
     fixtureSha256: parsed.fixtureSha256,
@@ -93,13 +95,19 @@ function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
     artifactSha256: sha256Hex(inputs.artifactBytes),
     abiSha256: sha256Hex(inputs.abiBytes),
     fixtureSha256: sha256Hex(inputs.fixtureBytes),
-    buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
+    rawBuildInfoSha256: sha256Hex(inputs.buildInfoBytes),
+    canonicalBuildInfoSha256: canonicalBuildInfoSha256(
+      parseObject(inputs.buildInfoBytes, "BUILD_INFO"),
+    ),
   };
 }
 
 function validateInputDigests(parsed: ParsedArtifactInputs, roots: TrustRoots): void {
-  if (parsed.buildInfoSha256 !== roots.buildInfoSha256) {
-    fail("BUILD_INFO_DIGEST_MISMATCH", "build-info digest differs from trust root");
+  if (parsed.canonicalBuildInfoSha256 !== roots.canonicalBuildInfoSha256) {
+    fail(
+      "CANONICAL_BUILD_INFO_DIGEST_MISMATCH",
+      "canonical build-info digest differs from trust root",
+    );
   }
   if (parsed.artifactSha256 !== roots.artifactSha256) {
     fail("ARTIFACT_DIGEST_MISMATCH", "artifact digest differs from trust root");
@@ -157,13 +165,22 @@ export function portableCompilerInputSha256(
   return sha256Hex(canonicalJson(portableCompilerInput(input)));
 }
 
-function portableCompilerInput(input: Record<string, unknown>): Record<string, unknown> {
-  const hasForgePaths = ["basePath", "allowPaths", "includePaths"]
-    .some((key) => Object.hasOwn(input, key));
-  if (!hasForgePaths) {
-    return input;
-  }
+/** Binds the complete document; rawBuildInfoSha256 separately binds exact bytes. */
+export function canonicalBuildInfoSha256(
+  build: Record<string, unknown>,
+): `0x${string}` {
+  const input = portableCompilerInput(object(build.input, "BUILD_INPUT_INVALID"));
+  return sha256Hex(canonicalJson({
+    ...build,
+    input: {
+      ...input,
+      allowPaths: [PORTABLE_ROOT, PORTABLE_ROOT],
+      includePaths: [PORTABLE_ROOT],
+    },
+  }));
+}
 
+function portableCompilerInput(input: Record<string, unknown>): Record<string, unknown> {
   const basePath = input.basePath;
   if (
     typeof basePath !== "string"

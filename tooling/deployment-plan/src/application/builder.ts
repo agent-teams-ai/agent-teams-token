@@ -8,11 +8,16 @@ import {
   parseUint,
 } from "../domain/model.ts";
 
+export interface StablePlanIdentity extends Readonly<Record<string, unknown>> {
+  readonly rawBuildInfoSha256: `0x${string}`;
+  readonly canonicalBuildInfoSha256: `0x${string}`;
+}
+
 export interface StablePlan {
   readonly schemaVersion: 2;
   readonly kind: "deployment-plan";
   readonly planId: `0x${string}`;
-  readonly identity: Record<string, unknown>;
+  readonly identity: StablePlanIdentity;
   readonly broadcastAllowed: false;
   readonly testOnly: true;
   readonly productionApproved: false;
@@ -76,11 +81,12 @@ export function buildStablePlan(
     fail("WRONG_CHAIN", "observed chain does not match approved chain");
   }
   const senderNonce = parseUint(observation.senderNonce, "senderNonce");
-  const identity: Record<string, unknown> = {
+  const identity: StablePlanIdentity = {
     contractFqn: roots.contractFqn,
     buildProfile: roots.buildProfile,
     sourceDependencyClosure: approved.sourceDependencyClosure,
-    buildInfoSha256: approved.buildInfoSha256,
+    rawBuildInfoSha256: approved.rawBuildInfoSha256,
+    canonicalBuildInfoSha256: approved.canonicalBuildInfoSha256,
     artifactSha256: approved.artifactSha256,
     abiSha256: approved.abiSha256,
     fixtureSha256: approved.fixtureSha256,

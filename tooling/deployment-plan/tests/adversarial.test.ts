@@ -34,7 +34,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "2",
   buildInfoSolcVersion: "0.8.36",
-  buildInfoSha256: hash,
+  canonicalBuildInfoSha256: hash,
   compilerInputSha256: hash,
   compilerSettings: {},
   artifactSha256: hash,
@@ -46,7 +46,8 @@ const roots: TrustRoots = {
   sourceDependencyClosure: {},
 };
 const artifact: ApprovedArtifact = {
-  buildInfoSha256: hash,
+  rawBuildInfoSha256: hash,
+  canonicalBuildInfoSha256: hash,
   artifactSha256: hash,
   abiSha256: hash,
   fixtureSha256: hash,
@@ -123,7 +124,7 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
   const quote = buildFeeQuote(plan, observation, roots);
   const changedArtifact = {
     ...artifact,
-    buildInfoSha256: `0x${"b".repeat(64)}` as const,
+    rawBuildInfoSha256: `0x${"b".repeat(64)}` as const,
   };
   const changed = buildStablePlan(changedArtifact, roots, observation);
   assert.notEqual(changed.planId, plan.planId);
@@ -136,7 +137,7 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
       ready: readyFor(changed.planId),
       nowSeconds: 120n,
     }),
-    /trust roots/u,
+    /bound|binding|mismatch|untrusted/u,
   );
   assert.throws(
     () => independentlyVerify({

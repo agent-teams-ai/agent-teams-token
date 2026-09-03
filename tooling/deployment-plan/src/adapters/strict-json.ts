@@ -12,7 +12,7 @@ const ROOT_KEYS = [
   "schemaVersion", "testOnly", "productionApproved", "mainnetAllowed",
   "chainId", "contractFqn", "buildProfile", "from", "maximumWorstCaseWei",
   "gasBufferBps", "quoteTtlSeconds", "maximumHeadLag", "buildInfoSolcVersion",
-  "buildInfoSha256", "compilerInputSha256",
+  "canonicalBuildInfoSha256", "compilerInputSha256",
   "compilerSettings", "artifactSha256", "abiSha256", "fixtureSha256",
   "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash",
   "sourceDependencyClosure",
@@ -22,8 +22,8 @@ const PLAN_KEYS = [
   "testOnly", "productionApproved", "mainnetAllowed",
 ] as const;
 const IDENTITY_KEYS = [
-  "contractFqn", "buildProfile", "sourceDependencyClosure", "buildInfoSha256",
-  "compilerInputSha256",
+  "contractFqn", "buildProfile", "sourceDependencyClosure", "rawBuildInfoSha256",
+  "canonicalBuildInfoSha256", "compilerInputSha256",
   "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256",
   "buildInfoSolcVersion", "compilerSettings", "creationBytecodeHash",
   "constructorAbiBytes", "constructorAbiHash", "constructorArguments",
@@ -57,7 +57,7 @@ export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
   strings(root, ["contractFqn", "buildProfile", "buildInfoSolcVersion"]);
   match(root.from, ADDRESS, "TRUST_ROOTS_SCHEMA", "from");
   decimals(root, ["maximumWorstCaseWei", "gasBufferBps", "quoteTtlSeconds", "maximumHeadLag"]);
-  hashes(root, ["buildInfoSha256", "compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash"]);
+  hashes(root, ["canonicalBuildInfoSha256", "compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash"]);
   object(root.compilerSettings, "TRUST_ROOTS_SCHEMA");
   hashMap(root.sourceDependencyClosure, "TRUST_ROOTS_SCHEMA");
   return root as unknown as TrustRoots;
@@ -75,7 +75,7 @@ export function parseStablePlan(bytes: Uint8Array): StablePlan {
   const identity = object(plan.identity, "PLAN_IDENTITY_SCHEMA");
   exactKeys(identity, IDENTITY_KEYS, "PLAN_IDENTITY_SCHEMA");
   strings(identity, ["contractFqn", "buildProfile", "buildInfoSolcVersion", "chainId", "value"]);
-  hashes(identity, ["buildInfoSha256", "compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "creationBytecodeHash", "constructorAbiHash", "constructorArgumentsHash", "creationInputHash"]);
+  hashes(identity, ["rawBuildInfoSha256", "canonicalBuildInfoSha256", "compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "creationBytecodeHash", "constructorAbiHash", "constructorArgumentsHash", "creationInputHash"]);
   match(identity.constructorAbiBytes, HEX, "PLAN_IDENTITY_SCHEMA", "constructorAbiBytes");
   match(identity.constructorArguments, HEX, "PLAN_IDENTITY_SCHEMA", "constructorArguments");
   match(identity.creationInput, HEX, "PLAN_IDENTITY_SCHEMA", "creationInput");

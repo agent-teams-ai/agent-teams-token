@@ -114,7 +114,7 @@ function validatePlanTrust(plan: StablePlan, roots: TrustRoots): void {
     || identity.value !== "0"
     || identity.contractFqn !== roots.contractFqn
     || identity.buildProfile !== roots.buildProfile
-    || identity.buildInfoSha256 !== roots.buildInfoSha256
+    || identity.canonicalBuildInfoSha256 !== roots.canonicalBuildInfoSha256
     || canonicalJson(identity.sourceDependencyClosure) !== canonicalJson(roots.sourceDependencyClosure)
     || identity.buildInfoSolcVersion !== roots.buildInfoSolcVersion
     || canonicalJson(identity.compilerSettings) !== canonicalJson(roots.compilerSettings)
@@ -172,7 +172,7 @@ function validateApprovedArtifactIntegrity(expected: ApprovedArtifact, roots: Tr
     || expected.compilerInputSha256 !== roots.compilerInputSha256) {
     fail("APPROVED_ARTIFACT_UNTRUSTED", "approved artifact digests differ from trust roots");
   }
-  if (expected.buildInfoSha256 !== roots.buildInfoSha256
+  if (expected.canonicalBuildInfoSha256 !== roots.canonicalBuildInfoSha256
     || expected.buildInfoSolcVersion !== roots.buildInfoSolcVersion
     || canonicalJson(expected.compilerSettings) !== canonicalJson(roots.compilerSettings)
     || canonicalJson(expected.sourceDependencyClosure) !== canonicalJson(roots.sourceDependencyClosure)) {
@@ -182,7 +182,8 @@ function validateApprovedArtifactIntegrity(expected: ApprovedArtifact, roots: Tr
 
 function validateBuildBindings(plan: StablePlan, expected: ApprovedArtifact): void {
   const bindings: Readonly<Record<string, unknown>> = {
-    buildInfoSha256: expected.buildInfoSha256,
+    rawBuildInfoSha256: expected.rawBuildInfoSha256,
+    canonicalBuildInfoSha256: expected.canonicalBuildInfoSha256,
     artifactSha256: expected.artifactSha256,
     abiSha256: expected.abiSha256,
     fixtureSha256: expected.fixtureSha256,

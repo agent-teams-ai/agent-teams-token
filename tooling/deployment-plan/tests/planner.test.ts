@@ -6,7 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { runUnsignedPlanner, type PlannerInput } from "../src/composition/index.ts";
 import type { TrustRoots } from "../src/application/ports.ts";
-import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
+import { canonicalBuildInfoSha256, portableCompilerInputSha256 } from "../src/adapters/artifact.ts";
+import { sha256Hex } from "../src/domain/identity.ts";
 
 const source = "contract X {}";
 const settings = {
@@ -31,10 +32,14 @@ const constructor = {
   ],
 };
 const abi = [constructor];
+const forgeRoot = "/workspace/contracts/evm";
 const build = {
   solcVersion: "0.8.36",
   solcLongVersion: "0.8.36",
   input: {
+    allowPaths: [forgeRoot, `${forgeRoot}/lib`],
+    basePath: forgeRoot,
+    includePaths: [forgeRoot],
     settings,
     sources: { "src/features/token-genesis/AGTMAIToken.sol": { content: source } },
   },
@@ -77,8 +82,8 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "1",
   buildInfoSolcVersion: "0.8.36",
-  buildInfoSha256: sha256Hex(json(build)),
-  compilerInputSha256: sha256Hex(canonicalJson(build.input)),
+  canonicalBuildInfoSha256: canonicalBuildInfoSha256(build),
+  compilerInputSha256: portableCompilerInputSha256(build.input),
   compilerSettings: settings,
   artifactSha256: sha256Hex(artifactBytes),
   abiSha256: sha256Hex(abiBytes),

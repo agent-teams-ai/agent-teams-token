@@ -48,6 +48,8 @@ test(
         await readFile(join(result.directory, "deployment-plan.v2.json"), "utf8"),
       ) as { planId: string; identity: {
         buildInfoSolcVersion: string;
+        rawBuildInfoSha256: string;
+        canonicalBuildInfoSha256: string;
         creationInputHash: string;
         senderNonce: string;
         expectedCreateAddress: string;
@@ -56,6 +58,10 @@ test(
         await readFile(join(result.directory, "fee-quote.v2.json"), "utf8"),
       ) as { creationInputHash: string; observation: { gasEstimate: string } };
       assert.equal(plan.identity.buildInfoSolcVersion, "0.8.36");
+      assert.notEqual(
+        plan.identity.rawBuildInfoSha256,
+        plan.identity.canonicalBuildInfoSha256,
+      );
       assert.equal(plan.identity.senderNonce, "0");
       assert.equal(plan.identity.expectedCreateAddress, "0x522b3294e6d06aa25ad0f1b8891242e335d3b459");
       assert.equal(quote.creationInputHash, plan.identity.creationInputHash);

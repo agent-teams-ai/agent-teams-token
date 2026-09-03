@@ -39,7 +39,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "2",
   buildInfoSolcVersion: "0.8.36",
-  buildInfoSha256: hash,
+  canonicalBuildInfoSha256: hash,
   compilerInputSha256: hash,
   compilerSettings: {},
   artifactSha256: hash,
@@ -51,7 +51,8 @@ const roots: TrustRoots = {
   sourceDependencyClosure: {},
 };
 const artifact: ApprovedArtifact = {
-  buildInfoSha256: hash,
+  rawBuildInfoSha256: hash,
+  canonicalBuildInfoSha256: hash,
   artifactSha256: hash,
   abiSha256: hash,
   fixtureSha256: hash,
@@ -136,21 +137,21 @@ test("forged component hashes are rejected even when bytes are unchanged", () =>
 test("build provenance fields are bound to trust roots", () => {
   const boundRoots = {
     ...roots,
-    buildInfoSha256: hash,
+    canonicalBuildInfoSha256: hash,
     sourceDependencyClosure: { "src/X.sol": hash },
     compilerSettings: { optimizer: { enabled: true } },
   } as const;
   const boundArtifact = {
     ...artifact,
-    buildInfoSha256: hash,
+    canonicalBuildInfoSha256: hash,
     sourceDependencyClosure: boundRoots.sourceDependencyClosure,
     compilerSettings: boundRoots.compilerSettings,
   };
   const plan = buildStablePlan(boundArtifact, boundRoots, observation);
   const quote = buildFeeQuote(plan, observation, boundRoots);
   const ready = readyFor(plan.planId);
-  for (const field of ["sourceDependencyClosure", "compilerSettings", "buildInfoSha256", "buildInfoSolcVersion"] as const) {
-    const mutated = { ...boundArtifact, [field]: field === "buildInfoSha256" ? otherHash : field === "buildInfoSolcVersion" ? "0.8.37" : {} };
+  for (const field of ["sourceDependencyClosure", "compilerSettings", "rawBuildInfoSha256", "canonicalBuildInfoSha256", "buildInfoSolcVersion"] as const) {
+    const mutated = { ...boundArtifact, [field]: field === "rawBuildInfoSha256" || field === "canonicalBuildInfoSha256" ? otherHash : field === "buildInfoSolcVersion" ? "0.8.37" : {} };
     assert.throws(() => independentlyVerify({ plan, quote, roots: boundRoots, expected: mutated, ready, nowSeconds: 110n }), /trust|binding|mismatch|untrusted|approved build input/u);
   }
 });
