@@ -5,16 +5,16 @@ import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
 import type { AnalysisInput, ClosureEntry, DetectorInventoryDocument, FindingTriage, GateErrorCode, GateManifest, Suppression } from "../domain/model.ts";
 import { parseCompilerProfile, SlitherGateError } from "../domain/model.ts";
 import { sha256 } from "./fingerprint.ts";
+import { assertContainerResult } from "./container-result.ts";
+import { assertSuppressionShape, parseTypedJson } from "./policy-shape.ts";
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
 import { parseDetectorInventory, parseSlitherInventory, parseSlitherJson } from "./slither-json.ts";
 import {
   dockerRunArguments,
-  dockerVulnerableFixtureArguments,
   IMAGE,
   IMAGE_REVISION,
   PINNED_PYTHONPATH,
 } from "./container-contract.ts";
-import { evaluateVulnerableFixture } from "../application/policy.ts";
 export interface ToolchainLock {
   readonly tools: {
     readonly foundry: { readonly platforms: Record<string, { readonly sha256: string; readonly installDirectory: string }> };
@@ -197,7 +197,8 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   assertSlitherToolchainBinding(lock);
   const foundryArtifact = lock.tools.foundry.platforms["linux-x64"];
   const solcArtifact = lock.tools.solc.platforms["linux-x64"];
-  const foundryPin = foundryArtifact?.sha256; const solcPin = solcArtifact?.sha256;
+  const foundryPin = foundryArtifact?.sha256;
+  const solcPin = solcArtifact?.sha256;
   if (foundryPin !== manifest.tools.forgeArchiveSha256 || solcPin !== manifest.tools.solcBinarySha256) {throw new SlitherGateError("TOOLCHAIN_LOCK_INVALID", "Linux project tool pins differ from the accepted prerequisite");}
   if (!foundryArtifact || !solcArtifact) {throw new SlitherGateError("TOOLCHAIN_LOCK_INVALID", "Linux tool artifacts are absent");}
   const expectedForgePath = join(repositoryRoot, ".tools", foundryArtifact.installDirectory, "forge");
@@ -206,7 +207,8 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   if (solcPath !== expectedSolcPath || await realpath(solcPath) !== solcPath) {throw new SlitherGateError("SOLC_PIN_MISMATCH", "solc must be the offline-installed project override");}
   await assertTool(forgePath, manifest.tools.forgeBinarySha256, "FORGE_PIN_MISMATCH");
   await assertTool(solcPath, manifest.tools.solcBinarySha256, "SOLC_PIN_MISMATCH");
-  const forgeBinarySha256 = sha256(await readFile(forgePath)); const solcBinarySha256 = sha256(await readFile(solcPath));
+  const forgeBinarySha256 = sha256(await readFile(forgePath));
+  const solcBinarySha256 = sha256(await readFile(solcPath));
   const imageEnvironment = await assertImage(processPort, dockerPath);
   return {
     base,
@@ -219,39 +221,7 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
     imageEnvironment,
   };
 }
-export async function assertContainerResult(
-  result: { readonly timedOut: boolean; readonly exitCode: number | null },
-  output: string,
-): Promise<void> {
-  if (result.timedOut) {
-    throw new SlitherGateError("CONTAINER_TIMEOUT", "container exceeded the bounded analysis timeout");
-  }
-  if (result.exitCode !== 0) {
-    const stage = await readFile(join(output, "failure.stage"), "utf8").then((value) => value.trim(), () => "");
-    if (stage === "compiler-build") {
-      throw new SlitherGateError("COMPILER_BUILD_FAILED", "pinned compiler build failed");
-    }
-    if (stage === "analysis-runtime") {
-      throw new SlitherGateError("ANALYZER_RUNTIME_FAILED", "pinned Slither runtime failed");
-    }
-    if (stage === "artifact-validation") {
-      throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "fresh compiler artifacts could not be exported");
-    }
-    if (stage === "version-inventory") {
-      throw new SlitherGateError("TOOL_VERSION_MISMATCH", "pinned tool version inventory failed");
-    }
-    if (stage === "detector-inventory") {
-      throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", `container phase failed: ${stage}`);
-    }
-    if (stage === "manifest-validation") {
-      throw new SlitherGateError("TARGET_MANIFEST_INVALID", "container target manifest is invalid");
-    }
-    if (stage === "container-execution") {
-      throw new SlitherGateError("CONTAINER_FAILED", "container security preflight failed");
-    }
-    throw new SlitherGateError("CONTAINER_FAILED", "container analysis command failed");
-  }
-}
+export { assertContainerResult };
 async function sealRawOutput(directory: string): Promise<void> {
   const info = await lstat(directory, { bigint: true });
   if (!info.isDirectory() || info.isSymbolicLink() || info.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", "analyzer output directory is not a sealed directory");}
@@ -429,7 +399,8 @@ async function safeCopyFile(source: string, destination: string): Promise<void> 
   await writeFile(destination, content, { mode: 0o444, flag: "wx" });
 }
 async function parseCompiledOutput(output: string): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string }> {
-  let artifactRaw: Buffer; let buildRaw: Buffer;
+  let artifactRaw: Buffer;
+  let buildRaw: Buffer;
   try { artifactRaw = await readStableRegularFile(join(output, "AGTMAIToken.json"), "compiler artifact"); buildRaw = await readStableRegularFile(join(output, "build-info.json"), "compiler build-info"); } catch { throw new SlitherGateError("BUILD_INFO_INVALID", "compiler artifact or build-info is missing or unreadable"); }
   const artifact = parseTypedJson(artifactRaw.toString("utf8"), "BUILD_INFO_INVALID", "compiler artifact") as ForgeArtifact;
   const build = parseTypedJson(buildRaw.toString("utf8"), "BUILD_INFO_INVALID", "compiler build-info") as BuildInfo;
@@ -491,16 +462,7 @@ export function decodeCreationBytecode(value: unknown): Buffer {
   if (!/^(?:[0-9a-fA-F]{2})+$/u.test(normalized)) {throw new SlitherGateError("BYTECODE_MISSING", "fresh creation bytecode is absent or malformed");}
   return Buffer.from(normalized, "hex");
 }
-function assertSuppressionShape(suppressions: readonly Suppression[]): void {
-  const expected = ["detectorId", "expiresAt", "findingIdentityHash", "fingerprint", "length", "owner", "path", "reason", "regressionEvidence", "reviewAt", "schemaVersion", "snippetHash", "sourceHash", "start"];
-  for (const item of suppressions) {
-    if (JSON.stringify(Object.keys(item).toSorted()) !== JSON.stringify(expected) || item.schemaVersion !== 1) {throw new SlitherGateError("SUPPRESSION_SHAPE_INVALID", "suppression entry has missing or unexpected fields");}
-  }
-}
-function parseTypedJson(raw: string, code: GateErrorCode, label: string): unknown {
-  try {return parseJsonWithoutDuplicateKeys(raw);}
-  catch {throw new SlitherGateError(code, `${label} is not unambiguous JSON`);}
-}
+export { assertSuppressionShape, parseTypedJson };
 export interface SlitherRuntimeIdentity {
   readonly image: string; readonly revision: string; readonly platform: string;
   readonly slither: string; readonly cryticCompile: string; readonly forge: string; readonly solcPrefix: string;
