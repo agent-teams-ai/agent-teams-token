@@ -51,7 +51,7 @@ export async function claimOwnedOutputDirectory(
   if (!/^[a-zA-Z0-9._-]+$/u.test(bundleName)) {
     fail("OUTPUT_FILE_NAME_INVALID", "output bundle name is invalid");
   }
-  if (/^\.staging-/u.test(bundleName)) {
+  if (/^\.staging-/iu.test(bundleName)) {
     fail("OUTPUT_FILE_NAME_INVALID", "staging names are reserved");
   }
   await assertNoSymlinkComponents(parent);
@@ -175,34 +175,22 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     await this.stagingHandle.sync();
     await this.faultInjection.afterStagingDirectorySync?.();
     try {
-      await mkdir(this.target, { mode: 0o700 });
-      this.reservedTargetIdentity = identity(await lstat(this.target));
-    } catch (error) {
-      if (nodeErrorCode(error) === "EEXIST") {
-        fail("OUTPUT_TARGET_EXISTS", "output target already exists");
-      }
-      throw error;
-    }
-    try {
       await this.faultInjection.beforePublishRename?.();
       await this.assertStagingStable();
-      const names = (await readdir(this.path)).toSorted();
-      const ordered = names.filter((name) => name !== "READY");
-      if (names.includes("READY")) {
-        ordered.push("READY");
+      await assertMissing(this.target);
+      try {
+        await rename(this.path, this.target);
+      } catch (error) {
+        if (nodeErrorCode(error) === "EEXIST") fail("OUTPUT_TARGET_EXISTS", "output target already exists");
+        throw error;
       }
-      for (const name of ordered) {
-        await rename(join(this.path, name), join(this.target, name));
-      }
-      await rmdir(this.path);
+      this.publishedTargetIdentity = identity(await lstat(this.target));
       this.stagingDisposed = true;
       await this.faultInjection.afterPublishRename?.();
       await this.assertParentStable();
       const publishedMetadata = await lstat(this.target);
       assertOwnedPrivateDirectory(publishedMetadata, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      if (this.reservedTargetIdentity !== undefined) {
-        assertSameIdentity(publishedMetadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      }
+      if (this.publishedTargetIdentity !== undefined) assertSameIdentity(publishedMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
       await this.faultInjection.beforeParentDirectorySync?.();
       await (this.faultInjection.parentDirectorySync?.() ?? this.parentHandle.sync());
       await this.faultInjection.afterParentDirectorySync?.();
@@ -259,11 +247,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   private async rollbackUndurablePublication(): Promise<void> {
     await this.assertParentStable();
     const metadata = await lstat(this.target);
-    if (this.reservedTargetIdentity !== undefined && metadata.isDirectory() && metadata.uid === process.getuid?.()) {
-      assertSameIdentity(metadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      for (const name of await readdir(this.target)) {
-        await unlink(join(this.target, name)).catch(() => {});
-      }
+    if (this.publishedTargetIdentity !== undefined && metadata.isDirectory() && metadata.uid === process.getuid?.()) {
+      assertSameIdentity(metadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+      for (const name of await readdir(this.target)) await unlink(join(this.target, name)).catch(() => {});
       await rmdir(this.target).catch(() => {});
     }
     await this.parentHandle.sync().catch(() => {});
@@ -275,8 +261,8 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       // reserved target was not replaced; rollback may legitimately remove it.
       try {
         const targetMetadata = await lstat(this.target);
-        if (this.reservedTargetIdentity !== undefined) {
-          assertSameIdentity(targetMetadata, this.reservedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+        if (this.publishedTargetIdentity !== undefined) {
+          assertSameIdentity(targetMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
         }
       } catch (error) {
         if (nodeErrorCode(error) !== "ENOENT") {

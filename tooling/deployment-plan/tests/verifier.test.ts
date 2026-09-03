@@ -132,6 +132,28 @@ test("forged component hashes are rejected even when bytes are unchanged", () =>
   }
 });
 
+test("build provenance fields are bound to trust roots", () => {
+  const boundRoots = {
+    ...roots,
+    buildInfoSha256: hash,
+    sourceDependencyClosure: { "src/X.sol": hash },
+    compilerSettings: { optimizer: { enabled: true } },
+  } as const;
+  const boundArtifact = {
+    ...artifact,
+    buildInfoSha256: hash,
+    sourceDependencyClosure: boundRoots.sourceDependencyClosure,
+    compilerSettings: boundRoots.compilerSettings,
+  };
+  const plan = buildStablePlan(boundArtifact, boundRoots, observation);
+  const quote = buildFeeQuote(plan, observation, boundRoots);
+  const ready = readyFor(plan.planId);
+  for (const field of ["sourceDependencyClosure", "compilerSettings", "buildInfoSha256", "buildInfoSolcVersion"] as const) {
+    const mutated = { ...boundArtifact, [field]: field === "buildInfoSha256" ? otherHash : field === "buildInfoSolcVersion" ? "0.8.37" : {} };
+    assert.throws(() => independentlyVerify({ plan, quote, roots: boundRoots, expected: mutated, ready, nowSeconds: 110n }), /trust|binding|mismatch|untrusted|approved build input/u);
+  }
+});
+
 test("quote expiry addition is uint256 overflow checked", () => {
   const plan = buildStablePlan(artifact, roots, observation);
   assert.throws(

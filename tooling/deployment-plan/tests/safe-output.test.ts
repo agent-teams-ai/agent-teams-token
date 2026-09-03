@@ -40,6 +40,14 @@ test("output claim requires a canonical owned 0700 parent", async () => {
   );
 });
 
+test("output claim rejects mixed-case staging names", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  await assert.rejects(
+    claimOwnedOutputDirectory(parent, ".StAgInG-ABC"),
+    /staging names are reserved/u,
+  );
+});
+
 test("output claim rejects symlink and pre-existing final targets", async () => {
   const parent = await canonicalTemporaryDirectory();
   const other = join(parent, "other");

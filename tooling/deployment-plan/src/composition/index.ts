@@ -66,7 +66,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
   if (!/^[a-zA-Z0-9._-]+$/u.test(request.bundleName)) {
     fail("BUNDLE_NAME_INVALID", "bundle name is invalid");
   }
-  if (/^\.staging-/u.test(request.bundleName)) {
+  if (/^\.staging-/iu.test(request.bundleName)) {
     fail("BUNDLE_STAGING_REJECTED", "staging names are reserved");
   }
   const planBytes = jsonBytes(request.plan);
@@ -134,7 +134,7 @@ async function assertExactBundle(directory: string, rejectStaging = true): Promi
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.nlink < 1 || (metadata.mode & 0o777) !== 0o700 || uid === undefined || metadata.uid !== uid) {
     fail("BUNDLE_DIRECTORY_UNSAFE", "bundle directory must be owned, private, and canonical");
   }
-  if (rejectStaging && (directory.includes(".bundle.staging-") || /\.staging-[0-9a-f]+$/u.test(directory))) {
+  if (rejectStaging && (directory.toLocaleLowerCase().includes(".bundle.staging-") || /\.staging-[0-9a-f]+$/iu.test(directory))) {
     fail("BUNDLE_STAGING_REJECTED", "staging directories cannot be verified");
   }
   if (await realpath(directory) !== directory) fail("BUNDLE_DIRECTORY_UNSAFE", "bundle path must be canonical");
