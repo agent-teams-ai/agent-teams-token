@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { IMPACTS, SlitherGateError } from "../domain/model.ts";
 import { classifyGateFailure, isGateErrorCode } from "../application/failure.ts";
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
@@ -41,9 +41,9 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
     throw invalid("bundle has missing or extra entries");
   }
   for (const name of entries) {await assertRegularFile(join(request.output, name));}
-  if ((await readFile(join(request.output, "READY"))).length !== 0) {throw invalid("READY must be empty");}
+  if ((await readStableOutputFile(join(request.output, "READY"))).length !== 0) {throw invalid("READY must be empty");}
 
-  const serialized = await readFile(join(request.output, variant), "utf8");
+  const serialized = (await readStableOutputFile(join(request.output, variant))).toString("utf8");
   await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, schemaName(variant)));
   const value = object(parseJsonWithoutDuplicateKeys(serialized), "evidence");
   if (value.candidateSha !== request.candidateSha) {throw invalid("evidence candidate SHA differs from the upload candidate");}
@@ -52,7 +52,7 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
 
   const derived = await deriveRawBundle(request.output, request.canonicalDirectory ?? request.schemaDirectory, request.schemaDirectory);
   assertAnalysisEvidenceSemantics(value, derived);
-  const summary = await readFile(join(request.output, "summary.md"), "utf8");
+  const summary = (await readStableOutputFile(join(request.output, "summary.md"))).toString("utf8");
   if (summary !== renderAnalysisSummary(value)) {throw invalid("summary differs from independently derived evidence");}
 }
 
@@ -63,7 +63,7 @@ async function assertFailureEvidence(value: JsonObject, schemaDirectory: string)
   if (value.category !== classification.category || value.exitCode !== classification.exitCode || value.stage !== classification.stage) {
     throw invalid("failure envelope differs from the exhaustive registry");
   }
-  const lock = object(parseJsonWithoutDuplicateKeys(await readFile(join(schemaDirectory, "../../toolchain.lock.json"), "utf8")), "toolchain lock");
+  const lock = object(parseJsonWithoutDuplicateKeys((await readStableCanonicalFile(join(schemaDirectory, "../../toolchain.lock.json"), "toolchain.lock.json")).toString("utf8")), "toolchain lock");
   const image = object(object(lock.securityImages, "securityImages").slither, "slither image");
   if (value.image !== `${image.repository}:${image.tag}@${image.manifestDigest}`) {
     throw invalid("failure image differs from the canonical toolchain lock");
@@ -86,6 +86,8 @@ interface DerivedBundle {
 }
 
 async function deriveRawBundle(output: string, directory: string, schemaDirectory: string): Promise<DerivedBundle> {
+  await assertCanonicalRoot(directory);
+  await assertCanonicalRoot(schemaDirectory);
   const canonicalInputs = await readCanonicalInputs(directory, schemaDirectory);
   const findings = await readRawAnalysis(
     output,
@@ -121,8 +123,15 @@ interface CanonicalInputs {
   readonly repositoryRoot: string;
 }
 
+async function assertCanonicalRoot(directory: string): Promise<void> {
+  const info = await lstat(directory, { bigint: true });
+  if (!info.isDirectory() || info.isSymbolicLink()) throw invalid("canonical input root is not a sealed directory");
+  const resolved = await (await import("node:fs/promises")).realpath(directory);
+  if (resolved !== directory) throw invalid("canonical input root must be a canonical realpath");
+}
+
 async function readCanonicalInputs(directory: string, schemaDirectory: string): Promise<CanonicalInputs> {
-  const manifestRaw = await readFile(join(directory, "production-closure.v1.json"), "utf8");
+  const manifestRaw = (await readStableCanonicalFile(join(directory, "production-closure.v1.json"), "production manifest")).toString("utf8");
   const manifest = object(parseJsonWithoutDuplicateKeys(manifestRaw), "production manifest");
   if (manifest.schemaVersion !== 1) {throw invalid("production manifest version is invalid");}
   const targets = uniqueStrings(manifest.expectedContracts, "manifest.expectedContracts");
@@ -142,12 +151,8 @@ async function readCanonicalInputs(directory: string, schemaDirectory: string): 
     const relative = stringValue(entry.path);
     assertStrictRelativePath(relative);
     const base = directory === schemaDirectory ? repositoryRoot : directory;
-    try {
-      const bytes = await readStableCanonicalFile(join(base, relative), relative);
-      if (hex(bytes) !== entry.sha256) throw invalid(`canonical closure input differs: ${relative}`);
-    } catch (error) {
-      if (directory === schemaDirectory || !relative.startsWith("contracts/evm/")) throw error;
-    }
+    const bytes = await readStableCanonicalFile(join(base, relative), relative);
+    if (hex(bytes) !== entry.sha256) throw invalid(`canonical closure input differs: ${relative}`);
   }
   const detectorEntry = object(manifest.detectorInventory, "manifest.detectorInventory");
   const acceptedDetectorBytes = await readStableCanonicalFile(join(directory, stringValue(detectorEntry.path)), "detector inventory");
@@ -225,11 +230,11 @@ async function readCanonicalPolicies(
   schemaDirectory: string,
   findings: readonly JsonObject[],
 ): Promise<CanonicalPolicies> {
-  const configBytes = await readFile(join(directory, "slither.config.json"));
+  const configBytes = await readStableCanonicalFile(join(directory, "slither.config.json"), "slither.config.json");
   let config: unknown; try { config = parseJsonWithoutDuplicateKeys(configBytes.toString("utf8")); } catch { throw invalid("Slither config is not unambiguous JSON"); }
   if (JSON.stringify(config) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) throw invalid("Slither config contains unsupported exclusions or fields");
-  const policyBytes = await readFile(join(directory, "suppressions.v1.json"));
-  const triageBytes = await readFile(join(directory, "triage.v1.json"));
+  const policyBytes = await readStableCanonicalFile(join(directory, "suppressions.v1.json"), "suppressions.v1.json");
+  const triageBytes = await readStableCanonicalFile(join(directory, "triage.v1.json"), "triage.v1.json");
   await assertSerializedAgainstSchema(policyBytes.toString("utf8"), join(schemaDirectory, "suppression-ledger.schema.v1.json"));
   await assertSerializedAgainstSchema(triageBytes.toString("utf8"), join(schemaDirectory, "triage-ledger.schema.v1.json"));
   const policy = object(parseJsonWithoutDuplicateKeys(policyBytes.toString("utf8")), "suppression policy");
@@ -274,7 +279,7 @@ function deriveTriage(findings: readonly JsonObject[], suppressed: ReadonlySet<s
 }
 
 async function readCanonicalTools(repositoryRoot: string, manifest: JsonObject): Promise<JsonObject> {
-  const lock = object(parseJsonWithoutDuplicateKeys(await readFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8")), "toolchain lock");
+  const lock = object(parseJsonWithoutDuplicateKeys((await readStableCanonicalFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "toolchain.lock.json")).toString("utf8")), "toolchain lock");
   const image = object(object(lock.securityImages, "securityImages").slither, "slither image");
   const versions = object(image.versions, "image versions");
   const manifestTools = object(manifest.tools, "manifest tools");
@@ -439,18 +444,24 @@ function canonical(value: unknown): unknown {
 const hex = (value: string | Uint8Array): string => createHash("sha256").update(value).digest("hex");
 const stringValue = (value: unknown): string => {if (typeof value !== "string") {throw invalid("expected string");} return value;};
 function schemaName(variant: Variant): string {return variant === "evidence.json" ? "evidence-report.schema.v1.json" : `${variant.slice(0, -5)}.schema.v1.json`;}
-async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path); if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("bundle is not a regular directory");}}
-async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {throw invalid("bundle entry is not a regular file");}}
-async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw invalid("raw output is not a sealed regular file"); const handle = await (await import("node:fs/promises")).open(path, 0 | 131072); try { const opened = await handle.stat(); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1) throw invalid("raw output identity changed"); const bytes = await handle.readFile(); const after = await handle.stat(); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1) throw invalid("raw output changed during read"); return bytes; } finally { await handle.close(); } }
+async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("bundle is not a regular directory");}}
+async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path, { bigint: true }); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) {throw invalid("bundle entry is not a regular file");}}
+async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path, { bigint: true }); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw invalid("raw output is not a sealed regular file"); const handle = await (await import("node:fs/promises")).open(path, 0 | 131072); try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) throw invalid("raw output identity changed"); const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) throw invalid("raw output changed during read"); return bytes; } finally { await handle.close(); } }
 function assertStrictRelativePath(value: string): void {
   if (!value || value.startsWith("/") || value.includes("\\") || value.split("/").some((part) => !part || part === "." || part === "..")) throw invalid(`unsafe canonical path: ${value}`);
 }
 
 async function readStableCanonicalFile(path: string, label: string): Promise<Buffer> {
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw invalid(`canonical input is not a sealed regular file: ${label}`);
+  let parent = dirname(path);
+  while (parent !== dirname(parent)) {
+    const parentInfo = await lstat(parent, { bigint: true });
+    if (parentInfo.isSymbolicLink() || !parentInfo.isDirectory()) throw invalid(`canonical input parent is symlinked or invalid: ${label}`);
+    parent = dirname(parent);
+  }
+  const info = await lstat(path, { bigint: true });
+  if (!info.isFile() || info.isSymbolicLink()) throw invalid(`canonical input is not a sealed regular file: ${label}`);
   const handle = await (await import("node:fs/promises")).open(path, 0 | 131072);
-  try { const opened = await handle.stat(); if (opened.ino !== info.ino || opened.dev !== info.dev || opened.nlink !== 1) throw invalid(`canonical input identity changed: ${label}`); const bytes = await handle.readFile(); const after = await handle.stat(); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1) throw invalid(`canonical input changed during read: ${label}`); return bytes; } finally { await handle.close(); }
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== info.ino || opened.dev !== info.dev || opened.nlink !== 1n) throw invalid(`canonical input identity changed: ${label}`); const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) throw invalid(`canonical input changed during read: ${label}`); return bytes; } finally { await handle.close(); }
 }
 
 function object(value: unknown, name: string): JsonObject {if (value === null || typeof value !== "object" || Array.isArray(value)) {throw invalid(`${name} is not an object`);} return value as JsonObject;}

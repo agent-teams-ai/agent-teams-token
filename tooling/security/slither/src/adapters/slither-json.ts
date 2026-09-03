@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import type { Finding, Impact } from "../domain/model.ts";
 import { IMPACTS, SlitherGateError } from "../domain/model.ts";
 import { findingFingerprint, normalizedIdentityHash, normalizeIdentity, normalizeRepositoryPath, sourceLocation } from "./fingerprint.ts";
@@ -96,7 +97,7 @@ async function parseFinding(
   const identity = normalizeFindingIdentity(rawIdentity, repositoryRoot);
   const mapping = sourceMapping(detector.elements);
   const relative = findingPath(mapping);
-  const source = await readFile(`${repositoryRoot}/${relative}`, "utf8");
+  const source = (await readStableSource(repositoryRoot, relative)).toString("utf8");
   const location = sourceLocation(
     relative,
     integer(mapping.start, "start"),
@@ -163,4 +164,14 @@ export function parseDetectorInventory(raw: string): readonly string[] {
   if (numbers.some((n, i) => n !== i + 1)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory numbering is not contiguous");
   const ids = rows.map((m) => m[2]!); if (new Set(ids).size !== ids.length) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is duplicated");
   return ids.toSorted();
+}
+
+async function readStableSource(root: string, relative: string): Promise<Buffer> {
+  const canonical = await realpath(root);
+  const path = await realpath(`${canonical}/${relative}`);
+  if (!path.startsWith(`${canonical}/`)) throw new SlitherGateError("MALFORMED_JSON", "finding source escapes repository");
+  const before = await lstat(path, { bigint: true });
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new SlitherGateError("MALFORMED_JSON", "finding source is not a sealed file");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) throw new SlitherGateError("MALFORMED_JSON", "finding source changed"); const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.ino !== opened.ino || after.dev !== opened.dev || after.nlink !== 1n) throw new SlitherGateError("MALFORMED_JSON", "finding source mutated"); return bytes; } finally { await handle.close(); }
 }

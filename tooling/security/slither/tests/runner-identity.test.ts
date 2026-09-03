@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   decodeCreationBytecode,
   assertSlitherStatus,
   parseSlitherExit,
   parseOfficialImageEnvironment,
+  verifyVersions,
 } from "../src/adapters/runner.ts";
 import {
   IMAGE_REVISION,
@@ -86,4 +89,20 @@ test("Slither exit files accept only canonical 0 or 255 with an optional trailin
   ]) {
     assert.throws(() => parseSlitherExit(raw), { code: "SLITHER_EXIT_INVALID" });
   }
+});
+
+
+test("solc version parser requires the exact pinned Linux.g++ suffix", async () => {
+  const root = await mkdtemp("/tmp/slither-version-");
+  try {
+    await writeFile(join(root, "solc.version"), "solc, the solidity compiler commandline interface\nVersion: 0.8.36+commit.8a079791.Linux.g++\n");
+    await writeFile(join(root, "slither.version"), "0.11.6\n");
+    await writeFile(join(root, "crytic-compile.version"), "crytic-compile 0.4.2\n");
+    await writeFile(join(root, "forge.version"), "forge Version: 1.8.0\n");
+    await verifyVersions(root);
+    for (const forged of ["Version: 0.8.36+commit.8a079791\n", "Version: 0.8.36+commit.deadbeef.Linux.g++\n", "Version: 0.8.36+commit.8a079791.Linux.g++-forged\n"]) {
+      await writeFile(join(root, "solc.version"), `solc, the solidity compiler commandline interface\n${forged}`);
+      await assert.rejects(verifyVersions(root), { code: "TOOL_VERSION_MISMATCH" });
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

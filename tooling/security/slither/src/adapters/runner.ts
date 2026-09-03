@@ -1,4 +1,4 @@
-import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
@@ -86,18 +86,19 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
     const before = await closure(repositoryRoot, productionClosure);
     const result = await processPort.run(dockerPath, dockerRunArguments({ input: inputDirectory, output: rawOutput, forge: forgePath, solc: solcPath, containerName, ...imageEnvironment }), 600_000);
     await assertContainerResult(result, rawOutput);
+    await sealRawOutput(rawOutput);
     await verifyVersions(rawOutput);
     const after = await closure(repositoryRoot, productionClosure);
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       throw new SlitherGateError("INPUT_CLOSURE_MUTATED", "production closure changed during analysis");
     }
-    const parsed = await parseSlitherJson(await readFile(join(rawOutput, "slither.json"), "utf8"), repositoryRoot);
-    const slitherExit = parseSlitherExit(await readFile(join(rawOutput, "slither.exit"), "utf8"));
+    const parsed = await parseSlitherJson((await requiredRaw(rawOutput, "slither.json")).toString("utf8"), repositoryRoot);
+    const slitherExit = parseSlitherExit(await requiredRaw(rawOutput, "slither.exit"));
     assertSlitherStatus(parsed.success, parsed.errors, parsed.findings.length, slitherExit);
-    const inventory = parseSlitherInventory(await readFile(join(rawOutput, "slither-inventory.json"), "utf8"));
-    const inventoryExit = parseSlitherExit(await readFile(join(rawOutput, "slither-inventory.exit"), "utf8"));
+    const inventory = parseSlitherInventory((await requiredRaw(rawOutput, "slither-inventory.json")).toString("utf8"));
+    const inventoryExit = parseSlitherExit(await requiredRaw(rawOutput, "slither-inventory.exit"));
     assertSlitherStatus(inventory.success, inventory.errors, 0, inventoryExit);
-    const detectorInventory = parseDetectorInventory(await readFile(join(rawOutput, "detectors.txt"), "utf8"));
+    const detectorInventory = parseDetectorInventory((await requiredRaw(rawOutput, "detectors.txt")).toString("utf8"));
     const compiled = await parseCompiledOutput(rawOutput);
     const input: AnalysisInput = {
       success: parsed.success && inventory.success, findings: parsed.findings, analyzedContracts: inventory.contracts, analyzedSources: inventory.sources, closure: after,
@@ -123,9 +124,9 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
       expectedDetectors: prepared.expectedDetectors,
       suppressions: prepared.suppressions,
       triage: prepared.triage,
-      configHash: sha256(await readFile(join(base, "slither.config.json"))),
-      policyHash: sha256(await readFile(join(base, "suppressions.v1.json"))),
-      triageHash: sha256(await readFile(join(base, "triage.v1.json"))),
+      configHash: sha256(await readStableRegularFile(join(base, "slither.config.json"), "slither.config.json")),
+      policyHash: sha256(await readStableRegularFile(join(base, "suppressions.v1.json"), "suppressions.v1.json")),
+      triageHash: sha256(await readStableRegularFile(join(base, "triage.v1.json"), "triage.v1.json")),
     };
   } finally {
     await processPort.run(dockerPath, ["rm", "--force", containerName], 30_000).catch(() => {});
@@ -169,11 +170,12 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
     600_000,
   );
   await assertContainerResult(result, output);
+  await sealRawOutput(output);
   await verifyVersions(output);
-  const parsed = await parseSlitherJson(await readFile(join(output, "slither.json"), "utf8"), input);
-  const status = parseSlitherExit(await readFile(join(output, "slither.exit"), "utf8"));
+  const parsed = await parseSlitherJson((await requiredRaw(output, "slither.json")).toString("utf8"), input);
+  const status = parseSlitherExit(await requiredRaw(output, "slither.exit"));
   assertSlitherStatus(parsed.success, parsed.errors, parsed.findings.length, status);
-  const observedDetectors = parseDetectorInventory(await readFile(join(output, "detectors.txt"), "utf8"));
+  const observedDetectors = parseDetectorInventory((await requiredRaw(output, "detectors.txt")).toString("utf8"));
   if (JSON.stringify(observedDetectors) !== JSON.stringify(request.expectedDetectors)) {
     throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "vulnerable fixture used a different detector inventory");
   }
@@ -186,9 +188,9 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
 async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   const { repositoryRoot, processPort, forgePath, solcPath, dockerPath } = request;
   const base = join(repositoryRoot, "tooling/security/slither");
-  const manifest = parseTypedJson(await readFile(join(base, "production-closure.v1.json"), "utf8"), "TARGET_MANIFEST_INVALID", "production manifest") as GateManifest;
-  const suppressionRaw = await readFile(join(base, "suppressions.v1.json"), "utf8");
-  const triageRaw = await readFile(join(base, "triage.v1.json"), "utf8");
+  const manifest = parseTypedJson((await readStableRegularFile(join(base, "production-closure.v1.json"), "production-closure.v1.json")).toString("utf8"), "TARGET_MANIFEST_INVALID", "production manifest") as GateManifest;
+  const suppressionRaw = (await readStableRegularFile(join(base, "suppressions.v1.json"), "suppressions.v1.json")).toString("utf8");
+  const triageRaw = (await readStableRegularFile(join(base, "triage.v1.json"), "triage.v1.json")).toString("utf8");
   try {
     await assertSerializedAgainstSchema(suppressionRaw, join(base, "suppression-ledger.schema.v1.json"));
     await assertSerializedAgainstSchema(triageRaw, join(base, "triage-ledger.schema.v1.json"));
@@ -202,7 +204,7 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   assertSuppressionShape(suppressionDocument.suppressions);
   const inventoryDocument = await readDetectorInventory(repositoryRoot, manifest.detectorInventory);
   await assertCanonicalConfig(join(base, "slither.config.json"));
-  const lock = parseTypedJson(await readFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8"), "TOOLCHAIN_LOCK_INVALID", "toolchain lock") as ToolchainLock;
+  const lock = parseTypedJson((await readStableRegularFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "toolchain.lock.json")).toString("utf8"), "TOOLCHAIN_LOCK_INVALID", "toolchain lock") as ToolchainLock;
   assertSlitherToolchainBinding(lock);
   const foundryArtifact = lock.tools.foundry.platforms["linux-x64"];
   const solcArtifact = lock.tools.solc.platforms["linux-x64"];
@@ -263,6 +265,22 @@ export async function assertContainerResult(
   }
 }
 
+async function sealRawOutput(directory: string): Promise<void> {
+  const info = await lstat(directory, { bigint: true });
+  if (!info.isDirectory() || info.isSymbolicLink() || info.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", "analyzer output directory is not a sealed directory");
+  for (const name of await readdir(directory)) {
+    const path = join(directory, name); const entry = await lstat(path, { bigint: true });
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `analyzer output entry is not a sealed file: ${name}`);
+    await chmod(path, 0o444);
+  }
+  await chmod(directory, 0o555);
+}
+
+async function requiredRaw(output: string, name: string): Promise<Buffer> {
+  try { return await readStableRegularFile(join(output, name), name); }
+  catch { throw new SlitherGateError("MALFORMED_JSON", `required analyzer output is missing or unreadable: ${name}`); }
+}
+
 export function parseSlitherExit(raw: string | Buffer): number {
   const serialized = raw.toString();
   if (!/^(?:0|255)\n?$/u.test(serialized)) {
@@ -291,7 +309,7 @@ export function assertSlitherStatus(
 
 async function assertTool(path: string, expected: string, code: GateErrorCode): Promise<void> {
   await assertRegularTool(path, code);
-  const actual = sha256(await readFile(path)); if (actual !== expected) {throw new SlitherGateError(code, "tool override checksum mismatch");}
+  const actual = sha256(await readStableRegularFile(path, "tool override")); if (actual !== expected) {throw new SlitherGateError(code, "tool override checksum mismatch");}
 }
 
 async function assertRegularTool(path: string, code: GateErrorCode): Promise<void> {
@@ -332,8 +350,7 @@ async function readDetectorInventory(
   repositoryRoot: string,
   entry: ClosureEntry,
 ): Promise<DetectorInventoryDocument> {
-  const path = join(repositoryRoot, entry.path);
-  const raw = await readFile(path);
+  const raw = await readConfinedStableFile(repositoryRoot, entry.path, entry.path);
   if (sha256(raw) !== entry.sha256) {
     throw new SlitherGateError("INPUT_HASH_MISMATCH", "pinned detector inventory differs");
   }
@@ -368,35 +385,55 @@ async function assertCanonicalConfig(path: string): Promise<void> {
 function assertManifestPath(path: string): void {
   if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) throw new SlitherGateError("TARGET_MANIFEST_INVALID", `manifest path is not canonical: ${path}`);
 }
-async function confinedPath(root: string, relative: string): Promise<string> {
-  const canonicalRoot = await realpath(root); const candidate = join(canonicalRoot, relative);
-  if (!candidate.startsWith(`${canonicalRoot}/`)) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "manifest path escapes repository");
-  let current = canonicalRoot; for (const part of relative.split("/").slice(0,-1)) { current = join(current, part); if ((await lstat(current)).isSymbolicLink()) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "manifest parent is symlinked"); }
-  return candidate;
+async function readConfinedStableFile(root: string, relative: string, label: string): Promise<Buffer> {
+  assertManifestPath(relative);
+  const rootInfo = await lstat(root, { bigint: true });
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root is not a regular directory");
+  const canonicalRoot = await realpath(root);
+  if (canonicalRoot !== root) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root must be a realpath");
+  const parts = relative.split("/");
+  const rootHandle = await open(canonicalRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  let current = rootHandle;
+  try {
+    for (const part of parts.slice(0, -1)) {
+      const next = await open(`/proc/self/fd/${current.fd}/${part}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      if (current !== rootHandle) await current.close();
+      current = next;
+    }
+    const handle = await open(`/proc/self/fd/${current.fd}/${parts.at(-1)!}`, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = await handle.stat({ bigint: true });
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not a sealed regular file: ${label}`);
+      const bytes = await handle.readFile();
+      const after = await handle.stat({ bigint: true });
+      if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);
+      return bytes;
+    } finally { await handle.close(); }
+  } finally { if (current !== rootHandle) await current.close(); await rootHandle.close().catch(() => {}); }
 }
 
 const safePathList = (value: string): boolean => value.split(":").every((entry) => entry.startsWith("/") && !entry.includes("..") && !entry.includes("\n"));
 
 async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
-  assertManifestPath(entry.path); const source = await confinedPath(root, entry.path); const content = await readStableRegularFile(source, entry.path);
+  assertManifestPath(entry.path); const content = await readConfinedStableFile(root, entry.path, entry.path);
   if (sha256(content) !== entry.sha256) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input differs: ${entry.path}`);}
   const target = join(destination, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 }); await writeFile(target, content, { mode: 0o444, flag: "wx" });
 }
 
 async function readStableRegularFile(path: string, label: string): Promise<Buffer> {
-  const before = await lstat(path);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);
+  const before = await lstat(path, { bigint: true });
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { const opened = await handle.stat(); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); const content = await handle.readFile(); const after = await handle.stat(); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); return content; } finally { await handle.close(); }
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); const content = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`); return content; } finally { await handle.close(); }
 }
 
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
-  return await Promise.all(entries.map(async ({ path }) => { assertManifestPath(path); return { path, sha256: sha256(await readStableRegularFile(await confinedPath(root, path), path)) }; }));
+  return await Promise.all(entries.map(async ({ path }) => { assertManifestPath(path); return { path, sha256: sha256(await readConfinedStableFile(root, path, path)) }; }));
 }
 
 export async function verifyVersions(output: string): Promise<void> {
   const checks: [string, RegExp][] = [
-    ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\s*$/u],
+    ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\.Linux\.g\+\+\s*$/u],
     ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /^crytic-compile 0\.4\.2\s*$/u],
   ];
   for (const [file, pattern] of checks) {
@@ -527,7 +564,7 @@ export function assertSlitherToolchainBinding(lock: ToolchainLock, runtime: Slit
 
 export async function readAndAssertSlitherToolchain(repositoryRoot: string): Promise<void> {
   let lock: ToolchainLock;
-  try {lock = parseJsonWithoutDuplicateKeys(await readFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8")) as ToolchainLock;}
+  try {lock = parseJsonWithoutDuplicateKeys((await readStableRegularFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "toolchain.lock.json")).toString("utf8")) as ToolchainLock;}
   catch {throw new SlitherGateError("TOOLCHAIN_LOCK_INVALID", "canonical toolchain lock is malformed");}
   assertSlitherToolchainBinding(lock);
 }
