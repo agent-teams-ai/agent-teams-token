@@ -170,8 +170,25 @@ async function terminateAuthenticatedValidator(lease: Lease, directory: string):
 
 async function awaitExit(pid: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) { if (!processAlive(pid)) { return true; } await delay(50); }
-  return !processAlive(pid);
+  while (Date.now() < deadline) { if (await processExited(pid)) { return true; } await delay(50); }
+  return await processExited(pid);
+}
+
+/**
+ * `kill(pid, 0)` still succeeds for a zombie whose parent was SIGKILLed until
+ * the system reaps it. Treat that kernel state as exited so stale-run reclaim
+ * does not wait forever (or report a false timeout) after an orphaned
+ * validator terminates.
+ */
+async function processExited(pid: number): Promise<boolean> {
+  if (!processAlive(pid)) { return true; }
+  if (process.platform !== "linux") { return false; }
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const end = stat.lastIndexOf(")");
+    const state = end < 0 ? undefined : stat.slice(end + 2).trim().split(/\s+/u)[0];
+    return state === "Z";
+  } catch { return true; }
 }
 
 async function leaseOwnerIsLive(lease: Lease): Promise<boolean> {

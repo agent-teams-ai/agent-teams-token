@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -208,4 +209,14 @@ test("pre-registration SIGKILL cannot orphan an unregistered validator", { skip:
   }
 });
 
-function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    if (process.platform === "linux") {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const end = stat.lastIndexOf(")");
+      if (end >= 0 && stat.slice(end + 2).trim().split(/\s+/u)[0] === "Z") { return false; }
+    }
+    return true;
+  } catch { return false; }
+}
