@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { validateFinalizedEvidenceBundle } from "../src/adapters/evidence-bundle.ts";
+import { findingFingerprint, sha256 } from "../src/adapters/fingerprint.ts";
 import { writeEnvironmentFailure, writeReadyEvidence } from "../src/adapters/evidence.ts";
 import type { AnalysisInput, Finding, GateManifest, PolicyDecision } from "../src/domain/model.ts";
 import { makeTestDirectory } from "./test-directory.ts";
@@ -21,7 +22,9 @@ const validate = async (output: string, candidateSha = sha): Promise<void> => aw
 async function makeBundle(output: string): Promise<void> {
   const canonicalDirectory = join(dirname(output), "canonical");
   const hashes = await writeCanonicalFixture(canonicalDirectory, manifest, input);
-  await writeReadyEvidence({ output, candidateSha: sha, manifest: hashes.manifest, input, decision, hashes: { config: hashes.config, policy: hashes.policy }, triageHash: hashes.triage, schemaDirectory, canonicalDirectory, assertReadyPrecondition: async () => {} });
+  const sourceHash = `sha256:${sha256("contract A {}\n")}`;
+  const fixtureInput = { ...input, findings: input.findings.map((finding) => { const location = { ...finding.location, sourceHash }; return { ...finding, location, fingerprint: findingFingerprint({ ...finding, location }) }; }) };
+  await writeReadyEvidence({ output, candidateSha: sha, manifest: hashes.manifest, input: fixtureInput, decision, hashes: { config: hashes.config, policy: hashes.policy }, triageHash: hashes.triage, schemaDirectory, canonicalDirectory, assertReadyPrecondition: async () => {} });
 }
 
 test("finalized analysis evidence validates independently", async () => {
@@ -173,16 +176,20 @@ async function makeIndependentGoldenBundle(output: string): Promise<void> {
   const detectorBytes = json({ schemaVersion: 1, slitherVersion: "0.11.6", detectors });
   const configBytes = json({ exclude_dependencies: false, legacy_ast: false });
   const policyBytes = json({ schemaVersion: 1, suppressions: [] });
-  const triageBytes = json({ schemaVersion: 1, findings: [{ schemaVersion: 1, fingerprint: golden.finding.fingerprint,
+  const source = "contract A {}\n";
+  const sourceHash = `sha256:${sha256(source)}`;
+  const snippetHash = `sha256:${sha256(source.slice(0, 1))}`;
+  const fingerprint = findingFingerprint({ detectorId: golden.finding.detectorId, impact: golden.finding.impact, confidence: golden.finding.confidence, identity: golden.finding.identity, findingIdentityHash: golden.finding.findingIdentityHash, location: { path: golden.finding.location.path, start: golden.finding.location.start, length: golden.finding.location.length, sourceHash, snippetHash }, });
+  const triageBytes = json({ schemaVersion: 1, findings: [{ schemaVersion: 1, fingerprint,
     owner: "fixture-security", disposition: "accepted-design", rationale: "Independently reviewed golden evidence fixture finding.",
     reviewedAt: "2026-08-29T00:00:00.000Z" }] });
-  const acceptedManifest = { ...manifest, detectorInventory: { path: "detector-inventory.v1.json", sha256: digest(detectorBytes) } };
+  const acceptedManifest = { ...manifest, sources: manifest.sources.map((entry) => ({ ...entry, sha256: sha256(source) })), detectorInventory: { path: "detector-inventory.v1.json", sha256: digest(detectorBytes) } };
   const rawFinding = {
     detectorId: golden.finding.detectorId, impact: golden.finding.impact, confidence: golden.finding.confidence,
     identity: golden.finding.identity, findingIdentityHash: golden.finding.findingIdentityHash,
-    fingerprint: golden.finding.fingerprint, path: golden.finding.location.path, start: golden.finding.location.start,
-    length: golden.finding.location.length, sourceHash: golden.finding.location.sourceHash,
-    snippetHash: golden.finding.location.snippetHash, blocking: false, suppressed: false,
+    fingerprint, path: golden.finding.location.path, start: golden.finding.location.start,
+    length: golden.finding.location.length, sourceHash,
+    snippetHash, blocking: false, suppressed: false,
   };
   const closure = [...acceptedManifest.sources, ...acceptedManifest.config, acceptedManifest.detectorInventory];
   const evidence = {
@@ -197,8 +204,9 @@ async function makeIndependentGoldenBundle(output: string): Promise<void> {
     policy: { blocking: 0, visible: 1, suppressed: 0, errors: [] }, result: { category: "clean", exitCode: 0 }, sanitised: true,
   };
   const summary = "# Slither security gate\n\nResult: clean (exit 0)\nFindings: 1; blocking: 0; suppressed: 0\nTargets: A\n- Informational fixture-detector at contracts/evm/src/A.sol:1 (visible)\n";
-  await mkdir(canonicalDirectory, { recursive: true }); await mkdir(output);
+  await mkdir(join(canonicalDirectory, "contracts/evm/src"), { recursive: true }); await mkdir(output);
   await Promise.all([
+    writeFile(join(canonicalDirectory, "contracts/evm/src/A.sol"), source),
     writeFile(join(canonicalDirectory, "production-closure.v1.json"), json(acceptedManifest)),
     writeFile(join(canonicalDirectory, "detector-inventory.v1.json"), detectorBytes),
     writeFile(join(canonicalDirectory, "slither.config.json"), configBytes),
