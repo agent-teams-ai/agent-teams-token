@@ -409,10 +409,10 @@ test("READY finalization cannot succeed before its post-rename directory sync", 
     await claim.writeExclusive("payload", Buffer.from("payload"));
     await claim.publish();
     let finalized = false;
-    const finalization = claim.finalizeReady("READY", Buffer.from("ready")).then(() => {
+    const finalization = (async () => {
+      await claim.finalizeReady("READY", Buffer.from("ready"));
       finalized = true;
-      return undefined;
-    });
+    })();
     await syncEntered;
     assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
     assert.equal(finalized, false);

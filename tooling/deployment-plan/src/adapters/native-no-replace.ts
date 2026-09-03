@@ -9,14 +9,14 @@ import {
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NoReplaceDirectoryRename } from "./safe-output.ts";
 import { sha256Hex } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
 
 const SOURCE_SHA256 = "0xdca72d3308cf66b7aed9fdc0a131777990845dd479a8a00d942a19c2ab43ee22";
-const SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), "../../native/no-replace.c");
+const SOURCE = resolvePath(dirname(fileURLToPath(import.meta.url)), "../../native/no-replace.c");
 const CHILD_TIMEOUT_MS = 10_000;
 
 interface ExecutableIdentity {
