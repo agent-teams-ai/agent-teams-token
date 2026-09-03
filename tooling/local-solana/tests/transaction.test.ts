@@ -18,7 +18,7 @@ test("negative authority transactions contain two full Ed25519 signatures", asyn
     await writeFile(payerPath, JSON.stringify([...payer])); await writeFile(authorityPath, JSON.stringify([...authority]));
     const rpc = { latestBlockhash: async () => base58Encode(new Uint8Array(32)) } as unknown as RpcPort;
     const mint = base58Encode(payer.slice(32)); const freeze = base58Encode(authority.slice(32));
-    const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath };
+    const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: new AbortController().signal };
     for (const bytes of [await signedRestoreFreezeTransaction({ ...context, mint, newAuthority: freeze }), await signedFreezeAccountTransaction({ ...context, account: mint, mint })]) {
       assert.equal(bytes[0], 2); assert.equal(bytes.length > 200, true); assert.notDeepEqual(bytes.slice(1, 65), new Uint8Array(64)); assert.notDeepEqual(bytes.slice(65, 129), new Uint8Array(64));
     }
@@ -35,7 +35,7 @@ test("message compilation deduplicates a mint that is also the freeze authority"
     const rpc = { latestBlockhash: async () => base58Encode(new Uint8Array(32)) } as unknown as RpcPort;
     const mintAndAuthority = base58Encode(authority.slice(32));
     const tokenAccount = base58Encode(Uint8Array.from({ length: 32 }, (_value, index) => 80 + index));
-    const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath };
+    const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: new AbortController().signal };
 
     const restore = messageFacts(await signedRestoreFreezeTransaction({ ...context, mint: mintAndAuthority, newAuthority: mintAndAuthority }));
     assert.deepEqual(restore.header, [2, 0, 1]);
@@ -46,6 +46,15 @@ test("message compilation deduplicates a mint that is also the freeze authority"
     assert.deepEqual(freeze.header, [2, 1, 1]);
     assert.equal(freeze.accountCount, 4);
     assert.deepEqual(freeze.instructionAccounts, [2, 1, 1]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("abort returned with the blockhash prevents signing and transaction bytes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-tx-abort-test-"));
+  try {
+    const key = Uint8Array.from({ length: 64 }, (_value, index) => index + 1); const payerPath = join(directory, "payer.json"); const authorityPath = join(directory, "authority.json"); await writeFile(payerPath, JSON.stringify([...key])); await writeFile(authorityPath, JSON.stringify([...key]));
+    const controller = new AbortController(); let blockhashCalls = 0; const rpc = { async latestBlockhash() { blockhashCalls += 1; controller.abort(); return base58Encode(new Uint8Array(32)); } } as unknown as RpcPort;
+    const mint = base58Encode(key.slice(32)); await assert.rejects(signedRestoreFreezeTransaction({ rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: controller.signal, mint, newAuthority: mint }), /SOLANA_COMMAND_ABORTED/u); assert.equal(blockhashCalls, 1);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

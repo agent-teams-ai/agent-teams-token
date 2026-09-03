@@ -49,18 +49,28 @@ export interface TransactionErrorFact {
 /** Semantic instruction facts decoded by the RPC adapter, never supplied by the runner. */
 export interface InstructionFact {
   readonly programId: string;
+  readonly programIdIndex: number;
   readonly instructionIndex: number;
   readonly innerInstructionIndex: number | null;
+  readonly innerGroupIndex: number | null;
   readonly kind: string;
   readonly accounts: readonly string[];
+  readonly accountIndices: readonly number[];
+  readonly dataHex: string;
   readonly mint: string | null;
   readonly tokenAccount: string | null;
   readonly owner: string | null;
+  readonly newAccount: string | null;
   readonly authority: string | null;
   readonly newAuthority: string | null;
   readonly authorityType: string | null;
   readonly amountBaseUnits: string | null;
   readonly decimals: number | null;
+}
+
+export interface InnerInstructionGroupFact {
+  readonly groupIndex: number;
+  readonly outerInstructionIndex: number;
 }
 
 export interface TransactionFact {
@@ -70,7 +80,9 @@ export interface TransactionFact {
   readonly confirmationStatus: "finalized";
   readonly error: TransactionErrorFact | null;
   readonly signers: readonly string[];
+  readonly accountKeys: readonly string[];
   readonly instructions: readonly InstructionFact[];
+  readonly innerInstructionGroups: readonly InnerInstructionGroupFact[];
   readonly genesisHash: string;
 }
 

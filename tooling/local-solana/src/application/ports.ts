@@ -14,7 +14,12 @@ export interface CommandPort {
   run(executable: string, args: readonly string[], options?: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal }): Promise<CommandResult>;
 }
 
-export interface ValidatorHandle { readonly pid: number; stop(): Promise<void>; assertHealthy?: () => Promise<void>; }
+export interface ValidatorHandle {
+  readonly pid: number;
+  stop(): Promise<void>;
+  assertHealthy(): Promise<void>;
+  assertRpcListener(port: number): Promise<void>;
+}
 export interface ValidatorStartRequest {
   readonly executable: string;
   readonly ledger: string;
@@ -38,6 +43,7 @@ export interface ValidatorIdentity {
   readonly executable: string;
   readonly ledger: string;
   readonly commandHash: string;
+  readonly leaseTokenHash: string;
 }
 export interface ValidatorPort {
   start(request: ValidatorStartRequest): Promise<ValidatorHandle>;
@@ -46,13 +52,13 @@ export interface ValidatorPort {
 export interface RpcPort {
   waitReady(rpcUrl: string, timeoutMs: number, signal: AbortSignal): Promise<{ readonly version: string; readonly genesisHash: string }>;
   waitProgramsReady(rpcUrl: string, programIds: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<void>;
-  genesisHash(rpcUrl: string): Promise<string>;
-  mintAccount(rpcUrl: string, address: string): Promise<AccountState>;
-  tokenAccount(rpcUrl: string, address: string): Promise<TokenAccountState>;
-  tokenAccountAddress(rpcUrl: string, owner: string, mint: string): Promise<string>;
-  finalizedTransaction(rpcUrl: string, signature: string): Promise<TransactionFact>;
-  sendSignedTransaction(rpcUrl: string, bytes: Uint8Array): Promise<string>;
-  latestBlockhash(rpcUrl: string, signal?: AbortSignal): Promise<string>;
+  genesisHash(rpcUrl: string, signal: AbortSignal): Promise<string>;
+  mintAccount(rpcUrl: string, address: string, signal: AbortSignal): Promise<AccountState>;
+  tokenAccount(rpcUrl: string, address: string, signal: AbortSignal): Promise<TokenAccountState>;
+  tokenAccountAddress(rpcUrl: string, owner: string, mint: string, signal: AbortSignal): Promise<string>;
+  finalizedTransaction(rpcUrl: string, signature: string, signal: AbortSignal): Promise<TransactionFact>;
+  sendSignedTransaction(rpcUrl: string, bytes: Uint8Array, signal: AbortSignal): Promise<string>;
+  latestBlockhash(rpcUrl: string, signal: AbortSignal): Promise<string>;
 }
 
 export interface RunPaths {
@@ -63,7 +69,12 @@ export interface RunPaths {
   readonly mintKey: string;
   readonly ownerKey: string;
   readonly leaseToken: string;
+  readonly rootIdentity: FileIdentity;
+  readonly directoryIdentity: FileIdentity;
+  readonly markerIdentity: FileIdentity;
 }
+
+export interface FileIdentity { readonly dev: string; readonly ino: string; }
 
 export interface RunStorePort {
   create(): Promise<RunPaths>;
@@ -111,5 +122,5 @@ export interface AuthorityTransactionContext {
   readonly rpcUrl: string;
   readonly payerPath: string;
   readonly authorityPath: string;
-  readonly signal?: AbortSignal;
+  readonly signal: AbortSignal;
 }

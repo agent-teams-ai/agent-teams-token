@@ -52,15 +52,22 @@ test("verifier rejects supply introduced only after freeze-authority revocation"
   );
 });
 
-test("verifier rejects mixed or unknown ATA inner instructions", () => {
-  const base = observationFixture();
-  for (const extra of [
-    instruction({ programId: CLASSIC_TOKEN_PROGRAM, kind: "transfer", instructionIndex: 0, innerInstructionIndex: 0 }),
-    instruction({ programId: "Unknown1111111111111111111111111111111111", kind: "raw", instructionIndex: 0, innerInstructionIndex: 0 }),
-  ]) {
-    const mutated = { ...base, transactions: base.transactions.map((tx) => tx.operation === "createAta" ? { ...tx, instructions: [...tx.instructions, extra] } : tx) };
-    assert.throws(() => verifyObservations(mutated), /SOLANA_ATA_INNER_SEQUENCE/u);
-  }
-  const shifted = { ...base, transactions: base.transactions.map((tx) => tx.operation === "createAta" ? { ...tx, instructions: tx.instructions.map((item) => ({ ...item, instructionIndex: 1 })) } : tx) };
-  assert.throws(() => verifyObservations(shifted), /SOLANA_ATA_OUTER/u);
+test("verifier rejects zero, extra, duplicate, sparse, reordered and semantically forged ATA CPI evidence", () => {
+  const mutateAta = (change: (transaction: FixtureObservations["transactions"][number]) => FixtureObservations["transactions"][number]): FixtureObservations => {
+    const base = observationFixture(); return { ...base, transactions: base.transactions.map((transaction) => transaction.operation === "createAta" ? change(transaction) : transaction) };
+  };
+  const attacks = [
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.slice(0, 1), innerInstructionGroups: [] })),
+    mutateAta((transaction) => ({ ...transaction, innerInstructionGroups: [...transaction.innerInstructionGroups, { groupIndex: 1, outerInstructionIndex: 0 }] })),
+    mutateAta((transaction) => ({ ...transaction, innerInstructionGroups: [{ groupIndex: 0, outerInstructionIndex: 0 }, { groupIndex: 0, outerInstructionIndex: 0 }] })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item) => item.innerInstructionIndex === 2 ? { ...item, innerInstructionIndex: 7 } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: [transaction.instructions[0]!, transaction.instructions[2]!, transaction.instructions[1]!, ...transaction.instructions.slice(3)] })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, dataHex: "01" } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item) => item.programId === SYSTEM_PROGRAM ? { ...item, dataHex: item.dataHex.slice(0, 24) + "a600000000000000" + item.dataHex.slice(40) } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item) => item.programId === SYSTEM_PROGRAM ? { ...item, newAccount: owner } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: [...transaction.instructions, { ...transaction.instructions[2]!, innerInstructionIndex: 4 }] })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item) => item.kind === "initializeAccount3" ? { ...item, owner: payer } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item) => item.kind === "getAccountDataSize" ? { ...item, accountIndices: [0] } : item) })),
+  ];
+  for (const attack of attacks) { assert.throws(() => verifyObservations(attack), /SOLANA_/u); }
 });

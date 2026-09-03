@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { observationFixture } from "./helpers/observations.ts";
 import { runFixture, type FixtureDependencies } from "../src/application/runner.ts";
 import { LocalSolanaError, type FailureEvidenceReport } from "../src/domain/model.ts";
 
@@ -25,7 +26,7 @@ test("a post-mutation exception publishes sanitized failure evidence after clean
     environment: { PATH: "/ambient/path-that-must-not-be-used" },
     tools: { async resolve() { return { solana: "/tools/solana", keygen: "/tools/keygen", validator: "/tools/validator", splToken: "/tools/spl-token", tokenProgram: "/tools/token.so", associatedTokenProgram: "/tools/ata.so" }; } },
     command: { run: unsupported },
-    validator: { async start() { return { pid: 123, async stop() { stopped = true; } }; } },
+    validator: { async start() { return { pid: 123, async assertHealthy() {}, async assertRpcListener() {}, async stop() { stopped = true; } }; } },
     rpc: {
       async waitReady() { return { version: "test", genesisHash: "11111111111111111111111111111111" }; },
       async waitProgramsReady() {},
@@ -79,7 +80,7 @@ function cleanupFailureFixture(target: CleanupTarget): { readonly deps: FixtureD
     environment: {},
     tools: { async resolve() { return { solana: "/tools/solana", keygen: "/tools/keygen", validator: "/tools/validator", splToken: "/tools/spl-token", tokenProgram: "/tools/token.so", associatedTokenProgram: "/tools/ata.so" }; } },
     command: { run: unsupported },
-    validator: { async start() { return { pid: 123, async stop() { fail("validator"); } }; } },
+    validator: { async start() { return { pid: 123, async assertHealthy() {}, async assertRpcListener() {}, async stop() { fail("validator"); } }; } },
     rpc: {
       async waitReady() { return { version: "test", genesisHash: "1".repeat(32) }; }, async waitProgramsReady() {},
       genesisHash: unsupported, mintAccount: unsupported, tokenAccount: unsupported, tokenAccountAddress: unsupported,
@@ -122,3 +123,25 @@ for (const target of ["validator", "port", "directory"] as const) {
     }
   });
 }
+
+
+test("replacement listener during the final evidence batch can never publish READY", async () => {
+  const observation = observationFixture(); let listenerOwned = true; let published = false; let mintRead = 0; let tokenRead = 0;
+  const signatures = observation.transactions.map((transaction) => transaction.signature);
+  const deps = {
+    environment: {}, tools: { async resolve() { return { solana: "/s", keygen: "/k", validator: "/v", splToken: "/t", tokenProgram: "/p", associatedTokenProgram: "/a" }; } }, command: { run: unsupported },
+    validator: { async start() { return { pid: 7, async assertHealthy() {}, async assertRpcListener() { if (!listenerOwned) { throw new LocalSolanaError("SOLANA_RPC_LISTENER_IDENTITY", "replacement"); } }, async stop() {} }; } },
+    rpc: {
+      async waitReady() { return { version: observation.validatorVersion, genesisHash: observation.genesisHashBefore }; }, async waitProgramsReady() {},
+      async genesisHash() { return observation.genesisHashAfter; }, async mintAccount() { return [observation.initialMint, observation.afterRevokeMint, observation.afterMint, observation.finalMint][mintRead++]!; },
+      async tokenAccount() { return [observation.afterMintTokenAccount, observation.finalTokenAccount][tokenRead++]!; }, async tokenAccountAddress() { return observation.tokenAccountAddress; },
+      async finalizedTransaction(_url: string, signature: string) { const result = observation.transactions.find((transaction) => transaction.signature === signature)!; if (signature === signatures.at(-1)) { listenerOwned = false; } return result; },
+      async sendSignedTransaction(_url: string, bytes: Uint8Array) { return bytes[0] === 1 ? signatures[5]! : signatures[6]!; }, async latestBlockhash() { return observation.genesisHashBefore; },
+    },
+    cli: { async createKeys() { return { payer: observation.payerAddress, mint: observation.mintAddress, owner: observation.ownerAddress }; }, async verifyFunded() {}, async createMint() { return signatures[0]!; }, async revokeFreeze() { return signatures[1]!; }, async createTokenAccount() { return signatures[2]!; }, async associatedAddress() { return observation.tokenAccountAddress; }, async mint() { return signatures[3]!; }, async burn() { return signatures[4]!; } },
+    store: { async reclaimStale() { return 0; }, async create() { return { directory: "/r", ledger: "/r/l", config: "/r/c", payerKey: "/r/p", mintKey: "/r/m", ownerKey: "/r/o", leaseToken: "a".repeat(64) }; }, async registerValidator() {}, async cleanup() {}, async publish() { published = true; return { jsonPath: "x", markdownPath: "y" }; }, async publishFailure() { return { jsonPath: "f", markdownPath: "f" }; } },
+    ports: { async allocate() { return { rpcPort: 20_000, faucetPort: 20_002, gossipPort: 19_900, dynamicPortRange: "19900-19999", async release() {} }; } },
+    authorityTransactions: { async restoreFreeze() { return Uint8Array.from([1]); }, async freezeAccount() { return Uint8Array.from([2]); } },
+  } as unknown as FixtureDependencies;
+  await assert.rejects(runFixture(deps), /SOLANA_RPC_LISTENER_IDENTITY/u); assert.equal(published, false);
+});

@@ -51,26 +51,32 @@ function validateTokenSnapshot(value: unknown, label: string): void {
   assertValid([root.address, root.mint, root.owner].every((item) => typeof item === "string" && ADDRESS.test(item)) && typeof root.amount === "string" && INTEGER.test(root.amount), label);
 }
 function validateTransaction(value: unknown, operation: string): void {
-  const root = record(value, `transaction ${operation}`); exactKeys(root, ["operation", "signature", "slot", "confirmationStatus", "error", "signers", "instructions", "genesisHash"], `transaction ${operation}`);
+  const root = record(value, `transaction ${operation}`); exactKeys(root, ["operation", "signature", "slot", "confirmationStatus", "error", "signers", "accountKeys", "instructions", "innerInstructionGroups", "genesisHash"], `transaction ${operation}`);
   assertValid(root.operation === operation && typeof root.signature === "string" && SIGNATURE.test(root.signature) && typeof root.slot === "string" && INTEGER.test(root.slot) && root.confirmationStatus === "finalized" && typeof root.genesisHash === "string" && ADDRESS.test(root.genesisHash), `transaction ${operation}`);
+  if (!Array.isArray(root.accountKeys) || !root.accountKeys.every((item) => typeof item === "string" && ADDRESS.test(item))) { invalid(`${operation} account keys`); }
+  if (!Array.isArray(root.innerInstructionGroups) || !root.innerInstructionGroups.every((item) => { const group = record(item, "inner instruction group"); exactKeys(group, ["groupIndex", "outerInstructionIndex"], "inner instruction group"); return Number.isSafeInteger(group.groupIndex) && Number.isSafeInteger(group.outerInstructionIndex); })) { invalid(`${operation} inner instruction groups`); }
   if (!Array.isArray(root.signers) || !root.signers.every((item) => typeof item === "string" && ADDRESS.test(item))) { invalid(`${operation} signers`); }
   if (!Array.isArray(root.instructions) || root.instructions.length === 0) { invalid(`${operation} instructions`); }
   root.instructions.forEach((item) => validateInstruction(item));
   if (root.error !== null) { const error = record(root.error, "transaction error"); exactKeys(error, ["instructionIndex", "code"], "transaction error"); assertValid(typeof error.instructionIndex === "number" && Number.isSafeInteger(error.instructionIndex) && error.instructionIndex >= 0 && typeof error.code === "string" && error.code.length > 0, "transaction error"); }
 }
 function validateInstruction(value: unknown): void {
-  const root = record(value, "instruction"); exactKeys(root, ["programId", "instructionIndex", "innerInstructionIndex", "kind", "accounts", "mint", "tokenAccount", "owner", "authority", "newAuthority", "authorityType", "amountBaseUnits", "decimals"], "instruction");
+  const root = record(value, "instruction"); exactKeys(root, ["programId", "programIdIndex", "instructionIndex", "innerInstructionIndex", "innerGroupIndex", "kind", "accounts", "accountIndices", "dataHex", "mint", "tokenAccount", "owner", "newAccount", "authority", "newAuthority", "authorityType", "amountBaseUnits", "decimals"], "instruction");
   validateInstructionIdentity(root);
-  for (const key of ["mint", "tokenAccount", "owner", "authority", "newAuthority"] as const) { assertValid(root[key] === null || (typeof root[key] === "string" && ADDRESS.test(root[key])), `instruction.${key}`); }
+  for (const key of ["mint", "tokenAccount", "owner", "newAccount", "authority", "newAuthority"] as const) { assertValid(root[key] === null || (typeof root[key] === "string" && ADDRESS.test(root[key])), `instruction.${key}`); }
   assertValid(root.authorityType === null || typeof root.authorityType === "string", "instruction.authorityType");
   assertValid(root.amountBaseUnits === null || (typeof root.amountBaseUnits === "string" && INTEGER.test(root.amountBaseUnits)), "instruction.amountBaseUnits");
   assertValid(root.decimals === null || (typeof root.decimals === "number" && Number.isSafeInteger(root.decimals) && root.decimals >= 0), "instruction.decimals");
 }
 function validateInstructionIdentity(root: Record<string, unknown>): void {
   assertValid(typeof root.programId === "string" && ADDRESS.test(root.programId), "instruction.programId");
+  assertValid(typeof root.programIdIndex === "number" && Number.isSafeInteger(root.programIdIndex) && root.programIdIndex >= 0, "instruction.programIdIndex");
   assertValid(typeof root.instructionIndex === "number" && Number.isSafeInteger(root.instructionIndex) && root.instructionIndex >= 0, "instruction.instructionIndex");
   assertValid(root.innerInstructionIndex === null || (typeof root.innerInstructionIndex === "number" && Number.isSafeInteger(root.innerInstructionIndex) && root.innerInstructionIndex >= 0), "instruction.innerInstructionIndex");
+  assertValid(root.innerGroupIndex === null || (typeof root.innerGroupIndex === "number" && Number.isSafeInteger(root.innerGroupIndex) && root.innerGroupIndex >= 0), "instruction.innerGroupIndex");
   assertValid(typeof root.kind === "string" && root.kind.length > 0, "instruction.kind");
+  assertValid(Array.isArray(root.accountIndices) && root.accountIndices.every((item) => typeof item === "number" && Number.isSafeInteger(item) && item >= 0), "instruction.accountIndices");
+  assertValid(typeof root.dataHex === "string" && /^(?:[0-9a-f]{2})*$/u.test(root.dataHex), "instruction.dataHex");
   assertValid(Array.isArray(root.accounts) && root.accounts.every((item) => typeof item === "string" && ADDRESS.test(item)), "instruction.accounts");
 }
 function record(value: unknown, label: string): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) { invalid(`${label} must be an object`); } return value as Record<string, unknown>; }

@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, sta
 import { setTimeout as delay } from "node:timers/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { FAILURE_PHASES, LocalSolanaError, type EvidenceReport, type FailureEvidenceReport, type FixtureObservations } from "../domain/model.ts";
-import type { RunPaths, RunStorePort, ValidatorIdentity } from "../application/ports.ts";
+import type { FileIdentity, RunPaths, RunStorePort, ValidatorIdentity } from "../application/ports.ts";
 import { assertEvidenceReport } from "../application/evidence.ts";
 import { verifyObservations } from "../application/verifier.ts";
 import { authenticateValidatorIdentity, processStartIdentity } from "./process-identity.ts";
@@ -17,46 +17,45 @@ export class PrivateRunStore implements RunStorePort {
   private readonly outputRoot: string;
   public constructor(runRoot: string, outputRoot: string) { this.root = resolve(runRoot); this.outputRoot = resolve(outputRoot); }
   public async create(): Promise<RunPaths> {
-    const root = await ensurePrivateRoot(this.root);
-    const processStart = await processStartIdentity(process.pid);
-    const directory = await mkdtemp(join(root, PREFIX));
-    await chmod(directory, 0o700);
-    const payerKey = join(directory, "payer.json");
-    const token = randomBytes(32).toString("hex");
-    const lease = { schemaVersion: 3, kind: "agtmai-local-solana", pid: process.pid, processStart, token, validator: null };
-    await atomicWrite(join(directory, MARKER), `${JSON.stringify(lease)}\n`, 0o600);
+    const root = await ensurePrivateRoot(this.root); const rootIdentity = await privateDirectoryIdentity(root);
+    const processStart = await processStartIdentity(process.pid); const directory = await mkdtemp(join(root, PREFIX)); await chmod(directory, 0o700);
+    const directoryIdentity = await privateDirectoryIdentity(directory); const payerKey = join(directory, "payer.json"); const token = randomBytes(32).toString("hex");
+    const markerPath = join(directory, MARKER); const handle = await open(markerPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+    let markerIdentity: FileIdentity;
+    try {
+      const markerStat = await handle.stat({ bigint: true }); assertPrivateMarkerStat(markerStat); markerIdentity = fileIdentity(markerStat);
+      const lease = leaseRecord(processStart, token, rootIdentity, directoryIdentity, markerIdentity, null);
+      await handle.writeFile(`${JSON.stringify(lease)}\n`); await handle.sync();
+    } finally { await handle.close(); }
+    await assertDirectoryIdentity(root, rootIdentity); await assertDirectoryIdentity(directory, directoryIdentity);
     await atomicWrite(join(directory, "config.yml"), `json_rpc_url: http://127.0.0.1:0/\nwebsocket_url: ''\nkeypair_path: ${payerKey}\naddress_labels: {}\ncommitment: finalized\n`, 0o600);
     const ledger = join(directory, "ledger"); await mkdir(ledger, { mode: 0o700 });
-    return { directory, ledger, config: join(directory, "config.yml"), payerKey, mintKey: join(directory, "mint.json"), ownerKey: join(directory, "owner.json"), leaseToken: token };
+    return { directory, ledger, config: join(directory, "config.yml"), payerKey, mintKey: join(directory, "mint.json"), ownerKey: join(directory, "owner.json"), leaseToken: token, rootIdentity, directoryIdentity, markerIdentity };
   }
   public async registerValidator(paths: RunPaths, identity: ValidatorIdentity): Promise<void> {
-    const root = await canonicalTarget(this.root); const lease = await validateOwnedRun(root, paths.directory, false);
-    if (lease.token !== paths.leaseToken || identity.ledger !== await realpath(paths.ledger)) { throw new LocalSolanaError("SOLANA_VALIDATOR_LEASE", "validator identity is not bound to this owned run"); }
-    const updated = { schemaVersion: 3, kind: "agtmai-local-solana", pid: process.pid, processStart: lease.processStart, token: lease.token, validator: identity };
-    await atomicWrite(join(paths.directory, MARKER), `${JSON.stringify(updated)}\n`, 0o600);
+    const root = await canonicalTarget(this.root); const validated = await validateOwnedRun(root, paths.directory, false, paths);
+    if (validated.lease.token !== paths.leaseToken || identity.ledger !== await realpath(paths.ledger) || validated.lease.validator !== null) { throw new LocalSolanaError("SOLANA_VALIDATOR_LEASE", "validator identity is not bound to this unregistered owned run"); }
+    const updated = leaseRecord(validated.lease.processStart, validated.lease.token, paths.rootIdentity, paths.directoryIdentity, paths.markerIdentity, identity);
+    await rewriteLease(paths.directory, updated, paths); await validateOwnedRun(root, paths.directory, false, paths);
   }
   public async cleanup(paths: RunPaths): Promise<void> {
-    const directoryEntry = await lstat(paths.directory).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return null;} throw cause; });
-    if (directoryEntry === null) { return; }
-    if (directoryEntry.isSymbolicLink() || !directoryEntry.isDirectory()) { throw new LocalSolanaError("SOLANA_CLEANUP_SUBSTITUTION", "owned run directory was substituted"); }
-    const lease = await validateOwnedRun(await canonicalTarget(this.root), paths.directory, false);
-    if (lease.token !== paths.leaseToken) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before cleanup"); }
-    if (lease.validator !== null && processAlive(lease.validator.pid)) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
-    await quarantineAndDeleteRun(await canonicalTarget(this.root), paths.directory, paths.leaseToken);
+    const entry = await lstat(paths.directory).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return null; } throw cause; });
+    if (entry === null) { return; }
+    const root = await canonicalTarget(this.root); const validated = await validateOwnedRun(root, paths.directory, false, paths);
+    if (validated.lease.token !== paths.leaseToken) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before cleanup"); }
+    if (validated.lease.validator !== null && processAlive(validated.lease.validator.pid)) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
+    await quarantineAndDeleteRun(root, paths.directory, validated);
     if (await exists(paths.directory)) { throw new LocalSolanaError("SOLANA_CLEANUP_INCOMPLETE", "private run directory still exists after cleanup"); }
   }
   public async reclaimStale(): Promise<number> {
-    const root = await ensurePrivateRoot(this.root);
-    const { readdir } = await import("node:fs/promises");
-    const entries = await readdir(root);
-    let reclaimed = 0;
+    const root = await ensurePrivateRoot(this.root); const rootIdentity = await privateDirectoryIdentity(root); const { readdir } = await import("node:fs/promises"); const entries = await readdir(root); let reclaimed = 0;
     for (const name of entries) {
       if (!name.startsWith(PREFIX)) { continue; }
-      const directory = join(root, name);
-      const lease = await validateOwnedRun(root, directory, true).catch(() => null);
-      if (!lease || await leaseOwnerIsLive(lease)) { continue; }
-      if (lease.validator !== null) { await terminateAuthenticatedValidator(lease, directory); }
-      await quarantineAndDeleteRun(root, directory, lease.token); reclaimed += 1;
+      const directory = join(root, name); const validated = await validateOwnedRun(root, directory, true).catch(() => null);
+      if (!validated || !sameIdentity(validated.lease.rootIdentity, rootIdentity) || await leaseOwnerIsLive(validated.lease)) { continue; }
+      if (validated.lease.validator !== null) { await terminateAuthenticatedValidator(validated.lease, directory); }
+      const refreshed = await validateOwnedRun(root, directory, true);
+      await quarantineAndDeleteRun(root, directory, refreshed); reclaimed += 1;
     }
     return reclaimed;
   }
@@ -94,7 +93,7 @@ export async function ensurePrivateRoot(path: string): Promise<string> {
   const absolute = await canonicalTarget(path);
   try { await mkdir(absolute, { mode: 0o700 }); } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "EEXIST") { throw cause; } }
   const entry = await lstat(absolute); const resolved = await realpath(absolute); const expectedUid = process.getuid?.();
-  if (!entry.isDirectory() || entry.isSymbolicLink() || resolved !== absolute || (entry.mode & 0o077) !== 0 || (expectedUid !== undefined && entry.uid !== expectedUid)) {
+  if (!entry.isDirectory() || entry.isSymbolicLink() || resolved !== absolute || (entry.mode & 0o777) !== 0o700 || (expectedUid !== undefined && entry.uid !== expectedUid)) {
     throw new LocalSolanaError("SOLANA_DIRECTORY_UNSAFE", "directory must be owned mode-0700 with no symlink substitution");
   }
   return absolute;
@@ -107,71 +106,105 @@ async function canonicalTarget(path: string): Promise<string> {
   return join(parent, basename(absolute));
 }
 
-interface Lease { readonly pid: number; readonly processStart: string; readonly token: string; readonly validator: ValidatorIdentity | null; }
-async function validateOwnedRun(root: string, directory: string, allowStale: boolean): Promise<Lease> {
+interface Lease {
+  readonly pid: number; readonly processStart: string; readonly token: string; readonly validator: ValidatorIdentity | null;
+  readonly rootIdentity: FileIdentity; readonly directoryIdentity: FileIdentity; readonly markerIdentity: FileIdentity;
+}
+interface ValidatedRun { readonly lease: Lease; readonly rootIdentity: FileIdentity; readonly directoryIdentity: FileIdentity; readonly markerIdentity: FileIdentity; }
+
+function leaseRecord(processStart: string, token: string, rootIdentity: FileIdentity, directoryIdentity: FileIdentity, markerIdentity: FileIdentity, validator: ValidatorIdentity | null): Record<string, unknown> {
+  return { schemaVersion: 4, kind: "agtmai-local-solana", pid: process.pid, processStart, token, rootIdentity, directoryIdentity, markerIdentity, validator };
+}
+
+async function validateOwnedRun(root: string, directory: string, allowStale: boolean, expected?: Pick<RunPaths, "rootIdentity" | "directoryIdentity" | "markerIdentity">): Promise<ValidatedRun> {
   if (dirname(directory) !== root || !basename(directory).startsWith(PREFIX)) { throw new LocalSolanaError("SOLANA_CLEANUP_BOUNDARY", "refusing cleanup outside owned run root"); }
-  await assertOwnedDirectory(directory);
-  const raw = await readLease(directory);
-  const lease = parseLease(raw);
-  if (!allowStale && (lease.pid !== process.pid || lease.processStart !== await processStartIdentity(process.pid))) {
-    throw new LocalSolanaError("SOLANA_LEASE_OWNER", "run belongs to another process identity");
-  }
-  return lease;
+  const rootIdentity = await privateDirectoryIdentity(root); const directoryIdentity = await privateDirectoryIdentity(directory);
+  const marker = await readLease(directory); const lease = parseLease(marker.raw);
+  const identitiesMatch = sameIdentity(lease.rootIdentity, rootIdentity) && sameIdentity(lease.directoryIdentity, directoryIdentity) && sameIdentity(lease.markerIdentity, marker.identity)
+    && (expected === undefined || (sameIdentity(expected.rootIdentity, rootIdentity) && sameIdentity(expected.directoryIdentity, directoryIdentity) && sameIdentity(expected.markerIdentity, marker.identity)));
+  if (!identitiesMatch) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "root, run directory or lease marker identity changed"); }
+  await assertDirectoryIdentity(root, rootIdentity); await assertDirectoryIdentity(directory, directoryIdentity);
+  if (!allowStale && (lease.pid !== process.pid || lease.processStart !== await processStartIdentity(process.pid))) { throw new LocalSolanaError("SOLANA_LEASE_OWNER", "run belongs to another process identity"); }
+  return { lease, rootIdentity, directoryIdentity, markerIdentity: marker.identity };
 }
 
-async function assertOwnedDirectory(directory: string): Promise<void> {
-  const entry = await lstat(directory);
+async function privateDirectoryIdentity(directory: string): Promise<FileIdentity> {
+  const entry = await lstat(directory, { bigint: true }); const expectedUid = process.getuid?.();
+  const unsafe = !entry.isDirectory() || entry.isSymbolicLink() || entry.nlink < 2n || (entry.mode & 0o777n) !== 0o700n || await realpath(directory) !== directory || (expectedUid !== undefined && entry.uid !== BigInt(expectedUid));
+  if (unsafe) { throw new LocalSolanaError("SOLANA_CLEANUP_SUBSTITUTION", "private directory was substituted"); }
+  return fileIdentity(entry);
+}
+async function assertDirectoryIdentity(directory: string, expected: FileIdentity): Promise<void> { if (!sameIdentity(await privateDirectoryIdentity(directory), expected)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "private directory identity changed"); } }
+
+async function readLease(directory: string): Promise<{ readonly raw: Record<string, unknown>; readonly identity: FileIdentity }> {
+  const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const entry = await handle.stat({ bigint: true }); assertPrivateMarkerStat(entry); const identity = fileIdentity(entry);
+    const content = await handle.readFile({ encoding: "utf8" }); if (Buffer.byteLength(content) > 16_384) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "lease exceeds its size bound"); }
+    let raw: unknown; try { raw = JSON.parse(content); } catch { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "lease is not valid JSON"); }
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "lease is not an object"); }
+    const after = await handle.stat({ bigint: true }); assertPrivateMarkerStat(after); if (!sameIdentity(identity, fileIdentity(after))) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "lease marker identity changed while reading"); }
+    return { raw: raw as Record<string, unknown>, identity };
+  } finally { await handle.close(); }
+}
+
+async function rewriteLease(directory: string, raw: Record<string, unknown>, expected: Pick<RunPaths, "rootIdentity" | "directoryIdentity" | "markerIdentity">): Promise<void> {
+  await assertDirectoryIdentity(dirname(directory), expected.rootIdentity); await assertDirectoryIdentity(directory, expected.directoryIdentity);
+  const handle = await open(join(directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
+  try {
+    const entry = await handle.stat({ bigint: true }); assertPrivateMarkerStat(entry); if (!sameIdentity(fileIdentity(entry), expected.markerIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "lease marker identity changed before update"); }
+    await handle.truncate(0); await handle.writeFile(`${JSON.stringify(raw)}\n`); await handle.sync();
+    const after = await handle.stat({ bigint: true }); assertPrivateMarkerStat(after); if (!sameIdentity(fileIdentity(after), expected.markerIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "lease marker identity changed during update"); }
+  } finally { await handle.close(); }
+  await assertDirectoryIdentity(dirname(directory), expected.rootIdentity); await assertDirectoryIdentity(directory, expected.directoryIdentity);
+}
+
+function assertPrivateMarkerStat(entry: import("node:fs").BigIntStats): void {
   const expectedUid = process.getuid?.();
-  const unsafe = !entry.isDirectory() || entry.isSymbolicLink() || entry.nlink < 2 || (entry.mode & 0o077) !== 0
-    || await realpath(directory) !== directory || (expectedUid !== undefined && entry.uid !== expectedUid);
-  if (unsafe) { throw new LocalSolanaError("SOLANA_CLEANUP_SUBSTITUTION", "owned run directory was substituted"); }
+  if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n || (entry.mode & 0o777n) !== 0o600n || (expectedUid !== undefined && entry.uid !== BigInt(expectedUid))) { throw new LocalSolanaError("SOLANA_LEASE_UNSAFE", "lease must be an owned private singly-linked regular file"); }
 }
-
-async function readLease(directory: string): Promise<Record<string, unknown>> {
-  const markerPath = join(directory, MARKER);
-  const markerEntry = await lstat(markerPath);
-  if (!markerEntry.isFile() || markerEntry.isSymbolicLink() || markerEntry.nlink !== 1 || (markerEntry.mode & 0o077) !== 0) {
-    throw new LocalSolanaError("SOLANA_LEASE_UNSAFE", "lease must be a private singly-linked regular file");
-  }
-  return JSON.parse(await readFile(markerPath, "utf8")) as Record<string, unknown>;
+function fileIdentity(entry: { readonly dev: bigint; readonly ino: bigint }): FileIdentity { return { dev: entry.dev.toString(), ino: entry.ino.toString() }; }
+function sameIdentity(left: FileIdentity, right: FileIdentity): boolean { return left.dev === right.dev && left.ino === right.ino; }
+function parseFileIdentity(value: unknown): FileIdentity {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "filesystem identity is invalid"); }
+  const raw = value as Record<string, unknown>;
+  if (Object.keys(raw).toSorted().join(",") !== "dev,ino" || typeof raw.dev !== "string" || typeof raw.ino !== "string" || !/^[0-9]+$/u.test(raw.dev) || !/^[0-9]+$/u.test(raw.ino)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "filesystem identity is invalid"); }
+  return { dev: raw.dev, ino: raw.ino };
 }
 
 function parseLease(raw: Record<string, unknown>): Lease {
-  const valid = Object.keys(raw).toSorted().join(",") === "kind,pid,processStart,schemaVersion,token,validator"
-    && raw.schemaVersion === 3 && raw.kind === "agtmai-local-solana" && typeof raw.pid === "number"
-    && Number.isSafeInteger(raw.pid) && raw.pid >= 1 && typeof raw.token === "string" && /^[a-f0-9]{64}$/u.test(raw.token);
-  const startValid = typeof raw.processStart === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(raw.processStart);
-  if (!valid || !startValid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "owned lease is invalid"); }
-  if (raw.validator === null) { return { pid: raw.pid as number, processStart: raw.processStart as string, token: raw.token as string, validator: null }; }
-  return { pid: raw.pid as number, processStart: raw.processStart as string, token: raw.token as string, validator: parseValidatorIdentity(raw.validator) };
+  const valid = Object.keys(raw).toSorted().join(",") === "directoryIdentity,kind,markerIdentity,pid,processStart,rootIdentity,schemaVersion,token,validator"
+    && raw.schemaVersion === 4 && raw.kind === "agtmai-local-solana" && typeof raw.pid === "number" && Number.isSafeInteger(raw.pid) && raw.pid >= 1
+    && typeof raw.token === "string" && /^[a-f0-9]{64}$/u.test(raw.token) && typeof raw.processStart === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(raw.processStart);
+  if (!valid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "owned lease is invalid"); }
+  return { pid: raw.pid as number, processStart: raw.processStart as string, token: raw.token as string,
+    rootIdentity: parseFileIdentity(raw.rootIdentity), directoryIdentity: parseFileIdentity(raw.directoryIdentity), markerIdentity: parseFileIdentity(raw.markerIdentity),
+    validator: raw.validator === null ? null : parseValidatorIdentity(raw.validator) };
 }
 
 function parseValidatorIdentity(child: unknown): ValidatorIdentity {
   if (typeof child !== "object" || child === null || Array.isArray(child)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "validator identity is invalid"); }
   const identity = child as Record<string, unknown>;
-  const childValid = Object.keys(identity).toSorted().join(",") === "commandHash,executable,ledger,pid,platform,startTime"
-    && typeof identity.pid === "number" && Number.isSafeInteger(identity.pid) && identity.pid >= 1
-    && (identity.platform === "linux" || identity.platform === "darwin")
+  const childValid = Object.keys(identity).toSorted().join(",") === "commandHash,executable,leaseTokenHash,ledger,pid,platform,startTime"
+    && typeof identity.pid === "number" && Number.isSafeInteger(identity.pid) && identity.pid >= 1 && (identity.platform === "linux" || identity.platform === "darwin")
     && typeof identity.startTime === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(identity.startTime)
-    && typeof identity.executable === "string" && identity.executable.startsWith("/")
-    && typeof identity.ledger === "string" && identity.ledger.startsWith("/")
-    && typeof identity.commandHash === "string" && /^[a-f0-9]{64}$/u.test(identity.commandHash);
+    && typeof identity.executable === "string" && identity.executable.startsWith("/") && typeof identity.ledger === "string" && identity.ledger.startsWith("/")
+    && typeof identity.commandHash === "string" && /^[a-f0-9]{64}$/u.test(identity.commandHash) && typeof identity.leaseTokenHash === "string" && /^[a-f0-9]{64}$/u.test(identity.leaseTokenHash);
   if (!childValid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "validator identity is invalid"); }
   return identity as unknown as ValidatorIdentity;
 }
 
-async function quarantineAndDeleteRun(root: string, directory: string, token: string): Promise<void> {
-  const quarantine = join(root, ".quarantine-" + token);
-  await rename(directory, quarantine);
+async function quarantineAndDeleteRun(root: string, directory: string, validated: ValidatedRun): Promise<void> {
+  await assertDirectoryIdentity(root, validated.rootIdentity); const before = await validateOwnedRun(root, directory, true);
+  if (!sameIdentity(before.directoryIdentity, validated.directoryIdentity) || !sameIdentity(before.markerIdentity, validated.markerIdentity) || before.lease.token !== validated.lease.token) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "run identity changed before quarantine"); }
+  const quarantine = join(root, ".quarantine-" + validated.lease.token); if (await exists(quarantine)) { throw new LocalSolanaError("SOLANA_CLEANUP_QUARANTINE", "quarantine target already exists"); } await rename(directory, quarantine);
   try {
-    await assertOwnedDirectory(quarantine);
-    const lease = parseLease(await readLease(quarantine));
-    if (lease.token !== token) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before quarantine cleanup"); }
-    await rm(quarantine, { recursive: true, force: false, maxRetries: 2 });
-  } catch (cause) {
-    await rename(quarantine, directory).catch(() => {});
-    throw cause;
-  }
+    await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity);
+    const marker = await readLease(quarantine); const lease = parseLease(marker.raw);
+    if (!sameIdentity(marker.identity, validated.markerIdentity) || lease.token !== validated.lease.token || !sameIdentity(lease.rootIdentity, validated.rootIdentity) || !sameIdentity(lease.directoryIdentity, validated.directoryIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined run identity changed"); }
+    await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity); const finalMarker = await readLease(quarantine); if (!sameIdentity(finalMarker.identity, validated.markerIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined marker changed before deletion"); }
+    await rm(quarantine, { recursive: true, force: false, maxRetries: 2 }); await assertDirectoryIdentity(root, validated.rootIdentity);
+  } catch (cause) { const currentRoot = await privateDirectoryIdentity(root).catch(() => null); if (currentRoot !== null && sameIdentity(currentRoot, validated.rootIdentity)) { await rename(quarantine, directory).catch(() => {}); } throw cause; }
 }
 
 async function terminateAuthenticatedValidator(lease: Lease, directory: string): Promise<void> {
@@ -182,9 +215,11 @@ async function terminateAuthenticatedValidator(lease: Lease, directory: string):
   if (!authenticated) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "refusing to terminate a PID that does not authenticate as the owned validator"); }
   if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before TERM"); }
   process.kill(identity.pid, "SIGTERM");
+  if (!await processExited(identity.pid) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after TERM"); }
   if (!await awaitExit(identity.pid, 5_000)) {
     if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before KILL"); }
     process.kill(identity.pid, "SIGKILL");
+    if (!await processExited(identity.pid) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after KILL"); }
     if (!await awaitExit(identity.pid, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); }
   }
 }

@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
-import { chmod, link, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { PrivateRunStore, ensurePrivateRoot } from "../src/adapters/filesystem.ts";
 import { processStartIdentity } from "../src/adapters/process-identity.ts";
 import { verifyObservations } from "../src/application/verifier.ts";
@@ -147,7 +148,7 @@ test("reused owner PID never authenticates a neighbouring process as its validat
   try {
     const neighbourPid = neighbour.pid; assert.ok(neighbourPid); const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const lease = JSON.parse(await readFile(marker, "utf8"));
     lease.processStart = process.platform === "linux" ? "linux:0" : "darwin:00";
-    lease.validator = { pid: neighbourPid, platform: process.platform, startTime: process.platform === "linux" ? "linux:0" : "darwin:00", executable: await realpath(process.execPath), ledger: paths.ledger, commandHash: "a".repeat(64) };
+    lease.validator = { pid: neighbourPid, platform: process.platform, startTime: process.platform === "linux" ? "linux:0" : "darwin:00", executable: await realpath(process.execPath), ledger: paths.ledger, commandHash: "a".repeat(64), leaseTokenHash: createHash("sha256").update(lease.token).digest("hex") };
     await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
     await assert.rejects(store.reclaimStale(), /SOLANA_RECLAIM_IDENTITY/u);
     assert.equal(processAlive(neighbourPid), true); assert.equal((await lstat(paths.directory)).isDirectory(), true);
@@ -158,7 +159,7 @@ test("normal cleanup refuses to delete state beneath a registered live validator
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-active-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
   try {
     const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const lease = JSON.parse(await readFile(marker, "utf8"));
-    lease.validator = { pid: process.pid, platform: process.platform, startTime: process.platform === "linux" ? "linux:1" : "darwin:61", executable: "/bin/validator", ledger: paths.ledger, commandHash: "a".repeat(64) };
+    lease.validator = { pid: process.pid, platform: process.platform, startTime: process.platform === "linux" ? "linux:1" : "darwin:61", executable: "/bin/validator", ledger: paths.ledger, commandHash: "a".repeat(64), leaseTokenHash: createHash("sha256").update(lease.token).digest("hex") };
     await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
     await assert.rejects(store.cleanup(paths), /SOLANA_VALIDATOR_ACTIVE/u); assert.equal((await lstat(paths.directory)).isDirectory(), true);
   } finally { await rm(boundary, { recursive: true, force: true }); }
@@ -183,8 +184,7 @@ test("real parent SIGKILL reclaim authenticates, terminates and awaits its valid
 test("pre-registration SIGKILL cannot orphan an unregistered validator", { skip: process.platform !== "linux" ? "fault injector uses a Linux validator shim" : false }, async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-preregister-sigkill-")); await chmod(boundary, 0o700);
   const runRoot = join(boundary, "runs"); const outputRoot = join(boundary, "out"); const readyPath = join(boundary, "spawned-before-registration.json");
-  const executable = join(boundary, "validator");
-  await writeFile(executable, "#!/bin/bash\nwhile :; do /bin/sleep 1; done\n", { mode: 0o700 });
+  const executable = await buildValidator(boundary);
   const fixture = spawn(process.execPath, [join(import.meta.dirname, "helpers/start-unregistered-validator.ts"), runRoot, outputRoot, readyPath, executable], { stdio: ["ignore", "pipe", "pipe"] });
   let diagnostics = ""; fixture.stdout.on("data", (chunk) => { diagnostics += String(chunk); }); fixture.stderr.on("data", (chunk) => { diagnostics += String(chunk); });
   let validatorPid: number | undefined;
@@ -208,6 +208,25 @@ test("pre-registration SIGKILL cannot orphan an unregistered validator", { skip:
     await rm(boundary, { recursive: true, force: true });
   }
 });
+
+test("a copied lease in a substituted run directory never authorizes deletion", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-copied-lease-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  try {
+    const paths = await store.create(); const displaced = paths.directory + "-displaced"; const markerName = ".agtmai-local-solana-lease.json";
+    const copiedLease = await readFile(join(paths.directory, markerName), "utf8"); await rename(paths.directory, displaced); await mkdir(paths.directory, { mode: 0o700 }); await writeFile(join(paths.directory, markerName), copiedLease, { mode: 0o600 });
+    await assert.rejects(store.cleanup(paths), /SOLANA_CLEANUP_IDENTITY/u); assert.equal((await lstat(paths.directory)).isDirectory(), true); assert.equal((await lstat(displaced)).isDirectory(), true);
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+test("marker inode replacement is rejected even when lease bytes are identical", async () => {
+  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-marker-inode-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
+  try {
+    const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const bytes = await readFile(marker, "utf8"); await rename(marker, marker + ".original"); await writeFile(marker, bytes, { mode: 0o600 });
+    await assert.rejects(store.cleanup(paths), /SOLANA_CLEANUP_IDENTITY/u); assert.equal((await lstat(paths.directory)).isDirectory(), true);
+  } finally { await rm(boundary, { recursive: true, force: true }); }
+});
+
+async function buildValidator(directory: string): Promise<string> { const source = join(directory, "validator.c"); const executable = join(directory, "validator"); await writeFile(source, "#include <unistd.h>\nint main(void){for(;;) pause();}\n"); await new Promise<void>((resolve, reject) => execFile("/usr/bin/cc", [source, "-o", executable], (cause) => cause ? reject(cause) : resolve())); return executable; }
 
 function processAlive(pid: number): boolean {
   try {

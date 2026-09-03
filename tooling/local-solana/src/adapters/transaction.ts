@@ -26,8 +26,8 @@ export async function signedFreezeAccountTransaction(request: AuthorityTransacti
 
 async function signedTokenTransaction(context: AuthorityTransactionContext, instructionRequest: { readonly writableAccounts: readonly string[]; readonly readonlyFlags: readonly boolean[]; readonly data: Uint8Array }): Promise<Uint8Array> {
   if (context.signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "fixture interrupted"); }
-  const payer = await keypair(context.payerPath);
-  const authority = await keypair(context.authorityPath);
+  const payer = await keypair(context.payerPath); ensureActive(context.signal);
+  const authority = await keypair(context.authorityPath); ensureActive(context.signal);
   if (instructionRequest.writableAccounts.length !== instructionRequest.readonlyFlags.length) {
     throw new LocalSolanaError("SOLANA_TRANSACTION_ACCOUNTS", "instruction account flags are inconsistent");
   }
@@ -49,6 +49,7 @@ async function signedTokenTransaction(context: AuthorityTransactionContext, inst
     shortVec(compiled.keys.length), ...compiled.keys,
     base58Decode(await context.rpc.latestBlockhash(context.rpcUrl, context.signal)), shortVec(1), instruction,
   ]);
+  ensureActive(context.signal);
   const signatures = [ed25519Sign(message, payer.seed), ed25519Sign(message, authority.seed)];
   return concat([shortVec(signatures.length), ...signatures, message]);
 }
@@ -149,3 +150,5 @@ function shortVec(value: number): Uint8Array {
   return Uint8Array.from(bytes);
 }
 function concat(parts: readonly Uint8Array[]): Uint8Array { const size = parts.reduce((sum, part) => sum + part.length, 0); const result = new Uint8Array(size); let offset = 0; for (const part of parts) { result.set(part, offset); offset += part.length; } return result; }
+
+function ensureActive(signal: AbortSignal): void { if (signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "fixture interrupted"); } }

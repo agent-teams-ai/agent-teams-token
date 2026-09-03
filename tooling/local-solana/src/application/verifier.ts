@@ -69,8 +69,30 @@ function verifyTransactions(value: FixtureObservations): void {
     const slot = parseUnsignedInteger(fact.slot, "transaction slot");
     if (slot <= previousSlot) { fail("SOLANA_TRANSACTION_SLOT_ORDER", "lifecycle slots must be strictly increasing"); }
     previousSlot = slot;
+    verifyRawBindings(fact);
     verifyTransactionSemantics(fact, value);
   }
+}
+
+function verifyRawBindings(fact: TransactionFact): void {
+  assertCondition(new Set(fact.accountKeys).size === fact.accountKeys.length, "SOLANA_TRANSACTION_ACCOUNT_KEYS", "transaction account keys must be unique");
+  const outer = fact.instructions.filter((item) => item.innerInstructionIndex === null);
+  assertCondition(outer.every((item, index) => item.instructionIndex === index && item.innerGroupIndex === null), "SOLANA_TRANSACTION_OUTER_INDEX", "outer instruction indexes are not contiguous");
+  for (const item of fact.instructions) {
+    assertCondition(fact.accountKeys[item.programIdIndex] === item.programId
+      && item.accountIndices.length === item.accounts.length
+      && item.accountIndices.every((accountIndex, index) => fact.accountKeys[accountIndex] === item.accounts[index])
+      && /^(?:[0-9a-f]{2})*$/u.test(item.dataHex), "SOLANA_TRANSACTION_RAW_BINDING", "retained instruction bytes or account indexes are not cross-bound");
+  }
+  for (const [groupIndex, group] of fact.innerInstructionGroups.entries()) {
+    assertCondition(group.groupIndex === groupIndex && Number.isSafeInteger(group.outerInstructionIndex) && group.outerInstructionIndex >= 0 && group.outerInstructionIndex < outer.length,
+      "SOLANA_TRANSACTION_CPI_GROUP", "inner instruction group is sparse, duplicated or out of range");
+    assertCondition(fact.instructions.some((item) => item.innerGroupIndex === groupIndex && item.instructionIndex === group.outerInstructionIndex),
+      "SOLANA_TRANSACTION_CPI_GROUP", "inner instruction group has no bound instructions");
+  }
+  const innerGroups = fact.instructions.filter((item) => item.innerInstructionIndex !== null).map((item) => item.innerGroupIndex);
+  assertCondition(innerGroups.every((groupIndex) => groupIndex !== null && fact.innerInstructionGroups[groupIndex]?.groupIndex === groupIndex),
+    "SOLANA_TRANSACTION_CPI_GROUP", "inner instruction is not bound to a retained group");
 }
 
 function verifyTransactionSemantics(fact: TransactionFact, value: FixtureObservations): void {
@@ -117,19 +139,31 @@ function verifyRevokeFreeze(fact: TransactionFact, relevant: InstructionFact, va
 
 function verifyCreateAta(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
   const outer = fact.instructions.filter((item) => item.innerInstructionIndex === null);
-  assertCondition(outer.length === 1 && outer[0] === relevant && relevant.instructionIndex === 0, "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction at index 0");
+  assertCondition(outer.length === 1 && outer[0] === relevant && relevant.instructionIndex === 0 && relevant.innerGroupIndex === null,
+    "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction at index 0");
+  assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && relevant.kind === "raw" && relevant.dataHex === "00",
+    "SOLANA_ATA_DISCRIMINANT", "ATA creation must use the pinned Create discriminant");
+  const expectedOuterAccounts = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM];
+  assertCondition(sameAddresses(relevant.accounts, expectedOuterAccounts), "SOLANA_ATA_ACCOUNTS", "ATA Create outer metas are not exact");
+  assertCondition(fact.innerInstructionGroups.length === 1 && fact.innerInstructionGroups[0]?.groupIndex === 0 && fact.innerInstructionGroups[0]?.outerInstructionIndex === 0,
+    "SOLANA_ATA_CPI_GROUPS", "ATA Create must contain exactly one CPI group for outer index zero");
   const inner = fact.instructions.filter((item) => item.innerInstructionIndex !== null);
-  assertCondition(inner.every((item) => item.instructionIndex === relevant.instructionIndex), "SOLANA_ATA_INNER_INDEX", "ATA CPI instructions must bind to the ATA outer instruction");
-  const ordered = inner.toSorted((a, b) => (a.innerInstructionIndex as number) - (b.innerInstructionIndex as number));
-  assertCondition(ordered.every((item, index) => item.innerInstructionIndex === index && ((item.programId === SYSTEM_PROGRAM && ["raw", "createAccount"].includes(item.kind)) || (item.programId === CLASSIC_TOKEN_PROGRAM && ["initializeImmutableOwner", "initializeAccount", "initializeAccount2", "initializeAccount3"].includes(item.kind)))), "SOLANA_ATA_INNER_SEQUENCE", "ATA transaction contains an unexpected CPI instruction");
-  assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && ["raw", "create", "createIdempotent"].includes(relevant.kind), "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
-  const expectedAccounts = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM];
-  const exactAccounts = relevant.accounts.length === expectedAccounts.length
-    && expectedAccounts.every((address, index) => relevant.accounts[index] === address);
-  const exactParsedSemantics = relevant.kind !== "raw" && relevant.authority === value.payerAddress
-    && relevant.tokenAccount === value.tokenAccountAddress && relevant.owner === value.ownerAddress && relevant.mint === value.mintAddress;
-  assertCondition(exactAccounts && (relevant.kind === "raw" || exactParsedSemantics),
-  "SOLANA_ATA_ACCOUNTS", "ATA instruction must contain exactly payer, ATA, owner, mint, System Program and classic Token Program accounts");
+  assertCondition(inner.length === 4 && inner.every((item, index) => item.instructionIndex === 0 && item.innerGroupIndex === 0 && item.innerInstructionIndex === index),
+    "SOLANA_ATA_INNER_SEQUENCE", "ATA CPI instructions must be one contiguous four-instruction sequence");
+  const [size, create, immutableOwner, initialize] = inner as [InstructionFact, InstructionFact, InstructionFact, InstructionFact];
+  assertCondition(size.programId === CLASSIC_TOKEN_PROGRAM && size.kind === "getAccountDataSize" && size.dataHex === "15"
+    && sameAddresses(size.accounts, [value.mintAddress]), "SOLANA_ATA_GET_SIZE", "ATA CPI getAccountDataSize semantics differ");
+  assertCondition(create.programId === SYSTEM_PROGRAM && create.kind === "createAccount" && create.dataHex.length === 104
+    && create.dataHex.startsWith("00000000") && create.newAccount === value.tokenAccountAddress && create.owner === CLASSIC_TOKEN_PROGRAM
+    && sameAddresses(create.accounts, [value.payerAddress, value.tokenAccountAddress]) && systemCreateLamports(create.dataHex) > 0n
+    && systemCreateSpace(create.dataHex) === 165n && systemCreateOwner(create.dataHex) === CLASSIC_TOKEN_PROGRAM,
+    "SOLANA_ATA_CREATE_ACCOUNT", "ATA CPI System createAccount semantics differ");
+  assertCondition(immutableOwner.programId === CLASSIC_TOKEN_PROGRAM && immutableOwner.kind === "initializeImmutableOwner" && immutableOwner.dataHex === "16"
+    && sameAddresses(immutableOwner.accounts, [value.tokenAccountAddress]), "SOLANA_ATA_IMMUTABLE_OWNER", "ATA CPI initializeImmutableOwner semantics differ");
+  assertCondition(initialize.programId === CLASSIC_TOKEN_PROGRAM && initialize.kind === "initializeAccount3" && initialize.dataHex.length === 66
+    && initialize.dataHex.startsWith("12") && initialize.owner === value.ownerAddress && initialize.tokenAccount === value.tokenAccountAddress
+    && initialize.mint === value.mintAddress && sameAddresses(initialize.accounts, [value.tokenAccountAddress, value.mintAddress])
+    && base58(initialize.dataHex.slice(2)) === value.ownerAddress, "SOLANA_ATA_INITIALIZE", "ATA CPI initializeAccount3 semantics differ");
   requireSigners(fact, [value.payerAddress]);
 }
 
@@ -187,6 +221,18 @@ function evidence(value: FixtureObservations): EvidenceReport {
     transactions: value.transactions,
     assertions: { exactLoopbackRpc: true, productionAuthorityProven: false, ccip: false, publicNetwork: false, realAssetCostUsd: 0, mintAuthorityRevoked: false, authorityKeyRetained: false, remintPossibleUntilTeardown: true, productionHardCapProven: false, signedRestoreReachedTokenProgramAndFailed: true, signedFreezeReachedTokenProgramAndFailed: true },
   };
+}
+
+function sameAddresses(left: readonly string[], right: readonly string[]): boolean { return left.length === right.length && left.every((value, index) => value === right[index]); }
+function systemCreateLamports(dataHex: string): bigint { return dataHex.length === 104 ? Buffer.from(dataHex, "hex").readBigUInt64LE(4) : -1n; }
+function systemCreateSpace(dataHex: string): bigint { return dataHex.length === 104 ? Buffer.from(dataHex, "hex").readBigUInt64LE(12) : -1n; }
+function systemCreateOwner(dataHex: string): string | null { return dataHex.length === 104 ? base58(dataHex.slice(40)) : null; }
+function base58(hex: string): string {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"; const bytes = Buffer.from(hex, "hex");
+  let number = 0n; for (const byte of bytes) { number = (number << 8n) + BigInt(byte); }
+  let result = ""; while (number > 0n) { result = alphabet[Number(number % 58n)] + result; number /= 58n; }
+  for (const byte of bytes) { if (byte === 0) { result = `1${result}`; } else { break; } }
+  return result || "1";
 }
 
 function fail(code: string, message: string): never { throw new LocalSolanaError(code, message); }

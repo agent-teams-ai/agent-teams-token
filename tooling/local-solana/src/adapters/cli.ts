@@ -14,6 +14,7 @@ export class SolanaCliAdapter implements CliPort {
       await this.checked(tools.keygen, ["new", "--no-bip39-passphrase", "--silent", "--force", "--outfile", path], env, signal);
       if (signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
       await chmod(path, 0o600);
+      if (signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
     }
     return {
       payer: await this.pubkey(tools, paths.payerKey, env, signal), mint: await this.pubkey(tools, paths.mintKey, env, signal),
@@ -60,6 +61,7 @@ export class SolanaCliAdapter implements CliPort {
   }
   private async checked(executable: string, args: readonly string[], env: NodeJS.ProcessEnv, signal: AbortSignal) {
     const result = await this.commands.run(executable, args, { env, signal, timeoutMs: 60_000 });
+    if (signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
     if (result.exitCode !== 0) { throw new LocalSolanaError("SOLANA_CLI_FAILED", `${executable.split("/").at(-1) ?? "CLI"} exited ${result.exitCode}: ${result.stderr}`); }
     return result;
   }

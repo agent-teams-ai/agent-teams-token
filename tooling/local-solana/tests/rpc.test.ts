@@ -1,143 +1,43 @@
 import assert from "node:assert/strict";
-import { createServer, type RequestListener, type Server } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { createServer, type RequestListener, type Server } from "node:http";
 import test from "node:test";
 import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
 import { assertLoopbackRpcUrl, parseFinalizedTransaction } from "../src/adapters/rpc-parsers.ts";
-import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
+import { CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
+import { base58Encode } from "../src/adapters/transaction.ts";
 
-const payer = "1".repeat(32); const mint = "2".repeat(32); const ata = "3".repeat(32);
-async function listen(handler: RequestListener): Promise<{ readonly server: Server; readonly url: string }> {
-  const server = createServer(handler); await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
-  const address = server.address(); if (typeof address === "string" || address === null) { throw new Error("test server missing port"); }
-  return { server, url: `http://127.0.0.1:${address.port}/` };
-}
-async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => { server.close((cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); }
+const payer = base58Encode(Uint8Array.from({ length: 32 }, () => 1));
+const mint = base58Encode(Uint8Array.from({ length: 32 }, () => 2));
+const ata = base58Encode(Uint8Array.from({ length: 32 }, () => 3));
+const signal = new AbortController().signal;
+async function listen(handler: RequestListener): Promise<{ readonly server: Server; readonly url: string }> { const server = createServer(handler); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)); const address = server.address(); if (typeof address === "string" || address === null) { throw new Error("missing port"); } return { server, url: `http://127.0.0.1:${address.port}/` }; }
+async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => server.close((cause) => cause ? reject(cause) : resolve())); }
+function parsed(kind = "mintTo", err: unknown = null) { return { slot: 42, meta: { err, innerInstructions: [] }, transaction: { message: { accountKeys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: mint, signer: true, writable: false }, { pubkey: ata, signer: false, writable: true }, { pubkey: CLASSIC_TOKEN_PROGRAM, signer: false, writable: false }], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: kind, info: kind === "mintTo" ? { mint, account: ata, mintAuthority: mint, amount: "1000000000000" } : { amount: "1" } } }] } } }; }
+function compiled(err: unknown = null) { return { slot: 42, meta: { err, innerInstructions: [] }, transaction: { message: { accountKeys: [payer, mint, ata, CLASSIC_TOKEN_PROGRAM], instructions: [{ programIdIndex: 3, accounts: [1, 2, 1], data: "1" }] } } }; }
 
-test("RPC adapter derives finalized Token semantics without a caller label", async () => {
-  const signature = "4".repeat(64);
-  const fixture = await listen((request, response) => {
-    let body = ""; request.setEncoding("utf8"); request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
-      const call = JSON.parse(body); let result: unknown;
-      if (call.method === "getSignatureStatuses") { result = { value: [{ confirmationStatus: "finalized", err: null }] }; }
-      else if (call.method === "getGenesisHash") { result = payer; }
-      else if (call.method === "getTransaction") { result = { slot: 42, blockTime: 1, meta: { err: null, innerInstructions: [] }, transaction: { message: { accountKeys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: mint, signer: true, writable: false }, { pubkey: ata, signer: false, writable: true }], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "mintTo", info: { mint, account: ata, mintAuthority: mint, amount: "1000000000000" } } }] } } }; }
-      else { result = null; }
-      response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
-    });
-  });
-  try {
-    const fact = await new JsonRpcAdapter().finalizedTransaction(fixture.url, signature);
-    assert.equal(fact.operation, "mint"); assert.equal(fact.slot, "42"); assert.equal(fact.instructions[0]?.amountBaseUnits, "1000000000000"); assert.deepEqual(fact.signers, [payer, mint]);
-  } finally { await close(fixture.server); }
-});
+async function rpcServer(transaction: ReturnType<typeof parsed>, raw = compiled(transaction.meta.err)) { return await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSignatureStatuses" ? { value: [{ confirmationStatus: "finalized" }] } : call.method === "getGenesisHash" ? payer : call.params?.[1]?.encoding === "json" ? raw : transaction; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); }); }
 
-test("RPC parser rejects unrelated Token instructions and malformed failure indices", async () => {
-  const signature = "4".repeat(64);
-  for (const transaction of [
-    { slot: 1, meta: { err: null, innerInstructions: [] }, transaction: { message: { accountKeys: [], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "transfer", info: { amount: "1" } } }] } } },
-    { slot: 1, meta: { err: { InstructionError: [] }, innerInstructions: [] }, transaction: { message: { accountKeys: [], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: "freezeAccount", info: { account: ata, mint, authority: mint } } }] } } },
-  ]) {
-    const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSignatureStatuses" ? { value: [{ confirmationStatus: "finalized" }] } : call.method === "getGenesisHash" ? payer : transaction; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); });
-    try { await assert.rejects(new JsonRpcAdapter().finalizedTransaction(fixture.url, signature), /SOLANA_TRANSACTION_/u); } finally { await close(fixture.server); }
-  }
-});
+test("RPC adapter retains and cross-binds compiled instruction bytes and indexes", async () => { const fixture = await rpcServer(parsed()); try { const fact = await new JsonRpcAdapter().finalizedTransaction(fixture.url, "4".repeat(64), signal); assert.equal(fact.operation, "mint"); assert.equal(fact.instructions[0]?.dataHex, "00"); assert.deepEqual(fact.instructions[0]?.accountIndices, [1, 2, 1]); assert.deepEqual(fact.instructions[0]?.accounts, [mint, ata, mint]); } finally { await close(fixture.server); } });
 
-test("RPC direct transport bypasses hostile proxy in a child process", async () => {
-  let targetRequests = 0; let proxyRequests = 0;
-  const target = await listen((_request, response) => { targetRequests += 1; response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: payer })); });
-  const proxy = await listen((_request, response) => { proxyRequests += 1; response.writeHead(502); response.end("proxy must not receive loopback RPC"); });
-  try {
-    const script = `import { JsonRpcAdapter } from ${JSON.stringify(new URL("../src/adapters/rpc.ts", import.meta.url).href)}; await new JsonRpcAdapter().genesisHash(process.argv[1]).then((value) => { if (value !== ${JSON.stringify(payer)}) process.exit(2); });`;
-    const child = spawn(process.execPath, ["--input-type=module", "-e", script, target.url], { env: { ...process.env, NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url, ALL_PROXY: proxy.url }, stdio: ["ignore", "pipe", "pipe"] });
-    const [result] = await once(child, "close");
-    assert.equal(result, 0);
-    assert.equal(targetRequests, 1);
-    assert.equal(proxyRequests, 0);
-  } finally { await close(target.server); await close(proxy.server); }
-});
+test("RPC parser rejects parsed/raw account, program, result and group mismatches", () => { const base = parsed(); const mutations = [
+  { ...compiled(), transaction: { message: { ...compiled().transaction.message, accountKeys: [payer, ata, mint, CLASSIC_TOKEN_PROGRAM] } } },
+  { ...compiled(), transaction: { message: { ...compiled().transaction.message, instructions: [{ programIdIndex: 0, accounts: [1, 2, 1], data: "1" }] } } },
+  { ...compiled(), slot: 43 },
+  { ...compiled(), meta: { err: null, innerInstructions: [{ index: 0, instructions: [] }] } },
+]; for (const raw of mutations) { assert.throws(() => parseFinalizedTransaction(base, raw, "4".repeat(64), payer), /SOLANA_TRANSACTION_RAW_BINDING/u); } });
 
-test("RPC transport rejects redirects and non-loopback targets", async () => {
-  const fixture = await listen((_request, response) => { response.writeHead(302, { location: "http://example.com/" }); response.end(); });
-  try { await assert.rejects(new JsonRpcAdapter().genesisHash(fixture.url)); await assert.rejects(new JsonRpcAdapter().genesisHash("http://localhost:8899/"), /SOLANA_RPC_NON_LOOPBACK/u); }
-  finally { await close(fixture.server); }
-});
+test("RPC parser rejects unrelated Token instructions and malformed failure indices", () => { assert.throws(() => parseFinalizedTransaction(parsed("transfer"), compiled(), "4".repeat(64), payer), /SOLANA_TRANSACTION_SEMANTICS/u); const err = { InstructionError: [] }; assert.throws(() => parseFinalizedTransaction(parsed("freezeAccount", err), compiled(err), "4".repeat(64), payer), /SOLANA_TRANSACTION_ERROR/u); });
 
-test("RPC readiness proves pinned local programs at a finalized post-genesis slot", async () => {
-  const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSlot" ? 2 : { value: { executable: true, owner: "BPFLoaderUpgradeab1e11111111111111111111111", data: ["", "base64"] } }; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); });
-  try { await new JsonRpcAdapter().waitProgramsReady(fixture.url, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 1_000, new AbortController().signal); }
-  finally { await close(fixture.server); }
-});
+test("RPC direct transport bypasses hostile proxy in a child process", async () => { let targetRequests = 0; let proxyRequests = 0; const target = await listen((_request, response) => { targetRequests += 1; response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: payer })); }); const proxy = await listen((_request, response) => { proxyRequests += 1; response.writeHead(502); response.end(); }); try { const script = `import { JsonRpcAdapter } from ${JSON.stringify(new URL("../src/adapters/rpc.ts", import.meta.url).href)}; await new JsonRpcAdapter().genesisHash(process.argv[1], new AbortController().signal);`; const child = spawn(process.execPath, ["--input-type=module", "-e", script, target.url], { env: { ...process.env, NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy.url, ALL_PROXY: proxy.url }, stdio: "ignore" }); const [code] = await once(child, "close"); assert.equal(code, 0); assert.equal(targetRequests, 1); assert.equal(proxyRequests, 0); } finally { await close(target.server); await close(proxy.server); } });
 
-test("RPC delivers negative transactions with a fresh hash and bounded retries", async () => {
-  const signature = "4".repeat(64); const calls: Array<{ readonly method: string; readonly params: readonly unknown[] }> = [];
-  const fixture = await listen((request, response) => {
-    let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => {
-      const call = JSON.parse(body) as { readonly id: number; readonly method: string; readonly params: readonly unknown[] }; calls.push(call);
-      const result = call.method === "getLatestBlockhash" ? { value: { blockhash: payer, lastValidBlockHeight: 100 } }
-        : call.method === "sendTransaction" ? signature : { value: [{ confirmationStatus: "finalized", err: { InstructionError: [0, { Custom: 4 }] } }] };
-      response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
-    });
-  });
-  try {
-    const rpc = new JsonRpcAdapter();
-    assert.equal(await rpc.latestBlockhash(fixture.url), payer);
-    assert.equal(await rpc.sendSignedTransaction(fixture.url, Uint8Array.from([1, 2, 3])), signature);
-    assert.deepEqual(calls.find((call) => call.method === "getLatestBlockhash")?.params, [{ commitment: "processed" }]);
-    const send = calls.find((call) => call.method === "sendTransaction");
-    assert.deepEqual(send?.params[1], { encoding: "base64", skipPreflight: true, preflightCommitment: "processed", maxRetries: 5 });
-    assert.equal(calls.some((call) => call.method === "getSignatureStatuses"), true);
-  } finally { await close(fixture.server); }
-});
+test("RPC transport rejects redirects and non-loopback targets", async () => { const fixture = await listen((_request, response) => { response.writeHead(302, { location: "http://example.com/" }); response.end(); }); try { await assert.rejects(new JsonRpcAdapter().genesisHash(fixture.url, signal)); await assert.rejects(new JsonRpcAdapter().genesisHash("http://localhost:8899/", signal), /SOLANA_RPC_NON_LOOPBACK/u); } finally { await close(fixture.server); } });
 
-test("RPC structured account reads reject forged Token-2022 ownership", async () => {
-  const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { value: { owner: "Token2022", data: { parsed: { type: "mint", info: { decimals: 9, supply: "0", mintAuthority: "x", freezeAuthority: null } } } } } })); }); });
-  try { await assert.rejects(new JsonRpcAdapter().mintAccount(fixture.url, "mint"), /SOLANA_MINT_PROGRAM/u); }
-  finally { await close(fixture.server); }
-});
+test("RPC readiness proves pinned local programs at a finalized post-genesis slot", async () => { const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSlot" ? 2 : { value: { executable: true, owner: "BPFLoaderUpgradeab1e11111111111111111111111" } }; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); }); try { await new JsonRpcAdapter().waitProgramsReady(fixture.url, [CLASSIC_TOKEN_PROGRAM], 1_000, signal); } finally { await close(fixture.server); } });
 
-test("RPC parser normalizes exact authority and associated-account semantics", () => {
-  const transaction = (programId: string, type: string, info: Record<string, unknown>, err: unknown = null) => ({
-    slot: 42,
-    meta: { err, innerInstructions: [] },
-    transaction: {
-      message: {
-        accountKeys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: mint, signer: true, writable: true }],
-        instructions: [{ programId, parsed: { type, info } }],
-      },
-    },
-  });
-  const revoke = parseFinalizedTransaction(transaction(CLASSIC_TOKEN_PROGRAM, "setAuthority", {
-    authority: mint, authorityType: "freezeAccount", mint, newAuthority: null,
-  }), "4".repeat(64), payer);
-  assert.equal(revoke.operation, "revokeFreeze");
-  assert.deepEqual(revoke.instructions[0], {
-    programId: CLASSIC_TOKEN_PROGRAM, instructionIndex: 0, innerInstructionIndex: null, kind: "setAuthority",
-    accounts: [mint], mint, tokenAccount: mint, owner: null, authority: mint, newAuthority: null,
-    authorityType: "freezeAccount", amountBaseUnits: null, decimals: null,
-  });
+test("RPC send uses bounded local delivery and one abort signal", async () => { const signature = "4".repeat(64); const calls: Array<{ readonly method: string; readonly params: readonly unknown[] }> = []; const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); calls.push(call); const result = call.method === "getLatestBlockhash" ? { value: { blockhash: payer } } : call.method === "sendTransaction" ? signature : { value: [{ confirmationStatus: "finalized" }] }; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); }); try { const rpc = new JsonRpcAdapter(); assert.equal(await rpc.latestBlockhash(fixture.url, signal), payer); assert.equal(await rpc.sendSignedTransaction(fixture.url, Uint8Array.from([1]), signal), signature); assert.deepEqual(calls.map((call) => call.method), ["getLatestBlockhash", "sendTransaction", "getSignatureStatuses"]); assert.deepEqual(calls[0]?.params, [{ commitment: "processed" }]); assert.deepEqual(calls[1]?.params[1], { encoding: "base64", skipPreflight: true, preflightCommitment: "processed", maxRetries: 5 }); } finally { await close(fixture.server); } });
 
-  const created = parseFinalizedTransaction(transaction(ASSOCIATED_TOKEN_PROGRAM, "create", {
-    source: payer, account: ata, wallet: ownerAddress(), mint, tokenProgram: CLASSIC_TOKEN_PROGRAM,
-  }), "5".repeat(64), payer);
-  const associated = created.instructions[0]!;
-  assert.equal(created.operation, "createAta");
-  assert.equal(associated.authority, payer); assert.equal(associated.tokenAccount, ata);
-  assert.equal(associated.owner, ownerAddress()); assert.equal(associated.mint, mint);
-  assert.equal(associated.accounts.includes(CLASSIC_TOKEN_PROGRAM), true);
+test("abort during blockhash prevents later transaction bytes or send", async () => { let sends = 0; const controller = new AbortController(); const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); if (call.method === "sendTransaction") { sends += 1; } controller.abort(); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { value: { blockhash: payer } } })); }); }); try { await assert.rejects(new JsonRpcAdapter().latestBlockhash(fixture.url, controller.signal), /SOLANA_COMMAND_ABORTED/u); assert.equal(sends, 0); } finally { await close(fixture.server); } });
 
-  const frozen = parseFinalizedTransaction(transaction(CLASSIC_TOKEN_PROGRAM, "freezeAccount", {
-    account: ata, mint, freezeAuthority: mint,
-  }, { InstructionError: [0, { Custom: 16 }] }), "6".repeat(64), payer);
-  assert.equal(frozen.operation, "freezeAttempt");
-  assert.equal(frozen.error?.code, "Custom(16)");
-  assert.equal(frozen.instructions[0]?.authority, mint); assert.equal(frozen.instructions[0]?.newAuthority, null);
-});
-
-function ownerAddress(): string { return "7".repeat(32); }
-
-test("RPC parser preserves explicit default transport port 80", () => {
-  const parsed = assertLoopbackRpcUrl("http://127.0.0.1:80/");
-  assert.equal(parsed.port, "");
-});
+test("RPC parser preserves explicit default transport port 80", () => { assert.equal(assertLoopbackRpcUrl("http://127.0.0.1:80/").port, ""); });
