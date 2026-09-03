@@ -5,6 +5,17 @@ import { LocalSolanaError, type FailureEvidenceReport } from "../src/domain/mode
 
 const unsupported = async (): Promise<never> => { throw new Error("unexpected test call"); };
 
+test("already-aborted fixture stops before reclaim or run creation", async () => {
+  const controller = new AbortController(); controller.abort();
+  let reclaimed = false; let created = false;
+  const deps = {
+    environment: {},
+    store: { async reclaimStale() { reclaimed = true; return 0; }, async create() { created = true; throw new Error("must not create"); } },
+  } as unknown as FixtureDependencies;
+  await assert.rejects(runFixture(deps, controller.signal), /SOLANA_COMMAND_ABORTED/u);
+  assert.equal(reclaimed, false); assert.equal(created, false);
+});
+
 test("a post-mutation exception publishes sanitized failure evidence after cleanup", async () => {
   let stopped = false;
   let released = false;

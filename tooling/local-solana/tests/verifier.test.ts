@@ -28,7 +28,7 @@ test("verifier rejects caller-style relabels, duplicate signatures and nonmonoto
     (v) => ({ ...v, transactions: v.transactions.map((item) => item.operation === "restoreFreezeAttempt" ? { ...item, error: { instructionIndex: 1, code: "Custom(16)" } } : item) }),
     (v) => ({ ...v, transactions: v.transactions.map((item) => item.operation === "restoreFreezeAttempt" ? { ...item, error: { instructionIndex: 0, code: "Custom(15)" } } : item) }),
     (v) => ({ ...v, transactions: v.transactions.map((item) => item.operation === "freezeAttempt" ? { ...item, signers: [payer, owner] } : item) }),
-    (v) => ({ ...v, transactions: v.transactions.map((item) => item.operation === "createAta" ? { ...item, instructions: [instruction({ programId: ASSOCIATED_TOKEN_PROGRAM, accounts: [payer, ata, owner, owner, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM] })] } : item) }),
+    (v) => ({ ...v, transactions: v.transactions.map((item) => item.operation === "createAta" ? { ...item, instructions: [instruction({ programId: ASSOCIATED_TOKEN_PROGRAM, accounts: [payer, ata, owner, mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM, "extra-account"] })] } : item) }),
     (v) => ({ ...v, transactions: v.transactions.map((item) => item.operation === "createAta" ? { ...item, instructions: [...item.instructions, instruction({ programId: CLASSIC_TOKEN_PROGRAM, kind: "transfer" })] } : item) }),
   ];
   for (const mutate of mutations) { assert.throws(() => verifyObservations(mutate(observationFixture())), /SOLANA_/u); }

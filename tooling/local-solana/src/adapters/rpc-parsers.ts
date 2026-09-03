@@ -38,12 +38,16 @@ export function parseFinalizedTransaction(raw: unknown, signature: string, genes
 }
 
 export function assertLoopbackRpcUrl(value: string): URL {
+  // Validate serialized form first: WHATWG URL erases explicit default :80,
+  // while this fixture boundary requires an explicit port and accepts :80.
+  const serialized = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/$/u.exec(value);
+  if (serialized === null) { throw new LocalSolanaError("SOLANA_RPC_NON_LOOPBACK", "RPC must be exact http://127.0.0.1:<port>/ with no credentials or redirect surface"); }
   let url: URL;
   try { url = new URL(value); } catch { throw new LocalSolanaError("SOLANA_RPC_URL", "RPC URL is invalid"); }
   if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
     throw new LocalSolanaError("SOLANA_RPC_NON_LOOPBACK", "RPC must be exact http://127.0.0.1:<port>/ with no credentials or redirect surface");
   }
-  const port = Number(url.port);
+  const port = Number(serialized[1]);
   if (!isValidLoopbackPort(port)) { throw new LocalSolanaError("SOLANA_RPC_PORT", "RPC port is outside the private fixture range"); }
   return url;
 }
