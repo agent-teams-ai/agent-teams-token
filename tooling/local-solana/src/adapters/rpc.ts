@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { request as httpRequest } from "node:http";
 import { LocalSolanaError } from "../domain/model.ts";
 import type { RpcPort } from "../application/ports.ts";
 import { array, assertLoopbackRpcUrl, integer, object, parseAccountState, parseFinalizedTransaction, parseTokenAccountState, string } from "./rpc-parsers.ts";
@@ -90,12 +91,38 @@ export class JsonRpcAdapter implements RpcPort {
     if (!allowed.has(method)) { throw new LocalSolanaError("SOLANA_RPC_METHOD", `RPC method ${method} is not allowlisted`); }
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 10_000);
     try {
-      const response = await fetch(rpcUrl, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++this.id, method, params }), signal: controller.signal });
-      if (!response.ok || response.url !== rpcUrl) { throw new LocalSolanaError("SOLANA_RPC_RESPONSE", `RPC HTTP status ${response.status}`); }
-      const envelope = object(await response.json(), "RPC envelope");
+      const url = assertLoopbackRpcUrl(rpcUrl);
+      const id = ++this.id;
+      const body = await this.postDirect(url, JSON.stringify({ jsonrpc: "2.0", id, method, params }), controller.signal);
+      let parsed: unknown;
+      try { parsed = JSON.parse(body); } catch { throw new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC response is not valid JSON"); }
+      const envelope = object(parsed, "RPC envelope");
+      if (envelope.id !== id) { throw new LocalSolanaError("SOLANA_RPC_RESULT", "RPC response id does not correlate to request"); }
       if (envelope.error !== undefined) { throw new LocalSolanaError("SOLANA_RPC_ERROR", JSON.stringify(envelope.error).slice(0, 1_000)); }
       if (!("result" in envelope)) { throw new LocalSolanaError("SOLANA_RPC_RESULT", "RPC result is missing"); }
       return envelope.result;
     } finally { clearTimeout(timer); }
+  }
+
+  private postDirect(url: URL, body: string, signal: AbortSignal): Promise<string> {
+    const port = Number(url.port);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (cause: unknown) => { if (settled) return; settled = true; reject(cause instanceof LocalSolanaError ? cause : new LocalSolanaError("SOLANA_RPC_RESPONSE", cause instanceof Error ? cause.message : "RPC transport failed")); };
+      const request = httpRequest({ protocol: "http:", hostname: "127.0.0.1", port, path: "/", method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) }, signal }, (response) => {
+        if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) { response.resume(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", `RPC HTTP status ${response.statusCode ?? 0}`)); return; }
+        let size = 0; const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer | string) => { size += Buffer.byteLength(chunk); if (size > 1_048_576) { response.destroy(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC response body exceeds limit")); } else { chunks.push(Buffer.from(chunk)); } });
+        response.on("end", () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks).toString("utf8")); } });
+        response.on("error", fail);
+      });
+      request.on("socket", (socket) => {
+        const verify = () => { if (socket.remoteAddress !== "127.0.0.1" || socket.remotePort !== port) { request.destroy(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC socket peer is not the owned validator")); } };
+        if (socket.connecting) socket.once("connect", verify); else verify();
+      });
+      request.on("error", fail);
+      request.setTimeout(10_000, () => { request.destroy(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", "RPC transport timed out")); });
+      request.end(body);
+    });
   }
 }

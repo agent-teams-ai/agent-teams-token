@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer, type RequestListener, type Server } from "node:http";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
 import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
 import { parseFinalizedTransaction } from "../src/adapters/rpc-parsers.ts";
@@ -40,6 +42,20 @@ test("RPC parser rejects unrelated Token instructions and malformed failure indi
     const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSignatureStatuses" ? { value: [{ confirmationStatus: "finalized" }] } : call.method === "getGenesisHash" ? payer : transaction; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); });
     try { await assert.rejects(new JsonRpcAdapter().finalizedTransaction(fixture.url, signature), /SOLANA_TRANSACTION_/u); } finally { await close(fixture.server); }
   }
+});
+
+test("RPC direct transport bypasses hostile proxy in a child process", async () => {
+  let targetRequests = 0; let proxyRequests = 0;
+  const target = await listen((_request, response) => { targetRequests += 1; response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: payer })); });
+  const proxy = await listen((_request, response) => { proxyRequests += 1; response.writeHead(502); response.end("proxy must not receive loopback RPC"); });
+  try {
+    const script = `import { JsonRpcAdapter } from ${JSON.stringify(new URL("../src/adapters/rpc.ts", import.meta.url).href)}; await new JsonRpcAdapter().genesisHash(process.argv[1]).then((value) => { if (value !== ${JSON.stringify(payer)}) process.exit(2); });`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, target.url], { env: { ...process.env, NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url, ALL_PROXY: proxy.url }, stdio: ["ignore", "pipe", "pipe"] });
+    const [result] = await once(child, "close");
+    assert.equal(result, 0);
+    assert.equal(targetRequests, 1);
+    assert.equal(proxyRequests, 0);
+  } finally { await close(target.server); await close(proxy.server); }
 });
 
 test("RPC transport rejects redirects and non-loopback targets", async () => {
