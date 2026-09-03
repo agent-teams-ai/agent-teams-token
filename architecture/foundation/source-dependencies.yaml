@@ -124,6 +124,7 @@ boundaries:
         - node:crypto
         - node:fs
         - node:fs/promises
+        - node:http
         - node:net
         - node:os
         - node:path
@@ -175,6 +176,7 @@ boundaries:
       - tooling/deployment-plan/src/adapters
     entrypoints:
       - tooling/deployment-plan/src/adapters/artifact.ts
+      - tooling/deployment-plan/src/adapters/native-no-replace.ts
       - tooling/deployment-plan/src/adapters/rpc.ts
       - tooling/deployment-plan/src/adapters/safe-output.ts
       - tooling/deployment-plan/src/adapters/strict-json.ts
@@ -184,10 +186,13 @@ boundaries:
         - tooling.deployment-plan.domain
       packages: []
       builtins:
+        - node:child_process
         - node:crypto
         - node:fs
         - node:fs/promises
+        - node:os
         - node:path
+        - node:url
       runtimeReferences: []
   - id: tooling.deployment-plan.composition
     roots:
@@ -246,6 +251,7 @@ boundaries:
       - tooling/security/slither/src/adapters/repository.ts
       - tooling/security/slither/src/adapters/runner.ts
       - tooling/security/slither/src/adapters/slither-json.ts
+      - tooling/security/slither/src/adapters/validated-environment.ts
     allow:
       boundaries:
         - tooling.slither.application
