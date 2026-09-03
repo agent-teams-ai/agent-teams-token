@@ -34,6 +34,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "2",
   buildInfoSolcVersion: "0.8.36",
+  buildInfoSha256: hash,
   compilerInputSha256: hash,
   compilerSettings: {},
   artifactSha256: hash,
@@ -135,7 +136,7 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
       ready: readyFor(changed.planId),
       nowSeconds: 120n,
     }),
-    /not bound/u,
+    /trust roots/u,
   );
   assert.throws(
     () => independentlyVerify({

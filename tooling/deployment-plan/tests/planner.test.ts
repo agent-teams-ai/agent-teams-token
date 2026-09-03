@@ -77,6 +77,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "1",
   buildInfoSolcVersion: "0.8.36",
+  buildInfoSha256: sha256Hex(json(build)),
   compilerInputSha256: sha256Hex(canonicalJson(build.input)),
   compilerSettings: settings,
   artifactSha256: sha256Hex(artifactBytes),

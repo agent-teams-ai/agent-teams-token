@@ -19,6 +19,11 @@ interface DirectoryIdentity {
   readonly ino: number;
 }
 
+interface FileIdentity extends DirectoryIdentity {
+  readonly ctimeMs: number;
+  readonly size: number;
+}
+
 export interface ClaimedOutputDirectory {
   /** The unguessable, unpublished staging directory. */
   readonly path: string;
@@ -105,10 +110,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   private readonly stagingIdentity: DirectoryIdentity;
   private readonly target: string;
   private readonly faultInjection: OutputFaultInjection;
-  private readonly leaves = new Map<string, DirectoryIdentity>();
+  private readonly leaves = new Map<string, FileIdentity>();
   private published = false;
   private stagingDisposed = false;
-  private reservedTargetIdentity?: DirectoryIdentity;
+  private publishedTargetIdentity?: DirectoryIdentity;
 
   constructor(input: {
     readonly parent: string;
@@ -144,10 +149,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
       0o600,
     );
-    let fileIdentity: DirectoryIdentity;
+    let fileIdentity: FileIdentity;
     try {
-      fileIdentity = identity(await file.stat());
-      this.leaves.set(name, fileIdentity);
+      fileIdentity = fileIdentityOf(await file.stat());
       await this.faultInjection.afterStagingLeafOpen?.();
       await file.chmod(0o600);
       await file.writeFile(bytes);
@@ -156,6 +160,8 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       if (!metadata.isFile() || metadata.nlink !== 1) {
         fail("OUTPUT_FILE_UNSAFE", "output file is not an owned regular file");
       }
+      fileIdentity = fileIdentityOf(metadata);
+      this.leaves.set(name, fileIdentity);
     } finally {
       await file.close();
     }
@@ -167,7 +173,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     if (!leaf.isFile() || leaf.isSymbolicLink() || leaf.nlink !== 1) {
       fail("OUTPUT_FILE_SUBSTITUTED", "staging file was substituted");
     }
-    assertSameIdentity(leaf, fileIdentity, "OUTPUT_FILE_SUBSTITUTED");
+    assertSameFileIdentity(leaf, fileIdentity, "OUTPUT_FILE_SUBSTITUTED");
   }
 
   async publish(): Promise<string> {
@@ -205,7 +211,11 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       this.published = true;
       return this.target;
     } catch (error) {
-      await this.rollbackUndurablePublication().catch(() => {});
+      try {
+        await this.rollbackUndurablePublication();
+      } catch (rollbackError) {
+        throw rollbackError;
+      }
       throw error;
     }
   }
@@ -254,12 +264,11 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
 
   private async rollbackUndurablePublication(): Promise<void> {
     await this.assertParentStable();
-    const metadata = await lstat(this.target);
-    if (this.publishedTargetIdentity !== undefined && metadata.isDirectory() && metadata.uid === process.getuid?.()) {
-      assertSameIdentity(metadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      for (const name of await readdir(this.target)) {await unlink(join(this.target, name)).catch(() => {});}
-      await rmdir(this.target).catch(() => {});
-    }
+    if (this.publishedTargetIdentity === undefined) return;
+    await this.assertPublishedTreeUnchanged();
+    const expectedNames = [...this.leaves.keys()].toSorted();
+    for (const name of expectedNames) await unlink(join(this.target, name));
+    await rmdir(this.target);
     await this.parentHandle.sync().catch(() => {});
   }
 
@@ -271,6 +280,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
         const targetMetadata = await lstat(this.target);
         if (this.publishedTargetIdentity !== undefined) {
           assertSameIdentity(targetMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+          await this.assertPublishedTreeUnchanged();
         }
       } catch (error) {
         if (nodeErrorCode(error) !== "ENOENT") {
@@ -302,14 +312,40 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
         fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted");
       }
-      assertSameIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+      assertSameFileIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
       await rename(leaf, quarantinedLeaf);
       const moved = await lstat(quarantinedLeaf);
       assertSameIdentity(moved, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+      if (moved.size !== expected.size) {
+        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf size changed");
+      }
       await unlink(quarantinedLeaf);
     }
     await rmdir(quarantine);
     await this.parentHandle.sync();
+  }
+
+  private async assertPublishedTreeUnchanged(): Promise<void> {
+    if (this.publishedTargetIdentity === undefined) {
+      fail("OUTPUT_PUBLISHED_SUBSTITUTED", "published output identity was not recorded");
+    }
+    const metadata = await lstat(this.target);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.()) {
+      fail("OUTPUT_PUBLISHED_SUBSTITUTED", "published output is not the owned directory that was created");
+    }
+    assertSameIdentity(metadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+    const names = (await readdir(this.target)).toSorted();
+    const expectedNames = [...this.leaves.keys()].toSorted();
+    if (names.length !== expectedNames.length || names.some((name, index) => name !== expectedNames[index])) {
+      fail("OUTPUT_ROLLBACK_FOREIGN_ENTRY", "published output contains an untracked or foreign entry");
+    }
+    for (const [name, expected] of this.leaves) {
+      const leaf = await lstat(join(this.target, name));
+      if (!leaf.isFile() || leaf.isSymbolicLink() || leaf.nlink !== 1) {
+        fail("OUTPUT_ROLLBACK_LEAF_SUBSTITUTED", "published output tracked leaf was substituted");
+      }
+      assertSameFileIdentity(leaf, expected, "OUTPUT_ROLLBACK_LEAF_SUBSTITUTED");
+    }
   }
 
   private async assertCleanupLeaves(directory: string): Promise<void> {
@@ -326,7 +362,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
         fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted");
       }
-      assertSameIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
+      assertSameFileIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
     }
   }
 }
@@ -398,6 +434,21 @@ async function assertMissing(path: string): Promise<void> {
     throw error;
   }
   fail("OUTPUT_TARGET_EXISTS", "output target already exists");
+}
+
+function fileIdentityOf(metadata: Stats): FileIdentity {
+  return { ...identity(metadata), ctimeMs: metadata.ctimeMs, size: metadata.size };
+}
+
+function assertSameFileIdentity(
+  actual: Stats,
+  expected: FileIdentity,
+  code: string,
+): void {
+  assertSameIdentity(actual, expected, code);
+  if (actual.ctimeMs !== expected.ctimeMs || actual.size !== expected.size) {
+    fail(code, "filesystem file identity changed");
+  }
 }
 
 function identity(metadata: Stats): DirectoryIdentity {

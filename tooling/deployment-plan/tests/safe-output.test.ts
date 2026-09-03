@@ -191,6 +191,46 @@ test("staging swap immediately before rename cannot be accepted as published", a
   }
 });
 
+test("rollback preserves published output when a foreign entry appears", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const target = join(parent, "bundle");
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async afterPublishRename() {
+      await writeFile(join(target, "foreign"), "do not delete", { mode: 0o600 });
+    },
+    async parentDirectorySync() { throw new Error("injected sync failure"); },
+  });
+  try {
+    await claim.writeExclusive("READY", Buffer.from("safe"));
+    await assert.rejects(claim.publish(), /foreign entry/u);
+    assert.equal(await readFile(join(target, "READY"), "utf8"), "safe");
+    assert.equal(await readFile(join(target, "foreign"), "utf8"), "do not delete");
+  } finally {
+    await assert.rejects(claim.close(), /foreign entry/u);
+  }
+});
+
+test("rollback preserves published output when a tracked leaf is substituted", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const target = join(parent, "bundle");
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async afterPublishRename() {
+      await rm(join(target, "READY"));
+      await writeFile(join(target, "READY"), "substituted", { mode: 0o600 });
+    },
+    async parentDirectorySync() { throw new Error("injected sync failure"); },
+  });
+  try {
+    await claim.writeExclusive("READY", Buffer.from("safe"));
+    await assert.rejects(claim.publish(), /identity changed/u);
+    assert.equal(await readFile(join(target, "READY"), "utf8"), "substituted");
+  } finally {
+    await assert.rejects(claim.close(), /leaf was substituted|identity changed/u);
+  }
+});
+
 test("published-directory substitution after atomic rename fails closed", async () => {
   const parent = await canonicalTemporaryDirectory();
   const target = join(parent, "bundle");

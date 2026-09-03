@@ -114,7 +114,7 @@ function validatePlanTrust(plan: StablePlan, roots: TrustRoots): void {
     || identity.value !== "0"
     || identity.contractFqn !== roots.contractFqn
     || identity.buildProfile !== roots.buildProfile
-    || (roots.buildInfoSha256 !== undefined && identity.buildInfoSha256 !== roots.buildInfoSha256)
+    || identity.buildInfoSha256 !== roots.buildInfoSha256
     || canonicalJson(identity.sourceDependencyClosure) !== canonicalJson(roots.sourceDependencyClosure)
     || identity.buildInfoSolcVersion !== roots.buildInfoSolcVersion
     || canonicalJson(identity.compilerSettings) !== canonicalJson(roots.compilerSettings)
@@ -172,7 +172,7 @@ function validateApprovedArtifactIntegrity(expected: ApprovedArtifact, roots: Tr
     || expected.compilerInputSha256 !== roots.compilerInputSha256) {
     fail("APPROVED_ARTIFACT_UNTRUSTED", "approved artifact digests differ from trust roots");
   }
-  if ((roots.buildInfoSha256 !== undefined && expected.buildInfoSha256 !== roots.buildInfoSha256)
+  if (expected.buildInfoSha256 !== roots.buildInfoSha256
     || expected.buildInfoSolcVersion !== roots.buildInfoSolcVersion
     || canonicalJson(expected.compilerSettings) !== canonicalJson(roots.compilerSettings)
     || canonicalJson(expected.sourceDependencyClosure) !== canonicalJson(roots.sourceDependencyClosure)) {

@@ -79,6 +79,7 @@ const roots: TrustRoots = {
   quoteTtlSeconds: "60",
   maximumHeadLag: "1",
   buildInfoSolcVersion: build.solcVersion,
+  buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
   compilerInputSha256: sha256Hex(canonicalJson(build.input)),
   compilerSettings: settings,
   artifactSha256: sha256Hex(inputs.artifactBytes),
@@ -120,8 +121,12 @@ test("full canonical compiler input is an immutable trust root", () => {
     { ...build.input, settings: { ...settings, outputSelection: { "*": { "*": ["abi"] } } } },
   ];
   for (const input of variants) {
+    const buildInfoBytes = bytes({ ...build, input });
     assert.throws(
-      () => approveForgeArtifact({ ...inputs, buildInfoBytes: bytes({ ...build, input }) }, roots),
+      () => approveForgeArtifact(
+        { ...inputs, buildInfoBytes },
+        { ...roots, buildInfoSha256: sha256Hex(buildInfoBytes) },
+      ),
       /compiler input/u,
     );
   }
@@ -190,24 +195,26 @@ test("build/artifact/ABI/constructor mismatches fail independently", () => {
   );
 });
 
-test("compiler trust binds only Forge build-info solcVersion exactly", () => {
+test("exact build-info bytes are an independent trust root", () => {
+  const alteredBytes = bytes({ ...build, solcLongVersion: "0.8.36+untrusted-label" });
   assert.throws(
-    () => approveForgeArtifact({
-      ...inputs,
-      buildInfoBytes: bytes({
-        ...build,
-        solcVersion: "0.8.35",
-        solcLongVersion: roots.buildInfoSolcVersion,
-      }),
-    }, roots),
+    () => approveForgeArtifact({ ...inputs, buildInfoBytes: alteredBytes }, roots),
+    /build-info digest/u,
+  );
+});
+
+test("compiler trust binds Forge build-info solcVersion exactly", () => {
+  const alteredBuild = {
+    ...build,
+    solcVersion: "0.8.35",
+    solcLongVersion: roots.buildInfoSolcVersion,
+  };
+  const buildInfoBytes = bytes(alteredBuild);
+  assert.throws(
+    () => approveForgeArtifact(
+      { ...inputs, buildInfoBytes },
+      { ...roots, buildInfoSha256: sha256Hex(buildInfoBytes) },
+    ),
     /solcVersion/u,
   );
-  const differentLongLabel = approveForgeArtifact({
-    ...inputs,
-    buildInfoBytes: bytes({
-      ...build,
-      solcLongVersion: "0.8.36+commit.not-evidence",
-    }),
-  }, roots);
-  assert.equal(differentLongLabel.buildInfoSolcVersion, roots.buildInfoSolcVersion);
 });

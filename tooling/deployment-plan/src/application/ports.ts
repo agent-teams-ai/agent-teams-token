@@ -31,7 +31,7 @@ export interface TrustRoots {
   readonly quoteTtlSeconds: string;
   readonly maximumHeadLag: string;
   readonly buildInfoSolcVersion: string;
-  readonly buildInfoSha256?: `0x${string}`;
+  readonly buildInfoSha256: `0x${string}`;
   readonly compilerInputSha256: `0x${string}`;
   readonly compilerSettings: Record<string, unknown>;
   readonly artifactSha256: `0x${string}`;

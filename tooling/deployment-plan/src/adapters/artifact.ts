@@ -19,6 +19,7 @@ interface ParsedArtifactInputs {
   readonly artifactSha256: `0x${string}`;
   readonly abiSha256: `0x${string}`;
   readonly fixtureSha256: `0x${string}`;
+  readonly buildInfoSha256: `0x${string}`;
 }
 
 interface BuildContract {
@@ -57,7 +58,7 @@ export function approveForgeArtifact(
   const constructorAbiBytes = utf8Hex(canonicalJson(constructor));
 
   const approved: ApprovedArtifact = {
-    buildInfoSha256: sha256Hex(canonicalJson(normalizeBuildInfo(parsed.build))),
+    buildInfoSha256: parsed.buildInfoSha256,
     artifactSha256: parsed.artifactSha256,
     abiSha256: parsed.abiSha256,
     fixtureSha256: parsed.fixtureSha256,
@@ -92,29 +93,14 @@ function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
     artifactSha256: sha256Hex(inputs.artifactBytes),
     abiSha256: sha256Hex(inputs.abiBytes),
     fixtureSha256: sha256Hex(inputs.fixtureBytes),
+    buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
   };
 }
 
-function normalizeBuildInfo(value: unknown, parentKey?: string): unknown {
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeBuildInfo(item, parentKey));
-  }
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
-    if (parentKey === "input" && key === "basePath" && typeof entry === "string") {
-      return [key, "$AGTMAI_ABSOLUTE_PATH"];
-    }
-    if (parentKey === "input" && (key === "allowPaths" || key === "includePaths") && Array.isArray(entry)
-      && entry.every((item) => typeof item === "string" && item.startsWith("/"))) {
-      return [key, entry.map(() => "$AGTMAI_ABSOLUTE_PATH")];
-    }
-    return [key, normalizeBuildInfo(entry, key)];
-  }));
-}
-
 function validateInputDigests(parsed: ParsedArtifactInputs, roots: TrustRoots): void {
+  if (parsed.buildInfoSha256 !== roots.buildInfoSha256) {
+    fail("BUILD_INFO_DIGEST_MISMATCH", "build-info digest differs from trust root");
+  }
   if (parsed.artifactSha256 !== roots.artifactSha256) {
     fail("ARTIFACT_DIGEST_MISMATCH", "artifact digest differs from trust root");
   }

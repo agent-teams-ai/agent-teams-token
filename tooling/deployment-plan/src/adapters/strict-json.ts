@@ -12,7 +12,7 @@ const ROOT_KEYS = [
   "schemaVersion", "testOnly", "productionApproved", "mainnetAllowed",
   "chainId", "contractFqn", "buildProfile", "from", "maximumWorstCaseWei",
   "gasBufferBps", "quoteTtlSeconds", "maximumHeadLag", "buildInfoSolcVersion",
-  "compilerInputSha256",
+  "buildInfoSha256", "compilerInputSha256",
   "compilerSettings", "artifactSha256", "abiSha256", "fixtureSha256",
   "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash",
   "sourceDependencyClosure",
@@ -48,9 +48,7 @@ const READY_KEYS = [
 export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
   const root = object(parseJsonWithoutDuplicates(bytes), "TRUST_ROOTS_SCHEMA");
   requireV2(root, "TRUST_ROOTS_SCHEMA");
-  const rootKeys = Object.hasOwn(root, "buildInfoSha256")
-    ? [...ROOT_KEYS, "buildInfoSha256"]
-    : ROOT_KEYS;
+  const rootKeys = ROOT_KEYS;
   exactKeys(root, rootKeys, "TRUST_ROOTS_SCHEMA");
   constants(root, {
     schemaVersion: 2, testOnly: true, productionApproved: false,
@@ -59,8 +57,7 @@ export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
   strings(root, ["contractFqn", "buildProfile", "buildInfoSolcVersion"]);
   match(root.from, ADDRESS, "TRUST_ROOTS_SCHEMA", "from");
   decimals(root, ["maximumWorstCaseWei", "gasBufferBps", "quoteTtlSeconds", "maximumHeadLag"]);
-  hashes(root, ["compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash"]);
-  if (root.buildInfoSha256 !== undefined) {match(root.buildInfoSha256, HASH, "TRUST_ROOTS_SCHEMA", "buildInfoSha256");}
+  hashes(root, ["buildInfoSha256", "compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "constructorArgumentsHash", "creationInputHash"]);
   object(root.compilerSettings, "TRUST_ROOTS_SCHEMA");
   hashMap(root.sourceDependencyClosure, "TRUST_ROOTS_SCHEMA");
   return root as unknown as TrustRoots;
