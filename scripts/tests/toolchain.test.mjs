@@ -144,6 +144,19 @@ test("macOS canonical root accepts trusted root-owned temp ancestors", (context)
   fetchArtifacts({ lock: fixture.lock, platform: "darwin-arm64", toolsRoot: macToolsRoot, downloader: fixture.downloader });
 });
 
+test("macOS /var/folders canonical hierarchy rejects descendant symlinks", (context) => {
+  if (process.platform !== "darwin") return;
+  const folders = canonicalizeTrustedPath("/var/folders", { platform: "darwin" });
+  assert.equal(folders, "/private/var/folders");
+  const macTemp = canonicalizeTrustedPath(tmpdir(), { platform: "darwin" });
+  assert.equal(macTemp.startsWith(`${folders}/`), true);
+  const probe = mkdtempSync(join(macTemp, "agtmai-toolchain-probe-"));
+  context.after(() => rmSync(probe, { recursive: true, force: true }));
+  const real = join(probe, "real"); const link = join(probe, "link");
+  mkdirSync(real); symlinkSync(real, link, "dir");
+  assert.throws(() => canonicalizeTrustedPath(link, { platform: "darwin" }), /TOOLCHAIN_DIRECTORY_IDENTITY_INVALID/);
+});
+
 test("unsupported hosts fail closed", () => {
   assert.throws(() => hostPlatform({ platform: "win32", arch: "x64" }), /TOOLCHAIN_UNSUPPORTED_PLATFORM/);
 });

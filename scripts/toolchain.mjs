@@ -467,11 +467,25 @@ function assertOwnedDirectoryChain(path, { platform = process.platform } = {}) {
   for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
     current = current === "/" ? `/${part}` : join(current, part);
     let st; try { st = lstatSync(current); } catch { continue; }
-    const trustedSystemAncestor = platform === "darwin" && ["/private", "/private/var", "/private/var/folders", "/private/tmp"].includes(current);
+    const trustedSystemAncestor = platform === "darwin" && (
+      ["/private", "/private/var", "/private/var/folders", "/private/tmp"].includes(current)
+      || isMacTempHierarchyAncestor(current, absolute, st)
+    );
     const trustedTempAncestor = current === "/tmp";
     if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1 || ((st.mode & 0o022) !== 0 && !trustedSystemAncestor && !trustedTempAncestor)) {throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");}
     if (typeof process.getuid === "function" && st.uid !== process.getuid() && current !== "/" && !trustedSystemAncestor) {throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");}
   }
+}
+
+// macOS creates root-owned, non-writable namespace components below
+// /private/var/folders (for example the two-character bucket). They are
+// trusted only as strict ancestors: the managed root itself, and everything
+// below it, must remain process-owned and private.
+function isMacTempHierarchyAncestor(current, managedPath, st) {
+  return current.startsWith("/private/var/folders/")
+    && current !== managedPath
+    && st.uid === 0
+    && (st.mode & 0o022) === 0;
 }
 
 function canonicalArchiveFileHashes({ artifact, archive }) {
