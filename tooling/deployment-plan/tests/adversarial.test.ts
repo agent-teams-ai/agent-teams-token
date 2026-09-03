@@ -10,6 +10,7 @@ import { independentlyVerify, independentlyVerifyRpc } from "../src/application/
 import { publishReadyLast, verifyBundle } from "../src/composition/index.ts";
 import { computePlanId, sha256Hex } from "../src/domain/identity.ts";
 import { main as estimateLocalMain } from "../../../scripts/deployment/estimate-local.ts";
+import { testOnlyNoReplaceDirectoryRename } from "./helpers/no-replace-directory-rename.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
 const inputHash = sha256Hex(Buffer.from("0103", "hex"));
@@ -291,6 +292,7 @@ test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substi
     quote,
     roots,
     expected: artifact,
+    outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename },
   };
   const directory = await publishReadyLast({ ...publish, bundleName: "bundle" });
   await verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });

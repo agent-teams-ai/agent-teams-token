@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { claimOwnedOutputDirectory } from "../src/adapters/safe-output.ts";
+import { testOnlyNoReplaceDirectoryRename } from "./helpers/no-replace-directory-rename.ts";
 
 test("output claim requires a canonical owned 0700 parent", async () => {
   const base = await canonicalTemporaryDirectory();
@@ -105,7 +106,9 @@ test("owned staging creation failure is reclaimed and a retry can publish", asyn
     /injected creation failure/u,
   );
   assert.deepEqual(await readdir(parent), []);
-  const retry = await claimOwnedOutputDirectory(parent, "bundle");
+  const retry = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+  });
   try {
     await retry.writeExclusive("READY", Buffer.from("ready"));
     assert.equal(await retry.publish(), join(parent, "bundle"));
@@ -119,6 +122,7 @@ test("staging leaf check/open swap cannot produce a publishable bundle", async (
   let claimPath = "";
   const displaced = join(parent, "displaced");
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async beforeStagingLeafOpen() {
       await rename(claimPath, displaced);
       await mkdir(claimPath, { mode: 0o700 });
@@ -141,6 +145,7 @@ test("exact staging-directory ABA around leaf open fails on leaf identity", asyn
   const displaced = join(parent, "displaced");
   const attacker = join(parent, "attacker");
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async beforeStagingLeafOpen() {
       await rename(claimPath, displaced);
       await mkdir(claimPath, { mode: 0o700 });
@@ -169,6 +174,7 @@ test("staging swap immediately before rename cannot be accepted as published", a
   let claimPath = "";
   const displaced = join(parent, "displaced");
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async beforePublishRename() {
       await rename(claimPath, displaced);
       await mkdir(claimPath, { mode: 0o700 });
@@ -190,6 +196,7 @@ test("published-directory substitution after atomic rename fails closed", async 
   const target = join(parent, "bundle");
   const displaced = join(parent, "displaced");
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async afterPublishRename() {
       await rename(target, displaced);
       await mkdir(target, { mode: 0o700 });
@@ -207,7 +214,9 @@ test("published-directory substitution after atomic rename fails closed", async 
 
 test("exclusive output files cannot be overwritten", async () => {
   const parent = await canonicalTemporaryDirectory();
-  const claim = await claimOwnedOutputDirectory(parent, "bundle");
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+  });
   try {
     await claim.writeExclusive("deployment-plan.v2.json", Buffer.from("{}\n"));
     await assert.rejects(
@@ -228,6 +237,7 @@ test("publication durably syncs staging before rename and parent after rename", 
   const parent = await canonicalTemporaryDirectory();
   const operations: string[] = [];
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async beforeStagingDirectorySync() { operations.push("before-staging-sync"); },
     async afterStagingDirectorySync() { operations.push("after-staging-sync"); },
     async beforePublishRename() { operations.push("before-rename"); },
@@ -250,6 +260,7 @@ test("publication durably syncs staging before rename and parent after rename", 
 test("staging sync failure prevents publication", async () => {
   const parent = await canonicalTemporaryDirectory();
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async beforeStagingDirectorySync() { throw new Error("injected staging sync failure"); },
   });
   try {
@@ -265,6 +276,7 @@ test("staging sync failure prevents publication", async () => {
 test("parent sync failure rolls READY back and leaves no acceptable bundle", async () => {
   const parent = await canonicalTemporaryDirectory();
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async parentDirectorySync() { throw new Error("injected parent fsync failure"); },
   });
   try {
