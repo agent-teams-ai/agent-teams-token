@@ -531,3 +531,13 @@ function writeExecutable(path, contents) {
   writeFileSync(path, contents);
   chmodSync(path, 0o755);
 }
+
+
+test("toolchain subprocesses use a minimal environment and protected download parts", () => {
+  const source = readFileSync(join(repositoryRoot, "scripts/toolchain.mjs"), "utf8");
+  assert.doesNotMatch(source, /env:\s*\{\s*\.\.\.process\.env/);
+  assert.match(source, /O_NOFOLLOW/);
+  assert.match(source, /O_EXCL/);
+  assert.match(source, /nlink !== 1/);
+  assert.match(source, /function minimalSubprocessEnv/);
+});

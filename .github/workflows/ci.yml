@@ -192,6 +192,7 @@ jobs:
         run: scripts/assert-clean-head.sh "$GITHUB_SHA"
 
   solidity-security:
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: [solidity]
@@ -205,6 +206,19 @@ jobs:
       SLITHER_SOLC_PATH: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
       SLITHER_DOCKER_PATH: /usr/bin/docker
     steps:
+      - name: Assert solidity prerequisite completed successfully
+        if: ${{ always() }}
+        shell: bash
+        env:
+          SLITHER_FAILURE_STAGE: ci-prerequisite
+          SLITHER_FAILURE_CODE: CI_PREREQUISITE_FAILED
+          SOLIDITY_RESULT: ${{ needs.solidity.result }}
+        run: |
+          if test "$SOLIDITY_RESULT" = success; then
+            printf "SLITHER_PREREQUISITE_RESULT=success\n" >> "$GITHUB_ENV"
+          else
+            printf "SLITHER_PREREQUISITE_RESULT=%s\n" "$SOLIDITY_RESULT" >> "$GITHUB_ENV"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -233,6 +247,11 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fail closed on solidity prerequisite result
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          test "${SLITHER_PREREQUISITE_RESULT:-failure}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=%s\n" "${SLITHER_PREREQUISITE_RESULT:-missing}" >&2; exit 1; }
       - name: Create minimal prerequisite-failure evidence
         if: ${{ failure() }}
         shell: bash

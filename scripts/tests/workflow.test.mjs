@@ -127,6 +127,10 @@ test("deployment-plan job proves the real unsigned loopback path", () => {
 test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence", () => {
   const job = workflow.jobs["solidity-security"];
   assert.deepEqual(job.needs, ["solidity"]);
+  assert.equal(job.if, "${{ always() }}");
+  const prerequisite = job.steps.find((step) => step.name === "Assert solidity prerequisite completed successfully");
+  assert.equal(prerequisite.if, "${{ always() }}");
+  assert.match(prerequisite.run, /SOLIDITY_PREREQUISITE_FAILED/);
   assert.equal(job.env.SLITHER_CANDIDATE_SHA, "${{ github.sha }}");
   assert.equal(job.env.SLITHER_DOCKER_PATH, "/usr/bin/docker");
   assert.match(job.env.SLITHER_FORGE_PATH, /foundry-v1\.8\.0-linux-x64\/forge/u);

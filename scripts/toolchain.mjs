@@ -7,6 +7,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  closeSync,
   lstatSync,
   readFileSync,
   readdirSync,
@@ -15,6 +17,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -189,7 +192,8 @@ function downloadableTools(lock, platform, scope = "core") {
 export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl, scope = "core" }) {
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
-  mkdirSync(downloads, { recursive: true });
+  mkdirSync(downloads, { recursive: true, mode: 0o700 });
+  chmodSync(downloads, 0o700);
   for (const [name, _tool, artifact] of downloadableTools(lock, platform, scope)) {
     const target = join(downloads, artifact.archiveName);
     if (existsSync(target) && sha256(target) === artifact.sha256) {
@@ -198,10 +202,17 @@ export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloa
     }
     if (existsSync(target)) {rmSync(target);}
     const part = `${target}.part`;
-    if (existsSync(part)) {rmSync(part);}
+    if (existsSync(part)) {rmSync(part, { force: true });}
+    const partFd = openSync(part, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
+    const before = lstatSync(part);
+    closeSync(partFd);
     const result = downloader(artifact.url ?? artifact.source, part);
     if (result !== 0) {
       throw new Error(`TOOLCHAIN_FETCH_FAILED tool=${name} platform=${platform} partial=${part}`);
+    }
+    const after = lstatSync(part);
+    if (!after.isFile() || after.nlink !== 1 || after.ino !== before.ino || after.dev !== before.dev) {
+      throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
     }
     const actual = sha256(part);
     if (actual !== artifact.sha256) {
@@ -218,8 +229,12 @@ function downloadWithCurl(url, part) {
   return spawnSync(
     "/usr/bin/curl",
     ["--fail", "--location", "--proto", "=https", "--show-error", "--output", part, url],
-    { stdio: "inherit" },
+    { stdio: "inherit", env: minimalSubprocessEnv() },
   ).status ?? 1;
+}
+
+function minimalSubprocessEnv() {
+  return { PATH: "/usr/bin:/bin", HOME: "/tmp", LANG: "C", LC_ALL: "C", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", COREPACK_ENABLE_PROJECT_SPEC: "0" };
 }
 
 export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "core" }) {
@@ -387,7 +402,7 @@ function executePnpmVersionCheck({ root, nodeExecutable, tool }) {
   }
   const actual = execFileSync(nodeExecutable, [join(root, "bin", "pnpm.cjs"), "--version"], {
     encoding: "utf8",
-    env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", COREPACK_ENABLE_PROJECT_SPEC: "0" },
+    env: minimalSubprocessEnv(),
     timeout: 15_000,
   }).trim();
   if (actual !== tool.version) {throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`);}
@@ -415,7 +430,7 @@ function executeVersionChecks(root, artifact) {
   return artifact.versionChecks.map((check) => {
     const actual = execFileSync(join(root, check.path), check.args, {
       encoding: "utf8",
-      env: { ...process.env, PATH: "/usr/bin:/bin" },
+      env: minimalSubprocessEnv(),
       timeout: 15_000,
     }).trim();
     if (!new RegExp(check.pattern).test(actual)) {

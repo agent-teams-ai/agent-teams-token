@@ -5,6 +5,7 @@ token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 token_mode=${1:-all}
 token_tools_root="$token_repo_root/.tools"
 token_downloads="$token_tools_root/downloads"
+umask 077
 
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64)
@@ -33,9 +34,9 @@ esac
 
 token_sha256() {
   if [[ -n "$token_sha256_argument" ]]; then
-    "$token_sha256_program" "$token_sha256_argument" 256 "$1" | /usr/bin/awk '{print $1}'
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_sha256_program" "$token_sha256_argument" 256 "$1" | /usr/bin/awk '{print $1}'
   else
-    "$token_sha256_program" "$1" | /usr/bin/awk '{print $1}'
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_sha256_program" "$1" | /usr/bin/awk '{print $1}'
   fi
 }
 
@@ -43,15 +44,24 @@ token_prepare_pinned_node() {
   local token_allow_fetch=$1
   local token_archive_path="$token_downloads/$token_node_archive"
   mkdir -p "$token_downloads"
+  chmod 700 "$token_tools_root" "$token_downloads"
   if [[ ! -f "$token_archive_path" ]] || [[ "$(token_sha256 "$token_archive_path")" != "$token_node_sha256" ]]; then
     if [[ "$token_allow_fetch" != true ]]; then
       printf 'TOOLCHAIN_OFFLINE_CACHE_MISS tool=node expected=%s\n' "$token_archive_path" >&2
       return 1
     fi
     rm -f "$token_archive_path"
-    local token_part="$token_archive_path.part"
-    rm -f "$token_part"
-    /usr/bin/curl --fail --location --proto '=https' --show-error --output "$token_part" "$token_node_url"
+    local token_part
+    token_part=$(/usr/bin/mktemp "$token_downloads/.node.part.XXXXXX")
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C /usr/bin/curl --fail --location --proto '=https' --show-error --output "$token_part" "$token_node_url"
+    local token_part_stat
+    if [[ "$(uname -s)" == Linux ]]; then
+      token_part_stat=$(/usr/bin/stat -c '%i:%d:%h:%F' "$token_part")
+      [[ "$token_part_stat" == *":1:regular file" ]]
+    else
+      token_part_stat=$(/usr/bin/stat -f '%i:%d:%l:%HT' "$token_part")
+      [[ "$token_part_stat" == *":1:Regular File" ]]
+    fi
     local token_actual_sha256
     token_actual_sha256=$(token_sha256 "$token_part")
     if [[ "$token_actual_sha256" != "$token_node_sha256" ]]; then
@@ -65,36 +75,36 @@ token_prepare_pinned_node() {
   trap 'rm -rf "$token_node_stage"' EXIT
   /usr/bin/tar "$token_node_tar_flag" "$token_archive_path" -C "$token_node_stage"
   token_pinned_node="$token_node_stage/$token_node_directory/bin/node"
-  [[ "$($token_pinned_node --version)" == v24.20.0 ]]
+  [[ "$(env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" --version)" == v24.20.0 ]]
 }
 
 case "$token_mode" in
   fetch)
     token_prepare_pinned_node true
-    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch "${@:2}"
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch "${@:2}"
     ;;
   install)
     token_prepare_pinned_node false
-    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install "${@:2}"
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install "${@:2}"
     ;;
   verify)
     token_prepare_pinned_node false
-    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" verify "${@:2}"
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" verify "${@:2}"
     ;;
   all)
     token_prepare_pinned_node true
-    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch
-    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install --offline
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install --offline
     source "$token_repo_root/scripts/env.sh"
     if [[ "$(command -v pnpm)" != "$token_tools_root/bin/pnpm" ]]; then
       printf '%s\n' 'TOOLCHAIN_PNPM_PATH_MISMATCH expected=.tools/bin/pnpm' >&2
       exit 1
     fi
-    if [[ "$(pnpm --version 2>/dev/null || true)" != "11.24.0" ]]; then
+    if [[ "$(/usr/bin/env -i PATH="$PATH" HOME=/tmp LANG=C LC_ALL=C pnpm --version 2>/dev/null || true)" != "11.24.0" ]]; then
       printf '%s\n' 'TOOLCHAIN_PNPM_MISMATCH expected=11.24.0 action=install-the-exact-packageManager-version' >&2
       exit 1
     fi
-    pnpm install --frozen-lockfile
+    /usr/bin/env -i PATH="$PATH" HOME=/tmp LANG=C LC_ALL=C pnpm install --frozen-lockfile
     ;;
   *)
     printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all]\n' >&2
