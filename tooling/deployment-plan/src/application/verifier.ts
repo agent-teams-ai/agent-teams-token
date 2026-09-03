@@ -150,6 +150,11 @@ function validateCapPolicy(value: unknown, roots: TrustRoots): void {
 }
 
 function validateApprovedArtifactIntegrity(expected: ApprovedArtifact, roots: TrustRoots): void {
+  if (sha256Hex(Buffer.from(expected.creationBytecode.slice(2), "hex")) !== expected.creationBytecodeHash
+    || sha256Hex(Buffer.from(expected.constructorArguments.slice(2), "hex")) !== expected.constructorArgumentsHash
+    || sha256Hex(Buffer.from(expected.constructorAbiBytes.slice(2), "hex")) !== expected.constructorAbiHash) {
+    fail("APPROVED_ARTIFACT_FORGED", "approved artifact component hashes are not bound to their bytes");
+  }
   const inputBytes = Buffer.from(expected.creationInput.slice(2), "hex");
   if (sha256Hex(inputBytes) !== expected.creationInputHash
     || expected.creationInput !== `${expected.creationBytecode}${expected.constructorArguments.slice(2)}`) {

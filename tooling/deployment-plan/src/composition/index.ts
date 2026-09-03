@@ -66,6 +66,9 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
   if (!/^[a-zA-Z0-9._-]+$/u.test(request.bundleName)) {
     fail("BUNDLE_NAME_INVALID", "bundle name is invalid");
   }
+  if (/^\.staging-/u.test(request.bundleName)) {
+    fail("BUNDLE_STAGING_REJECTED", "staging names are reserved");
+  }
   const planBytes = jsonBytes(request.plan);
   const quoteBytes = jsonBytes(request.quote);
   const ready: ReadyMarker = {
