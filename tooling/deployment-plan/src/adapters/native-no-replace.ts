@@ -192,7 +192,7 @@ class ChildExitError extends Error {
 }
 
 async function runChild(executable: string, arguments_: readonly string[], code: string): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const child = spawn(executable, arguments_, {
       shell: false,
       stdio: ["ignore", "ignore", "pipe"],
@@ -213,7 +213,7 @@ async function runChild(executable: string, arguments_: readonly string[], code:
     child.once("exit", (exitCode, signal) => {
       clearTimeout(timeout);
       if (exitCode === 0 && signal === null) {
-        resolvePromise();
+        resolve();
       } else {
         reject(new ChildExitError(
           exitCode,

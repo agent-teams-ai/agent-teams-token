@@ -396,8 +396,8 @@ test("READY finalization cannot succeed before its post-rename directory sync", 
   const parent = await canonicalTemporaryDirectory();
   let releaseSync: (() => void) | undefined;
   let reportSyncEntered: (() => void) | undefined;
-  const syncEntered = new Promise<void>((resolvePromise) => { reportSyncEntered = resolvePromise; });
-  const allowSync = new Promise<void>((resolvePromise) => { releaseSync = resolvePromise; });
+  const syncEntered = new Promise<void>((resolve) => { reportSyncEntered = resolve; });
+  const allowSync = new Promise<void>((resolve) => { releaseSync = resolve; });
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
     noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async finalMarkerDirectorySync() {
@@ -411,6 +411,7 @@ test("READY finalization cannot succeed before its post-rename directory sync", 
     let finalized = false;
     const finalization = claim.finalizeReady("READY", Buffer.from("ready")).then(() => {
       finalized = true;
+      return undefined;
     });
     await syncEntered;
     assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
