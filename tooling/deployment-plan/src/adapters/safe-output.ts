@@ -183,7 +183,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     try {
       await this.faultInjection.beforePublishRename?.();
       await this.assertStagingStable();
-      for (const name of (await readdir(this.path)).toSorted()) await rename(join(this.path, name), join(this.target, name));
+      const names = (await readdir(this.path)).toSorted();
+      const ordered = names.filter((name) => name !== "READY");
+      if (names.includes("READY")) ordered.push("READY");
+      for (const name of ordered) await rename(join(this.path, name), join(this.target, name));
       await rmdir(this.path);
       await this.faultInjection.afterPublishRename?.();
       await this.assertParentStable();
