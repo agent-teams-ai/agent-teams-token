@@ -11,6 +11,7 @@ import {
   fstatSync,
   lstatSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -18,7 +19,7 @@ import {
   writeFileSync,
   writeSync,constants as fsConstants
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalizeTrustedPath, assertOwnedDirectoryChain } from "./toolchain-paths.mjs";
 import { validateLock } from "./toolchain-lock-validation.mjs";
 import { fileURLToPath } from "node:url";
@@ -38,13 +39,13 @@ export function hostPlatform({ platform = process.platform, arch = process.arch 
 }
 
 export function loadLock(lockPath = join(repositoryRoot, "tooling/toolchain.lock.json")) {
-  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+  const lock = JSON.parse(readVerifiedBytes(lockPath).bytes.toString("utf8"));
   validateLock(lock);
   return lock;
 }
 
 export function sha256(path) {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return readVerifiedBytes(path).hash;
 }
 
 function coreDownloadableTools(lock) {
@@ -67,7 +68,14 @@ function downloadableTools(lock, platform, scope = "core") {
   return tools;
 }
 
-export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl, scope = "core", hostPlatform: host = process.platform }) {
+export function fetchArtifacts({
+  lock,
+  platform,
+  toolsRoot,
+  downloader = downloadWithCurl,
+  scope = "core",
+  hostPlatform: host = process.platform,
+}) {
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot, { platform: host });
   assertOwnedDirectoryChain(toolsRoot, { platform: host });
@@ -76,53 +84,64 @@ export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloa
   assertOwnedDirectoryChain(downloads, { platform: host });
   chmodSync(downloads, 0o700);
   for (const [name, _tool, artifact] of downloadableTools(lock, platform, scope)) {
-    const target = join(downloads, artifact.archiveName);
-    if (isRegularCacheEntry(target) && sha256(target) === artifact.sha256) {
+    const target = containedPath(downloads, artifact.archiveName);
+    if (verifiedCacheHash(target) === artifact.sha256) {
       process.stdout.write(`FETCH_CACHED tool=${name} platform=${platform} sha256=${artifact.sha256}\n`);
       continue;
     }
-    if (existsSync(target)) {rmSync(target);}
-    const part = `${target}.part`;
-    if (existsSync(part)) {rmSync(part, { force: true });}
-    const partFd = openSync(part, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
-    const before = lstatSync(part);
-    closeSync(partFd);
-    const result = downloader(artifact.url ?? artifact.source, part);
-    if (result !== 0) {
-      throw new Error(`TOOLCHAIN_FETCH_FAILED tool=${name} platform=${platform} partial=${part}`);
-    }
-    const after = lstatSync(part);
-    if (!after.isFile() || after.nlink !== 1 || after.ino !== before.ino || after.dev !== before.dev) {
-      throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
-    }
-    const actual = sha256(part);
-    if (actual !== artifact.sha256) {
-      throw new Error(
-        `TOOLCHAIN_CHECKSUM_MISMATCH tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual} partial=${part}`,
-      );
-    }
-    const publishFd = openSync(part, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    try {
-      const fdStat = fstatSync(publishFd);
-      const pathStat = lstatSync(part);
-      if (!pathStat.isFile() || pathStat.nlink !== 1 || pathStat.ino !== fdStat.ino || pathStat.dev !== fdStat.dev) {
-        throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
-      }
-      renameSync(part, target);
-    } finally { closeSync(publishFd); }
-    process.stdout.write(`FETCH_OK tool=${name} platform=${platform} sha256=${actual}\n`);
+    if (existsSync(target)) { rmSync(target); }
+    fetchArtifact({ name, platform, artifact, target, downloader });
   }
 }
 
-function isRegularCacheEntry(path) {
-  try { const entry = lstatSync(path); return entry.isFile() && entry.nlink === 1; } catch { return false; }
+function fetchArtifact({ name, platform, artifact, target, downloader }) {
+  const part = `${target}.part`;
+  if (existsSync(part)) { rmSync(part, { force: true }); }
+  const flags = fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
+  const partFd = openSync(part, flags, 0o600);
+  try {
+    const before = checkedRegularDescriptor(partFd);
+    const result = downloader(artifact.url ?? artifact.source, partFd);
+    if (result !== 0) {
+      throw new Error(`TOOLCHAIN_FETCH_FAILED tool=${name} platform=${platform} partial=${part}`);
+    }
+    let after;
+    try {
+      after = checkedRegularDescriptor(partFd);
+    } catch {
+      throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
+    }
+    const pathStat = lstatSync(part);
+    if (!sameIdentity(before, after) || !sameIdentity(before, pathStat) || pathStat.nlink !== 1) {
+      throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
+    }
+    const actual = hashDescriptor(partFd);
+    if (actual !== artifact.sha256) {
+      throw new Error(
+        `TOOLCHAIN_CHECKSUM_MISMATCH tool=${name} platform=${platform}`
+        + ` expected=${artifact.sha256} actual=${actual} partial=${part}`,
+      );
+    }
+    renameSync(part, target);
+    const published = lstatSync(target);
+    if (!sameIdentity(before, published) || published.nlink !== 1) {
+      throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
+    }
+    process.stdout.write(`FETCH_OK tool=${name} platform=${platform} sha256=${actual}\n`);
+  } finally {
+    closeSync(partFd);
+  }
 }
 
-function downloadWithCurl(url, part) {
+function verifiedCacheHash(path) {
+  try { return readVerifiedBytes(path).hash; } catch { return undefined; }
+}
+
+function downloadWithCurl(url, partFd) {
   return spawnSync(
     "/usr/bin/curl",
-    ["--fail", "--location", "--proto", "=https", "--show-error", "--output", part, url],
-    { stdio: "inherit", env: minimalSubprocessEnv() },
+    ["--fail", "--location", "--proto", "=https", "--show-error", "--output", "-", url],
+    { stdio: ["ignore", partFd, "inherit"], env: minimalSubprocessEnv() },
   ).status ?? 1;
 }
 
@@ -139,9 +158,9 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
   assertOwnedDirectoryChain(downloads, { platform: host });
   mkdirSync(toolsRoot, { recursive: true });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
-    const archive = join(downloads, artifact.archiveName);
+    const archive = containedPath(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_OFFLINE_CACHE_MISS" });
-    const destination = join(toolsRoot, artifact.installDirectory);
+    const destination = containedPath(toolsRoot, artifact.installDirectory);
     const present = inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock, hostPlatform: host });
     if (present.ok) {
       process.stdout.write(
@@ -168,14 +187,60 @@ function verifyArchive({ name, platform, artifact, archive, missingCode }) {
 function readVerifiedBytes(path) {
   const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
-    const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) {throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID");}
-    const bytes = readFileSync(fd);
-    const hash = createHash("sha256").update(bytes).digest("hex");
-    const pathStat = lstatSync(path); const after = fstatSync(fd);
-    if (!pathStat.isFile() || pathStat.nlink !== 1 || after.ino !== before.ino || after.dev !== before.dev || pathStat.ino !== before.ino || pathStat.dev !== before.dev) {throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
-    return { bytes, hash };
-  } finally { closeSync(fd); }
+    const before = checkedRegularDescriptor(fd);
+    const bytes = readDescriptorBytes(fd, before.size);
+    const after = checkedRegularDescriptor(fd);
+    const pathStat = lstatSync(path);
+    if (!sameIdentity(before, after) || !sameIdentity(before, pathStat) || pathStat.nlink !== 1) {
+      throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
+    }
+    return { bytes, hash: createHash("sha256").update(bytes).digest("hex") };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function checkedRegularDescriptor(fd) {
+  const stat = fstatSync(fd);
+  if (!stat.isFile() || stat.nlink !== 1) { throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID"); }
+  return stat;
+}
+
+function readDescriptorBytes(fd, size = checkedRegularDescriptor(fd).size) {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(fd, bytes, offset, size - offset, offset);
+    if (count === 0) { throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED"); }
+    offset += count;
+  }
+  return bytes;
+}
+
+function hashDescriptor(fd) {
+  const before = checkedRegularDescriptor(fd);
+  const bytes = readDescriptorBytes(fd, before.size);
+  const after = checkedRegularDescriptor(fd);
+  if (!sameIdentity(before, after) || before.size !== after.size) {
+    throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
+  }
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function sameIdentity(left, right) {
+  return left.isFile() && right.isFile() && left.dev === right.dev && left.ino === right.ino;
+}
+
+function containedPath(root, value) {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\\") || isAbsolute(value)) {
+    throw new Error("TOOLCHAIN_PATH_OUTSIDE_ROOT");
+  }
+  const target = resolve(root, value);
+  const fromRoot = relative(resolve(root), target);
+  if (fromRoot === "" || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error("TOOLCHAIN_PATH_OUTSIDE_ROOT");
+  }
+  return target;
 }
 
 function atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock, hostPlatform: host = process.platform }) {
@@ -190,7 +255,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
     const archiveFd = openSync(verifiedArchive, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
     try { writeSync(archiveFd, archiveBytes); } finally { closeSync(archiveFd); }
     if (artifact.archive === "executable") {
-      const target = join(staged, artifact.expectedFiles[0]);
+      const target = containedPath(staged, artifact.expectedFiles[0]);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, archiveBytes);
       chmodSync(target, 0o755);
@@ -207,7 +272,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       ? join(staged, entries[0])
       : staged;
     const files = Object.fromEntries(artifact.expectedFiles.map((path) => {
-      const target = join(source, path);
+      const target = containedPath(source, path);
       if (!existsSync(target) || !lstatSync(target).isFile()) {
         throw new Error(`TOOLCHAIN_INSTALL_EXPECTED_FILE tool=${name} platform=${platform} path=${path}`);
       }
@@ -217,11 +282,12 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
     if (name === "pnpm") {
       executePnpmVersionCheck({
         root: source,
-        nodeExecutable: pinnedNode(lock, toolsRoot, platform),
+        node: pinnedNode(lock, toolsRoot, platform),
+        pnpmHash: files["bin/pnpm.cjs"],
         tool,
       });
     } else {
-      executeVersionChecks(source, artifact);
+      executeVersionChecks(source, artifact, files);
     }
     writeFileSync(join(source, provenanceFile), `${JSON.stringify({
       schemaVersion: 1,
@@ -241,7 +307,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       if (backup && !existsSync(destination)) {renameSync(backup, destination);}
       throw error;
     }
-    if (name === "pnpm") {writePnpmWrapper({ lock, toolsRoot, platform, hostPlatform: host });}
+    if (name === "pnpm") {writePnpmWrapper({ toolsRoot, hostPlatform: host });}
     if (backup) {rmSync(backup, { force: true, recursive: true });}
   } finally {
     rmSync(stageRoot, { recursive: true, force: true });
@@ -256,12 +322,19 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
   if (!existsSync(provenancePath)) {return { ok: false, code: "provenance-missing", actualVersion: "unknown" };}
   let provenance;
   try {
-    provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+    provenance = JSON.parse(readVerifiedBytes(provenancePath).bytes.toString("utf8"));
   } catch {
     return { ok: false, code: "provenance-invalid", actualVersion: "unknown" };
   }
+  const provenanceKeys = ["artifactSha256", "files", "platform", "schemaVersion", "tool", "version"];
+  const fileKeys = typeof provenance.files === "object" && provenance.files !== null
+    ? Object.keys(provenance.files).sort()
+    : [];
   if (
-    provenance.schemaVersion !== 1
+    JSON.stringify(Object.keys(provenance).sort()) !== JSON.stringify(provenanceKeys)
+    || JSON.stringify(fileKeys) !== JSON.stringify([...artifact.expectedFiles].sort())
+    || fileKeys.some((key) => !/^[a-f0-9]{64}$/.test(provenance.files[key]))
+    || provenance.schemaVersion !== 1
     || provenance.tool !== name
     || provenance.version !== tool.version
     || provenance.platform !== platform
@@ -270,10 +343,13 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
     return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
   }
   let canonicalFiles;
-  try { canonicalFiles = canonicalArchiveFileHashes({ artifact, archive: join(toolsRoot, "downloads", artifact.archiveName) }); }
+  try { canonicalFiles = canonicalArchiveFileHashes({ artifact, archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName) }); }
   catch { return { ok: false, code: "archive-provenance-unavailable", actualVersion: "unknown" }; }
+  if (fileKeys.some((path) => provenance.files[path] !== canonicalFiles[path])) {
+    return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
+  }
   for (const path of artifact.expectedFiles) {
-    const target = join(destination, path);
+    const target = containedPath(destination, path);
     const exists = existsSync(target);
     const code = inspectStableExpectedFile({ artifact: { ...artifact, provenanceFiles: canonicalFiles }, path, target, exists });
     if (code) {return { ok: false, code, actualVersion: "unknown" };}
@@ -283,16 +359,17 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
     actualVersion = name === "pnpm"
       ? executePnpmVersionCheck({
           root: destination,
-          nodeExecutable: pinnedNode(lock, toolsRoot, platform),
+          node: pinnedNode(lock, toolsRoot, platform),
+          pnpmHash: canonicalFiles["bin/pnpm.cjs"],
           tool,
         })
-      : executeVersionChecks(destination, artifact);
+      : executeVersionChecks(destination, artifact, canonicalFiles);
   } catch (error) {
     return { ok: false, code: "version-command", actualVersion: error instanceof Error ? error.message : String(error) };
   }
   if (name === "pnpm") {
     const wrapper = join(toolsRoot, "bin", "pnpm");
-    if (!existsSync(wrapper) || readFileSync(wrapper, "utf8") !== pnpmWrapper(lock, platform)) {
+    if (!existsSync(wrapper) || readVerifiedBytes(wrapper).bytes.toString("utf8") !== pnpmWrapper()) {
       return { ok: false, code: "wrapper-missing-or-tampered", actualVersion: singleLine(actualVersion) };
     }
   }
@@ -327,75 +404,120 @@ function canonicalArchiveFileHashes({ artifact, archive }) {
 }
 
 function pinnedNode(lock, toolsRoot, platform) {
-  return join(toolsRoot, lock.tools.node.platforms[platform].installDirectory, "bin", "node");
+  const artifact = lock.tools.node.platforms[platform];
+  const hashes = canonicalArchiveFileHashes({ artifact, archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName) });
+  return { path: containedPath(containedPath(toolsRoot, artifact.installDirectory), "bin/node"), sha256: hashes["bin/node"] };
 }
 
-function executePnpmVersionCheck({ root, nodeExecutable, tool }) {
-  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+function executePnpmVersionCheck({ root, node, pnpmHash, tool }) {
+  const packageJson = JSON.parse(readVerifiedBytes(containedPath(root, "package.json")).bytes.toString("utf8"));
   if (packageJson.name !== "pnpm" || packageJson.version !== tool.version) {
     throw new Error(`pnpm-package-mismatch:actual=${packageJson.name}@${packageJson.version}`);
   }
-  const pnpmPath = join(root, "bin", "pnpm.cjs");
-  const identity = stablePathIdentity(pnpmPath);
-  const actual = execFileSync(nodeExecutable, [pnpmPath, "--version"], {
-    encoding: "utf8",
-    env: minimalSubprocessEnv(),
-    timeout: 15_000,
-  }).trim();
-  if (!samePathIdentity(pnpmPath, identity)) {throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
-  if (actual !== tool.version) {throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`);}
+  const script = { path: containedPath(root, "bin/pnpm.cjs"), sha256: pnpmHash };
+  const actual = executeOpenedNode({ node, script, args: ["--version"] });
+  if (actual !== tool.version) { throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`); }
   return `pnpm=${actual}`;
 }
 
-function pnpmWrapper(lock, platform) {
-  const nodeDirectory = lock.tools.node.platforms[platform].installDirectory;
-  const pnpmDirectory = lock.tools.pnpm.installDirectory;
-  return `#!/usr/bin/env bash\nset -euo pipefail\ntoken_pnpm_tools_root=$(CDPATH= cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd)\nexport COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nexport COREPACK_ENABLE_PROJECT_SPEC=0\nexec "$token_pnpm_tools_root/${nodeDirectory}/bin/node" "$token_pnpm_tools_root/${pnpmDirectory}/bin/pnpm.cjs" --config.auto-install-peers=false "$@"\n`;
+function pnpmWrapper() {
+  return "#!/usr/bin/env bash\n"
+    + "set -euo pipefail\n"
+    + "token_pnpm_tools_root=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE[0]}\")/..\" && pwd)\n"
+    + "token_pnpm_repo_root=$(CDPATH= cd -- \"$token_pnpm_tools_root/..\" && pwd)\n"
+    + "exec \"$token_pnpm_repo_root/scripts/bootstrap.sh\" run-pnpm \"$@\"\n";
 }
 
-function writePnpmWrapper({ lock, toolsRoot, platform, hostPlatform: host = process.platform }) {
+function writePnpmWrapper({ toolsRoot, hostPlatform: host = process.platform }) {
   toolsRoot = canonicalizeTrustedPath(toolsRoot, { platform: host });
-  const bin = join(toolsRoot, "bin");
+  const bin = containedPath(toolsRoot, "bin");
   mkdirSync(bin, { recursive: true, mode: 0o700 });
   assertOwnedDirectoryChain(bin, { platform: host });
-  const target = join(bin, "pnpm");
-  const part = `${target}.part`;
-  if (existsSync(part)) { const stale = lstatSync(part); if (!stale.isFile() || stale.nlink !== 1) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE");} rmSync(part); }
-  const fd = openSync(part, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o700);
+  const target = containedPath(bin, "pnpm"); const part = `${target}.part`;
+  if (existsSync(part)) {
+    const stale = lstatSync(part);
+    if (!stale.isFile() || stale.nlink !== 1) { throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE"); }
+    rmSync(part);
+  }
+  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
+  const fd = openSync(part, flags, 0o700);
   try {
-    const contents = pnpmWrapper(lock, platform);
-    writeSync(fd, contents);
-    const st = fstatSync(fd);
-    if (!st.isFile() || st.nlink !== 1) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");}
-  } finally { closeSync(fd); }
-  const check = lstatSync(part);
-  if (!check.isFile() || check.nlink !== 1) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");}
-  renameSync(part, target);
-  const published = lstatSync(target); if (!published.isFile() || published.nlink !== 1 || readFileSync(target, "utf8") !== pnpmWrapper(lock, platform)) {throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");}
-}
-
-function stablePathIdentity(path) {
-  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-  try { const st = fstatSync(fd); if (!st.isFile() || st.nlink !== 1) {throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID");} return { ino: st.ino, dev: st.dev }; }
-  finally { closeSync(fd); }
-}
-function samePathIdentity(path, identity) {
-  try { const st = lstatSync(path); return st.isFile() && st.nlink === 1 && st.ino === identity.ino && st.dev === identity.dev; } catch { return false; }
-}
-
-function executeVersionChecks(root, artifact) {
-  return artifact.versionChecks.map((check) => {
-    const executable = join(root, check.path);
-    const identity = stablePathIdentity(executable);
-    const actual = execFileSync(executable, check.args, {
-      encoding: "utf8",
-      env: minimalSubprocessEnv(),
-      timeout: 15_000,
-    }).trim();
-    if (!samePathIdentity(executable, identity)) {throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
-    if (!new RegExp(check.pattern).test(actual)) {
-      throw new Error(`version-mismatch:${check.name}:actual=${singleLine(actual)}`);
+    writeSync(fd, pnpmWrapper());
+    const identity = checkedRegularDescriptor(fd);
+    const check = lstatSync(part);
+    if (!sameIdentity(identity, check) || check.nlink !== 1) {
+      throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
     }
+    renameSync(part, target);
+    const published = lstatSync(target);
+    if (!sameIdentity(identity, published) || published.nlink !== 1) {
+      throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
+    }
+  } finally {
+    closeSync(fd);
+  }
+  if (readVerifiedBytes(target).bytes.toString("utf8") !== pnpmWrapper()) {
+    throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
+  }
+}
+
+export function descriptorRoot(platform = process.platform) {
+  if (platform === "linux") { return "/proc/self/fd"; }
+  if (platform === "darwin") { return "/dev/fd"; }
+  throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED platform=${platform}`);
+}
+
+function openExpectedFile(path, expectedHash) {
+  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const identity = checkedRegularDescriptor(fd); const actual = hashDescriptor(fd);
+    if (actual !== expectedHash) { throw new Error(`TOOLCHAIN_EXECUTABLE_CHECKSUM expected=${expectedHash} actual=${actual}`); }
+    return { fd, identity, path };
+  } catch (error) { closeSync(fd); throw error; }
+}
+
+function assertPathStillIdentifies(opened) {
+  const current = lstatSync(opened.path);
+  if (current.nlink !== 1 || !sameIdentity(opened.identity, current)) { throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED"); }
+}
+
+function checkedSpawn(result) {
+  if (result.error) { throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED cause=${result.error.code ?? "unknown"}`); }
+  if (result.status !== 0) { throw new Error(`TOOLCHAIN_VERSION_COMMAND_FAILED status=${result.status} stderr=${singleLine(result.stderr)}`); }
+  return String(result.stdout).trim();
+}
+
+export function executeVerifiedFile({ path, expectedSha256, args = [], beforeSpawn }) {
+  const opened = openExpectedFile(path, expectedSha256);
+  try {
+    beforeSpawn?.(); assertPathStillIdentifies(opened);
+    return checkedSpawn(spawnSync(`${descriptorRoot()}/3`, args, {
+      encoding: "utf8", env: minimalSubprocessEnv(), stdio: ["ignore", "pipe", "pipe", opened.fd], timeout: 15_000,
+    }));
+  } finally { closeSync(opened.fd); }
+}
+
+function executeOpenedNode({ node, script, args, stdio = "pipe" }) {
+  const openedNode = openExpectedFile(node.path, node.sha256); const openedScript = openExpectedFile(script.path, script.sha256);
+  try {
+    assertPathStillIdentifies(openedNode); assertPathStillIdentifies(openedScript);
+    const root = descriptorRoot(); const inherited = stdio === "inherit" ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"];
+    const result = spawnSync(`${root}/3`, [`${root}/4`, ...args], {
+      encoding: stdio === "inherit" ? undefined : "utf8", env: minimalSubprocessEnv(), stdio: [...inherited, openedNode.fd, openedScript.fd],
+      timeout: stdio === "inherit" ? undefined : 15_000,
+    });
+    if (stdio === "inherit") {
+      if (result.error) { throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED cause=${result.error.code ?? "unknown"}`); }
+      return result.status ?? 1;
+    }
+    return checkedSpawn(result);
+  } finally { closeSync(openedScript.fd); closeSync(openedNode.fd); }
+}
+
+function executeVersionChecks(root, artifact, hashes) {
+  return artifact.versionChecks.map((check) => {
+    const actual = executeVerifiedFile({ path: containedPath(root, check.path), expectedSha256: hashes[check.path], args: check.args });
+    if (!new RegExp(check.pattern).test(actual)) { throw new Error(`version-mismatch:${check.name}:actual=${singleLine(actual)}`); }
     return `${check.name}=${singleLine(actual)}`;
   }).join(",");
 }
@@ -412,14 +534,14 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
   assertOwnedDirectoryChain(toolsRoot, { platform: host });
   assertOwnedDirectoryChain(downloads, { platform: host });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
-    const archive = join(downloads, artifact.archiveName);
+    const archive = containedPath(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_CACHE_MISSING" });
     const installation = inspectInstallation({
       name,
       tool,
       artifact,
       platform,
-      destination: join(toolsRoot, artifact.installDirectory),
+      destination: containedPath(toolsRoot, artifact.installDirectory),
       toolsRoot,
       lock,
       hostPlatform: host,
@@ -431,6 +553,31 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
       `VERIFY_OK tool=${name} platform=${platform} version=${installation.actualVersion} sha256=${artifact.sha256}\n`,
     );
   }
+}
+
+export function runPnpm({ lock, platform, toolsRoot, args }) {
+  assertSupported(lock, platform);
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
+  assertOwnedDirectoryChain(toolsRoot);
+  const nodeTool = lock.tools.node;
+  const nodeArtifact = nodeTool.platforms[platform];
+  const pnpmTool = lock.tools.pnpm;
+  for (const [name, tool, artifact] of [["node", nodeTool, nodeArtifact], ["pnpm", pnpmTool, pnpmTool]]) {
+    const installation = inspectInstallation({
+      name, tool, artifact, platform, destination: containedPath(toolsRoot, artifact.installDirectory), toolsRoot, lock,
+    });
+    if (!installation.ok) { throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`); }
+  }
+  const pnpmHashes = canonicalArchiveFileHashes({
+    artifact: pnpmTool,
+    archive: containedPath(join(toolsRoot, "downloads"), pnpmTool.archiveName),
+  });
+  return executeOpenedNode({
+    node: pinnedNode(lock, toolsRoot, platform),
+    script: { path: containedPath(containedPath(toolsRoot, pnpmTool.installDirectory), "bin/pnpm.cjs"), sha256: pnpmHashes["bin/pnpm.cjs"] },
+    args,
+    stdio: "inherit",
+  });
 }
 
 function assertSupported(lock, platform) {
@@ -458,9 +605,10 @@ function cli() {
   if (command === "fetch") {return fetchArtifacts({ lock, platform, toolsRoot, scope });}
   if (command === "install") {return installArtifacts({ lock, platform, toolsRoot, offline, scope });}
   if (command === "verify") {return verifyCache({ lock, platform, toolsRoot, offline, scope });}
+  if (command === "run-pnpm") { process.exitCode = runPnpm({ lock, platform, toolsRoot, args }); return; }
   throw new Error(
     "Usage: ./dev bootstrap fetch [--scope=solana] | install --offline [--scope=solana]"
-    + " | verify --offline [--scope=solana]",
+    + " | verify --offline [--scope=solana] | run-pnpm [args...]",
   );
 }
 

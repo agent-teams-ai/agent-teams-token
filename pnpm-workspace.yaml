@@ -4,6 +4,7 @@ packages:
   - packages/contexts/*
 
 catalogMode: strict
+autoInstallPeers: false
 catalog:
   "@types/node": 24.13.3
   "@noble/hashes": 2.4.0

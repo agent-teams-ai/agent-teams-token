@@ -7,14 +7,19 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
+  descriptorRoot,
+  executeVerifiedFile,
   fetchArtifacts,
   hostPlatform,
   installArtifacts,
@@ -29,8 +34,8 @@ import {
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
-function brokenDownloader(_url, part) {
-  writeFileSync(part, "truncated");
+function brokenDownloader(_url, partFd) {
+  writeSync(partFd, "truncated");
   return 0;
 }
 
@@ -123,8 +128,74 @@ test("Bash bootstrap starts from checksum-pinned Node without a system Node fall
   assert.match(bootstrap, /node-v24\.20\.0-darwin-arm64\.tar\.gz/);
   assert.match(bootstrap, /40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8/);
   assert.match(bootstrap, /\.part/);
+  assert.match(bootstrap, /exec \{token_part_fd\}>/);
+  assert.match(bootstrap, /--output - .*>&"\$token_part_fd"/);
+  assert.doesNotMatch(bootstrap, /--output "?\$token_part/);
   assert.match(bootstrap, /token_pinned_node.*scripts\/toolchain\.mjs/);
+  assert.match(bootstrap, /fetch --scope=solana/);
+  assert.doesNotMatch(bootstrap, /foundry-v1\.8\.0-linux-x64:.*solc-v0\.8\.36-linux-x64/);
   assert.doesNotMatch(bootstrap, /TOKEN_BOOTSTRAP_NODE|\$\{[^}]+:-node\}/);
+  assert.ok(bootstrap.indexOf("token_validate_directory \"$token_tools_root\" false") < bootstrap.indexOf("/bin/mkdir -p -- \"$token_tools_root\""));
+  const dev = readFileSync(join(repositoryRoot, "dev"), "utf8");
+  assert.doesNotMatch(dev, /exec (?:node|pnpm)|source .*env\.sh/);
+  assert.match(dev, /bootstrap\.sh" doctor/);
+  assert.match(dev, /bootstrap\.sh" run-pnpm check/);
+});
+
+test("bootstrap rejects a missing Node cache before a hostile PATH binary runs", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-bootstrap-path-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const scripts = join(root, "scripts");
+  const hostile = join(root, "hostile");
+  const markerPath = join(root, "ambient-node-ran");
+  mkdirSync(scripts);
+  mkdirSync(hostile);
+  copyFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), join(scripts, "bootstrap.sh"));
+  writeExecutable(join(hostile, "node"), `#!/bin/sh\necho ran > ${JSON.stringify(markerPath)}\n`);
+  const result = spawnSync("/bin/bash", [join(scripts, "bootstrap.sh"), "doctor"], {
+    encoding: "utf8",
+    env: { PATH: hostile },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /TOOLCHAIN_OFFLINE_CACHE_MISS/);
+  assert.equal(existsSync(markerPath), false);
+});
+
+test("Bash download keeps the exclusive part descriptor across a pathname replacement race", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-bootstrap-race-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const scripts = join(root, "scripts");
+  const payloadRoot = join(root, "payload");
+  const nodeDirectory = "node-v24.20.0-linux-x64";
+  const nodeBin = join(payloadRoot, nodeDirectory, "bin");
+  const archive = join(root, "node-test.tar.gz");
+  const archiveName = "node-test.tar.gz";
+  const victim = join(root, "victim");
+  const part = join(root, ".tools", "downloads", archiveName + ".part");
+  const curl = join(root, "race-curl");
+  mkdirSync(scripts);
+  mkdirSync(nodeBin, { recursive: true });
+  copyFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), join(scripts, "bootstrap.sh"));
+  writeExecutable(join(nodeBin, "node"), "#!/bin/sh\n[ \"${1:-}\" = --version ] && echo v24.20.0\n");
+  execFileSync("/usr/bin/tar", ["-czf", archive, "-C", payloadRoot, nodeDirectory]);
+  writeFileSync(victim, "victim-safe");
+  writeExecutable(curl, `#!/bin/sh\n/bin/rm -f ${JSON.stringify(part)}\n/bin/ln -s ${JSON.stringify(victim)} ${JSON.stringify(part)}\n/bin/cat ${JSON.stringify(archive)}\n`);
+  const result = spawnSync("/bin/bash", [join(scripts, "bootstrap.sh"), "fetch"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/hostile",
+      TOKEN_BOOTSTRAP_TEST_MODE: "1",
+      TOKEN_BOOTSTRAP_TEST_NODE_ARCHIVE: archiveName,
+      TOKEN_BOOTSTRAP_TEST_NODE_DIRECTORY: nodeDirectory,
+      TOKEN_BOOTSTRAP_TEST_NODE_URL: "https://fixtures.invalid/node-test.tar.gz",
+      TOKEN_BOOTSTRAP_TEST_NODE_SHA256: digest(archive),
+      TOKEN_BOOTSTRAP_TEST_NODE_TAR_FLAG: "-xzf",
+      TOKEN_BOOTSTRAP_TEST_CURL: curl,
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /TOOLCHAIN_FETCH_PART_UNSTABLE/);
+  assert.equal(readFileSync(victim, "utf8"), "victim-safe");
 });
 
 test("environment helper requires Bash and runs Zsh portability where required or available", (context) => {
@@ -134,6 +205,18 @@ test("environment helper requires Bash and runs Zsh portability where required o
   const bin = join(root, ".tools", "bin");
   mkdirSync(scripts, { recursive: true });
   mkdirSync(bin, { recursive: true });
+  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
+  const pinnedDirectories = {
+    [join(root, ".tools", `node-v24.20.0-${platform}`, "bin")]: ["node"],
+    [join(root, ".tools", `foundry-v1.8.0-${platform}`)]: ["forge", "cast", "anvil", "chisel"],
+    [join(root, ".tools", `solc-v0.8.36-${platform}`)]: ["solc"],
+    [join(root, ".tools", `agave-v4.2.1-${platform}`, "bin")]: ["solana", "solana-keygen", "solana-test-validator", "spl-token"],
+  };
+  for (const [directory, commands] of Object.entries(pinnedDirectories)) {
+    mkdirSync(directory, { recursive: true });
+    for (const command of commands) { writeExecutable(join(directory, command), "#!/bin/sh\nexit 0\n"); }
+  }
+  writeExecutable(join(bin, "pnpm"), "#!/bin/sh\nexit 0\n");
   copyFileSync(join(repositoryRoot, "scripts/env.sh"), join(scripts, "env.sh"));
   writeExecutable(join(bin, "agtmai-env-probe"), "#!/bin/sh\nexit 0\n");
   assert.equal(existsSync("/bin/bash"), true, "Bash is a required portability dependency");
@@ -201,6 +284,48 @@ test("checksum mismatch retains truncated part and a clean retry installs atomic
     readdirSync(fixture.toolsRoot).filter((name) => name.startsWith(".install-part-")),
     [],
   );
+});
+
+test("replacement of an open download part never writes the replacement target", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const victim = join(fixture.root, "victim");
+  writeFileSync(victim, "victim-safe");
+  const downloader = (url, partFd) => {
+    fixture.downloader(url, partFd);
+    const part = join(fixture.toolsRoot, "downloads", basename(url) + ".part");
+    unlinkSync(part);
+    symlinkSync(victim, part);
+    writeSync(partFd, "unlinked-only");
+    return 0;
+  };
+  assert.throws(
+    () => fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader }),
+    /TOOLCHAIN_FETCH_PART_UNSTABLE/,
+  );
+  assert.equal(readFileSync(victim, "utf8"), "victim-safe");
+});
+
+test("verified execution fails closed when the pathname is replaced after hashing", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-exec-race-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const executable = join(root, "tool");
+  const markerPath = join(root, "attacker-ran");
+  writeExecutable(executable, "#!/bin/sh\necho verified\n");
+  const expectedSha256 = digest(executable);
+  assert.throws(() => executeVerifiedFile({
+    path: executable,
+    expectedSha256,
+    beforeSpawn: () => {
+      renameSync(executable, executable + ".verified");
+      writeExecutable(executable, `#!/bin/sh\necho attacker > ${JSON.stringify(markerPath)}\n`);
+    },
+  }), /TOOLCHAIN_FILE_IDENTITY_CHANGED/);
+  assert.equal(existsSync(markerPath), false);
+});
+
+test("descriptor execution rejects unsupported hosts", () => {
+  assert.throws(() => descriptorRoot("win32"), /TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED/);
 });
 
 test("offline cold cache never uses PATH or a downloader", (context) => {
@@ -296,8 +421,7 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
     /TOOLCHAIN_INSTALL_INVALID tool=pnpm.*wrapper-missing-or-tampered/,
   );
   installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
-  assert.match(readFileSync(wrapper, "utf8"), /pnpm-test\/bin\/pnpm\.cjs/);
-  assert.match(readFileSync(wrapper, "utf8"), /--config\.auto-install-peers=false/);
+  assert.match(readFileSync(wrapper, "utf8"), /bootstrap\.sh.*run-pnpm/);
 
   const payload = join(fixture.toolsRoot, "pnpm-test", "bin", "pnpm.cjs");
   writeFileSync(payload, "tampered-payload\n");
@@ -323,7 +447,7 @@ test("forged provenance cannot bless a spoofed executable", (context) => {
   writeFileSync(provenancePath, `${JSON.stringify(provenance)}\n`);
   assert.throws(
     () => verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true }),
-    /TOOLCHAIN_INSTALL_INVALID tool=solc.*file-checksum:solc/,
+    /TOOLCHAIN_INSTALL_INVALID tool=solc.*provenance-mismatch/,
   );
 });
 
@@ -385,7 +509,7 @@ function makeFixture() {
   mkdirSync(nodePayload, { recursive: true });
   writeExecutable(
     join(nodePayload, "node"),
-    "#!/bin/sh\ncase \"${1:-}\" in *pnpm.cjs) echo '11.24.0' ;; *) echo 'v24.20.0' ;; esac\n",
+    "#!/bin/sh\nif [ \"$#\" -ge 2 ]; then echo '11.24.0'; else echo 'v24.20.0'; fi\n",
   );
   const nodeArchive = join(artifacts, "node-test.tar.gz");
   execFileSync("tar", ["-czf", nodeArchive, "-C", join(root, "node-payload"), "node-test-linux-x64"]);
@@ -478,8 +602,8 @@ function makeFixture() {
     root,
     toolsRoot,
     lock,
-    downloader: (url, part) => {
-      copyFileSync(join(artifacts, basename(url)), part);
+    downloader: (url, partFd) => {
+      writeSync(partFd, readFileSync(join(artifacts, basename(url))));
       return 0;
     },
   };

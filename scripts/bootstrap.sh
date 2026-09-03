@@ -2,124 +2,242 @@
 export PATH=/usr/bin:/bin
 set -euo pipefail
 
-token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+token_repo_root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 token_mode=${1:-all}
+shift || true
 token_tools_root="$token_repo_root/.tools"
 token_downloads="$token_tools_root/downloads"
 umask 077
 
-case "$(uname -s):$(uname -m)" in
+case "$(/usr/bin/uname -s):$(/usr/bin/uname -m)" in
   Darwin:arm64)
+    token_platform=darwin-arm64
     token_node_archive=node-v24.20.0-darwin-arm64.tar.gz
     token_node_directory=node-v24.20.0-darwin-arm64
     token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz
     token_node_sha256=40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8
     token_node_tar_flag=-xzf
-    token_sha256_program=/usr/bin/shasum
-    token_sha256_argument=-a
     ;;
   Linux:x86_64)
+    token_platform=linux-x64
     token_node_archive=node-v24.20.0-linux-x64.tar.xz
     token_node_directory=node-v24.20.0-linux-x64
     token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz
     token_node_sha256=2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2
     token_node_tar_flag=-xJf
-    token_sha256_program=/usr/bin/sha256sum
-    token_sha256_argument=
     ;;
   *)
-    printf 'TOOLCHAIN_UNSUPPORTED_PLATFORM platform=%s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+    printf 'TOOLCHAIN_UNSUPPORTED_PLATFORM platform=%s:%s\n' "$(/usr/bin/uname -s)" "$(/usr/bin/uname -m)" >&2
     exit 1
     ;;
 esac
 
-token_sha256() {
-  if [[ -n "$token_sha256_argument" ]]; then
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_sha256_program" "$token_sha256_argument" 256 "$1" | /usr/bin/awk '{print $1}'
+token_curl=/usr/bin/curl
+if [[ "${TOKEN_BOOTSTRAP_TEST_MODE:-0}" == 1 ]]; then
+  token_node_archive=${TOKEN_BOOTSTRAP_TEST_NODE_ARCHIVE:?}
+  token_node_directory=${TOKEN_BOOTSTRAP_TEST_NODE_DIRECTORY:?}
+  token_node_url=${TOKEN_BOOTSTRAP_TEST_NODE_URL:?}
+  token_node_sha256=${TOKEN_BOOTSTRAP_TEST_NODE_SHA256:?}
+  token_node_tar_flag=${TOKEN_BOOTSTRAP_TEST_NODE_TAR_FLAG:?}
+  token_curl=${TOKEN_BOOTSTRAP_TEST_CURL:?}
+  [[ "$token_curl" == /* && ! -L "$token_curl" && -x "$token_curl" ]] || {
+    printf 'TOOLCHAIN_TEST_CURL_INVALID\n' >&2
+    exit 1
+  }
+fi
+
+token_stat() {
+  if [[ "$token_platform" == linux-x64 ]]; then
+    /usr/bin/stat -c '%u:%a:%h:%d:%i:%F' -- "$1"
   else
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_sha256_program" "$1" | /usr/bin/awk '{print $1}'
+    /usr/bin/stat -f '%u:%Lp:%l:%d:%i:%HT' -- "$1"
   fi
+}
+
+token_stat_follow() {
+  if [[ "$token_platform" == linux-x64 ]]; then
+    /usr/bin/stat -Lc '%u:%a:%h:%d:%i:%F' -- "$1"
+  else
+    /usr/bin/stat -Lf '%u:%Lp:%l:%d:%i:%HT' -- "$1"
+  fi
+}
+
+token_sha256() {
+  if [[ "$token_platform" == linux-x64 ]]; then
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C /usr/bin/sha256sum -- "$1" | /usr/bin/awk '{print $1}'
+  else
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C /usr/bin/shasum -a 256 -- "$1" | /usr/bin/awk '{print $1}'
+  fi
+}
+
+token_validate_directory() {
+  local token_path=$1
+  local token_required=$2
+  if [[ ! -e "$token_path" && ! -L "$token_path" ]]; then
+    [[ "$token_required" == false ]] && return 0
+    printf 'TOOLCHAIN_DIRECTORY_MISSING path=%s\n' "$token_path" >&2
+    return 1
+  fi
+  if [[ -L "$token_path" || ! -d "$token_path" ]]; then
+    printf 'TOOLCHAIN_DIRECTORY_IDENTITY_INVALID path=%s\n' "$token_path" >&2
+    return 1
+  fi
+  local token_metadata token_uid token_mode_value
+  token_metadata=$(token_stat "$token_path")
+  IFS=: read -r token_uid token_mode_value _ <<< "$token_metadata"
+  if [[ "$token_uid" != "$(/usr/bin/id -u)" || $((8#$token_mode_value & 8#022)) -ne 0 ]]; then
+    printf 'TOOLCHAIN_DIRECTORY_OWNER_OR_MODE_INVALID path=%s\n' "$token_path" >&2
+    return 1
+  fi
+}
+
+token_prepare_directories() {
+  token_validate_directory "$token_repo_root" true
+  token_validate_directory "$token_tools_root" false
+  token_validate_directory "$token_downloads" false
+  /bin/mkdir -p -- "$token_tools_root"
+  token_validate_directory "$token_tools_root" true
+  /bin/mkdir -p -- "$token_downloads"
+  token_validate_directory "$token_downloads" true
+  /bin/chmod 700 -- "$token_tools_root" "$token_downloads"
+}
+
+token_safe_remove_part() {
+  local token_part=$1
+  if [[ -e "$token_part" || -L "$token_part" ]]; then
+    if [[ -d "$token_part" && ! -L "$token_part" ]]; then
+      printf 'TOOLCHAIN_FETCH_PART_UNSAFE partial=%s\n' "$token_part" >&2
+      return 1
+    fi
+    /bin/rm -f -- "$token_part"
+  fi
+}
+
+token_fetch_node() {
+  local token_archive_path=$1
+  local token_part="$token_archive_path.part"
+  token_safe_remove_part "$token_part"
+  set -C
+  if ! { exec {token_part_fd}> "$token_part"; } 2>/dev/null; then
+    set +C
+    printf 'TOOLCHAIN_FETCH_PART_CREATE_FAILED partial=%s\n' "$token_part" >&2
+    return 1
+  fi
+  set +C
+  local token_before token_after token_path_after token_actual
+  token_before=$(token_stat_follow "/dev/fd/$token_part_fd")
+  if ! /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C \
+    "$token_curl" --fail --location --proto '=https' --show-error --output - "$token_node_url" >&"$token_part_fd"
+  then
+    exec {token_part_fd}>&-
+    printf 'TOOLCHAIN_FETCH_FAILED tool=node partial=%s\n' "$token_part" >&2
+    return 1
+  fi
+  token_after=$(token_stat_follow "/dev/fd/$token_part_fd")
+  token_path_after=$(token_stat "$token_part")
+  if [[ "$token_before" != "$token_after" ]]; then
+    exec {token_part_fd}>&-
+    printf 'TOOLCHAIN_FETCH_PART_UNSTABLE tool=node\n' >&2
+    return 1
+  fi
+  if [[ "$token_before" != "$token_path_after" ]]; then
+    exec {token_part_fd}>&-
+    printf 'TOOLCHAIN_FETCH_PART_UNSTABLE tool=node\n' >&2
+    return 1
+  fi
+  token_actual=$(token_sha256 "/dev/fd/$token_part_fd")
+  if [[ "$token_actual" != "$token_node_sha256" ]]; then
+    exec {token_part_fd}>&-
+    printf 'TOOLCHAIN_CHECKSUM_MISMATCH tool=node expected=%s actual=%s partial=%s\n' \
+      "$token_node_sha256" "$token_actual" "$token_part" >&2
+    return 1
+  fi
+  /bin/mv -- "$token_part" "$token_archive_path"
+  [[ "$(token_stat_follow "/dev/fd/$token_part_fd")" == "$(token_stat "$token_archive_path")" ]] || {
+    exec {token_part_fd}>&-
+    printf 'TOOLCHAIN_FETCH_PART_UNSTABLE tool=node\n' >&2
+    return 1
+  }
+  exec {token_part_fd}>&-
+}
+
+token_snapshot_archive() {
+  local token_archive_path=$1
+  local token_snapshot=$2
+  /bin/cp -P -- "$token_archive_path" "$token_snapshot" 2>/dev/null || return 1
+  [[ ! -L "$token_snapshot" && -f "$token_snapshot" ]] || return 1
+  local token_metadata
+  token_metadata=$(token_stat "$token_snapshot")
+  [[ "$token_metadata" == *":1:"* ]] || return 1
+  [[ "$(token_sha256 "$token_snapshot")" == "$token_node_sha256" ]]
 }
 
 token_prepare_pinned_node() {
   local token_allow_fetch=$1
+  token_prepare_directories
   local token_archive_path="$token_downloads/$token_node_archive"
-  mkdir -p "$token_downloads"
-  chmod 700 "$token_tools_root" "$token_downloads"
-  if [[ ! -f "$token_archive_path" ]] || [[ "$(token_sha256 "$token_archive_path")" != "$token_node_sha256" ]]; then
+  token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
+  trap '/bin/rm -rf -- "$token_node_stage"' EXIT
+  local token_verified_archive="$token_node_stage/$token_node_archive"
+  if ! token_snapshot_archive "$token_archive_path" "$token_verified_archive"; then
+    /bin/rm -f -- "$token_verified_archive"
     if [[ "$token_allow_fetch" != true ]]; then
       printf 'TOOLCHAIN_OFFLINE_CACHE_MISS tool=node expected=%s\n' "$token_archive_path" >&2
       return 1
     fi
-    rm -f "$token_archive_path"
-    local token_part
-    token_part=$(/usr/bin/mktemp "$token_downloads/.node.part.XXXXXX")
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C /usr/bin/curl --fail --location --proto '=https' --show-error --output "$token_part" "$token_node_url"
-    local token_part_stat
-    if [[ "$(uname -s)" == Linux ]]; then
-      token_part_stat=$(/usr/bin/stat -c '%i:%d:%h:%F' "$token_part")
-      [[ "$token_part_stat" == *":1:regular file" ]]
-    else
-      token_part_stat=$(/usr/bin/stat -f '%i:%d:%l:%HT' "$token_part")
-      [[ "$token_part_stat" == *":1:Regular File" ]]
-    fi
-    local token_actual_sha256
-    token_actual_sha256=$(token_sha256 "$token_part")
-    if [[ "$token_actual_sha256" != "$token_node_sha256" ]]; then
-      printf 'TOOLCHAIN_CHECKSUM_MISMATCH tool=node expected=%s actual=%s partial=%s\n' \
-        "$token_node_sha256" "$token_actual_sha256" "$token_part" >&2
+    token_fetch_node "$token_archive_path"
+    token_snapshot_archive "$token_archive_path" "$token_verified_archive" || {
+      printf 'TOOLCHAIN_ARCHIVE_IDENTITY_INVALID tool=node\n' >&2
       return 1
-    fi
-    local token_publish_stat
-    if [[ "$(uname -s)" == Linux ]]; then
-      token_publish_stat=$(/usr/bin/stat -c '%i:%d:%h:%F' "$token_part")
-    else
-      token_publish_stat=$(/usr/bin/stat -f '%i:%d:%l:%HT' "$token_part")
-    fi
-    [[ "$token_publish_stat" == "$token_part_stat" ]] || { printf '%s\n' 'TOOLCHAIN_FETCH_PART_UNSTABLE tool=node' >&2; return 1; }
-    /usr/bin/mv "$token_part" "$token_archive_path"
+    }
   fi
-  token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
-  trap 'rm -rf "$token_node_stage"' EXIT
-  [[ ! -L "$token_archive_path" && -f "$token_archive_path" ]] || { printf 'TOOLCHAIN_ARCHIVE_IDENTITY_INVALID tool=node\n' >&2; return 1; }
-  local token_verified_archive="$token_node_stage/$token_node_archive"
-  /usr/bin/cp -P "$token_archive_path" "$token_verified_archive"
-  [[ ! -L "$token_verified_archive" && -f "$token_verified_archive" ]] || { printf 'TOOLCHAIN_ARCHIVE_IDENTITY_INVALID tool=node\n' >&2; return 1; }
-  [[ "$(token_sha256 "$token_verified_archive")" == "$token_node_sha256" ]] || { printf 'TOOLCHAIN_ARCHIVE_REPLACED tool=node\n' >&2; return 1; }
-  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= /usr/bin/tar "$token_node_tar_flag" "$token_verified_archive" -C "$token_node_stage"
+  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= \
+    /usr/bin/tar "$token_node_tar_flag" "$token_verified_archive" -C "$token_node_stage"
   token_pinned_node="$token_node_stage/$token_node_directory/bin/node"
-  [[ "$(env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" --version)" == v24.20.0 ]]
+  [[ ! -L "$token_pinned_node" && -f "$token_pinned_node" && -x "$token_pinned_node" ]] || {
+    printf 'TOOLCHAIN_NODE_SNAPSHOT_INVALID\n' >&2
+    return 1
+  }
+  [[ "$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" --version)" == v24.20.0 ]]
+}
+
+token_run_toolchain() {
+  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C \
+    "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" "$@"
 }
 
 case "$token_mode" in
   fetch)
     token_prepare_pinned_node true
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch "${@:2}"
+    token_run_toolchain fetch "$@"
     ;;
   install)
     token_prepare_pinned_node false
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install "${@:2}"
+    token_run_toolchain install "$@"
     ;;
   verify)
     token_prepare_pinned_node false
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" verify "${@:2}"
+    token_run_toolchain verify "$@"
     ;;
   all)
     token_prepare_pinned_node true
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" fetch
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" install --offline
-    source "$token_repo_root/scripts/env.sh"
-    if [[ "$(command -v pnpm)" != "$token_tools_root/bin/pnpm" ]]; then
-      printf '%s\n' 'TOOLCHAIN_PNPM_PATH_MISMATCH expected=.tools/bin/pnpm' >&2
-      exit 1
-    fi
-    token_pnpm="$token_tools_root/bin/pnpm"
-    token_verified_path="$token_tools_root/bin:$token_tools_root/$token_node_directory/bin:$token_tools_root/foundry-v1.8.0-linux-x64:$token_tools_root/solc-v0.8.36-linux-x64:/usr/bin:/bin"
-    if [[ "$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" --version 2>/dev/null || true)" != "11.24.0" ]]; then
-      printf '%s\n' 'TOOLCHAIN_PNPM_MISMATCH expected=11.24.0 action=install-the-exact-packageManager-version' >&2
-      exit 1
-    fi
-    /usr/bin/env -i PATH="$token_verified_path" HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" install --frozen-lockfile
+    token_run_toolchain fetch --scope=solana
+    token_run_toolchain install --offline --scope=solana
+    token_run_toolchain run-pnpm install --frozen-lockfile
+    ;;
+  doctor)
+    token_prepare_pinned_node false
+    exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C \
+      "$token_pinned_node" "$token_repo_root/scripts/doctor.mjs" "$@"
+    ;;
+  run-pnpm)
+    token_prepare_pinned_node false
+    token_run_toolchain run-pnpm "$@"
+    ;;
+  run-solana)
+    token_prepare_pinned_node false
+    exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C \
+      "$token_pinned_node" "$token_repo_root/scripts/solana/local-fixture.ts" "$@"
     ;;
   *)
     printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all]\n' >&2

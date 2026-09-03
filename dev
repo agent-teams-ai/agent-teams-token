@@ -1,37 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+token_repo_root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 token_command=${1:-help}
 shift || true
 
-# Bootstrap and doctor deliberately run before project-local directories are
-# added to PATH. Offline install therefore validates/replaces a present install
-# without executing binaries from that install first.
 case "$token_command" in
   bootstrap)
     exec "$token_repo_root/scripts/bootstrap.sh" "$@"
     ;;
   doctor)
-    exec node "$token_repo_root/scripts/doctor.mjs" "$@"
+    exec "$token_repo_root/scripts/bootstrap.sh" doctor "$@"
     ;;
-esac
-
-source "$token_repo_root/scripts/env.sh"
-
-case "$token_command" in
   check)
-    exec pnpm check "$@"
+    exec "$token_repo_root/scripts/bootstrap.sh" run-pnpm check "$@"
+    ;;
+  solana)
+    exec "$token_repo_root/scripts/bootstrap.sh" run-solana "$@"
     ;;
   evm-up)
     exec docker compose -f "$token_repo_root/compose.yaml" up -d --wait anvil
     ;;
   evm-down)
     exec docker compose -f "$token_repo_root/compose.yaml" down
-    ;;
-  solana)
-    # Delegate to the pinned, lease-aware local fixture boundary.
-    exec node "$token_repo_root/scripts/solana/local-fixture.ts" "$@"
     ;;
   help|*)
     printf '%s\n' \

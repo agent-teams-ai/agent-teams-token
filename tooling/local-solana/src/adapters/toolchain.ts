@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { chmod, constants, lstat, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { LocalSolanaError } from "../domain/model.ts";
 import { object, string } from "./rpc-parsers.ts";
 import type { CommandPort, ToolPaths, ToolResolverPort } from "../application/ports.ts";
+
+const EXPECTED_EXECUTABLES = ["bin/solana", "bin/solana-keygen", "bin/solana-test-validator", "bin/spl-token"] as const;
 
 export class PinnedToolResolver implements ToolResolverPort {
   private readonly repositoryRoot: string;
@@ -11,42 +13,43 @@ export class PinnedToolResolver implements ToolResolverPort {
   public constructor(repositoryRoot: string, commands: CommandPort) { this.repositoryRoot = repositoryRoot; this.commands = commands; }
   public async resolve(): Promise<ToolPaths> {
     const repositoryRoot = await trustedRepositoryRoot(this.repositoryRoot);
-    const lockPath = join(repositoryRoot, "tooling/toolchain.lock.json");
-    const lock = object(JSON.parse(await readFile(lockPath, "utf8")), "toolchain lock");
+    const lock = object(JSON.parse((await stableRead(join(repositoryRoot, "tooling/toolchain.lock.json"))).toString("utf8")), "toolchain lock");
     const tools = object(lock.tools, "toolchain tools");
     const agave = object(tools.agave, "Agave pin");
     if (agave.version !== "4.2.1" || agave.splTokenVersion !== "5.6.1") { throw new LocalSolanaError("SOLANA_TOOL_VERSION_PIN", "expected exact Agave 4.2.1 and SPL 5.6.1 pins"); }
     const platform = supportedPlatform();
     const artifact = object(object(agave.platforms, "Agave platforms")[platform], "Agave artifact");
-    assertArtifactPin(artifact);
-    const install = resolve(repositoryRoot, ".tools", string(artifact.installDirectory, "install directory"));
+    assertArtifactPin(artifact, platform);
+    const toolsRoot = join(repositoryRoot, ".tools");
+    await assertDirectory(toolsRoot, "SOLANA_TOOLS_ROOT");
+    const install = contained(toolsRoot, string(artifact.installDirectory, "install directory"), "SOLANA_TOOL_INSTALL_PATH");
+    await assertDirectory(install, "SOLANA_TOOL_INSTALL_PATH");
     const hashes = object(artifact.expectedFileSha256, "binary hashes");
     const programs = object(tools.splPrograms, "SPL program pins");
     const token = object(programs.token, "SPL Token program pin");
     const associated = object(programs.associatedToken, "associated token program pin");
-    assertProgramPin(token, "9.0.0", "dfb260231c761be7d9c8b63728e770a102b86495", "https://github.com/solana-program/token");
-    assertProgramPin(associated, "8.0.0", "0b867b5340cd001e5980d8ca7928effc4e10015c", "https://github.com/solana-program/associated-token-account");
-    const paths: ToolPaths = {
-      solana: join(install, "bin/solana"), keygen: join(install, "bin/solana-keygen"),
-      validator: join(install, "bin/solana-test-validator"), splToken: join(install, "bin/spl-token"),
-      tokenProgram: resolve(repositoryRoot, string(token.path, "SPL Token program path")),
-      associatedTokenProgram: resolve(repositoryRoot, string(associated.path, "associated token program path")),
+    assertProgramPin(token, "9.0.0", "dfb260231c761be7d9c8b63728e770a102b86495", "https://github.com/solana-program/token", "tooling/local-solana/programs/spl_token-v9.0.0.so");
+    assertProgramPin(associated, "8.0.0", "0b867b5340cd001e5980d8ca7928effc4e10015c", "https://github.com/solana-program/associated-token-account", "tooling/local-solana/programs/spl_associated_token_account-v8.0.0.so");
+    const sources = {
+      solana: { path: contained(install, "bin/solana", "SOLANA_TOOL_PATH"), hash: hashes["bin/solana"] },
+      keygen: { path: contained(install, "bin/solana-keygen", "SOLANA_TOOL_PATH"), hash: hashes["bin/solana-keygen"] },
+      validator: { path: contained(install, "bin/solana-test-validator", "SOLANA_TOOL_PATH"), hash: hashes["bin/solana-test-validator"] },
+      splToken: { path: contained(install, "bin/spl-token", "SOLANA_TOOL_PATH"), hash: hashes["bin/spl-token"] },
+      tokenProgram: { path: contained(repositoryRoot, string(token.path, "SPL Token program path"), "SOLANA_PROGRAM_PIN"), hash: token.sha256 },
+      associatedTokenProgram: { path: contained(repositoryRoot, string(associated.path, "associated token program path"), "SOLANA_PROGRAM_PIN"), hash: associated.sha256 },
     };
-    const executables = [["solana", paths.solana, "bin/solana"], ["keygen", paths.keygen, "bin/solana-keygen"], ["validator", paths.validator, "bin/solana-test-validator"], ["splToken", paths.splToken, "bin/spl-token"]] as const;
-    for (const [name, path, relative] of executables) { await verifyFile(name, path, hashes[relative]); }
-    await verifyFile("tokenProgram", paths.tokenProgram, token.sha256);
-    await verifyFile("associatedTokenProgram", paths.associatedTokenProgram, associated.sha256);
+    const paths = await authenticatedSnapshots(install, sources);
     await verifyVersions(paths, this.commands);
     return paths;
   }
 }
 
-function assertProgramPin(value: Record<string, unknown>, version: string, commit: string, source: string): void {
-  if (value.version !== version || value.commit !== commit || value.source !== source
-    || typeof value.path !== "string" || !value.path.startsWith("tooling/local-solana/programs/")
+function assertProgramPin(value: Record<string, unknown>, version: string, commit: string, source: string, path: string): void {
+  if (value.version !== version || value.commit !== commit || value.source !== source || value.path !== path
     || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(value.sha256)) {
     throw new LocalSolanaError("SOLANA_PROGRAM_PIN", "SPL program source, revision, path or hash is not exact");
   }
+  contained("/program-root", path, "SOLANA_PROGRAM_PIN");
 }
 
 async function trustedRepositoryRoot(path: string): Promise<string> {
@@ -62,25 +65,91 @@ function supportedPlatform(): "linux-x64" | "darwin-arm64" {
   throw new LocalSolanaError("SOLANA_TOOL_PLATFORM", "supported platforms are linux-x64 and darwin-arm64");
 }
 
-function assertArtifactPin(artifact: Record<string, unknown>): void {
+function assertArtifactPin(artifact: Record<string, unknown>, platform: "linux-x64" | "darwin-arm64"): void {
   const url = string(artifact.url, "Agave URL");
   const hash = string(artifact.sha256, "archive hash");
-  if (artifact.archive !== "tar.bz2" || !url.startsWith("https://github.com/anza-xyz/agave/releases/download/v4.2.1/") || !/^[a-f0-9]{64}$/u.test(hash)) {
-    throw new LocalSolanaError("SOLANA_TOOL_ARCHIVE_PIN", "Agave archive pin is not immutable");
+  const expectedInstall = `agave-v4.2.1-${platform}`;
+  const expectedArchive = platform === "linux-x64" ? "solana-release-x86_64-unknown-linux-gnu.tar.bz2" : "solana-release-aarch64-apple-darwin.tar.bz2";
+  const expectedUrl = `https://github.com/anza-xyz/agave/releases/download/v4.2.1/${expectedArchive}`;
+  if (artifact.archive !== "tar.bz2" || artifact.installDirectory !== expectedInstall || artifact.archiveName !== expectedArchive
+    || url !== expectedUrl || !/^[a-f0-9]{64}$/u.test(hash)
+    || JSON.stringify(artifact.expectedFiles) !== JSON.stringify(EXPECTED_EXECUTABLES)
+    || !validExpectedHashes(artifact.expectedFileSha256)) {
+    throw new LocalSolanaError("SOLANA_TOOL_ARCHIVE_PIN", "Agave archive and executable pins are not exact");
   }
 }
 
-async function verifyFile(name: string, path: string, expectedHash: unknown): Promise<void> {
-  const entry = await lstat(path).catch(() => null);
-  if (!entry?.isFile() || entry.isSymbolicLink() || entry.nlink !== 1 || await realpath(path) !== path) {
-    throw new LocalSolanaError("SOLANA_TOOL_MISSING", `${name} is absent or substituted`);
+function validExpectedHashes(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) { return false; }
+  const hashes = value as Record<string, unknown>;
+  return JSON.stringify(Object.keys(hashes)) === JSON.stringify(EXPECTED_EXECUTABLES)
+    && EXPECTED_EXECUTABLES.every((path) => typeof hashes[path] === "string" && /^[a-f0-9]{64}$/u.test(hashes[path] as string));
+}
+
+async function authenticatedSnapshots(
+  install: string,
+  sources: Record<keyof ToolPaths, { readonly path: string; readonly hash: unknown }>,
+): Promise<ToolPaths> {
+  const root = await mkdtemp(join(install, ".authenticated-tools-"));
+  await chmod(root, 0o700);
+  try {
+    const entries = await Promise.all(Object.entries(sources).map(async ([name, source]) => {
+      if (typeof source.hash !== "string" || !/^[a-f0-9]{64}$/u.test(source.hash)) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} hash pin is invalid`); }
+      const bytes = await stableRead(source.path);
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== source.hash) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} binary hash mismatch`); }
+      const target = join(root, `${name}-${basename(source.path)}`);
+      await writeFile(target, bytes, { flag: "wx", mode: 0o700 });
+      await chmod(target, 0o500);
+      const snapshotHash = createHash("sha256").update(await stableRead(target)).digest("hex");
+      if (snapshotHash !== source.hash) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} authenticated snapshot changed`); }
+      return [name, target] as const;
+    }));
+    return Object.fromEntries(entries) as unknown as ToolPaths;
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
   }
-  const actual = createHash("sha256").update(await readFile(path)).digest("hex");
-  if (actual !== expectedHash) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} binary hash mismatch`); }
+}
+
+async function stableRead(path: string): Promise<Buffer> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => {
+    throw new LocalSolanaError("SOLANA_TOOL_MISSING", "tool is absent or substituted");
+  });
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.nlink !== 1) { throw new LocalSolanaError("SOLANA_TOOL_MISSING", "tool is absent or substituted"); }
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    const current = await lstat(path);
+    if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1
+      || before.dev !== after.dev || before.ino !== after.ino || before.dev !== current.dev || before.ino !== current.ino) {
+      throw new LocalSolanaError("SOLANA_TOOL_IDENTITY", "tool identity changed while it was read");
+    }
+    return bytes;
+  } finally { await handle.close(); }
+}
+
+async function assertDirectory(path: string, code: string): Promise<void> {
+  const entry = await lstat(path).catch(() => null);
+  if (!entry?.isDirectory() || entry.isSymbolicLink()) { throw new LocalSolanaError(code, "toolchain directory is absent or substituted"); }
+}
+
+function contained(root: string, value: string, code: string): string {
+  if (value.length === 0 || /[\u0000-\u001f\u007f]/u.test(value) || value.includes("\\") || isAbsolute(value)
+    || value.split("/").some((part) => part === "" || part === "." || part === ".." || part.startsWith("-"))) {
+    throw new LocalSolanaError(code, "toolchain path is not a safe relative path");
+  }
+  const target = resolve(root, value);
+  const fromRoot = relative(resolve(root), target);
+  if (fromRoot === "" || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new LocalSolanaError(code, "toolchain path escapes its trusted root");
+  }
+  return target;
 }
 
 async function verifyVersions(paths: ToolPaths, commands: CommandPort): Promise<void> {
-  const env = { HOME: "/nonexistent", LANG: "C", LC_ALL: "C", PATH: "/usr/bin:/bin" };
+  const env = { HOME: "/nonexistent", LANG: "C", LC_ALL: "C", PATH: "" };
   const expectations = [[paths.solana, /^solana-cli 4\.2\.1 /u], [paths.keygen, /^solana-keygen 4\.2\.1 /u], [paths.validator, /^solana-test-validator 4\.2\.1 /u], [paths.splToken, /^spl-token-cli 5\.6\.1\s*$/u]] as const;
   for (const [path, expected] of expectations) {
     const result = await commands.run(path, ["--version"], { env, timeoutMs: 10_000 });

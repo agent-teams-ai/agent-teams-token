@@ -49,3 +49,23 @@ test("committed lock schema covers Core, Solana fixture and future tools separat
   floating.tools.node.platforms["linux-x64"].url = "https://fixtures.invalid/latest/node.tar.xz";
   assert.throws(() => validateLock(floating), /TOOLCHAIN_LOCK_FLOATING/);
 });
+
+
+test("Core and Agave lock paths reject traversal, separators, controls and options", () => {
+  const lock = loadLock(join(repositoryRoot, "tooling/toolchain.lock.json"));
+  const segmentEscapes = [".", "..", "/absolute", "-option", "nested/name", "nested\\name", "control\u0000name"];
+  for (const toolName of ["node", "foundry", "solc", "agave"]) {
+    for (const field of ["archiveName", "installDirectory"]) {
+      for (const value of segmentEscapes) {
+        const mutated = structuredClone(lock);
+        mutated.tools[toolName].platforms["linux-x64"][field] = value;
+        assert.throws(() => validateLock(mutated), /TOOLCHAIN_LOCK_PATH/);
+      }
+    }
+    for (const value of [".", "..", "/absolute", "-option", "bin\\tool", "bin//tool", "bin/../tool", "bin/control\u0000tool"]) {
+      const mutated = structuredClone(lock);
+      mutated.tools[toolName].platforms["linux-x64"].expectedFiles[0] = value;
+      assert.throws(() => validateLock(mutated), /TOOLCHAIN_LOCK_RELATIVE_PATH/);
+    }
+  }
+});

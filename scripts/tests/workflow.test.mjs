@@ -186,17 +186,21 @@ test("environment PATH keeps verified Core tools ahead of the package-manager bi
   const node = environmentText.indexOf("node-v24.20.0-$token_env_platform/bin");
   const foundry = environmentText.indexOf("foundry-v1.8.0-$token_env_platform");
   const solc = environmentText.indexOf("solc-v0.8.36-$token_env_platform");
+  const agave = environmentText.indexOf("agave-v4.2.1-$token_env_platform/bin");
   const packageBin = environmentText.indexOf('"$token_env_tools_root/bin"');
-  assert.ok(node >= 0 && node < foundry && foundry < solc && solc < packageBin);
-  assert.match(environmentText, /export PATH="\$token_env_path_prefix:\$PATH"/);
+  assert.ok(node >= 0 && node < foundry && foundry < solc && solc < agave && agave < packageBin);
+  assert.match(environmentText, /export PATH="\$token_env_node:\$token_env_foundry:\$token_env_solc:\$token_env_agave:\$token_env_package_bin"/);
+  assert.doesNotMatch(environmentText, /:\$PATH/);
   assert.doesNotMatch(environmentText, /\bfind\b/);
 });
 
 test("package-manager policy disables implicit downloads and the final check has no silent omissions", () => {
   const npmrc = readFileSync(join(repositoryRoot, ".npmrc"), "utf8");
+  const workspace = readFileSync(join(repositoryRoot, "pnpm-workspace.yaml"), "utf8");
   const lock = readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8");
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
-  assert.match(npmrc, /^auto-install-peers=false$/m);
+  assert.doesNotMatch(npmrc, /^auto-install-peers=/m);
+  assert.match(workspace, /^autoInstallPeers: false$/m);
   assert.match(npmrc, /^manage-package-manager-versions=false$/m);
   assert.match(npmrc, /^package-manager-strict-version=true$/m);
   assert.match(npmrc, /^registry=https:\/\/registry\.npmjs\.org\/$/m);

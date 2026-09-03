@@ -1,5 +1,5 @@
 import { lstatSync, readlinkSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 function selectedPlatform(platform, hostOs) {
   return hostOs ?? platform;
@@ -29,11 +29,16 @@ function isTrustedAlias(current, platform) {
       || (current === "/tmp" && trustedAliasTarget(current, "/private/tmp")));
 }
 
+function isWithin(parent, child, allowEqual = false) {
+  const value = relative(parent, child);
+  return (allowEqual && value === "")
+    || (value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !isAbsolute(value));
+}
+
 function canonicalAlias(absolute, platform) {
   if (platform !== "darwin") return undefined;
   for (const [alias, target] of [["/var", "/private/var"], ["/tmp", "/private/tmp"]]) {
-    const matchesAlias = absolute === alias || absolute.startsWith(alias + "/");
-    if (matchesAlias && inspect(alias)?.isSymbolicLink() && trustedAliasTarget(alias, target)) {
+    if (isWithin(alias, absolute, true) && inspect(alias)?.isSymbolicLink() && trustedAliasTarget(alias, target)) {
       return target + absolute.slice(alias.length);
     }
   }
@@ -56,8 +61,11 @@ export function canonicalizeTrustedPath(path, { platform = process.platform, hos
 }
 
 function isMacTempHierarchyAncestor(current, managedPath, st) {
-  return current.startsWith("/private/var/folders/")
-    && current !== managedPath
+  const folders = "/private/var/folders";
+  const depth = relative(folders, current).split(sep).filter(Boolean).length;
+  return isWithin(folders, current)
+    && isWithin(current, managedPath)
+    && depth <= 3
     && st.uid === 0
     && (st.mode & 0o022) === 0;
 }
