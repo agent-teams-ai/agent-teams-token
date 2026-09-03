@@ -192,8 +192,10 @@ function downloadableTools(lock, platform, scope = "core") {
 
 export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl, scope = "core" }) {
   assertSupported(lock, platform);
+  assertOwnedDirectoryChain(toolsRoot);
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(downloads, { recursive: true, mode: 0o700 });
+  assertOwnedDirectoryChain(downloads);
   chmodSync(downloads, 0o700);
   for (const [name, _tool, artifact] of downloadableTools(lock, platform, scope)) {
     const target = join(downloads, artifact.archiveName);
@@ -254,6 +256,8 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
   if (!offline) {throw new Error("TOOLCHAIN_INSTALL_REQUIRES_OFFLINE use=install --offline");}
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
+  assertOwnedDirectoryChain(toolsRoot);
+  assertOwnedDirectoryChain(downloads);
   mkdirSync(toolsRoot, { recursive: true });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = join(downloads, artifact.archiveName);
@@ -314,7 +318,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       const args = artifact.archive === "tar.xz"
         ? ["-xJf", verifiedArchive, "-C", staged]
         : artifact.archive === "tar.bz2"
-          ? ["-xjf", archive, "-C", staged]
+          ? ["-xjf", verifiedArchive, "-C", staged]
           : ["-xzf", verifiedArchive, "-C", staged];
       execFileSync("/usr/bin/tar", args, { stdio: "pipe", env: minimalSubprocessEnv() });
     }
@@ -365,6 +369,8 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
 }
 
 export function inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock }) {
+  try { assertOwnedDirectoryChain(toolsRoot); assertOwnedDirectoryChain(join(toolsRoot, "downloads")); assertOwnedDirectoryChain(destination); }
+  catch { return { ok: false, code: "installation-path-unsafe", actualVersion: "unknown" }; }
   if (!existsSync(destination)) {return { ok: false, code: "missing", actualVersion: "missing" };}
   const provenancePath = join(destination, provenanceFile);
   if (!existsSync(provenancePath)) {return { ok: false, code: "provenance-missing", actualVersion: "unknown" };}
@@ -383,10 +389,13 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
   ) {
     return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
   }
+  let canonicalFiles;
+  try { canonicalFiles = canonicalArchiveFileHashes({ artifact, archive: join(toolsRoot, "downloads", artifact.archiveName) }); }
+  catch { return { ok: false, code: "archive-provenance-unavailable", actualVersion: "unknown" }; }
   for (const path of artifact.expectedFiles) {
     const target = join(destination, path);
     const exists = existsSync(target);
-    const code = inspectStableExpectedFile({ artifact: { ...artifact, provenanceFiles: provenance.files }, path, target, exists });
+    const code = inspectStableExpectedFile({ artifact: { ...artifact, provenanceFiles: canonicalFiles }, path, target, exists });
     if (code) {return { ok: false, code, actualVersion: "unknown" };}
   }
   let actualVersion;
@@ -425,6 +434,28 @@ function inspectStableExpectedFile({ artifact, path, target, exists }) {
   } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) closeSync(fd); }
 }
 
+function assertOwnedDirectoryChain(path) {
+  const absolute = resolve(path); const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
+  for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
+    current = current === "/" ? `/${part}` : join(current, part);
+    let st; try { st = lstatSync(current); } catch { continue; }
+    if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");
+  }
+}
+
+function canonicalArchiveFileHashes({ artifact, archive }) {
+  const bytes = verifyArchive({ name: "canonical", platform: "canonical", artifact, archive, missingCode: "TOOLCHAIN_ARCHIVE_MISSING" });
+  if (artifact.archive === "executable") return { [artifact.expectedFiles[0]]: createHash("sha256").update(bytes).digest("hex") };
+  const root = mkdtempSync(join(dirname(archive), ".inspect-archive-")); const snapshot = join(root, "archive");
+  try {
+    writeFileSync(snapshot, bytes, { mode: 0o600 });
+    execFileSync("/usr/bin/tar", [artifact.archive === "tar.xz" ? "-xJf" : artifact.archive === "tar.bz2" ? "-xjf" : "-xzf", snapshot, "-C", root], { stdio: "pipe", env: minimalSubprocessEnv() });
+    const entries = readdirSync(root).filter((entry) => entry !== "archive"); const source = entries.length === 1 && statSync(join(root, entries[0])).isDirectory() ? join(root, entries[0]) : root;
+    return Object.fromEntries(artifact.expectedFiles.map((path) => [path, sha256(join(source, path))]));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
 function pinnedNode(lock, toolsRoot, platform) {
   return join(toolsRoot, lock.tools.node.platforms[platform].installDirectory, "bin", "node");
 }
@@ -457,6 +488,7 @@ function writePnpmWrapper({ lock, toolsRoot, platform }) {
   const target = join(bin, "pnpm");
   const part = `${target}.part`;
   mkdirSync(bin, { recursive: true });
+  if (existsSync(part)) { const stale = lstatSync(part); if (!stale.isFile() || stale.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE"); rmSync(part); }
   const fd = openSync(part, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o700);
   try {
     const contents = pnpmWrapper(lock, platform);
@@ -467,6 +499,7 @@ function writePnpmWrapper({ lock, toolsRoot, platform }) {
   const check = lstatSync(part);
   if (!check.isFile() || check.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
   renameSync(part, target);
+  const published = lstatSync(target); if (!published.isFile() || published.nlink !== 1 || readFileSync(target, "utf8") !== pnpmWrapper(lock, platform)) throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
 }
 
 function stablePathIdentity(path) {
@@ -503,6 +536,8 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
   if (!offline) {throw new Error("TOOLCHAIN_VERIFY_REQUIRES_OFFLINE use=verify --offline");}
   assertSupported(lock, platform);
   const downloads = join(toolsRoot, "downloads");
+  assertOwnedDirectoryChain(toolsRoot);
+  assertOwnedDirectoryChain(downloads);
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = join(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_CACHE_MISSING" });

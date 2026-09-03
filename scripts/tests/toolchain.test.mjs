@@ -314,6 +314,24 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
   verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
 });
 
+test("forged provenance cannot bless a spoofed executable", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
+  installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
+  const destination = join(fixture.toolsRoot, "solc-test-linux-x64");
+  const executable = join(destination, "solc");
+  writeExecutable(executable, "#!/bin/sh\necho spoofed\n");
+  const provenancePath = join(destination, ".agtmai-toolchain-install.json");
+  const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+  provenance.files.solc = digest(executable);
+  writeFileSync(provenancePath, `${JSON.stringify(provenance)}\n`);
+  assert.throws(
+    () => verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true }),
+    /TOOLCHAIN_INSTALL_INVALID tool=solc.*file-checksum:solc/,
+  );
+});
+
 test("doctor identifies a cached installation for the wrong platform", (context) => {
   const fixture = makeFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));

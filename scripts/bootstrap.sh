@@ -81,7 +81,12 @@ token_prepare_pinned_node() {
   fi
   token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
   trap 'rm -rf "$token_node_stage"' EXIT
-  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= /usr/bin/tar "$token_node_tar_flag" "$token_archive_path" -C "$token_node_stage"
+  [[ ! -L "$token_archive_path" && -f "$token_archive_path" ]] || { printf 'TOOLCHAIN_ARCHIVE_IDENTITY_INVALID tool=node\n' >&2; return 1; }
+  local token_verified_archive="$token_node_stage/$token_node_archive"
+  /usr/bin/cp -P "$token_archive_path" "$token_verified_archive"
+  [[ ! -L "$token_verified_archive" && -f "$token_verified_archive" ]] || { printf 'TOOLCHAIN_ARCHIVE_IDENTITY_INVALID tool=node\n' >&2; return 1; }
+  [[ "$(token_sha256 "$token_verified_archive")" == "$token_node_sha256" ]] || { printf 'TOOLCHAIN_ARCHIVE_REPLACED tool=node\n' >&2; return 1; }
+  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= /usr/bin/tar "$token_node_tar_flag" "$token_verified_archive" -C "$token_node_stage"
   token_pinned_node="$token_node_stage/$token_node_directory/bin/node"
   [[ "$(env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" --version)" == v24.20.0 ]]
 }
@@ -109,11 +114,12 @@ case "$token_mode" in
       exit 1
     fi
     token_pnpm="$token_tools_root/bin/pnpm"
+    token_verified_path="$token_tools_root/bin:$token_tools_root/$token_node_directory/bin:$token_tools_root/foundry-v1.8.0-linux-x64:$token_tools_root/solc-v0.8.36-linux-x64:/usr/bin:/bin"
     if [[ "$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" --version 2>/dev/null || true)" != "11.24.0" ]]; then
       printf '%s\n' 'TOOLCHAIN_PNPM_MISMATCH expected=11.24.0 action=install-the-exact-packageManager-version' >&2
       exit 1
     fi
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" install --frozen-lockfile
+    /usr/bin/env -i PATH="$token_verified_path" HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" install --frozen-lockfile
     ;;
   *)
     printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all]\n' >&2
