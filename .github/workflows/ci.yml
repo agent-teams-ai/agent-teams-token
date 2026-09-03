@@ -186,6 +186,7 @@ jobs:
           AGTMAI_ANVIL_BINARY: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/anvil
           AGTMAI_FORGE_BINARY: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge
           AGTMAI_SOLC_BINARY: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
+          AGTMAI_CC_BINARY: /usr/bin/cc
         run: source scripts/env.sh && pnpm test:deployment-plan
       - name: Assert gates kept the exact checkout clean
         shell: bash

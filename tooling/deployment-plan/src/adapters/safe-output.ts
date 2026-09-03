@@ -28,8 +28,10 @@ export interface ClaimedOutputDirectory {
   /** The unguessable, unpublished staging directory. */
   readonly path: string;
   writeExclusive(name: string, bytes: Uint8Array): Promise<void>;
-  /** Atomically exposes the complete staging directory at the requested name. */
+  /** Atomically exposes and durably syncs the prepared directory without READY. */
   publish(): Promise<string>;
+  /** Commits READY only after the published directory is durably reachable. */
+  finalizeReady(name: "READY", bytes: Uint8Array): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -45,9 +47,10 @@ export interface OutputFaultInjection {
   readonly afterPublishRename?: () => Promise<void>;
   readonly beforeParentDirectorySync?: () => Promise<void>;
   readonly afterParentDirectorySync?: () => Promise<void>;
+  readonly beforeFinalMarkerRename?: () => Promise<void>;
   /** Replaces the parent fsync operation for deterministic failure injection. */
   readonly parentDirectorySync?: () => Promise<void>;
-  /** Directory no-replace rename supplied by a pinned native helper. */
+  /** Filesystem no-replace rename supplied by a pinned native helper. */
   readonly noReplaceDirectoryRename?: NoReplaceDirectoryRename;
 }
 
@@ -142,6 +145,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     if (!/^[a-zA-Z0-9._-]+$/u.test(name)) {
       fail("OUTPUT_FILE_NAME_INVALID", "output file name is invalid");
     }
+    if (name === "READY") {
+      fail("OUTPUT_READY_PREMATURE", "READY is reserved for the final durability commit");
+    }
     await this.assertStagingStable();
     await this.faultInjection.beforeStagingLeafOpen?.();
     const file = await open(
@@ -188,6 +194,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     await this.faultInjection.beforeStagingDirectorySync?.();
     await this.stagingHandle.sync();
     await this.faultInjection.afterStagingDirectorySync?.();
+    let renamed = false;
     try {
       await this.faultInjection.beforePublishRename?.();
       await this.assertStagingStable();
@@ -196,10 +203,15 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
         await noReplaceRename(this.path, this.target);
       } catch (error) {
         if (nodeErrorCode(error) === "EEXIST") {fail("OUTPUT_TARGET_EXISTS", "output target already exists");}
+        // A failed native invocation may have completed the atomic syscall
+        // before losing its response. Preserve both pathnames from here on.
+        renamed = true;
+        this.stagingDisposed = true;
         throw error;
       }
-      this.publishedTargetIdentity = identity(await lstat(this.target));
+      renamed = true;
       this.stagingDisposed = true;
+      this.publishedTargetIdentity = this.stagingIdentity;
       await this.faultInjection.afterPublishRename?.();
       await this.assertParentStable();
       const publishedMetadata = await lstat(this.target);
@@ -211,9 +223,55 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       this.published = true;
       return this.target;
     } catch (error) {
-      await this.rollbackUndurablePublication();
+      if (renamed) {
+        fail(
+          "OUTPUT_PUBLICATION_UNCERTAIN",
+          `published directory durability or identity is uncertain; target preserved: ${errorMessage(error)}`,
+        );
+      }
       throw error;
     }
+  }
+
+  async finalizeReady(name: "READY", bytes: Uint8Array): Promise<void> {
+    if (!this.published) {
+      fail("OUTPUT_NOT_DURABLE", "READY cannot be committed before durable publication");
+    }
+    if (this.leaves.has(name)) {
+      fail("OUTPUT_READY_EXISTS", "READY was already created");
+    }
+    const noReplaceRename = this.faultInjection.noReplaceDirectoryRename;
+    if (noReplaceRename === undefined) {
+      fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "READY commit requires a native no-replace rename primitive");
+    }
+    await this.assertPublishedTreeUnchanged();
+    const pendingName = `.READY.pending-${randomBytes(16).toString("hex")}`;
+    const pending = join(this.target, pendingName);
+    const ready = join(this.target, name);
+    const file = await open(
+      pending,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    let pendingIdentity: FileIdentity;
+    try {
+      await file.chmod(0o600);
+      await file.writeFile(bytes);
+      await file.sync();
+      pendingIdentity = fileIdentityOf(await file.stat());
+    } finally {
+      await file.close();
+    }
+    // The pending marker and its data are durable before the atomic name commit.
+    // If the final rename is lost on crash, readers see no READY (a safe false
+    // negative); there is deliberately no fallible operation after that commit.
+    await this.stagingHandle.sync();
+    await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
+    assertSameFileIdentity(await lstat(pending), pendingIdentity, "OUTPUT_READY_SUBSTITUTED");
+    await this.faultInjection.beforeFinalMarkerRename?.();
+    await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
+    await noReplaceRename(pending, ready);
+    this.leaves.set(name, pendingIdentity);
   }
 
   async assertStagingStable(): Promise<void> {
@@ -258,31 +316,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     }
   }
 
-  private async rollbackUndurablePublication(): Promise<void> {
-    await this.assertParentStable();
-    if (this.publishedTargetIdentity === undefined) {return;}
-    await this.assertPublishedTreeUnchanged();
-    const expectedNames = [...this.leaves.keys()].toSorted();
-    for (const name of expectedNames) {await unlink(join(this.target, name));}
-    await rmdir(this.target);
-    await this.parentHandle.sync().catch(() => {});
-  }
-
   private async cleanupStaging(): Promise<void> {
     if (this.stagingDisposed) {
-      // A post-rename failure has already consumed staging. Check that the
-      // reserved target was not replaced; rollback may legitimately remove it.
-      try {
-        const targetMetadata = await lstat(this.target);
-        if (this.publishedTargetIdentity !== undefined) {
-          assertSameIdentity(targetMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
-          await this.assertPublishedTreeUnchanged();
-        }
-      } catch (error) {
-        if (nodeErrorCode(error) !== "ENOENT") {
-          throw error;
-        }
-      }
+      // Once renamed, never pathname-delete or inspect for cleanup: identity
+      // may have changed. An uncertain target is preserved for human recovery.
       return;
     }
     await this.assertStagingStable();
@@ -321,7 +358,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     await this.parentHandle.sync();
   }
 
-  private async assertPublishedTreeUnchanged(): Promise<void> {
+  private async assertPublishedTreeUnchanged(
+    expectedNamesInput: readonly string[] = [...this.leaves.keys()],
+  ): Promise<void> {
     if (this.publishedTargetIdentity === undefined) {
       fail("OUTPUT_PUBLISHED_SUBSTITUTED", "published output identity was not recorded");
     }
@@ -331,7 +370,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     }
     assertSameIdentity(metadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
     const names = (await readdir(this.target)).toSorted();
-    const expectedNames = [...this.leaves.keys()].toSorted();
+    const expectedNames = [...expectedNamesInput].toSorted();
     if (names.length !== expectedNames.length || names.some((name, index) => name !== expectedNames[index])) {
       fail("OUTPUT_ROLLBACK_FOREIGN_ENTRY", "published output contains an untracked or foreign entry");
     }
@@ -464,4 +503,8 @@ function assertSameIdentity(
 function nodeErrorCode(error: unknown): string | undefined {
   return error instanceof Error && "code" in error
     ? String((error as NodeJS.ErrnoException).code) : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

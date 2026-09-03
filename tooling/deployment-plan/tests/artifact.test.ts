@@ -36,6 +36,7 @@ const abi = [constructor];
 const bytecode = "60016000";
 const forgeRoot = "/workspace/contracts/evm";
 const build = {
+  id: "0123456789abcdef",
   solcVersion: "0.8.36",
   solcLongVersion: "0.8.36",
   input: {
@@ -146,8 +147,8 @@ test("canonical build-info is portable, raw bytes differ, and paths are exact", 
     basePath,
     includePaths: [basePath],
   });
-  const firstBuild = { ...build, input: withRoot(firstRoot) };
-  const secondBuild = { ...build, input: withRoot(secondRoot) };
+  const firstBuild = { ...build, id: "0123456789abcdef", input: withRoot(firstRoot) };
+  const secondBuild = { ...build, id: "fedcba9876543210", input: withRoot(secondRoot) };
   assert.equal(
     canonicalBuildInfoSha256(firstBuild),
     canonicalBuildInfoSha256(secondBuild),
@@ -168,6 +169,15 @@ test("canonical build-info is portable, raw bytes differ, and paths are exact", 
     portableCompilerInputSha256(withRoot(firstRoot)),
     portableCompilerInputSha256(withRoot(secondRoot)),
   );
+  for (const invalidId of [
+    undefined, "", "0123456789abcde", "0123456789abcdef0", "0123456789abcdeg",
+    "0123456789ABCDEf", 1234567890123456,
+  ]) {
+    assert.throws(
+      () => canonicalBuildInfoSha256({ ...firstBuild, id: invalidId }),
+      /exactly 16 lowercase hexadecimal/u,
+    );
+  }
   assert.throws(
     () => portableCompilerInputSha256({
       ...withRoot(firstRoot),
@@ -186,6 +196,31 @@ test("canonical build-info is portable, raw bytes differ, and paths are exact", 
       () => portableCompilerInputSha256(invalid),
       /compiler input Forge paths/u,
     );
+  }
+});
+
+test("canonical build-info binds every field except the proven root and Forge id transport fields", () => {
+  const root = "/Users/example/project/contracts/evm";
+  const portable = {
+    ...build,
+    id: "0123456789abcdef",
+    input: {
+      ...build.input,
+      allowPaths: [root, `${root}/lib`],
+      basePath: root,
+      includePaths: [root],
+    },
+  };
+  const expected = canonicalBuildInfoSha256(portable);
+  const mutations = mutableLeafVariants(portable);
+  mutations.push(
+    { ...portable, unexpected: true },
+    { ...portable, output: { ...portable.output, errors: [] } },
+    { ...portable, input: { ...portable.input, language: "Solidity" } },
+  );
+  assert(mutations.length > 10, "test must cover the complete non-transport document");
+  for (const mutation of mutations) {
+    assert.notEqual(canonicalBuildInfoSha256(mutation), expected);
   }
 });
 
@@ -248,3 +283,44 @@ test("compiler trust binds Forge build-info solcVersion exactly", () => {
     /solcVersion/u,
   );
 });
+
+function mutableLeafVariants(value: Record<string, unknown>): Record<string, unknown>[] {
+  const skipped = new Set([
+    "id",
+    "input.allowPaths.0", "input.allowPaths.1",
+    "input.basePath", "input.includePaths.0",
+  ]);
+  const paths: string[][] = [];
+  collectLeafPaths(value, [], paths);
+  return paths
+    .filter((path) => !skipped.has(path.join(".")))
+    .map((path) => {
+      const copy = structuredClone(value);
+      const parent = path.slice(0, -1).reduce<unknown>((current, segment) => {
+        if (current === null || typeof current !== "object") {throw new Error("invalid test path");}
+        return (current as Record<string, unknown>)[segment];
+      }, copy);
+      if (parent === null || typeof parent !== "object") {throw new Error("invalid test parent");}
+      const key = path.at(-1) as string;
+      const record = parent as Record<string, unknown>;
+      const leaf = record[key];
+      record[key] = typeof leaf === "string"
+        ? `${leaf}-mutated`
+        : typeof leaf === "number"
+          ? leaf + 1
+          : typeof leaf === "boolean"
+            ? !leaf
+            : "mutated";
+      return copy;
+    });
+}
+
+function collectLeafPaths(value: unknown, path: string[], output: string[][]): void {
+  if (value !== null && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      collectLeafPaths(child, [...path, key], output);
+    }
+    return;
+  }
+  output.push(path);
+}

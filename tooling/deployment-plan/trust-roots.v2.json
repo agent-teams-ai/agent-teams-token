@@ -12,8 +12,8 @@
   "quoteTtlSeconds": "60",
   "maximumHeadLag": "2",
   "buildInfoSolcVersion": "0.8.36",
-  "canonicalBuildInfoSha256": "0x12389bfee7c3dcbfae70f0b77984c9cc0f200e8e6c4159d353054ed6b825939a",
-  "compilerInputSha256": "0x8936485001ce25e250f3ffe3612851426f98df860dc0a4aadaccee412b1723f2",
+  "canonicalBuildInfoSha256": "0xa3a29c0f0cbe1fb1e7f193cbc5991b594efdb1230313159a8611c46f5336c865",
+  "compilerInputSha256": "0x3697fd540ce6ee7328ac0db9c78c44efd0727eac4aad95f29678eb5ce7ed75d8",
   "compilerSettings": {
     "optimizer": { "enabled": true, "runs": 200 },
     "evmVersion": "paris",

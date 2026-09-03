@@ -173,6 +173,7 @@ export function validateTrustRootSafety(roots: TrustRoots): void {
     fail("TRUST_ROOTS_UNSAFE", "trust roots are not local test-only roots");
   }
   for (const [field, value] of [
+    ["canonicalBuildInfoSha256", roots.canonicalBuildInfoSha256],
     ["artifactSha256", roots.artifactSha256],
     ["abiSha256", roots.abiSha256],
     ["fixtureSha256", roots.fixtureSha256],

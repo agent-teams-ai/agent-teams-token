@@ -3,6 +3,7 @@ import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { approveForgeArtifact } from "../adapters/artifact.ts";
 import { createLocalRpc, observeFees } from "../adapters/rpc.ts";
+import { createNativeNoReplaceCapability } from "../adapters/native-no-replace.ts";
 import {
   claimOwnedOutputDirectory,
   type OutputFaultInjection,
@@ -87,18 +88,18 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
   try {
     await output.writeExclusive(PLAN, planBytes);
     await output.writeExclusive(QUOTE, quoteBytes);
-    await output.writeExclusive(READY, jsonBytes(ready));
-    await assertExactBundle(output.path, false);
-    await assertPublishedContent(
+    await assertExactBundle(output.path, false, false);
+    await assertPreparedContent(
       output.path, planBytes, quoteBytes, ready,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
     const published = await output.publish();
-    await assertExactBundle(published);
-    await assertPublishedContent(
+    await assertExactBundle(published, true, false);
+    await assertPreparedContent(
       published, planBytes, quoteBytes, ready,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
+    await output.finalizeReady(READY, jsonBytes(ready));
     return published;
   } finally {
     await output.close();
@@ -128,7 +129,11 @@ export async function verifyBundle(
   return { plan, quote };
 }
 
-async function assertExactBundle(directory: string, rejectStaging = true): Promise<void> {
+async function assertExactBundle(
+  directory: string,
+  rejectStaging = true,
+  readyRequired = true,
+): Promise<void> {
   const metadata = await lstat(directory);
   const uid = process.getuid?.();
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.nlink < 1 || (metadata.mode & 0o777) !== 0o700 || uid === undefined || metadata.uid !== uid) {
@@ -139,13 +144,18 @@ async function assertExactBundle(directory: string, rejectStaging = true): Promi
   }
   if (await realpath(directory) !== directory) {fail("BUNDLE_DIRECTORY_UNSAFE", "bundle path must be canonical");}
   const names = (await readdir(directory)).toSorted();
-  const expected = [PLAN, QUOTE, READY].toSorted();
+  const expected = readyRequired ? [PLAN, QUOTE, READY].toSorted() : [PLAN, QUOTE].toSorted();
   if (names.length !== expected.length || names.some((name, index) => name !== expected[index])) {
-    fail("BUNDLE_FILES_INVALID", "bundle must contain exactly plan, quote, and READY");
+    fail(
+      "BUNDLE_FILES_INVALID",
+      readyRequired
+        ? "bundle must contain exactly plan, quote, and READY"
+        : "prepared bundle must contain exactly plan and quote",
+    );
   }
 }
 
-async function assertPublishedContent(
+async function assertPreparedContent(
   directory: string,
   expectedPlanBytes: Uint8Array,
   expectedQuoteBytes: Uint8Array,
@@ -154,21 +164,16 @@ async function assertPublishedContent(
 ): Promise<void> {
   const planBytes = await safeRead(join(directory, PLAN));
   const quoteBytes = await safeRead(join(directory, QUOTE));
-  const readyBytes = await safeRead(join(directory, READY));
   if (
     !Buffer.from(planBytes).equals(expectedPlanBytes)
     || !Buffer.from(quoteBytes).equals(expectedQuoteBytes)
   ) {
     fail("OUTPUT_CONTENT_SUBSTITUTED", "published bundle differs from verified staging bytes");
   }
-  const ready = parseReadyMarker(readyBytes);
-  if (canonicalJson(ready) !== canonicalJson(expectedReady)) {
-    fail("OUTPUT_CONTENT_SUBSTITUTED", "published READY marker was substituted");
-  }
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
-  verifyReadyDigests(planBytes, quoteBytes, ready);
-  independentlyVerify({ ...request, plan, quote, ready });
+  verifyReadyDigests(planBytes, quoteBytes, expectedReady);
+  independentlyVerify({ ...request, plan, quote, ready: expectedReady });
 }
 
 export async function runUnsignedPlanner(
@@ -199,24 +204,30 @@ export async function runUnsignedPlanner(
     quote,
     creationInput: approved.creationInput,
   });
-  const publishRequest = {
-    parent: input.outputParent,
-    bundleName: input.bundleName,
-    plan,
-    quote,
-    roots,
-    expected: approved,
-  };
-  const directory = await publishReadyLast(publishRequest);
-  await verifyBundle({
-    directory,
-    roots,
-    expected: approved,
-    nowSeconds: trustedNowSeconds(),
-    rpc,
-    creationInput: approved.creationInput,
-  });
-  return { directory, planId: plan.planId };
+  const nativeNoReplace = await createNativeNoReplaceCapability();
+  try {
+    const publishRequest = {
+      parent: input.outputParent,
+      bundleName: input.bundleName,
+      plan,
+      quote,
+      roots,
+      expected: approved,
+      outputFaultInjection: { noReplaceDirectoryRename: nativeNoReplace.rename },
+    };
+    const directory = await publishReadyLast(publishRequest);
+    await verifyBundle({
+      directory,
+      roots,
+      expected: approved,
+      nowSeconds: trustedNowSeconds(),
+      rpc,
+      creationInput: approved.creationInput,
+    });
+    return { directory, planId: plan.planId };
+  } finally {
+    await nativeNoReplace.close();
+  }
 }
 
 function trustedNowSeconds(): bigint {

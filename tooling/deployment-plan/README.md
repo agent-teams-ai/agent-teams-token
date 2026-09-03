@@ -27,7 +27,14 @@ the machine-specific absolute checkout root in `basePath`, `allowPaths` and
 `includePaths`. Their exact expected shape is validated and only that root is
 replaced with the fixed `$AGTMAI_EVM_ROOT` token before hashing, so macOS and
 Linux bind the same portable input without ignoring an extra search path. The
-smaller normalized settings object remains a readable policy view, but it
+top-level Forge `id` is required to be exactly 16 lowercase hex characters and
+is replaced with `$FORGE_BUILD_ID`; no other build-info field is normalized.
+Every plan retains the raw byte hash as run-specific evidence. The current
+native Forge 1.8.0/solc 0.8.36 root binds portable compiler input
+`0x3697fd540ce6ee7328ac0db9c78c44efd0727eac4aad95f29678eb5ce7ed75d8`
+and canonical build-info
+`0xa3a29c0f0cbe1fb1e7f193cbc5991b594efdb1230313159a8611c46f5336c865`.
+The smaller normalized settings object remains a readable policy view, but it
 cannot replace the full compiler-input identity.
 The RPC port has five read-only methods, rejects redirects and final-URL
 changes, and cannot accept public hosts. There is deliberately no wallet,
@@ -38,22 +45,26 @@ full zero-value creation input, observation block, and independently derived
 RLP/Keccak CREATE address, so nonce-zero and nonce-one plans cannot collide or
 exchange evidence.
 
-Bundles are assembled READY-last in an unguessable owned staging directory,
-validated there, and atomically renamed into place as a complete directory.
+Bundles are assembled without READY in an unguessable owned staging directory,
+validated there, and atomically renamed into place.
 Before rename the held staging directory is synchronised to durable storage;
 after rename its owned parent directory is synchronised as well. A failure at
 either durability boundary fails closed and is covered by injected-failure
 tests.
-If publication cannot durably sync the parent after rename, the target is
-rolled back before failure is returned, so no READY path can be accepted.
+Only after those durability checks and a second identity/content validation is
+a synced hidden marker atomically renamed to `READY`. Losing that final rename
+on crash is a safe false negative. A post-rename durability or identity failure
+returns typed `OUTPUT_PUBLICATION_UNCERTAIN`, preserves the target, and never
+creates READY; a published pathname is never deleted after identity can change.
 Unpublished staging directories are reclaimed on close only while their held
 filesystem identity and each created leaf identity still match. Cleanup first
 quarantines those identities and never recursively removes a substituted or
 foreign tree; close reports those paths as rejected rather than hiding a failed
 reclamation.
-No bundle leaf is written after publication. The held staging identity and the
-exact bytes are checked again after rename, so check/open, rename, substitution,
-and ABA races cannot produce a bundle that publication reports as accepted.
+READY is the sole post-publication leaf. Its data and hidden name are synced
+before an atomic no-replace name commit. The held directory identity and exact
+payload bytes are checked after rename, so substitution and ABA races fail
+before acceptable evidence exists.
 Bundles contain `deployment-plan.v2.json`, `fee-quote.v2.json`, then `READY`.
 The independent verifier recomputes identity, fee math, cap and freshness and
 checks READY digests using no-follow file reads. The planner independently
@@ -70,9 +81,10 @@ simulated-time option. Deterministic tests inject time only through their test
 surface.
 
 Publication ordering deliberately preserves the immutable-byte invariant in
-the accepted plan: a READY-last staging directory is checked, atomically
-renamed, and its exact bytes are checked again after rename before current RPC
-facts are reread. A post-publication RPC drift (including estimate N to N+1)
+the accepted plan: a payload-only staging directory is checked, atomically
+renamed, durably synced, checked again, and receives the final READY commit
+before current RPC facts are reread. A post-publication RPC drift (including
+estimate N to N+1)
 therefore makes the run fail and the normal verifier reject the complete bundle;
 it does not turn immutable READY into a claim that mutable RPC state can never
 change. Deleting that complete bundle on drift would weaken the held-identity
@@ -81,8 +93,8 @@ RPC read earlier would stop it from being a final current-state check. This is
 the reconciled interpretation of plan sections 6.3 and 6.5: failed runs cannot
 leave a reviewable partial bundle, and READY denotes complete immutable bytes.
 
-Root command and TypeScript-project wiring are integrator-owned and therefore
-must be added separately. Tests can be run directly after the root build with:
+The root command and TypeScript-project checks include this feature. Tests can
+also be run directly with:
 
 `node --test tooling/deployment-plan/tests/*.test.ts`
 
@@ -99,4 +111,12 @@ SIGTERM grace period is deterministically sent SIGKILL.
 
 Publication no-replace capability
 
-Node.js `fs.rename` has replace semantics and is not sufficient for the final publication boundary. `claimOwnedOutputDirectory(...).publish()` therefore fails closed with typed code `OUTPUT_NO_REPLACE_UNAVAILABLE` unless the caller supplies `noReplaceDirectoryRename(source, target)`. The callback is a narrow port for a pinned native helper: it must atomically rename one directory onto an absent destination, return `EEXIST` when the destination exists without modifying either path, reject symlink/path substitution, and provide the same identity guarantees as Linux `renameat2(RENAME_NOREPLACE)` or an equivalent exclusive macOS primitive. Production wiring must capability-detect and pin/checksum the helper before exposing this callback; tests may inject a deterministic implementation.
+Node.js `fs.rename` has replace semantics and is insufficient for either commit.
+Production composition builds digest-pinned `native/no-replace.c` in owned
+`0700` temporary custody with a fixed C11 invocation, makes the result owner-
+executable only, and validates device/inode/ctime/size/SHA-256 immediately
+before every direct, no-shell use. Linux calls `renameat2(RENAME_NOREPLACE)`;
+macOS calls `renameatx_np(RENAME_EXCL)`. Occupied targets return `EEXIST`
+without changing either path. The callback stays injectable for deterministic
+unit races. Missing, unsupported, substituted, or failed native capability is
+fail-closed; there is no shell or replace-capable fallback.

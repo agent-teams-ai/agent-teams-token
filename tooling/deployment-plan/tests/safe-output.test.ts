@@ -73,7 +73,7 @@ test("directory replacement after an exclusive claim fails closed", async () => 
     await rename(claim.path, displaced);
     await mkdir(claim.path, { mode: 0o700 });
     await assert.rejects(
-      claim.writeExclusive("READY", Buffer.from("ready")),
+      claim.writeExclusive("payload", Buffer.from("ready")),
       /identity changed/u,
     );
   } finally {
@@ -86,12 +86,12 @@ test("publication fails closed when no-replace capability is unavailable", async
   const parent = await canonicalTemporaryDirectory();
   const claim = await claimOwnedOutputDirectory(parent, "bundle");
   try {
-    await claim.writeExclusive("READY", Buffer.from("ready"));
+    await claim.writeExclusive("payload", Buffer.from("ready"));
     await assert.rejects(
       claim.publish(),
       /native no-replace directory rename primitive/u,
     );
-    await assert.rejects(readFile(join(parent, "bundle", "READY")));
+    await assert.rejects(readFile(join(parent, "bundle", "payload")));
   } finally {
     await claim.close();
   }
@@ -110,7 +110,7 @@ test("owned staging creation failure is reclaimed and a retry can publish", asyn
     noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
   });
   try {
-    await retry.writeExclusive("READY", Buffer.from("ready"));
+    await retry.writeExclusive("payload", Buffer.from("ready"));
     assert.equal(await retry.publish(), join(parent, "bundle"));
   } finally {
     await retry.close();
@@ -130,9 +130,9 @@ test("staging leaf check/open swap cannot produce a publishable bundle", async (
   });
   claimPath = claim.path;
   try {
-    await assert.rejects(claim.writeExclusive("READY", Buffer.from("safe")), /identity changed/u);
-    await assert.rejects(readFile(join(displaced, "READY")));
-    assert.equal(await readFile(join(claimPath, "READY"), "utf8"), "safe");
+    await assert.rejects(claim.writeExclusive("payload", Buffer.from("safe")), /identity changed/u);
+    await assert.rejects(readFile(join(displaced, "payload")));
+    assert.equal(await readFile(join(claimPath, "payload"), "utf8"), "safe");
     await assert.rejects(claim.publish(), /identity changed/u);
   } finally {
     await assert.rejects(claim.close(), /identity changed/u);
@@ -158,11 +158,11 @@ test("exact staging-directory ABA around leaf open fails on leaf identity", asyn
   claimPath = claim.path;
   try {
     await assert.rejects(
-      claim.writeExclusive("READY", Buffer.from("unsafe")),
+      claim.writeExclusive("payload", Buffer.from("unsafe")),
       /ENOENT|substituted/u,
     );
-    await assert.rejects(readFile(join(claimPath, "READY")));
-    assert.equal(await readFile(join(attacker, "READY"), "utf8"), "unsafe");
+    await assert.rejects(readFile(join(claimPath, "payload")));
+    assert.equal(await readFile(join(attacker, "payload"), "utf8"), "unsafe");
   } finally {
     await assert.rejects(claim.close(), /ENOENT|substituted|foreign entry/u);
     await rm(attacker, { recursive: true, force: true });
@@ -182,16 +182,16 @@ test("staging swap immediately before rename cannot be accepted as published", a
   });
   claimPath = claim.path;
   try {
-    await claim.writeExclusive("READY", Buffer.from("safe"));
+    await claim.writeExclusive("payload", Buffer.from("safe"));
     await assert.rejects(claim.publish(), /identity changed/u);
-    await assert.rejects(readFile(join(parent, "bundle", "READY")));
-    assert.equal(await readFile(join(displaced, "READY"), "utf8"), "safe");
+    await assert.rejects(readFile(join(parent, "bundle", "payload")));
+    assert.equal(await readFile(join(displaced, "payload"), "utf8"), "safe");
   } finally {
     await assert.rejects(claim.close(), /ENOENT|identity changed/u);
   }
 });
 
-test("rollback preserves published output when a foreign entry appears", async () => {
+test("uncertain publication preserves a published output with a foreign entry", async () => {
   const parent = await canonicalTemporaryDirectory();
   const target = join(parent, "bundle");
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
@@ -202,32 +202,32 @@ test("rollback preserves published output when a foreign entry appears", async (
     async parentDirectorySync() { throw new Error("injected sync failure"); },
   });
   try {
-    await claim.writeExclusive("READY", Buffer.from("safe"));
-    await assert.rejects(claim.publish(), /foreign entry/u);
-    assert.equal(await readFile(join(target, "READY"), "utf8"), "safe");
+    await claim.writeExclusive("payload", Buffer.from("safe"));
+    await assert.rejects(claim.publish(), /target preserved/u);
+    assert.equal(await readFile(join(target, "payload"), "utf8"), "safe");
     assert.equal(await readFile(join(target, "foreign"), "utf8"), "do not delete");
   } finally {
-    await assert.rejects(claim.close(), /foreign entry/u);
+    await claim.close();
   }
 });
 
-test("rollback preserves published output when a tracked leaf is substituted", async () => {
+test("uncertain publication preserves a substituted published leaf", async () => {
   const parent = await canonicalTemporaryDirectory();
   const target = join(parent, "bundle");
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
     noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async afterPublishRename() {
-      await rm(join(target, "READY"));
-      await writeFile(join(target, "READY"), "substituted", { mode: 0o600 });
+      await rm(join(target, "payload"));
+      await writeFile(join(target, "payload"), "substituted", { mode: 0o600 });
     },
     async parentDirectorySync() { throw new Error("injected sync failure"); },
   });
   try {
-    await claim.writeExclusive("READY", Buffer.from("safe"));
-    await assert.rejects(claim.publish(), /identity changed/u);
-    assert.equal(await readFile(join(target, "READY"), "utf8"), "substituted");
+    await claim.writeExclusive("payload", Buffer.from("safe"));
+    await assert.rejects(claim.publish(), /target preserved/u);
+    assert.equal(await readFile(join(target, "payload"), "utf8"), "substituted");
   } finally {
-    await assert.rejects(claim.close(), /leaf was substituted|identity changed/u);
+    await claim.close();
   }
 });
 
@@ -243,12 +243,12 @@ test("published-directory substitution after atomic rename fails closed", async 
     },
   });
   try {
-    await claim.writeExclusive("READY", Buffer.from("safe"));
+    await claim.writeExclusive("payload", Buffer.from("safe"));
     await assert.rejects(claim.publish(), /identity changed/u);
-    await assert.rejects(readFile(join(target, "READY")));
-    assert.equal(await readFile(join(displaced, "READY"), "utf8"), "safe");
+    await assert.rejects(readFile(join(target, "payload")));
+    assert.equal(await readFile(join(displaced, "payload"), "utf8"), "safe");
   } finally {
-    await assert.rejects(claim.close(), /ENOENT|identity changed/u);
+    await claim.close();
   }
 });
 
@@ -265,7 +265,7 @@ test("exclusive output files cannot be overwritten", async () => {
     );
     assert.equal(await claim.publish(), join(parent, "bundle"));
     await assert.rejects(
-      claim.writeExclusive("READY", Buffer.from("late")),
+      claim.writeExclusive("payload", Buffer.from("late")),
       /already published/u,
     );
   } finally {
@@ -286,7 +286,7 @@ test("publication durably syncs staging before rename and parent after rename", 
     async afterParentDirectorySync() { operations.push("after-parent-sync"); },
   });
   try {
-    await claim.writeExclusive("READY", Buffer.from("ready"));
+    await claim.writeExclusive("payload", Buffer.from("ready"));
     await claim.publish();
     assert.deepEqual(operations, [
       "before-staging-sync", "after-staging-sync", "before-rename",
@@ -304,51 +304,103 @@ test("staging sync failure prevents publication", async () => {
     async beforeStagingDirectorySync() { throw new Error("injected staging sync failure"); },
   });
   try {
-    await claim.writeExclusive("READY", Buffer.from("ready"));
+    await claim.writeExclusive("payload", Buffer.from("ready"));
     await assert.rejects(claim.publish(), /injected staging sync failure/u);
-    await assert.rejects(readFile(join(parent, "bundle", "READY")));
+    await assert.rejects(readFile(join(parent, "bundle", "payload")));
   } finally {
     await claim.close();
   }
   assert.deepEqual(await readdir(parent), []);
 });
 
-test("parent sync failure rolls READY back and leaves no acceptable bundle", async () => {
+test("post-rename parent sync uncertainty preserves target without READY", async () => {
   const parent = await canonicalTemporaryDirectory();
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
     noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
     async parentDirectorySync() { throw new Error("injected parent fsync failure"); },
   });
   try {
-    await claim.writeExclusive("READY", Buffer.from("ready"));
-    await assert.rejects(claim.publish(), /injected parent fsync failure/u);
+    await claim.writeExclusive("payload", Buffer.from("ready"));
+    await assert.rejects(
+      claim.publish(),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "OUTPUT_PUBLICATION_UNCERTAIN",
+    );
+    assert.equal(await readFile(join(parent, "bundle", "payload"), "utf8"), "ready");
     await assert.rejects(readFile(join(parent, "bundle", "READY")));
   } finally {
     await claim.close();
   }
-  assert.deepEqual(await readdir(parent), []);
+  assert.deepEqual(await readdir(join(parent, "bundle")), ["payload"]);
+});
+
+test("READY is committed only after durable publication", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const operations: string[] = [];
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async afterParentDirectorySync() { operations.push("published-durable"); },
+    async beforeFinalMarkerRename() { operations.push("ready-commit"); },
+  });
+  try {
+    await assert.rejects(
+      claim.writeExclusive("READY", Buffer.from("premature")),
+      /reserved for the final durability commit/u,
+    );
+    await claim.writeExclusive("payload", Buffer.from("payload"));
+    await claim.publish();
+    await claim.finalizeReady("READY", Buffer.from("ready"));
+    assert.deepEqual(operations, ["published-durable", "ready-commit"]);
+    assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
+  } finally {
+    await claim.close();
+  }
+});
+
+test("replacement race before final marker preserves both trees without acceptable READY", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const target = join(parent, "bundle");
+  const displaced = join(parent, "displaced");
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    async beforeFinalMarkerRename() {
+      await rename(target, displaced);
+      await mkdir(target, { mode: 0o700 });
+    },
+  });
+  try {
+    await claim.writeExclusive("payload", Buffer.from("owned"));
+    await claim.publish();
+    await assert.rejects(claim.finalizeReady("READY", Buffer.from("ready")), /identity changed/u);
+    await assert.rejects(readFile(join(target, "READY")));
+    await assert.rejects(readFile(join(displaced, "READY")));
+    assert.equal(await readFile(join(displaced, "payload"), "utf8"), "owned");
+  } finally {
+    await claim.close();
+  }
 });
 
 test("cleanup refuses a hostile staging replacement", async () => {
   const parent = await canonicalTemporaryDirectory();
   const claim = await claimOwnedOutputDirectory(parent, "bundle");
   const displaced = join(parent, "displaced");
-  await claim.writeExclusive("READY", Buffer.from("owned"));
+  await claim.writeExclusive("payload", Buffer.from("owned"));
   await rename(claim.path, displaced);
   await mkdir(claim.path, { mode: 0o700 });
   await writeFile(join(claim.path, "foreign"), "preserve", { mode: 0o600 });
   await assert.rejects(claim.close(), /identity changed/u);
   assert.equal(await readFile(join(claim.path, "foreign"), "utf8"), "preserve");
-  assert.equal(await readFile(join(displaced, "READY"), "utf8"), "owned");
+  assert.equal(await readFile(join(displaced, "payload"), "utf8"), "owned");
 });
 
 test("cleanup rejects and preserves a foreign staging entry", async () => {
   const parent = await canonicalTemporaryDirectory();
   const claim = await claimOwnedOutputDirectory(parent, "bundle");
-  await claim.writeExclusive("READY", Buffer.from("owned"));
+  await claim.writeExclusive("payload", Buffer.from("owned"));
   await writeFile(join(claim.path, "foreign"), "preserve", { mode: 0o600 });
   await assert.rejects(claim.close(), /foreign entry/u);
-  assert.equal(await readFile(join(claim.path, "READY"), "utf8"), "owned");
+  assert.equal(await readFile(join(claim.path, "payload"), "utf8"), "owned");
   assert.equal(await readFile(join(claim.path, "foreign"), "utf8"), "preserve");
 });
 

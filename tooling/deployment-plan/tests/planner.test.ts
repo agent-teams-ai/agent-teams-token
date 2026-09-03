@@ -34,6 +34,7 @@ const constructor = {
 const abi = [constructor];
 const forgeRoot = "/workspace/contracts/evm";
 const build = {
+  id: "0123456789abcdef",
   solcVersion: "0.8.36",
   solcLongVersion: "0.8.36",
   input: {

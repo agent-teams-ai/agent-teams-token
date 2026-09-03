@@ -152,6 +152,7 @@ function readBuildContract(build: Record<string, unknown>, roots: TrustRoots): B
 }
 
 const PORTABLE_ROOT = "$AGTMAI_EVM_ROOT";
+const PORTABLE_FORGE_BUILD_ID = "$FORGE_BUILD_ID";
 
 /**
  * Forge records the absolute checkout path in three build-info transport fields.
@@ -169,13 +170,18 @@ export function portableCompilerInputSha256(
 export function canonicalBuildInfoSha256(
   build: Record<string, unknown>,
 ): `0x${string}` {
+  if (typeof build.id !== "string" || !/^[0-9a-f]{16}$/u.test(build.id)) {
+    fail(
+      "BUILD_INFO_ID_INVALID",
+      "Forge build-info id must be exactly 16 lowercase hexadecimal characters",
+    );
+  }
   const input = portableCompilerInput(object(build.input, "BUILD_INPUT_INVALID"));
   return sha256Hex(canonicalJson({
     ...build,
+    id: PORTABLE_FORGE_BUILD_ID,
     input: {
       ...input,
-      allowPaths: [PORTABLE_ROOT, PORTABLE_ROOT],
-      includePaths: [PORTABLE_ROOT],
     },
   }));
 }
