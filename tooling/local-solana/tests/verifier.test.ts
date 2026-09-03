@@ -54,7 +54,6 @@ test("verifier rejects supply introduced only after freeze-authority revocation"
 
 test("verifier rejects mixed or unknown ATA inner instructions", () => {
   const base = observationFixture();
-  const ataTx = base.transactions[2]!;
   for (const extra of [
     instruction({ programId: CLASSIC_TOKEN_PROGRAM, kind: "transfer", instructionIndex: 0, innerInstructionIndex: 0 }),
     instruction({ programId: "Unknown1111111111111111111111111111111111", kind: "raw", instructionIndex: 0, innerInstructionIndex: 0 }),

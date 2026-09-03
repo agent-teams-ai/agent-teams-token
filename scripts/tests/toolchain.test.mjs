@@ -18,7 +18,6 @@ import {
   fetchArtifacts,
   hostPlatform,
   installArtifacts,
-  loadLock,
   validateLock,
   verifyCache,
   canonicalizeTrustedPath,

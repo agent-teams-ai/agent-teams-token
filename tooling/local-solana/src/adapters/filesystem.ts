@@ -36,7 +36,7 @@ export class PrivateRunStore implements RunStorePort {
     await atomicWrite(join(paths.directory, MARKER), `${JSON.stringify(updated)}\n`, 0o600);
   }
   public async cleanup(paths: RunPaths): Promise<void> {
-    const directoryEntry = await lstat(paths.directory).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause; });
+    const directoryEntry = await lstat(paths.directory).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return null;} throw cause; });
     if (directoryEntry === null) { return; }
     if (directoryEntry.isSymbolicLink() || !directoryEntry.isDirectory()) { throw new LocalSolanaError("SOLANA_CLEANUP_SUBSTITUTION", "owned run directory was substituted"); }
     const lease = await validateOwnedRun(await canonicalTarget(this.root), paths.directory, false);
