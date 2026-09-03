@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   openSync,
   closeSync,
+  fstatSync,
   lstatSync,
   readFileSync,
   readdirSync,
@@ -196,7 +197,7 @@ export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloa
   chmodSync(downloads, 0o700);
   for (const [name, _tool, artifact] of downloadableTools(lock, platform, scope)) {
     const target = join(downloads, artifact.archiveName);
-    if (existsSync(target) && sha256(target) === artifact.sha256) {
+    if (isRegularCacheEntry(target) && sha256(target) === artifact.sha256) {
       process.stdout.write(`FETCH_CACHED tool=${name} platform=${platform} sha256=${artifact.sha256}\n`);
       continue;
     }
@@ -220,9 +221,21 @@ export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloa
         `TOOLCHAIN_CHECKSUM_MISMATCH tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual} partial=${part}`,
       );
     }
-    renameSync(part, target);
+    const publishFd = openSync(part, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      const fdStat = fstatSync(publishFd);
+      const pathStat = lstatSync(part);
+      if (!pathStat.isFile() || pathStat.nlink !== 1 || pathStat.ino !== fdStat.ino || pathStat.dev !== fdStat.dev) {
+        throw new Error(`TOOLCHAIN_FETCH_PART_UNSTABLE tool=${name} platform=${platform}`);
+      }
+      renameSync(part, target);
+    } finally { closeSync(publishFd); }
     process.stdout.write(`FETCH_OK tool=${name} platform=${platform} sha256=${actual}\n`);
   }
+}
+
+function isRegularCacheEntry(path) {
+  try { const entry = lstatSync(path); return entry.isFile() && entry.nlink === 1; } catch { return false; }
 }
 
 function downloadWithCurl(url, part) {
@@ -262,7 +275,7 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
 }
 
 function verifyArchive({ name, platform, artifact, archive, missingCode }) {
-  if (!existsSync(archive)) {
+  if (!isRegularCacheEntry(archive)) {
     throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`);
   }
   const actual = sha256(archive);
@@ -290,7 +303,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
         : artifact.archive === "tar.bz2"
           ? ["-xjf", archive, "-C", staged]
           : ["-xzf", archive, "-C", staged];
-      execFileSync("/usr/bin/tar", args, { stdio: "pipe" });
+      execFileSync("/usr/bin/tar", args, { stdio: "pipe", env: minimalSubprocessEnv() });
     }
     const entries = readdirSync(staged);
     const source = entries.length === 1 && statSync(join(staged, entries[0])).isDirectory()

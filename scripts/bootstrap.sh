@@ -69,11 +69,18 @@ token_prepare_pinned_node() {
         "$token_node_sha256" "$token_actual_sha256" "$token_part" >&2
       return 1
     fi
+    local token_publish_stat
+    if [[ "$(uname -s)" == Linux ]]; then
+      token_publish_stat=$(/usr/bin/stat -c '%i:%d:%h:%F' "$token_part")
+    else
+      token_publish_stat=$(/usr/bin/stat -f '%i:%d:%l:%HT' "$token_part")
+    fi
+    [[ "$token_publish_stat" == "$token_part_stat" ]] || { printf '%s\n' 'TOOLCHAIN_FETCH_PART_UNSTABLE tool=node' >&2; return 1; }
     mv "$token_part" "$token_archive_path"
   fi
   token_node_stage=$(/usr/bin/mktemp -d "$token_tools_root/.bootstrap-node-part.XXXXXX")
   trap 'rm -rf "$token_node_stage"' EXIT
-  /usr/bin/tar "$token_node_tar_flag" "$token_archive_path" -C "$token_node_stage"
+  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= /usr/bin/tar "$token_node_tar_flag" "$token_archive_path" -C "$token_node_stage"
   token_pinned_node="$token_node_stage/$token_node_directory/bin/node"
   [[ "$(env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C "$token_pinned_node" --version)" == v24.20.0 ]]
 }
@@ -100,11 +107,12 @@ case "$token_mode" in
       printf '%s\n' 'TOOLCHAIN_PNPM_PATH_MISMATCH expected=.tools/bin/pnpm' >&2
       exit 1
     fi
-    if [[ "$(/usr/bin/env -i PATH="$PATH" HOME=/tmp LANG=C LC_ALL=C pnpm --version 2>/dev/null || true)" != "11.24.0" ]]; then
+    token_pnpm="$token_tools_root/bin/pnpm"
+    if [[ "$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" --version 2>/dev/null || true)" != "11.24.0" ]]; then
       printf '%s\n' 'TOOLCHAIN_PNPM_MISMATCH expected=11.24.0 action=install-the-exact-packageManager-version' >&2
       exit 1
     fi
-    /usr/bin/env -i PATH="$PATH" HOME=/tmp LANG=C LC_ALL=C pnpm install --frozen-lockfile
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C LC_ALL=C TAR_OPTIONS= "$token_pnpm" install --frozen-lockfile
     ;;
   *)
     printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all]\n' >&2

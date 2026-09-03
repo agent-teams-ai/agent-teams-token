@@ -209,16 +209,8 @@ jobs:
       - name: Assert solidity prerequisite completed successfully
         if: ${{ always() }}
         shell: bash
-        env:
-          SLITHER_FAILURE_STAGE: ci-prerequisite
-          SLITHER_FAILURE_CODE: CI_PREREQUISITE_FAILED
-          SOLIDITY_RESULT: ${{ needs.solidity.result }}
         run: |
-          if test "$SOLIDITY_RESULT" = success; then
-            printf "SLITHER_PREREQUISITE_RESULT=success\n" >> "$GITHUB_ENV"
-          else
-            printf "SLITHER_PREREQUISITE_RESULT=%s\n" "$SOLIDITY_RESULT" >> "$GITHUB_ENV"
-          fi
+          test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -251,7 +243,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
-          test "${SLITHER_PREREQUISITE_RESULT:-failure}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=%s\n" "${SLITHER_PREREQUISITE_RESULT:-missing}" >&2; exit 1; }
+          test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
       - name: Create minimal prerequisite-failure evidence
         if: ${{ failure() }}
         shell: bash
