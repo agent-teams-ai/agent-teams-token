@@ -15,7 +15,6 @@ import {
   PINNED_PYTHONPATH,
 } from "./container-contract.ts";
 import { evaluateVulnerableFixture } from "../application/policy.ts";
-
 export interface ToolchainLock {
   readonly tools: {
     readonly foundry: { readonly platforms: Record<string, { readonly sha256: string; readonly installDirectory: string }> };
@@ -44,8 +43,7 @@ interface BuildInfo {
 interface RunGateRequest {
   readonly repositoryRoot: string;
   readonly processPort: ProcessPort;
-  readonly forgePath: string;
-  readonly solcPath: string;
+  readonly forgePath: string; readonly solcPath: string;
   readonly dockerPath: string;
 }
 interface PreparedGate {
@@ -58,7 +56,6 @@ interface PreparedGate {
   readonly solcBinarySha256: string;
   readonly imageEnvironment: OfficialImageEnvironment;
 }
-
 export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
   const { repositoryRoot, processPort, forgePath, solcPath, dockerPath } = request;
   const prepared = await prepareGate(request);
@@ -134,19 +131,12 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
     await rm(scratch, { recursive: true, force: true });
   }
 }
-
 interface VulnerableFixtureRequest {
-  readonly repositoryRoot: string;
-  readonly scratch: string;
-  readonly processPort: ProcessPort;
-  readonly dockerPath: string;
-  readonly forgePath: string;
-  readonly solcPath: string;
-  readonly containerName: string;
-  readonly imageEnvironment: OfficialImageEnvironment;
-  readonly expectedDetectors: readonly string[];
-}
-
+  readonly repositoryRoot: string; readonly scratch: string;
+  readonly processPort: ProcessPort; readonly dockerPath: string;
+  readonly forgePath: string; readonly solcPath: string;
+  readonly containerName: string; readonly imageEnvironment: OfficialImageEnvironment;
+  readonly expectedDetectors: readonly string[]; }
 async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): Promise<void> {
   const input = join(request.scratch, "fixture-input");
   const output = join(request.scratch, "fixture-output");
@@ -184,7 +174,6 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
     throw new SlitherGateError("VULNERABLE_FIXTURE_NOT_BLOCKED", "real pinned Slither fixture must produce policy exit 20");
   }
 }
-
 async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   const { repositoryRoot, processPort, forgePath, solcPath, dockerPath } = request;
   const base = join(repositoryRoot, "tooling/security/slither");
@@ -230,7 +219,6 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
     imageEnvironment,
   };
 }
-
 export async function assertContainerResult(
   result: { readonly timedOut: boolean; readonly exitCode: number | null },
   output: string,
@@ -264,7 +252,6 @@ export async function assertContainerResult(
     throw new SlitherGateError("CONTAINER_FAILED", "container analysis command failed");
   }
 }
-
 async function sealRawOutput(directory: string): Promise<void> {
   const info = await lstat(directory, { bigint: true });
   if (!info.isDirectory() || info.isSymbolicLink() || info.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", "analyzer output directory is not a sealed directory");}
@@ -275,12 +262,10 @@ async function sealRawOutput(directory: string): Promise<void> {
   }
   await chmod(directory, 0o555);
 }
-
 async function requiredRaw(output: string, name: string): Promise<Buffer> {
   try { return await readStableRegularFile(join(output, name), name); }
   catch { throw new SlitherGateError("MALFORMED_JSON", `required analyzer output is missing or unreadable: ${name}`); }
 }
-
 export function parseSlitherExit(raw: string | Buffer): number {
   const serialized = raw.toString();
   if (!/^(?:0|255)\n?$/u.test(serialized)) {
@@ -288,7 +273,6 @@ export function parseSlitherExit(raw: string | Buffer): number {
   }
   return serialized.startsWith("0") ? 0 : 255;
 }
-
 export function assertSlitherStatus(
   success: boolean,
   errors: readonly string[],
@@ -306,23 +290,19 @@ export function assertSlitherStatus(
     );
   }
 }
-
 async function assertTool(path: string, expected: string, code: GateErrorCode): Promise<void> {
   await assertRegularTool(path, code);
   const actual = sha256(await readStableRegularFile(path, "tool override")); if (actual !== expected) {throw new SlitherGateError(code, "tool override checksum mismatch");}
 }
-
 async function assertRegularTool(path: string, code: GateErrorCode): Promise<void> {
   const info = await stat(path);
   if (!path.startsWith("/") || !info.isFile() || (await lstat(path)).isSymbolicLink() || (info.mode & 0o111) === 0) {throw new SlitherGateError(code, "tool override must be an absolute executable regular file");}
 }
-
 async function assertImage(port: ProcessPort, dockerPath: string): Promise<OfficialImageEnvironment> {
   const result = await port.run(dockerPath, ["image", "inspect", IMAGE, "--format", "{{json .}}"], 30_000);
   if (result.exitCode !== 0 || result.timedOut) {throw new SlitherGateError("IMAGE_UNAVAILABLE", "exact pinned image is unavailable locally");}
   return parseOfficialImageEnvironment(result.stdout);
 }
-
 export function parseOfficialImageEnvironment(raw: string): OfficialImageEnvironment {
   let image: ImageInspection; try { image = parseJsonWithoutDuplicateKeys(raw) as ImageInspection; } catch { throw new SlitherGateError("IMAGE_METADATA_INVALID", "image inspection output is malformed"); }
   const digests = Array.isArray(image.RepoDigests) ? image.RepoDigests : [];
@@ -345,7 +325,6 @@ export function parseOfficialImageEnvironment(raw: string): OfficialImageEnviron
   // analysis starts.
   return { imagePath, pythonPath: PINNED_PYTHONPATH };
 }
-
 async function readDetectorInventory(
   repositoryRoot: string,
   entry: ClosureEntry,
@@ -375,13 +354,11 @@ async function readDetectorInventory(
   }
   return document as DetectorInventoryDocument;
 }
-
 async function assertCanonicalConfig(path: string): Promise<void> {
   const raw = await readStableRegularFile(path, "slither.config.json");
   let value: unknown; try { value = parseJsonWithoutDuplicateKeys(raw.toString("utf8")); } catch { throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config is not unambiguous JSON"); }
   if (JSON.stringify(value) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) {throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config contains unsupported exclusions or fields");}
 }
-
 function assertManifestPath(path: string): void {
   if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) {throw new SlitherGateError("TARGET_MANIFEST_INVALID", `manifest path is not canonical: ${path}`);}
 }
@@ -410,26 +387,21 @@ async function readConfinedStableFile(root: string, relative: string, label: str
     } finally { await handle.close(); }
   } finally { if (current !== rootHandle) {await current.close();} await rootHandle.close().catch(() => {}); }
 }
-
 const safePathList = (value: string): boolean => value.split(":").every((entry) => entry.startsWith("/") && !entry.includes("..") && !entry.includes("\n"));
-
 async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
   assertManifestPath(entry.path); const content = await readConfinedStableFile(root, entry.path, entry.path);
   if (sha256(content) !== entry.sha256) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input differs: ${entry.path}`);}
   const target = join(destination, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 }); await writeFile(target, content, { mode: 0o444, flag: "wx" });
 }
-
 async function readStableRegularFile(path: string, label: string): Promise<Buffer> {
   const before = await lstat(path, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);}
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);} const content = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);} return content; } finally { await handle.close(); }
 }
-
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
   return await Promise.all(entries.map(async ({ path }) => { assertManifestPath(path); return { path, sha256: sha256(await readConfinedStableFile(root, path, path)) }; }));
 }
-
 export async function verifyVersions(output: string): Promise<void> {
   const checks: [string, RegExp][] = [
     ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\.Linux\.g\+\+\s*$/u],
@@ -452,12 +424,10 @@ export async function verifyVersions(output: string): Promise<void> {
     throw new SlitherGateError("TOOL_VERSION_MISMATCH", "forge.version did not report the exact pinned version");
   }
 }
-
 async function safeCopyFile(source: string, destination: string): Promise<void> {
   const content = await readStableRegularFile(source, "vulnerable fixture input");
   await writeFile(destination, content, { mode: 0o444, flag: "wx" });
 }
-
 async function parseCompiledOutput(output: string): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string }> {
   let artifactRaw: Buffer; let buildRaw: Buffer;
   try { artifactRaw = await readStableRegularFile(join(output, "AGTMAIToken.json"), "compiler artifact"); buildRaw = await readStableRegularFile(join(output, "build-info.json"), "compiler build-info"); } catch { throw new SlitherGateError("BUILD_INFO_INVALID", "compiler artifact or build-info is missing or unreadable"); }
@@ -471,7 +441,6 @@ async function parseCompiledOutput(output: string): Promise<{ compiler: GateMani
   const buildInfoBytes = decodeCreationBytecode(buildHex);
   return { compiler, artifactBytecode: sha256(artifactBytes), buildInfoBytecode: sha256(buildInfoBytes) };
 }
-
 function validateBuildCompiler(build: BuildInfo): GateManifest["compiler"] {
   const settings = build.input?.settings;
   if (!settings || build.solcVersion !== "0.8.36+commit.8a079791") {
@@ -510,40 +479,33 @@ function validateBuildCompiler(build: BuildInfo): GateManifest["compiler"] {
   }
   return profile;
 }
-
 function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? value
     : [];
 }
-
 const isEmptyRecord = (value: unknown): boolean => value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
-
 export function decodeCreationBytecode(value: unknown): Buffer {
   if (typeof value !== "string") {throw new SlitherGateError("BYTECODE_MISSING", "fresh creation bytecode is absent or malformed");}
   const normalized = value.startsWith("0x") ? value.slice(2) : value;
   if (!/^(?:[0-9a-fA-F]{2})+$/u.test(normalized)) {throw new SlitherGateError("BYTECODE_MISSING", "fresh creation bytecode is absent or malformed");}
   return Buffer.from(normalized, "hex");
 }
-
 function assertSuppressionShape(suppressions: readonly Suppression[]): void {
   const expected = ["detectorId", "expiresAt", "findingIdentityHash", "fingerprint", "length", "owner", "path", "reason", "regressionEvidence", "reviewAt", "schemaVersion", "snippetHash", "sourceHash", "start"];
   for (const item of suppressions) {
     if (JSON.stringify(Object.keys(item).toSorted()) !== JSON.stringify(expected) || item.schemaVersion !== 1) {throw new SlitherGateError("SUPPRESSION_SHAPE_INVALID", "suppression entry has missing or unexpected fields");}
   }
 }
-
 function parseTypedJson(raw: string, code: GateErrorCode, label: string): unknown {
   try {return parseJsonWithoutDuplicateKeys(raw);}
   catch {throw new SlitherGateError(code, `${label} is not unambiguous JSON`);}
 }
-
 export interface SlitherRuntimeIdentity {
   readonly image: string; readonly revision: string; readonly platform: string;
   readonly slither: string; readonly cryticCompile: string; readonly forge: string; readonly solcPrefix: string;
   readonly containerUser: string; readonly pythonPath: string; readonly forgeMountPath: string; readonly solcMountPath: string;
 }
-
 export function assertSlitherToolchainBinding(lock: ToolchainLock, runtime: SlitherRuntimeIdentity = {
   image: IMAGE, revision: IMAGE_REVISION, platform: "linux/amd64", slither: "0.11.6", cryticCompile: "0.4.2",
   forge: "1.8.0", solcPrefix: "0.8.36+commit.8a079791", containerUser: "1000:1000", pythonPath: PINNED_PYTHONPATH,
@@ -560,7 +522,6 @@ export function assertSlitherToolchainBinding(lock: ToolchainLock, runtime: Slit
     throw new SlitherGateError("TOOLCHAIN_LOCK_INVALID", "Slither runtime differs from the canonical toolchain lock");
   }
 }
-
 export async function readAndAssertSlitherToolchain(repositoryRoot: string): Promise<void> {
   let lock: ToolchainLock;
   try {lock = parseJsonWithoutDuplicateKeys((await readStableRegularFile(join(repositoryRoot, "tooling/toolchain.lock.json"), "toolchain.lock.json")).toString("utf8")) as ToolchainLock;}
