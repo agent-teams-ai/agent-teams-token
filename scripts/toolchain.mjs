@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -24,7 +23,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertExpectedFileHashes,
-  inspectExpectedFile,
   lockedFileMismatch,
   validateExpectedFileHashes,
   validateFixtureToolShape,
@@ -279,7 +277,7 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
 function verifyArchive({ name, platform, artifact, archive, missingCode }) {
   let actual;
   try { actual = readVerifiedBytes(archive); }
-  catch (error) { if (error?.code === "ENOENT") throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`); throw error; }
+  catch (error) { if (error?.code === "ENOENT") throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`, { cause: error }); throw error; }
   if (actual.hash !== artifact.sha256) throw new Error(`TOOLCHAIN_OFFLINE_UNVERIFIED_CACHE tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual.hash}`);
   return actual.bytes;
 }
