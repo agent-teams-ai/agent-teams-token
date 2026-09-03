@@ -133,6 +133,18 @@ test("canonicalizes the macOS system temp aliases but rejects attacker symlink r
   assert.throws(() => canonicalizeTrustedPath(link), /TOOLCHAIN_DIRECTORY_IDENTITY_INVALID/);
 });
 
+test("macOS canonical root accepts trusted root-owned temp ancestors", (context) => {
+  if (process.platform !== "darwin") return;
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const macToolsRoot = join("/tmp", basename(fixture.toolsRoot));
+  rmSync(macToolsRoot, { recursive: true, force: true });
+  mkdirSync(macToolsRoot, { recursive: true, mode: 0o700 });
+  context.after(() => rmSync(macToolsRoot, { recursive: true, force: true }));
+  assert.equal(canonicalizeTrustedPath(macToolsRoot, { platform: "darwin" }).startsWith("/private/tmp/"), true);
+  fetchArtifacts({ lock: fixture.lock, platform: "darwin-arm64", toolsRoot: macToolsRoot, downloader: fixture.downloader });
+});
+
 test("unsupported hosts fail closed", () => {
   assert.throws(() => hostPlatform({ platform: "win32", arch: "x64" }), /TOOLCHAIN_UNSUPPORTED_PLATFORM/);
 });

@@ -12,7 +12,7 @@ import {
   lstatSync,
   readFileSync,
   readdirSync,
-  realpathSync,
+  readlinkSync,
   renameSync,
   rmSync,
   statSync,
@@ -194,10 +194,10 @@ function downloadableTools(lock, platform, scope = "core") {
 export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl, scope = "core" }) {
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot);
-  assertOwnedDirectoryChain(toolsRoot);
+  assertOwnedDirectoryChain(toolsRoot, { platform });
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(downloads, { recursive: true, mode: 0o700 });
-  assertOwnedDirectoryChain(downloads);
+  assertOwnedDirectoryChain(downloads, { platform });
   chmodSync(downloads, 0o700);
   for (const [name, _tool, artifact] of downloadableTools(lock, platform, scope)) {
     const target = join(downloads, artifact.archiveName);
@@ -259,8 +259,8 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const downloads = join(toolsRoot, "downloads");
-  assertOwnedDirectoryChain(toolsRoot);
-  assertOwnedDirectoryChain(downloads);
+  assertOwnedDirectoryChain(toolsRoot, { platform });
+  assertOwnedDirectoryChain(downloads, { platform });
   mkdirSync(toolsRoot, { recursive: true });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = join(downloads, artifact.archiveName);
@@ -303,7 +303,7 @@ function readVerifiedBytes(path) {
 }
 
 function atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock }) {
-  assertOwnedDirectoryChain(destination);
+  assertOwnedDirectoryChain(destination, { platform });
   const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
   const staged = join(stageRoot, "payload");
   let backup;
@@ -373,7 +373,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
 }
 
 export function inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock }) {
-  try { assertOwnedDirectoryChain(toolsRoot); assertOwnedDirectoryChain(join(toolsRoot, "downloads")); assertOwnedDirectoryChain(destination); }
+  try { assertOwnedDirectoryChain(toolsRoot, { platform }); assertOwnedDirectoryChain(join(toolsRoot, "downloads"), { platform }); assertOwnedDirectoryChain(destination, { platform }); }
   catch { return { ok: false, code: "installation-path-unsafe", actualVersion: "unknown" }; }
   if (!existsSync(destination)) {return { ok: false, code: "missing", actualVersion: "missing" };}
   const provenancePath = join(destination, provenanceFile);
@@ -445,26 +445,33 @@ export function canonicalizeTrustedPath(path, { platform = process.platform } = 
     current = current === "/" ? `/${part}` : join(current, part);
     let st; try { st = lstatSync(current); } catch { continue; }
     if (!st.isSymbolicLink()) continue;
-    const allowed = platform === "darwin" && ((current === "/var" && realpathSync(current) === "/private/var") || (current === "/tmp" && realpathSync(current) === "/private/tmp"));
+    const allowed = platform === "darwin" && ((current === "/var" && trustedAliasTarget(current, "/private/var")) || (current === "/tmp" && trustedAliasTarget(current, "/private/tmp")));
     if (!allowed) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
   }
   if (platform === "darwin") {
     for (const [alias, target] of [["/var", "/private/var"], ["/tmp", "/private/tmp"]]) {
       if (absolute === alias || absolute.startsWith(`${alias}/`)) {
-        try { if (lstatSync(alias).isSymbolicLink() && realpathSync(alias) === target) return `${target}${absolute.slice(alias.length)}`; } catch { /* unresolved roots remain lexical */ }
+        try { if (lstatSync(alias).isSymbolicLink() && trustedAliasTarget(alias, target)) return `${target}${absolute.slice(alias.length)}`; } catch { /* unresolved roots remain lexical */ }
       }
     }
   }
   return absolute;
 }
 
-function assertOwnedDirectoryChain(path) {
-  const absolute = canonicalizeTrustedPath(path); const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
+function trustedAliasTarget(alias, target) {
+  const link = readlinkSync(alias);
+  return link === target || link === target.slice(1);
+}
+
+function assertOwnedDirectoryChain(path, { platform = process.platform } = {}) {
+  const absolute = canonicalizeTrustedPath(path, { platform }); const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
   for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
     current = current === "/" ? `/${part}` : join(current, part);
     let st; try { st = lstatSync(current); } catch { continue; }
-    if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
-    if (typeof process.getuid === "function" && st.uid !== process.getuid()) throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");
+    const trustedSystemAncestor = platform === "darwin" && ["/private", "/private/var", "/private/var/folders", "/private/tmp"].includes(current);
+    const trustedTempAncestor = current === "/tmp";
+    if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1 || ((st.mode & 0o022) !== 0 && !trustedSystemAncestor && !trustedTempAncestor)) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
+    if (typeof process.getuid === "function" && st.uid !== process.getuid() && current !== "/" && !trustedSystemAncestor) throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");
   }
 }
 
@@ -511,7 +518,7 @@ function writePnpmWrapper({ lock, toolsRoot, platform }) {
   toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const bin = join(toolsRoot, "bin");
   mkdirSync(bin, { recursive: true, mode: 0o700 });
-  assertOwnedDirectoryChain(bin);
+  assertOwnedDirectoryChain(bin, { platform });
   const target = join(bin, "pnpm");
   const part = `${target}.part`;
   if (existsSync(part)) { const stale = lstatSync(part); if (!stale.isFile() || stale.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE"); rmSync(part); }
@@ -563,8 +570,8 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const downloads = join(toolsRoot, "downloads");
-  assertOwnedDirectoryChain(toolsRoot);
-  assertOwnedDirectoryChain(downloads);
+  assertOwnedDirectoryChain(toolsRoot, { platform });
+  assertOwnedDirectoryChain(downloads, { platform });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = join(downloads, artifact.archiveName);
     verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_CACHE_MISSING" });
