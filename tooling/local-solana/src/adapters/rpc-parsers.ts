@@ -1,4 +1,4 @@
-import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LIFECYCLE, LocalSolanaError, type AccountState, type InstructionFact, type LifecycleKind, type TokenAccountState, type TransactionErrorFact, type TransactionFact } from "../domain/model.ts";
+import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LIFECYCLE, LocalSolanaError, isValidLoopbackPort, type AccountState, type InstructionFact, type LifecycleKind, type TokenAccountState, type TransactionErrorFact, type TransactionFact } from "../domain/model.ts";
 
 export function parseAccountState(value: unknown, address: string): AccountState {
   const root = object(value, "mint account");
@@ -44,7 +44,7 @@ export function assertLoopbackRpcUrl(value: string): URL {
     throw new LocalSolanaError("SOLANA_RPC_NON_LOOPBACK", "RPC must be exact http://127.0.0.1:<port>/ with no credentials or redirect surface");
   }
   const port = Number(url.port);
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) { throw new LocalSolanaError("SOLANA_RPC_PORT", "RPC port is outside the private fixture range"); }
+  if (!isValidLoopbackPort(port)) { throw new LocalSolanaError("SOLANA_RPC_PORT", "RPC port is outside the private fixture range"); }
   return url;
 }
 

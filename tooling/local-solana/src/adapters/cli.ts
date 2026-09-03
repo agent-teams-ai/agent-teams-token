@@ -10,7 +10,9 @@ export class SolanaCliAdapter implements CliPort {
   public async createKeys(context: CliExecutionContext) {
     const { paths, tools, env, signal } = context;
     for (const path of [paths.payerKey, paths.mintKey, paths.ownerKey]) {
+      if (signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
       await this.checked(tools.keygen, ["new", "--no-bip39-passphrase", "--silent", "--force", "--outfile", path], env, signal);
+      if (signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
       await chmod(path, 0o600);
     }
     return {

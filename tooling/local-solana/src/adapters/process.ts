@@ -9,6 +9,7 @@ import { captureValidatorIdentity } from "./process-identity.ts";
 export class NodeCommandAdapter implements CommandPort {
   public async run(executable: string, args: readonly string[], options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}): Promise<CommandResult> {
     if (!executable.startsWith("/")) { throw new LocalSolanaError("SOLANA_EXECUTABLE_ABSOLUTE", "child executable must be absolute"); }
+    if (options.signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
     return await new Promise((resolve, reject) => {
       const child = spawn(executable, args, { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"] });
       let stdout = ""; let stderr = ""; let stopping = false;
@@ -35,6 +36,7 @@ export class NodeCommandAdapter implements CommandPort {
 
 export class OwnedValidatorAdapter implements ValidatorPort {
   public async start(request: ValidatorStartRequest): Promise<ValidatorHandle> {
+    if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
     if (!request.executable.startsWith("/")) { throw new LocalSolanaError("SOLANA_VALIDATOR_ABSOLUTE", "validator executable must be absolute"); }
     const args = [
       "--reset", "--ledger", request.ledger, "--config", request.config,
@@ -65,6 +67,7 @@ export class OwnedValidatorAdapter implements ValidatorPort {
     const abort = (): void => { void stopSupervisor(supervisor, validatorPid).catch(() => {}); };
     request.signal.addEventListener("abort", abort, { once: true });
     try {
+      if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
       supervisor.send({ type: "start", executable: request.executable, args, env: request.env, leaseToken: request.leaseToken });
       await waitFor(() => validatorPid !== undefined || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000);
       if (validatorPid === undefined) { throw startupFailure(validatorExit, output, request); }

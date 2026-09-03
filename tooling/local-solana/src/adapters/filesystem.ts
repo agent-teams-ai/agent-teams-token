@@ -40,7 +40,7 @@ export class PrivateRunStore implements RunStorePort {
     const lease = await validateOwnedRun(await canonicalTarget(this.root), paths.directory, false);
     if (lease.token !== paths.leaseToken) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before cleanup"); }
     if (lease.validator !== null && processAlive(lease.validator.pid)) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
-    await rm(paths.directory, { recursive: true, force: false, maxRetries: 2 });
+    await quarantineAndDeleteRun(await canonicalTarget(this.root), paths.directory, paths.leaseToken);
     if (await exists(paths.directory)) { throw new LocalSolanaError("SOLANA_CLEANUP_INCOMPLETE", "private run directory still exists after cleanup"); }
   }
   public async reclaimStale(): Promise<number> {
@@ -54,7 +54,7 @@ export class PrivateRunStore implements RunStorePort {
       const lease = await validateOwnedRun(root, directory, true).catch(() => null);
       if (!lease || await leaseOwnerIsLive(lease)) { continue; }
       if (lease.validator !== null) { await terminateAuthenticatedValidator(lease, directory); }
-      await rm(directory, { recursive: true, force: false, maxRetries: 2 }); reclaimed += 1;
+      await quarantineAndDeleteRun(root, directory, lease.token); reclaimed += 1;
     }
     return reclaimed;
   }
@@ -158,6 +158,20 @@ function parseValidatorIdentity(child: unknown): ValidatorIdentity {
   return identity as unknown as ValidatorIdentity;
 }
 
+async function quarantineAndDeleteRun(root: string, directory: string, token: string): Promise<void> {
+  const quarantine = join(root, ".quarantine-" + token);
+  await rename(directory, quarantine);
+  try {
+    await assertOwnedDirectory(quarantine);
+    const lease = parseLease(await readLease(quarantine));
+    if (lease.token !== token) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before quarantine cleanup"); }
+    await rm(quarantine, { recursive: true, force: false, maxRetries: 2 });
+  } catch (cause) {
+    await rename(quarantine, directory).catch(() => {});
+    throw cause;
+  }
+}
+
 async function terminateAuthenticatedValidator(lease: Lease, directory: string): Promise<void> {
   const identity = lease.validator;
   if (identity === null || !processAlive(identity.pid)) { return; }
@@ -188,7 +202,7 @@ async function processExited(pid: number): Promise<boolean> {
     const end = stat.lastIndexOf(")");
     const state = end < 0 ? undefined : stat.slice(end + 2).trim().split(/\s+/u)[0];
     return state === "Z";
-  } catch { return true; }
+  } catch { return false; }
 }
 
 async function leaseOwnerIsLive(lease: Lease): Promise<boolean> {

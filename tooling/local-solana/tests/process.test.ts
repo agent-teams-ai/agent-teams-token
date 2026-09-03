@@ -11,6 +11,18 @@ test("process adapter rejects PATH fallback and bounds execution", async () => {
   await assert.rejects(adapter.run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 30 }), /SOLANA_COMMAND_TIMEOUT/u);
 });
 
+test("already-aborted command and validator paths spawn nothing", async () => {
+  const controller = new AbortController(); controller.abort();
+  const adapter = new NodeCommandAdapter();
+  await assert.rejects(adapter.run(process.execPath, ["-e", "process.exit(0)"], { signal: controller.signal }), /SOLANA_COMMAND_ABORTED/u);
+  await assert.rejects(new OwnedValidatorAdapter().start({
+    executable: process.execPath, ledger: "/tmp/ledger", config: "/tmp/config", genesisMint: "5".repeat(32),
+    tokenProgram: process.execPath, associatedTokenProgram: process.execPath, rpcPort: 30000, faucetPort: 30002,
+    gossipPort: 30010, dynamicPortRange: "30010-30137", env: { PATH: "/usr/bin:/bin" }, signal: controller.signal,
+    leaseToken: "a".repeat(64), registerIdentity: async () => { throw new Error("must not register"); },
+  }), /SOLANA_COMMAND_ABORTED/u);
+});
+
 test("process interruption terminates only its exact child", async () => {
   const adapter = new NodeCommandAdapter(); const controller = new AbortController();
   const pending = adapter.run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { signal: controller.signal });

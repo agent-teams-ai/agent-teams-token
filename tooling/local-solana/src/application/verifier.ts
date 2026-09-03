@@ -5,6 +5,7 @@ import {
   FIXTURE_DECIMALS,
   LIFECYCLE,
   LocalSolanaError,
+  SYSTEM_PROGRAM,
   isExactLoopbackRpcUrl,
   parseUnsignedInteger,
   type EvidenceReport,
@@ -115,13 +116,15 @@ function verifyRevokeFreeze(fact: TransactionFact, relevant: InstructionFact, va
 }
 
 function verifyCreateAta(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  const outer = fact.instructions.filter((item) => item.innerInstructionIndex === null);
+  assertCondition(outer.length === 1 && outer[0] === relevant, "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction");
   assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && ["raw", "create", "createIdempotent"].includes(relevant.kind), "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
   const expectedPrefix = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress];
   const exactParsedSemantics = relevant.kind !== "raw" && relevant.authority === value.payerAddress
     && relevant.tokenAccount === value.tokenAccountAddress && relevant.owner === value.ownerAddress && relevant.mint === value.mintAddress;
   const exactRawPrefix = relevant.kind === "raw" && expectedPrefix.every((address, index) => relevant.accounts[index] === address);
   assertCondition((exactParsedSemantics || exactRawPrefix)
-    && [...expectedPrefix, CLASSIC_TOKEN_PROGRAM].every((address) => relevant.accounts.includes(address)),
+    && [...expectedPrefix, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM].every((address) => relevant.accounts.includes(address)),
   "SOLANA_ATA_ACCOUNTS", "ATA instruction does not bind payer, ATA, owner, mint and Token Program");
   requireSigners(fact, [value.payerAddress]);
 }

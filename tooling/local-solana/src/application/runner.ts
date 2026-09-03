@@ -33,8 +33,11 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
   const controller = new AbortController();
   const abort = (): void => controller.abort(externalSignal?.reason);
   externalSignal?.addEventListener("abort", abort, { once: true });
+  if (externalSignal?.aborted) { controller.abort(externalSignal.reason); }
   const signal = controller.signal;
+  ensureNotAborted(signal);
   await deps.store.reclaimStale();
+  ensureNotAborted(signal);
   const paths = await deps.store.create();
   const resources: CleanupResources = { validator: undefined, portLease: undefined };
   let mutationPhase: FailurePhase | undefined;
@@ -43,6 +46,7 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
   let failure: unknown;
   let failed = false;
   try {
+    ensureNotAborted(signal);
     const tools = await deps.tools.resolve();
     const env = allowlistedEnvironment(deps.environment, paths.directory);
     const cliContext = { paths, tools, env, signal };
@@ -211,6 +215,8 @@ export function allowlistedEnvironment(source: NodeJS.ProcessEnv, runDirectory: 
   for (const key of ["SYSTEMROOT", "WINDIR"]) { if (source[key]) { env[key] = source[key]; } }
   return env;
 }
+
+export function ensureNotAborted(signal: AbortSignal): void { if (signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "fixture interrupted"); } }
 
 export function assertFixtureAmount(value: bigint): void {
   if (value !== FIXTURE_AMOUNT_BASE_UNITS) { throw new LocalSolanaError("SOLANA_AMOUNT", "fixture amount is immutable"); }

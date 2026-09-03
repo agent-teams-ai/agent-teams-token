@@ -30,13 +30,8 @@ case "$token_command" in
     exec docker compose -f "$token_repo_root/compose.yaml" down
     ;;
   solana)
-    mkdir -p "$token_repo_root/.local/solana-ledger"
-    exec solana-test-validator \
-      --reset \
-      --ledger "$token_repo_root/.local/solana-ledger" \
-      --rpc-port 8899 \
-      --faucet-port 9900 \
-      "$@"
+    # Delegate to the pinned, lease-aware local fixture boundary.
+    exec node "$token_repo_root/scripts/solana/local-fixture.ts" "$@"
     ;;
   help|*)
     printf '%s\n' \
@@ -46,6 +41,6 @@ case "$token_command" in
       '  check      Run lint, typecheck, and unit tests' \
       '  evm-up     Start the local Anvil container' \
       '  evm-down   Stop local containers' \
-      '  solana     Start native solana-test-validator'
+      '  solana     Run the pinned lease-aware local fixture'
     ;;
 esac

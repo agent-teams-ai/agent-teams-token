@@ -11,8 +11,10 @@ test("canonical bigint parser accepts only unsigned decimal strings", () => {
 });
 
 test("RPC policy accepts exact IPv4 loopback only", () => {
-  assert.equal(assertLoopbackRpcUrl("http://127.0.0.1:8899/").port, "8899");
-  for (const value of ["https://127.0.0.1:8899/", "http://localhost:8899/", "http://[::1]:8899/", "http://127.0.0.1:80/", "http://127.0.0.1:8899/path", "http://user@127.0.0.1:8899/", "http://127.0.0.1:8899/?next=http://evil.test"]) {
+  for (const port of [1, 80, 1023, 1024, 65535]) {
+    assert.equal(assertLoopbackRpcUrl(`http://127.0.0.1:${port}/`).port, String(port));
+  }
+  for (const value of ["https://127.0.0.1:8899/", "http://localhost:8899/", "http://[::1]:8899/", "http://127.0.0.1:0/", "http://127.0.0.1:65536/", "http://127.0.0.1:8899/path", "http://user@127.0.0.1:8899/", "http://127.0.0.1:8899/?next=http://evil.test"]) {
     assert.throws(() => assertLoopbackRpcUrl(value), /SOLANA_RPC_/u, value);
   }
 });

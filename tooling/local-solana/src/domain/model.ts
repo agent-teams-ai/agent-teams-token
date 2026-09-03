@@ -4,10 +4,12 @@ export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 export const FIXTURE_DECIMALS = 9;
 export const FIXTURE_AMOUNT_BASE_UNITS = 1_000_000_000_000n;
 
+export function isValidLoopbackPort(port: number): boolean { return Number.isInteger(port) && port >= 1 && port <= 65_535; }
+
 /** Accepts only the canonical fixture URL shape on the IPv4 loopback host. */
 export function isExactLoopbackRpcUrl(value: string): boolean {
   const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/$/u.exec(value);
-  return match !== null && Number(match[1]) <= 65_535;
+  return match !== null && isValidLoopbackPort(Number(match[1]));
 }
 
 export class LocalSolanaError extends Error {
