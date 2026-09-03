@@ -211,11 +211,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       this.published = true;
       return this.target;
     } catch (error) {
-      try {
-        await this.rollbackUndurablePublication();
-      } catch (rollbackError) {
-        throw rollbackError;
-      }
+      await this.rollbackUndurablePublication();
       throw error;
     }
   }
@@ -264,10 +260,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
 
   private async rollbackUndurablePublication(): Promise<void> {
     await this.assertParentStable();
-    if (this.publishedTargetIdentity === undefined) return;
+    if (this.publishedTargetIdentity === undefined) {return;}
     await this.assertPublishedTreeUnchanged();
     const expectedNames = [...this.leaves.keys()].toSorted();
-    for (const name of expectedNames) await unlink(join(this.target, name));
+    for (const name of expectedNames) {await unlink(join(this.target, name));}
     await rmdir(this.target);
     await this.parentHandle.sync().catch(() => {});
   }
