@@ -96,3 +96,7 @@ listener instead of probing and releasing a port before process startup.
 Both temporary trees are removed in the E2E `finally` path. Forge execution and
 Anvil shutdown have explicit deadlines; a child that ignores the bounded
 SIGTERM grace period is deterministically sent SIGKILL.
+
+Publication no-replace capability
+
+Node.js `fs.rename` has replace semantics and is not sufficient for the final publication boundary. `claimOwnedOutputDirectory(...).publish()` therefore fails closed with typed code `OUTPUT_NO_REPLACE_UNAVAILABLE` unless the caller supplies `noReplaceDirectoryRename(source, target)`. The callback is a narrow port for a pinned native helper: it must atomically rename one directory onto an absent destination, return `EEXIST` when the destination exists without modifying either path, reject symlink/path substitution, and provide the same identity guarantees as Linux `renameat2(RENAME_NOREPLACE)` or an equivalent exclusive macOS primitive. Production wiring must capability-detect and pin/checksum the helper before exposing this callback; tests may inject a deterministic implementation.

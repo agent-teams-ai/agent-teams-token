@@ -28,6 +28,8 @@ export interface ClaimedOutputDirectory {
   close(): Promise<void>;
 }
 
+export type NoReplaceDirectoryRename = (source: string, target: string) => Promise<void>;
+
 export interface OutputFaultInjection {
   readonly beforeStagingLeafOpen?: () => Promise<void>;
   readonly afterStagingLeafOpen?: () => Promise<void>;
@@ -40,6 +42,8 @@ export interface OutputFaultInjection {
   readonly afterParentDirectorySync?: () => Promise<void>;
   /** Replaces the parent fsync operation for deterministic failure injection. */
   readonly parentDirectorySync?: () => Promise<void>;
+  /** Directory no-replace rename supplied by a pinned native helper. */
+  readonly noReplaceDirectoryRename?: NoReplaceDirectoryRename;
 }
 
 export async function claimOwnedOutputDirectory(
@@ -171,6 +175,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       fail("OUTPUT_ALREADY_PUBLISHED", "bundle is already published");
     }
     await this.assertStagingStable();
+    const noReplaceRename = this.faultInjection.noReplaceDirectoryRename;
+    if (noReplaceRename === undefined) {
+      fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "publication requires a native no-replace directory rename primitive");
+    }
     await this.faultInjection.beforeStagingDirectorySync?.();
     await this.stagingHandle.sync();
     await this.faultInjection.afterStagingDirectorySync?.();
@@ -179,7 +187,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.assertStagingStable();
       await assertMissing(this.target);
       try {
-        await rename(this.path, this.target);
+        await noReplaceRename(this.path, this.target);
       } catch (error) {
         if (nodeErrorCode(error) === "EEXIST") fail("OUTPUT_TARGET_EXISTS", "output target already exists");
         throw error;

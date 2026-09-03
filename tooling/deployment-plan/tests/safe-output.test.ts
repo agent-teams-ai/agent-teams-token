@@ -81,6 +81,21 @@ test("directory replacement after an exclusive claim fails closed", async () => 
   assert.deepEqual(await readdir(claim.path), []);
 });
 
+test("publication fails closed when no-replace capability is unavailable", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  const claim = await claimOwnedOutputDirectory(parent, "bundle");
+  try {
+    await claim.writeExclusive("READY", Buffer.from("ready"));
+    await assert.rejects(
+      claim.publish(),
+      /native no-replace directory rename primitive/u,
+    );
+    await assert.rejects(readFile(join(parent, "bundle", "READY")));
+  } finally {
+    await claim.close();
+  }
+});
+
 test("owned staging creation failure is reclaimed and a retry can publish", async () => {
   const parent = await canonicalTemporaryDirectory();
   await assert.rejects(
