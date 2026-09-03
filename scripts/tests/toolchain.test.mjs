@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +22,7 @@ import {
   loadLock,
   validateLock,
   verifyCache,
+  canonicalizeTrustedPath,
 } from "../toolchain.mjs";
 import { runDoctor } from "../doctor.mjs";
 import {
@@ -115,6 +117,20 @@ test("Solana scope installs exact Agave and rejects a tampered inner binary", (c
     }),
     /TOOLCHAIN_INSTALL_INVALID tool=agave.*file-checksum:bin\/solana-test-validator/,
   );
+});
+
+test("canonicalizes the macOS system temp aliases but rejects attacker symlink roots", (context) => {
+  if (process.platform === "darwin") {
+    const canonical = canonicalizeTrustedPath(join("/var", "tmp", "agtmai-tools"), { platform: "darwin" });
+    assert.equal(canonical.startsWith("/private/var/"), true);
+  }
+  const root = mkdtempSync(join(tmpdir(), "agtmai-symlink-test-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const real = join(root, "real-tools");
+  const link = join(root, ".tools");
+  mkdirSync(real);
+  symlinkSync(real, link, "dir");
+  assert.throws(() => canonicalizeTrustedPath(link), /TOOLCHAIN_DIRECTORY_IDENTITY_INVALID/);
 });
 
 test("unsupported hosts fail closed", () => {

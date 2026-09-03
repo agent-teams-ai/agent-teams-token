@@ -12,6 +12,7 @@ import {
   lstatSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -192,6 +193,7 @@ function downloadableTools(lock, platform, scope = "core") {
 
 export function fetchArtifacts({ lock, platform, toolsRoot, downloader = downloadWithCurl, scope = "core" }) {
   assertSupported(lock, platform);
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
   assertOwnedDirectoryChain(toolsRoot);
   const downloads = join(toolsRoot, "downloads");
   mkdirSync(downloads, { recursive: true, mode: 0o700 });
@@ -255,6 +257,7 @@ function minimalSubprocessEnv() {
 export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "core" }) {
   if (!offline) {throw new Error("TOOLCHAIN_INSTALL_REQUIRES_OFFLINE use=install --offline");}
   assertSupported(lock, platform);
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const downloads = join(toolsRoot, "downloads");
   assertOwnedDirectoryChain(toolsRoot);
   assertOwnedDirectoryChain(downloads);
@@ -300,6 +303,7 @@ function readVerifiedBytes(path) {
 }
 
 function atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock }) {
+  assertOwnedDirectoryChain(destination);
   const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
   const staged = join(stageRoot, "payload");
   let backup;
@@ -434,8 +438,28 @@ function inspectStableExpectedFile({ artifact, path, target, exists }) {
   } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) closeSync(fd); }
 }
 
+export function canonicalizeTrustedPath(path, { platform = process.platform } = {}) {
+  const absolute = resolve(path);
+  const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
+  for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
+    current = current === "/" ? `/${part}` : join(current, part);
+    let st; try { st = lstatSync(current); } catch { continue; }
+    if (!st.isSymbolicLink()) continue;
+    const allowed = platform === "darwin" && ((current === "/var" && realpathSync(current) === "/private/var") || (current === "/tmp" && realpathSync(current) === "/private/tmp"));
+    if (!allowed) throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
+  }
+  if (platform === "darwin") {
+    for (const [alias, target] of [["/var", "/private/var"], ["/tmp", "/private/tmp"]]) {
+      if (absolute === alias || absolute.startsWith(`${alias}/`)) {
+        try { if (lstatSync(alias).isSymbolicLink() && realpathSync(alias) === target) return `${target}${absolute.slice(alias.length)}`; } catch { /* unresolved roots remain lexical */ }
+      }
+    }
+  }
+  return absolute;
+}
+
 function assertOwnedDirectoryChain(path) {
-  const absolute = resolve(path); const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
+  const absolute = canonicalizeTrustedPath(path); const parts = absolute.split("/"); let current = parts[0] === "" ? "/" : parts[0];
   for (const part of parts.slice(parts[0] === "" ? 1 : 0)) {
     current = current === "/" ? `/${part}` : join(current, part);
     let st; try { st = lstatSync(current); } catch { continue; }
@@ -484,10 +508,12 @@ function pnpmWrapper(lock, platform) {
 }
 
 function writePnpmWrapper({ lock, toolsRoot, platform }) {
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const bin = join(toolsRoot, "bin");
+  mkdirSync(bin, { recursive: true, mode: 0o700 });
+  assertOwnedDirectoryChain(bin);
   const target = join(bin, "pnpm");
   const part = `${target}.part`;
-  mkdirSync(bin, { recursive: true });
   if (existsSync(part)) { const stale = lstatSync(part); if (!stale.isFile() || stale.nlink !== 1) throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE"); rmSync(part); }
   const fd = openSync(part, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o700);
   try {
@@ -535,6 +561,7 @@ function singleLine(value) {
 export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core" }) {
   if (!offline) {throw new Error("TOOLCHAIN_VERIFY_REQUIRES_OFFLINE use=verify --offline");}
   assertSupported(lock, platform);
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const downloads = join(toolsRoot, "downloads");
   assertOwnedDirectoryChain(toolsRoot);
   assertOwnedDirectoryChain(downloads);
