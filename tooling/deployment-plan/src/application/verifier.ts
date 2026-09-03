@@ -37,6 +37,7 @@ export function independentlyVerify(request: VerificationRequest): void {
   validatePlanSafety(request.plan);
   validatePlanTrust(request.plan, request.roots);
   validateBuildBindings(request.plan, request.expected);
+  validateApprovedArtifactIntegrity(request.expected, request.roots);
   validateQuote(request);
   validateReadyBinding(request.plan, request.quote, request.ready);
 }
@@ -145,6 +146,22 @@ function validateCapPolicy(value: unknown, roots: TrustRoots): void {
     || capPolicy.testOnly !== true
   ) {
     fail("PLAN_CAP_POLICY_MISMATCH", "plan cap policy differs from trust roots");
+  }
+}
+
+function validateApprovedArtifactIntegrity(expected: ApprovedArtifact, roots: TrustRoots): void {
+  const inputBytes = Buffer.from(expected.creationInput.slice(2), "hex");
+  if (sha256Hex(inputBytes) !== expected.creationInputHash
+    || expected.creationInput !== `${expected.creationBytecode}${expected.constructorArguments.slice(2)}`) {
+    fail("APPROVED_ARTIFACT_FORGED", "creation input is not independently bound to its bytes");
+  }
+  if (expected.creationInputHash !== roots.creationInputHash
+    || expected.constructorArgumentsHash !== roots.constructorArgumentsHash
+    || expected.artifactSha256 !== roots.artifactSha256
+    || expected.abiSha256 !== roots.abiSha256
+    || expected.fixtureSha256 !== roots.fixtureSha256
+    || expected.compilerInputSha256 !== roots.compilerInputSha256) {
+    fail("APPROVED_ARTIFACT_UNTRUSTED", "approved artifact digests differ from trust roots");
   }
 }
 

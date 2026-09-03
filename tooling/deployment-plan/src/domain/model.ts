@@ -37,6 +37,9 @@ export function parseUint(value: unknown, field: string, allowZero = true): bigi
   if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/u.test(value)) {
     fail("INVALID_DECIMAL", `${field} must be a canonical decimal string`);
   }
+  if (value.length > 78) {
+    fail("DECIMAL_TOO_LONG", `${field} exceeds the maximum decimal length`);
+  }
   const parsed = BigInt(value);
   if ((!allowZero && parsed === 0n) || parsed > UINT256_MAX) {
     fail("UINT256_RANGE", `${field} is outside uint256`);

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ApprovedArtifact, TrustRoots } from "../src/adapters/artifact.ts";
 import { buildFeeQuote, buildStablePlan, type QuoteObservation } from "../src/application/builder.ts";
-import { computePlanId, deriveCreateAddress } from "../src/domain/identity.ts";
-import { calculateCosts, ceilDiv, UINT256_MAX, type CostInput } from "../src/domain/model.ts";
+import { canonicalJson, computePlanId, deriveCreateAddress } from "../src/domain/identity.ts";
+import { calculateCosts, ceilDiv, parseUint, UINT256_MAX, type CostInput } from "../src/domain/model.ts";
 
 const hash = `0x${"1".repeat(64)}` as const;
 const roots: TrustRoots = {
@@ -184,4 +184,13 @@ test("every stable identity field participates in planId", () => {
     }
     assert.notEqual(computePlanId({ ...identity, [key]: mutation }), baseline, key);
   }
+});
+
+
+test("canonical JSON uses deterministic code-point key ordering", () => {
+  assert.equal(canonicalJson({ "é": 1, "e": 2, "😀": 3 }), '{"e":2,"é":1,"😀":3}');
+});
+
+test("decimal strings reject lengths beyond uint256 maximum", () => {
+  assert.throws(() => parseUint("1" + "0".repeat(78), "value"), /maximum decimal length/u);
 });

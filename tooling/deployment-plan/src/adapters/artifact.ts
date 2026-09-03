@@ -57,7 +57,7 @@ export function approveForgeArtifact(
   const constructorAbiBytes = utf8Hex(canonicalJson(constructor));
 
   const approved: ApprovedArtifact = {
-    buildInfoSha256: sha256Hex(inputs.buildInfoBytes),
+    buildInfoSha256: sha256Hex(canonicalJson(normalizeBuildInfo(parsed.build))),
     artifactSha256: parsed.artifactSha256,
     abiSha256: parsed.abiSha256,
     fixtureSha256: parsed.fixtureSha256,
@@ -93,6 +93,15 @@ function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
     abiSha256: sha256Hex(inputs.abiBytes),
     fixtureSha256: sha256Hex(inputs.fixtureBytes),
   };
+}
+
+function normalizeBuildInfo(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeBuildInfo);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalizeBuildInfo(entry)]));
+  }
+  if (typeof value === "string" && value.startsWith("/")) return "$AGTMAI_ABSOLUTE_PATH";
+  return value;
 }
 
 function validateInputDigests(parsed: ParsedArtifactInputs, roots: TrustRoots): void {
@@ -227,8 +236,17 @@ function canonicalAbi(value: unknown): string {
     fail("ABI_BUILD_MISMATCH", "ABI/build/artifact mismatch");
   }
   return canonicalJson(
-    value.toSorted((left, right) => canonicalJson(left).localeCompare(canonicalJson(right))),
+    value.toSorted((left, right) => compareCanonical(canonicalJson(left), canonicalJson(right))),
   );
+}
+
+function compareCanonical(left: string, right: string): number {
+  const a = Array.from(left, (char) => char.codePointAt(0) as number);
+  const b = Array.from(right, (char) => char.codePointAt(0) as number);
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return a.length - b.length;
 }
 
 function findConstructor(abi: unknown[]): Record<string, unknown> {

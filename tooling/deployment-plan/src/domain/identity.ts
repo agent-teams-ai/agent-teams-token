@@ -17,13 +17,22 @@ export function canonicalJson(value: unknown): string {
   }
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
-      .toSorted(([left], [right]) => left.localeCompare(right));
+      .toSorted(([left], [right]) => compareCodePoints(left, right));
     const properties = entries.map(
       ([key, entryValue]) => `${JSON.stringify(key)}:${canonicalJson(entryValue)}`,
     );
     return `{${properties.join(",")}}`;
   }
   fail("CANONICAL_TYPE", "unsupported canonical value");
+}
+
+function compareCodePoints(left: string, right: string): number {
+  const a = Array.from(left, (char) => char.codePointAt(0) as number);
+  const b = Array.from(right, (char) => char.codePointAt(0) as number);
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return a.length - b.length;
 }
 
 export function sha256Hex(value: string | Uint8Array): `0x${string}` {

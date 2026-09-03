@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, readdir } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { approveForgeArtifact } from "../adapters/artifact.ts";
 import { createLocalRpc, observeFees } from "../adapters/rpc.ts";
@@ -85,7 +85,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
     await output.writeExclusive(PLAN, planBytes);
     await output.writeExclusive(QUOTE, quoteBytes);
     await output.writeExclusive(READY, jsonBytes(ready));
-    await assertExactBundle(output.path);
+    await assertExactBundle(output.path, false);
     await assertPublishedContent(
       output.path, planBytes, quoteBytes, ready,
       { ...request, nowSeconds: trustedNowSeconds() },
@@ -113,7 +113,9 @@ export async function verifyBundle(
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
   verifyReadyDigests(planBytes, quoteBytes, ready);
-  independentlyVerify({ ...request, plan, quote, ready });
+  // Production verification always samples the trusted system clock here;
+  // caller-supplied timestamps are test-only and never control freshness.
+  independentlyVerify({ ...request, plan, quote, ready, nowSeconds: trustedNowSeconds() });
   await independentlyVerifyRpc({
     rpc: request.rpc,
     plan,
@@ -123,7 +125,16 @@ export async function verifyBundle(
   return { plan, quote };
 }
 
-async function assertExactBundle(directory: string): Promise<void> {
+async function assertExactBundle(directory: string, rejectStaging = true): Promise<void> {
+  const metadata = await lstat(directory);
+  const uid = process.getuid?.();
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.nlink < 1 || (metadata.mode & 0o777) !== 0o700 || uid === undefined || metadata.uid !== uid) {
+    fail("BUNDLE_DIRECTORY_UNSAFE", "bundle directory must be owned, private, and canonical");
+  }
+  if (rejectStaging && (directory.includes(".bundle.staging-") || /\.staging-[0-9a-f]+$/u.test(directory))) {
+    fail("BUNDLE_STAGING_REJECTED", "staging directories cannot be verified");
+  }
+  if (await realpath(directory) !== directory) fail("BUNDLE_DIRECTORY_UNSAFE", "bundle path must be canonical");
   const names = (await readdir(directory)).toSorted();
   const expected = [PLAN, QUOTE, READY].toSorted();
   if (names.length !== expected.length || names.some((name, index) => name !== expected[index])) {
