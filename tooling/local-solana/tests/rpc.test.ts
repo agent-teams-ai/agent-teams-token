@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import test from "node:test";
 import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
-import { parseFinalizedTransaction } from "../src/adapters/rpc-parsers.ts";
+import { assertLoopbackRpcUrl, parseFinalizedTransaction } from "../src/adapters/rpc-parsers.ts";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
 
 const payer = "1".repeat(32); const mint = "2".repeat(32); const ata = "3".repeat(32);
@@ -136,3 +136,8 @@ test("RPC parser normalizes exact authority and associated-account semantics", (
 });
 
 function ownerAddress(): string { return "7".repeat(32); }
+
+test("RPC parser preserves explicit default transport port 80", () => {
+  const parsed = assertLoopbackRpcUrl("http://127.0.0.1:80/");
+  assert.equal(parsed.port, "");
+});

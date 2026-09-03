@@ -25,6 +25,7 @@ export async function signedFreezeAccountTransaction(request: AuthorityTransacti
 }
 
 async function signedTokenTransaction(context: AuthorityTransactionContext, instructionRequest: { readonly writableAccounts: readonly string[]; readonly readonlyFlags: readonly boolean[]; readonly data: Uint8Array }): Promise<Uint8Array> {
+  if (context.signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "fixture interrupted"); }
   const payer = await keypair(context.payerPath);
   const authority = await keypair(context.authorityPath);
   if (instructionRequest.writableAccounts.length !== instructionRequest.readonlyFlags.length) {
@@ -46,7 +47,7 @@ async function signedTokenTransaction(context: AuthorityTransactionContext, inst
   const message = concat([
     Uint8Array.from([compiled.requiredSignatures, compiled.readonlySigned, compiled.readonlyUnsigned]),
     shortVec(compiled.keys.length), ...compiled.keys,
-    base58Decode(await context.rpc.latestBlockhash(context.rpcUrl)), shortVec(1), instruction,
+    base58Decode(await context.rpc.latestBlockhash(context.rpcUrl, context.signal)), shortVec(1), instruction,
   ]);
   const signatures = [ed25519Sign(message, payer.seed), ed25519Sign(message, authority.seed)];
   return concat([shortVec(signatures.length), ...signatures, message]);

@@ -14,7 +14,7 @@ export interface CommandPort {
   run(executable: string, args: readonly string[], options?: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal }): Promise<CommandResult>;
 }
 
-export interface ValidatorHandle { readonly pid: number; stop(): Promise<void>; }
+export interface ValidatorHandle { readonly pid: number; stop(): Promise<void>; assertHealthy?: () => Promise<void>; }
 export interface ValidatorStartRequest {
   readonly executable: string;
   readonly ledger: string;
@@ -52,7 +52,7 @@ export interface RpcPort {
   tokenAccountAddress(rpcUrl: string, owner: string, mint: string): Promise<string>;
   finalizedTransaction(rpcUrl: string, signature: string): Promise<TransactionFact>;
   sendSignedTransaction(rpcUrl: string, bytes: Uint8Array): Promise<string>;
-  latestBlockhash(rpcUrl: string): Promise<string>;
+  latestBlockhash(rpcUrl: string, signal?: AbortSignal): Promise<string>;
 }
 
 export interface RunPaths {
@@ -111,4 +111,5 @@ export interface AuthorityTransactionContext {
   readonly rpcUrl: string;
   readonly payerPath: string;
   readonly authorityPath: string;
+  readonly signal?: AbortSignal;
 }

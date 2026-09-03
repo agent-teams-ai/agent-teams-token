@@ -55,11 +55,11 @@ export class JsonRpcAdapter implements RpcPort {
     if (state.owner !== owner || state.mint !== mint) { throw new LocalSolanaError("SOLANA_TOKEN_ACCOUNT_IDENTITY", "associated token account identity does not match owner and mint"); }
     return address;
   }
-  public async latestBlockhash(rpcUrl: string): Promise<string> {
+  public async latestBlockhash(rpcUrl: string, signal?: AbortSignal): Promise<string> {
     // A processed hash is the validator's freshest hash. Failed transactions must
     // skip simulation so they reach the real program, which makes a fresh hash and
     // validator-side delivery retries especially important on a single-node cluster.
-    const root = object(await this.call(rpcUrl, "getLatestBlockhash", [{ commitment: "processed" }]), "blockhash result");
+    const root = object(await this.call(rpcUrl, "getLatestBlockhash", [{ commitment: "processed" }], signal), "blockhash result");
     return string(object(root.value, "blockhash value").blockhash, "blockhash");
   }
   public async sendSignedTransaction(rpcUrl: string, bytes: Uint8Array): Promise<string> {
@@ -85,11 +85,11 @@ export class JsonRpcAdapter implements RpcPort {
     throw new LocalSolanaError("SOLANA_TRANSACTION_TIMEOUT", "transaction did not finalize");
   }
 
-  private async call(rpcUrl: string, method: string, params: readonly unknown[]): Promise<unknown> {
+  private async call(rpcUrl: string, method: string, params: readonly unknown[], externalSignal?: AbortSignal): Promise<unknown> {
     assertLoopbackRpcUrl(rpcUrl);
     const allowed = new Set(["getVersion", "getGenesisHash", "getSlot", "getAccountInfo", "getTokenAccountsByOwner", "getLatestBlockhash", "sendTransaction", "getSignatureStatuses", "getTransaction"]);
     if (!allowed.has(method)) { throw new LocalSolanaError("SOLANA_RPC_METHOD", `RPC method ${method} is not allowlisted`); }
-    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 10_000);
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 10_000); const abort = () => controller.abort(externalSignal?.reason); if (externalSignal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "fixture interrupted"); } externalSignal?.addEventListener("abort", abort, { once: true });
     try {
       const url = assertLoopbackRpcUrl(rpcUrl);
       const id = ++this.id;
@@ -101,11 +101,11 @@ export class JsonRpcAdapter implements RpcPort {
       if (envelope.error !== undefined) { throw new LocalSolanaError("SOLANA_RPC_ERROR", JSON.stringify(envelope.error).slice(0, 1_000)); }
       if (!("result" in envelope)) { throw new LocalSolanaError("SOLANA_RPC_RESULT", "RPC result is missing"); }
       return envelope.result;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); externalSignal?.removeEventListener("abort", abort); }
   }
 
   private postDirect(url: URL, body: string, signal: AbortSignal): Promise<string> {
-    const port = Number(url.port);
+    const port = url.port === "" ? 80 : Number(url.port);
     return new Promise((resolve, reject) => {
       let settled = false;
       const fail = (cause: unknown) => { if (settled) {return;} settled = true; reject(cause instanceof LocalSolanaError ? cause : new LocalSolanaError("SOLANA_RPC_RESPONSE", cause instanceof Error ? cause.message : "RPC transport failed")); };

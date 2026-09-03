@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { processStartIdentity } from "./process-identity.ts";
 
 interface StartMessage {
   readonly type: "start";
@@ -13,6 +14,7 @@ type ControlMessage = StartMessage | { readonly type: "acknowledge" } | { readon
 let validator: ChildProcess | undefined;
 let acknowledged = false;
 let stopping: Promise<boolean> | undefined;
+let validatorStart: string | null = null;
 
 process.on("message", (message: ControlMessage) => {
   if (message.type === "start" && validator === undefined) {
@@ -20,6 +22,7 @@ process.on("message", (message: ControlMessage) => {
       env: { ...message.env, AGTMAI_LOCAL_SOLANA_LEASE_TOKEN: message.leaseToken },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    void (async () => { validatorStart = validator?.pid === undefined ? null : await processStartIdentity(validator.pid).catch(() => null); })();
     validator.stdout?.on("data", (chunk: Buffer) => { send({ type: "output", value: chunk.toString("utf8") }); });
     validator.stderr?.on("data", (chunk: Buffer) => { send({ type: "output", value: chunk.toString("utf8") }); });
     validator.once("spawn", () => { send({ type: "spawned", pid: validator?.pid }); });
@@ -56,8 +59,10 @@ async function stopValidator(): Promise<boolean> {
   const child = validator;
   if (child === undefined || child.exitCode !== null || child.signalCode !== null) { return true; }
   const closed = new Promise<void>((resolve) => { child.once("close", () => { resolve(); }); });
+  if (validatorStart !== null && await processStartIdentity(child.pid ?? -1).catch(() => null) !== validatorStart) { return false; }
   child.kill("SIGTERM");
   if (!await within(closed, 5_000)) {
+    if (validatorStart !== null && await processStartIdentity(child.pid ?? -1).catch(() => null) !== validatorStart) { return false; }
     child.kill("SIGKILL");
     return await within(closed, 5_000);
   }

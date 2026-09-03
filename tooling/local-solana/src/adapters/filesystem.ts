@@ -36,7 +36,9 @@ export class PrivateRunStore implements RunStorePort {
     await atomicWrite(join(paths.directory, MARKER), `${JSON.stringify(updated)}\n`, 0o600);
   }
   public async cleanup(paths: RunPaths): Promise<void> {
-    if (!await exists(paths.directory)) { return; }
+    const directoryEntry = await lstat(paths.directory).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause; });
+    if (directoryEntry === null) { return; }
+    if (directoryEntry.isSymbolicLink() || !directoryEntry.isDirectory()) { throw new LocalSolanaError("SOLANA_CLEANUP_SUBSTITUTION", "owned run directory was substituted"); }
     const lease = await validateOwnedRun(await canonicalTarget(this.root), paths.directory, false);
     if (lease.token !== paths.leaseToken) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before cleanup"); }
     if (lease.validator !== null && processAlive(lease.validator.pid)) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
@@ -178,8 +180,13 @@ async function terminateAuthenticatedValidator(lease: Lease, directory: string):
   const expectedLedger = await realpath(join(directory, "ledger"));
   const authenticated = identity.ledger === expectedLedger && await authenticateValidatorIdentity(identity, lease.token);
   if (!authenticated) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "refusing to terminate a PID that does not authenticate as the owned validator"); }
+  if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before TERM"); }
   process.kill(identity.pid, "SIGTERM");
-  if (!await awaitExit(identity.pid, 5_000)) { process.kill(identity.pid, "SIGKILL"); if (!await awaitExit(identity.pid, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); } }
+  if (!await awaitExit(identity.pid, 5_000)) {
+    if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before KILL"); }
+    process.kill(identity.pid, "SIGKILL");
+    if (!await awaitExit(identity.pid, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); }
+  }
 }
 
 async function awaitExit(pid: number, timeoutMs: number): Promise<boolean> {

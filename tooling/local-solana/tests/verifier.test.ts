@@ -51,3 +51,17 @@ test("verifier rejects supply introduced only after freeze-authority revocation"
     /SOLANA_PRE_MINT_SUPPLY/u,
   );
 });
+
+test("verifier rejects mixed or unknown ATA inner instructions", () => {
+  const base = observationFixture();
+  const ataTx = base.transactions[2]!;
+  for (const extra of [
+    instruction({ programId: CLASSIC_TOKEN_PROGRAM, kind: "transfer", instructionIndex: 0, innerInstructionIndex: 0 }),
+    instruction({ programId: "Unknown1111111111111111111111111111111111", kind: "raw", instructionIndex: 0, innerInstructionIndex: 0 }),
+  ]) {
+    const mutated = { ...base, transactions: base.transactions.map((tx) => tx.operation === "createAta" ? { ...tx, instructions: [...tx.instructions, extra] } : tx) };
+    assert.throws(() => verifyObservations(mutated), /SOLANA_ATA_INNER_SEQUENCE/u);
+  }
+  const shifted = { ...base, transactions: base.transactions.map((tx) => tx.operation === "createAta" ? { ...tx, instructions: tx.instructions.map((item) => ({ ...item, instructionIndex: 1 })) } : tx) };
+  assert.throws(() => verifyObservations(shifted), /SOLANA_ATA_OUTER/u);
+});

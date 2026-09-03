@@ -117,7 +117,11 @@ function verifyRevokeFreeze(fact: TransactionFact, relevant: InstructionFact, va
 
 function verifyCreateAta(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
   const outer = fact.instructions.filter((item) => item.innerInstructionIndex === null);
-  assertCondition(outer.length === 1 && outer[0] === relevant, "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction");
+  assertCondition(outer.length === 1 && outer[0] === relevant && relevant.instructionIndex === 0, "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction at index 0");
+  const inner = fact.instructions.filter((item) => item.innerInstructionIndex !== null);
+  assertCondition(inner.every((item) => item.instructionIndex === relevant.instructionIndex), "SOLANA_ATA_INNER_INDEX", "ATA CPI instructions must bind to the ATA outer instruction");
+  const ordered = inner.toSorted((a, b) => (a.innerInstructionIndex as number) - (b.innerInstructionIndex as number));
+  assertCondition(ordered.every((item, index) => item.innerInstructionIndex === index && ((item.programId === SYSTEM_PROGRAM && ["raw", "createAccount"].includes(item.kind)) || (item.programId === CLASSIC_TOKEN_PROGRAM && ["initializeImmutableOwner", "initializeAccount", "initializeAccount2", "initializeAccount3"].includes(item.kind)))), "SOLANA_ATA_INNER_SEQUENCE", "ATA transaction contains an unexpected CPI instruction");
   assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && ["raw", "create", "createIdempotent"].includes(relevant.kind), "SOLANA_ATA_PROGRAM", "ATA creation must reach the Associated Token Program");
   const expectedAccounts = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM];
   const exactAccounts = relevant.accounts.length === expectedAccounts.length

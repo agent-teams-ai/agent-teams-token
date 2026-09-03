@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LocalSolanaError } from "../domain/model.ts";
 import type { CommandPort, CommandResult, ValidatorHandle, ValidatorPort, ValidatorStartRequest } from "../application/ports.ts";
-import { captureValidatorIdentity } from "./process-identity.ts";
+import { authenticateValidatorIdentity, captureValidatorIdentity } from "./process-identity.ts";
 
 export class NodeCommandAdapter implements CommandPort {
   public async run(executable: string, args: readonly string[], options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}): Promise<CommandResult> {
@@ -86,7 +86,9 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       throw cause;
     }
     let inFlight: Promise<void> | undefined; let stopped = false;
-    return { pid: validatorPid, stop: () => {
+    return { pid: validatorPid, assertHealthy: async () => {
+      if (!await authenticateValidatorIdentity(await captureValidatorIdentity(validatorPid, request.executable, request.ledger, request.leaseToken), request.leaseToken)) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "owned validator identity changed"); }
+    }, stop: () => {
       request.signal.removeEventListener("abort", abort);
       if (stopped) { return Promise.resolve(); }
       inFlight ??= (async () => {
@@ -148,9 +150,16 @@ function processAlive(pid: number): boolean { try { process.kill(pid, 0); return
 
 export async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) { return; }
+  const pid = child.pid;
+  const start = pid === undefined ? null : await processStartIdentity(pid).catch(() => null);
+  const verify = async (): Promise<void> => {
+    if (pid === undefined || start === null) { return; }
+    const current = await processStartIdentity(pid).catch(() => null);
+    if (current !== null && current !== start) { throw new LocalSolanaError("SOLANA_CHILD_IDENTITY", "child PID identity changed before signal"); }
+  };
   const closed = new Promise<void>((resolve) => { child.once("close", () => { resolve(); }); });
-  child.kill("SIGTERM");
-  if (!await within(closed, 5_000)) { child.kill("SIGKILL"); if (!await within(closed, 5_000)) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", `owned child ${child.pid ?? "unknown"} did not exit`); } }
+  await verify(); child.kill("SIGTERM");
+  if (!await within(closed, 5_000)) { await verify(); child.kill("SIGKILL"); if (!await within(closed, 5_000)) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", `owned child ${child.pid ?? "unknown"} did not exit`); } }
 }
 async function within(promise: Promise<void>, ms: number): Promise<boolean> { let timer: NodeJS.Timeout | undefined; try { return await Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => { timer = setTimeout(() => { resolve(false); }, ms); })]); } finally { if (timer) { clearTimeout(timer); } } }
 function bounded(previous: string, chunk: string): string { return `${previous}${chunk}`.slice(-64 * 1024); }

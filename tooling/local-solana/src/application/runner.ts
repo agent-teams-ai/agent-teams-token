@@ -56,31 +56,40 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
     const ready = await deps.rpc.waitReady(rpcUrl, 30_000, signal);
     await deps.rpc.waitProgramsReady(rpcUrl, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 30_000, signal);
     await deps.cli.verifyFunded(cliContext, { rpcUrl, payer: keys.payer });
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "createMint";
     const createSignature = await deps.cli.createMint(cliContext, { rpcUrl, publicKeys: keys });
     const initialMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "revokeFreeze";
     const revokeSignature = await deps.cli.revokeFreeze(cliContext, { rpcUrl, mint: keys.mint });
     const afterRevokeMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "createAta";
     const ataSignature = await deps.cli.createTokenAccount(cliContext, { rpcUrl, mint: keys.mint, owner: keys.owner });
     const tokenAccountAddress = await deps.rpc.tokenAccountAddress(rpcUrl, keys.owner, keys.mint);
     const expectedTokenAccountAddress = await deps.cli.associatedAddress(cliContext, { rpcUrl, mint: keys.mint, owner: keys.owner });
     if (tokenAccountAddress !== expectedTokenAccountAddress) { throw new LocalSolanaError("SOLANA_ASSOCIATED_ADDRESS", "created token account is not the derived associated address"); }
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "mint";
     const mintSignature = await deps.cli.mint(cliContext, { rpcUrl, mint: keys.mint, account: tokenAccountAddress });
     const afterMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
     const afterMintTokenAccount = await deps.rpc.tokenAccount(rpcUrl, tokenAccountAddress);
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "burn";
     const burnSignature = await deps.cli.burn(cliContext, { rpcUrl, account: tokenAccountAddress });
     const finalMint = await deps.rpc.mintAccount(rpcUrl, keys.mint);
     const finalTokenAccount = await deps.rpc.tokenAccount(rpcUrl, tokenAccountAddress);
 
-    const authorityContext = { rpc: deps.rpc, rpcUrl, payerPath: paths.payerKey, authorityPath: paths.mintKey };
+    const authorityContext = { rpc: deps.rpc, rpcUrl, payerPath: paths.payerKey, authorityPath: paths.mintKey, signal };
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "restoreFreezeAttempt";
+    ensureNotAborted(signal);
     const restoreBytes = await deps.authorityTransactions.restoreFreeze({ ...authorityContext, mint: keys.mint, newAuthority: keys.mint });
     const restoreSignature = await deps.rpc.sendSignedTransaction(rpcUrl, restoreBytes);
+    await assertValidatorHealthy(resources.validator);
     mutationPhase = "freezeAttempt";
+    ensureNotAborted(signal);
     const freezeBytes = await deps.authorityTransactions.freezeAccount({ ...authorityContext, account: tokenAccountAddress, mint: keys.mint });
     const freezeSignature = await deps.rpc.sendSignedTransaction(rpcUrl, freezeBytes);
     const genesisAfter = await deps.rpc.genesisHash(rpcUrl);
@@ -221,3 +230,5 @@ export function ensureNotAborted(signal: AbortSignal): void { if (signal.aborted
 export function assertFixtureAmount(value: bigint): void {
   if (value !== FIXTURE_AMOUNT_BASE_UNITS) { throw new LocalSolanaError("SOLANA_AMOUNT", "fixture amount is immutable"); }
 }
+
+async function assertValidatorHealthy(value: CleanupResources["validator"]): Promise<void> { await value?.assertHealthy?.(); }
