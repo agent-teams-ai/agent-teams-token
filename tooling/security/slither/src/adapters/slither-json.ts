@@ -150,11 +150,17 @@ function findingPath(mapping: JsonObject): string {
 }
 
 export function parseDetectorInventory(raw: string): readonly string[] {
-  const lines = raw.split(/\r?\n/u).filter((line) => line.trim().length > 0);
-  const row = /^\|\s*\d+\s*\|\s*`?([a-z0-9-]+)`?\s*\|/u;
-  for (const line of lines) { if (!row.test(line) && !/^\s*\|?\s*(?:Detector|ID|[-| ]+)\s*\|?/u.test(line)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory contains an unrecognised line"); }
-  const ids = lines.flatMap((line) => { const match = row.exec(line); return match ? [match[1]!] : []; });
-  const unique = [...new Set(ids)].toSorted();
-  if (unique.length !== ids.length || unique.length === 0) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is empty or duplicated");}
-  return unique;
+  const lines = raw.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.length > 0);
+  const row = /^\|\s*(\d+)\s*\|\s*`?([a-z0-9-]+)`?\s*\|/u;
+  if (lines.length === 0) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is empty");
+  const rows = lines.map((line) => row.exec(line)).filter((m): m is RegExpExecArray => m !== null);
+  if (rows.length !== lines.length) {
+    const header = /^\|?\s*Detector\s*\|/u.test(lines[0] ?? "");
+    const separator = /^\|?[\s:-]+\|/u.test(lines[1] ?? "");
+    if (!(header && separator && rows.length === lines.length - 2)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory grammar is invalid");
+  }
+  const numbers = rows.map((m) => Number(m[1]));
+  if (numbers.some((n, i) => n !== i + 1)) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory numbering is not contiguous");
+  const ids = rows.map((m) => m[2]!); if (new Set(ids).size !== ids.length) throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is duplicated");
+  return ids.toSorted();
 }

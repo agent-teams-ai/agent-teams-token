@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { AnalysisInput, GateErrorCode, GateManifest, PolicyDecision } from "../domain/model.ts";
 import { classifyGateFailure } from "../application/failure.ts";
@@ -66,7 +66,7 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
     const evidence = {
     schemaVersion: 1, ready: true, candidateSha,
     execution: executionIdentity(),
-    tools: { image: IMAGE, imageRevision: IMAGE_REVISION, slither: "0.11.6", cryticCompile: "0.4.2", forge: "1.8.0", forgeBinarySha256: `sha256:${input.forgeBinarySha256}`, solc: "0.8.36+commit.8a079791", solcBinarySha256: `sha256:${input.solcBinarySha256}` },
+    tools: { image: IMAGE, indexDigest: "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8", imageRevision: IMAGE_REVISION, slither: "0.11.6", cryticCompile: "0.4.2", forge: "1.8.0", forgeBinarySha256: `sha256:${input.forgeBinarySha256}`, solc: "0.8.36+commit.8a079791", solcBinarySha256: `sha256:${input.solcBinarySha256}` },
     inputs: { closureHash: `sha256:${sha256(JSON.stringify([...manifest.sources, ...manifest.config, manifest.detectorInventory]))}`, configHash: `sha256:${hashes.config}`, policyHash: `sha256:${hashes.policy}`, triageHash: `sha256:${request.triageHash}` },
     analysis: { expectedTargets: manifest.expectedContracts, observedTargets: input.analyzedContracts, expectedSources: manifest.sources.map(({ path }) => path.replace(/^contracts\/evm\//u, "")), observedSources: input.analyzedSources, creationBytecodeSha256: `sha256:${input.creationBytecodeSha256}`, detectors: input.detectorInventory, findingCount: input.findings.length, perImpact, findings, suppressions: decision.suppressed.length, triaged: request.triageHash.length > 0 ? decision.visible.filter(({ impact }) => impact === "Low" || impact === "Informational" || impact === "Optimization").length : 0 },
     policy: { blocking: decision.blocking.length, visible: decision.visible.length, suppressed: decision.suppressed.length, errors: decision.errors },
@@ -127,6 +127,8 @@ function executionIdentity(): Record<string, string> {
 
 async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>): Promise<void> {
   if (!output.startsWith("/") || (await lstat(output).catch(() => null)) !== null) { throw new Error("evidence output must be an absolute fresh path"); }
+  const parent = dirname(output); const parentReal = await realpath(parent).catch(() => { throw new Error("evidence output parent must exist and be realpath-resolvable"); });
+  if (parentReal !== parent || output.includes("/../") || output.includes("//")) throw new Error("evidence output parent must be canonical and non-symlinked");
   const staging = await mkdtemp(join(dirname(output), `.${basename(output)}.staging-`));
   try {
     const info = await lstat(staging);
@@ -134,6 +136,7 @@ async function publish(output: string, build: (staging: string) => Promise<void>
     await build(staging);
     await writeFile(join(staging, "READY"), "", { mode: 0o600, flag: "wx" });
     await finalize(staging);
+    if ((await lstat(output).catch(() => null)) !== null) throw new Error("evidence output was created concurrently");
     await rename(staging, output);
   } catch (error) {
     await rm(staging, { recursive: true, force: true });

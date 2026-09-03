@@ -274,7 +274,7 @@ async function readCanonicalTools(repositoryRoot: string, manifest: JsonObject):
   const versions = object(image.versions, "image versions");
   const manifestTools = object(manifest.tools, "manifest tools");
   const tools: JsonObject = {
-    image: `${image.repository}:${image.tag}@${image.manifestDigest}`, imageRevision: image.sourceRevision,
+    image: `${image.repository}:${image.tag}@${image.manifestDigest}`, indexDigest: String(image.indexDigest), imageRevision: image.sourceRevision,
     slither: versions.slither, cryticCompile: versions.cryticCompile, forge: versions.forge,
     forgeBinarySha256: `sha256:${manifestTools.forgeBinarySha256}`,
     solc: String(versions.solc).replace(/\.Linux\.g\+\+$/u, ""),
@@ -436,7 +436,7 @@ const stringValue = (value: unknown): string => {if (typeof value !== "string") 
 function schemaName(variant: Variant): string {return variant === "evidence.json" ? "evidence-report.schema.v1.json" : `${variant.slice(0, -5)}.schema.v1.json`;}
 async function assertRegularDirectory(path: string): Promise<void> {const info = await lstat(path); if (!info.isDirectory() || info.isSymbolicLink()) {throw invalid("bundle is not a regular directory");}}
 async function assertRegularFile(path: string): Promise<void> {const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {throw invalid("bundle entry is not a regular file");}}
-async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw invalid("raw output is not a sealed regular file"); const bytes = await readFile(path); const after = await lstat(path); if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.nlink !== 1) throw invalid("raw output changed during read"); return bytes; }
+async function readStableOutputFile(path: string): Promise<Buffer> { const before = await lstat(path); if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw invalid("raw output is not a sealed regular file"); const handle = await (await import("node:fs/promises")).open(path, 0 | 131072); try { const opened = await handle.stat(); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1) throw invalid("raw output identity changed"); const bytes = await handle.readFile(); const after = await handle.stat(); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1) throw invalid("raw output changed during read"); return bytes; } finally { await handle.close(); } }
 function object(value: unknown, name: string): JsonObject {if (value === null || typeof value !== "object" || Array.isArray(value)) {throw invalid(`${name} is not an object`);} return value as JsonObject;}
 function array(value: unknown, name: string): unknown[] {if (!Array.isArray(value)) {throw invalid(`${name} is not an array`);} return value;}
 function invalid(message: string): SlitherGateError {return new SlitherGateError("EVIDENCE_BUNDLE_INVALID", message);}

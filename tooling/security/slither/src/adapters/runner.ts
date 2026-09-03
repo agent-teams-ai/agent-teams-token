@@ -1,4 +1,4 @@
-import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, constants, copyFile, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
@@ -309,7 +309,7 @@ export function parseOfficialImageEnvironment(raw: string): OfficialImageEnviron
   let image: ImageInspection; try { image = parseJsonWithoutDuplicateKeys(raw) as ImageInspection; } catch { throw new SlitherGateError("IMAGE_METADATA_INVALID", "image inspection output is malformed"); }
   const digests = Array.isArray(image.RepoDigests) ? image.RepoDigests : [];
   const revision = image.Config?.Labels?.["org.opencontainers.image.revision"];
-  if (image.Os !== "linux" || image.Architecture !== "amd64" || !digests.some((value: unknown) => typeof value === "string" && value.endsWith("@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0")) || revision !== IMAGE_REVISION) {
+  if (image.Os !== "linux" || image.Architecture !== "amd64" || !digests.some((value: unknown) => typeof value === "string" && value === "ghcr.io/trailofbits/eth-security-toolbox@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0") || revision !== IMAGE_REVISION) {
     throw new SlitherGateError("IMAGE_PIN_MISMATCH", "image digest, platform or revision mismatch");
   }
   const environment = Array.isArray(image.Config?.Env) ? image.Config.Env.filter((value): value is string => typeof value === "string") : [];
@@ -365,10 +365,20 @@ async function assertCanonicalConfig(path: string): Promise<void> {
   if (JSON.stringify(value) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) throw new SlitherGateError("POLICY_SHAPE_INVALID", "Slither config contains unsupported exclusions or fields");
 }
 
+function assertManifestPath(path: string): void {
+  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) throw new SlitherGateError("TARGET_MANIFEST_INVALID", `manifest path is not canonical: ${path}`);
+}
+async function confinedPath(root: string, relative: string): Promise<string> {
+  const canonicalRoot = await realpath(root); const candidate = join(canonicalRoot, relative);
+  if (!candidate.startsWith(`${canonicalRoot}/`)) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "manifest path escapes repository");
+  let current = canonicalRoot; for (const part of relative.split("/").slice(0,-1)) { current = join(current, part); if ((await lstat(current)).isSymbolicLink()) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "manifest parent is symlinked"); }
+  return candidate;
+}
+
 const safePathList = (value: string): boolean => value.split(":").every((entry) => entry.startsWith("/") && !entry.includes("..") && !entry.includes("\n"));
 
 async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
-  const source = join(root, entry.path); const content = await readStableRegularFile(source, entry.path);
+  assertManifestPath(entry.path); const source = await confinedPath(root, entry.path); const content = await readStableRegularFile(source, entry.path);
   if (sha256(content) !== entry.sha256) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input differs: ${entry.path}`);}
   const target = join(destination, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 }); await writeFile(target, content, { mode: 0o444, flag: "wx" });
 }
@@ -381,24 +391,26 @@ async function readStableRegularFile(path: string, label: string): Promise<Buffe
 }
 
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
-  return await Promise.all(entries.map(async ({ path }) => ({ path, sha256: sha256(await readStableRegularFile(join(root, path), path)) })));
+  return await Promise.all(entries.map(async ({ path }) => { assertManifestPath(path); return { path, sha256: sha256(await readStableRegularFile(await confinedPath(root, path), path)) }; }));
 }
 
-async function verifyVersions(output: string): Promise<void> {
+export async function verifyVersions(output: string): Promise<void> {
   const checks: [string, RegExp][] = [
-    ["forge.version", /^forge Version: 1\.8\.0\s*$/u], ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\s*$/u],
+        ["forge.version", /^forge Version: 1\.8\.0(?:\r?\n|$)/u], ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\s*$/u],
     ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /^crytic-compile 0\.4\.2\s*$/u],
   ];
   for (const [file, pattern] of checks) {
-    if (!pattern.test(await readFile(join(output, file), "utf8"))) {
+    if (!pattern.test((await readStableRegularFile(join(output, file), file)).toString("utf8"))) {
       throw new SlitherGateError("TOOL_VERSION_MISMATCH", `${file} did not report the exact pinned version`);
     }
   }
 }
 
 async function parseCompiledOutput(output: string): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string }> {
-  const artifact = parseTypedJson(await readFile(join(output, "AGTMAIToken.json"), "utf8"), "BUILD_INFO_INVALID", "compiler artifact") as ForgeArtifact;
-  const build = parseTypedJson(await readFile(join(output, "build-info.json"), "utf8"), "BUILD_INFO_INVALID", "compiler build-info") as BuildInfo;
+  let artifactRaw: Buffer; let buildRaw: Buffer;
+  try { artifactRaw = await readStableRegularFile(join(output, "AGTMAIToken.json"), "compiler artifact"); buildRaw = await readStableRegularFile(join(output, "build-info.json"), "compiler build-info"); } catch { throw new SlitherGateError("BUILD_INFO_INVALID", "compiler artifact or build-info is missing or unreadable"); }
+  const artifact = parseTypedJson(artifactRaw.toString("utf8"), "BUILD_INFO_INVALID", "compiler artifact") as ForgeArtifact;
+  const build = parseTypedJson(buildRaw.toString("utf8"), "BUILD_INFO_INVALID", "compiler build-info") as BuildInfo;
   const compiler = validateBuildCompiler(build);
   const sourceName = "src/features/token-genesis/AGTMAIToken.sol";
   const artifactHex = artifact.bytecode?.object;

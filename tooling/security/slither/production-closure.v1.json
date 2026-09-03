@@ -20,7 +20,7 @@
     {"path":"tooling/security/slither/suppression-ledger.schema.v1.json","sha256":"7ed9bfe880d078500da9697982189d80cc3a3e1ab4b54df2239e656f3de63386"},
     {"path":"tooling/security/slither/triage.v1.json","sha256":"38a02ae3f51fedb31680af7456f3cbbcd2d2c41cd82da12e05a0e6f5ce907029"},
     {"path":"tooling/security/slither/triage-ledger.schema.v1.json","sha256":"9800595693b0578607c9422022bcf7be989ef1626a05472afb882f371d676087"},
-    {"path":"tooling/security/slither/evidence-report.schema.v1.json","sha256":"45f3f433a7d21c0140891401ca28d9c550a52666b4b9d1ccf130fd74c90967ae"},
+    {"path":"tooling/security/slither/evidence-report.schema.v1.json","sha256":"4edd95cd6079f88721a70a3031a68760bae08821aac26dfe7be678ecdb38a8e6"},
     {"path":"tooling/security/slither/output-failure.schema.v1.json","sha256":"25fa44e4ecfbcbafc2063a2075a73b50021dc070b6dfcc05ebb422c339f0db9b"},
     {"path":"tooling/security/slither/tool-failure.schema.v1.json","sha256":"43ed9485a6a4ccafe49d9739f1d7f3bb6c2fb5625209322fa90175a6541b4c54"},
     {"path":"tooling/security/slither/environment-failure.schema.v1.json","sha256":"fd5304a6418e612cbd556bad59d19d81381b5be88a80e62776ad281de8718764"}
