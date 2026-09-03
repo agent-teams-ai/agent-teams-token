@@ -141,7 +141,8 @@ test("macOS canonical root accepts trusted root-owned temp ancestors", (context)
   mkdirSync(macToolsRoot, { recursive: true, mode: 0o700 });
   context.after(() => rmSync(macToolsRoot, { recursive: true, force: true }));
   assert.equal(canonicalizeTrustedPath(macToolsRoot, { platform: "darwin" }).startsWith("/private/tmp/"), true);
-  fetchArtifacts({ lock: fixture.lock, platform: "darwin-arm64", toolsRoot: macToolsRoot, downloader: fixture.downloader });
+  // Host path semantics must accept macOS /tmp aliases while selecting linux artifacts.
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", hostPlatform: "darwin", toolsRoot: macToolsRoot, downloader: fixture.downloader });
 });
 
 test("macOS /var/folders canonical hierarchy rejects descendant symlinks", (context) => {
