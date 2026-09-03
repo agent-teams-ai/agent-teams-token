@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import { IMPACTS, SlitherGateError } from "../domain/model.ts";
 import { classifyGateFailure, isGateErrorCode } from "../application/failure.ts";
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
@@ -28,10 +28,13 @@ interface ValidationRequest {
 
 /** Independently derives the uploaded result from raw, normalized analyzer inputs. */
 export async function validateFinalizedEvidenceBundle(request: ValidationRequest): Promise<void> {
-  const repositoryRoot = join(request.schemaDirectory, "../../..");
-  if (!request.output.startsWith("/") || request.output === repositoryRoot || request.output.startsWith(`${repositoryRoot}/`) || !/^[0-9a-f]{40}$/u.test(request.candidateSha)) {
+  const canonicalSchemaDirectory = await realpath(request.schemaDirectory).catch(() => { throw invalid("schema root is not realpath-resolvable"); });
+  const repositoryRoot = await realpath(join(canonicalSchemaDirectory, "../../.."));
+  if (!request.output.startsWith("/") || !/^[0-9a-f]{40}$/u.test(request.candidateSha)) {
     throw invalid("an absolute bundle path and exact candidate SHA are required");
   }
+  const canonicalOutput = await realpath(request.output).catch(() => { throw invalid("bundle output is not realpath-resolvable"); });
+  if (canonicalOutput === repositoryRoot || canonicalOutput.startsWith(`${repositoryRoot}/`)) throw invalid("bundle output must remain outside the repository boundary");
   await assertRegularDirectory(request.output);
   const entries = (await readdir(request.output)).toSorted();
   const variants = (Object.keys(VARIANTS) as Variant[]).filter((name) => entries.includes(name));
@@ -44,13 +47,13 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
   if ((await readStableOutputFile(join(request.output, "READY"))).length !== 0) {throw invalid("READY must be empty");}
 
   const serialized = (await readStableOutputFile(join(request.output, variant))).toString("utf8");
-  await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, schemaName(variant)));
+  await assertSerializedAgainstSchema(serialized, join(canonicalSchemaDirectory, schemaName(variant)));
   const value = object(parseJsonWithoutDuplicateKeys(serialized), "evidence");
   if (value.candidateSha !== request.candidateSha) {throw invalid("evidence candidate SHA differs from the upload candidate");}
   assertExecution(value, request.finalizationMode ?? (process.env.GITHUB_ACTIONS === "true" ? "ci" : "local"));
-  if (variant !== "evidence.json") {await assertFailureEvidence(value, request.schemaDirectory); return;}
+  if (variant !== "evidence.json") {await assertFailureEvidence(value, canonicalSchemaDirectory); return;}
 
-  const derived = await deriveRawBundle(request.output, request.canonicalDirectory ?? request.schemaDirectory, request.schemaDirectory);
+  const derived = await deriveRawBundle(request.output, request.canonicalDirectory ?? canonicalSchemaDirectory, canonicalSchemaDirectory);
   assertAnalysisEvidenceSemantics(value, derived);
   const summary = (await readStableOutputFile(join(request.output, "summary.md"))).toString("utf8");
   if (summary !== renderAnalysisSummary(value)) {throw invalid("summary differs from independently derived evidence");}
@@ -86,9 +89,11 @@ interface DerivedBundle {
 }
 
 async function deriveRawBundle(output: string, directory: string, schemaDirectory: string): Promise<DerivedBundle> {
-  await assertCanonicalRoot(directory);
-  await assertCanonicalRoot(schemaDirectory);
-  const canonicalInputs = await readCanonicalInputs(directory, schemaDirectory);
+  const canonicalSchemaDirectory = await assertCanonicalRoot(schemaDirectory);
+  const repositoryRoot = await realpath(join(canonicalSchemaDirectory, "../../.."));
+  if (!isWithin(repositoryRoot, canonicalSchemaDirectory)) throw invalid("schema root escapes the repository boundary");
+  const canonicalDirectory = await assertCanonicalRoot(directory);
+  const canonicalInputs = await readCanonicalInputs(canonicalDirectory, canonicalSchemaDirectory);
   const findings = await readRawAnalysis(
     output,
     canonicalInputs.targets,
@@ -96,7 +101,7 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
     canonicalInputs.acceptedDetectors,
   );
   assertRawFindingSources(findings, canonicalInputs.manifest);
-  const policies = await readCanonicalPolicies(directory, schemaDirectory, findings);
+  const policies = await readCanonicalPolicies(canonicalDirectory, canonicalSchemaDirectory, findings);
   const tools = await readCanonicalTools(canonicalInputs.repositoryRoot, canonicalInputs.manifest);
   return {
     manifest: canonicalInputs.manifest,
@@ -123,11 +128,16 @@ interface CanonicalInputs {
   readonly repositoryRoot: string;
 }
 
-async function assertCanonicalRoot(directory: string): Promise<void> {
-  const info = await lstat(directory, { bigint: true });
+async function assertCanonicalRoot(directory: string): Promise<string> {
+  const resolved = await realpath(directory).catch(() => { throw invalid("canonical input root is not realpath-resolvable"); });
+  const info = await lstat(resolved, { bigint: true });
   if (!info.isDirectory() || info.isSymbolicLink()) throw invalid("canonical input root is not a sealed directory");
-  const resolved = await (await import("node:fs/promises")).realpath(directory);
-  if (resolved !== directory) throw invalid("canonical input root must be a canonical realpath");
+  return resolved;
+}
+
+function isWithin(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel === "" || (rel !== ".." && !rel.startsWith("../") && !rel.startsWith("/"));
 }
 
 async function readCanonicalInputs(directory: string, schemaDirectory: string): Promise<CanonicalInputs> {
@@ -145,7 +155,7 @@ async function readCanonicalInputs(directory: string, schemaDirectory: string): 
     ...array(manifest.config, "manifest.config"),
     object(manifest.detectorInventory, "manifest.detectorInventory"),
   ];
-  const repositoryRoot = join(schemaDirectory, "../../..");
+  const repositoryRoot = await realpath(join(schemaDirectory, "../../.."));
   for (const rawEntry of closure) {
     const entry = object(rawEntry, "closure entry");
     const relative = stringValue(entry.path);

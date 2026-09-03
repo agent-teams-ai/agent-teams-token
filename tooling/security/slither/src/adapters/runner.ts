@@ -387,10 +387,9 @@ function assertManifestPath(path: string): void {
 }
 async function readConfinedStableFile(root: string, relative: string, label: string): Promise<Buffer> {
   assertManifestPath(relative);
-  const rootInfo = await lstat(root, { bigint: true });
+  const canonicalRoot = await realpath(root).catch(() => { throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root is not realpath-resolvable"); });
+  const rootInfo = await lstat(canonicalRoot, { bigint: true });
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root is not a regular directory");
-  const canonicalRoot = await realpath(root);
-  if (canonicalRoot !== root) throw new SlitherGateError("TARGET_MANIFEST_INVALID", "canonical root must be a realpath");
   const parts = relative.split("/");
   const rootHandle = await open(canonicalRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   let current = rootHandle;
