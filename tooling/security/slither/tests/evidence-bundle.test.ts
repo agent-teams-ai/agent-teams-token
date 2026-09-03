@@ -188,7 +188,7 @@ async function makeIndependentGoldenBundle(output: string): Promise<void> {
   const evidence = {
     schemaVersion: 1, ready: true, candidateSha: sha,
     execution: { platform: "linux/amd64", event: "local", repository: "local", workflow: "local", job: "local", runId: "local", runAttempt: "1" },
-    tools: { image: "ghcr.io/trailofbits/eth-security-toolbox:nightly-20260824@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0", imageRevision: "8cad443280f7eeb5920a901b5f58f5a91872d9aa", slither: "0.11.6", cryticCompile: "0.4.2", forge: "1.8.0", forgeBinarySha256: `sha256:${manifest.tools.forgeBinarySha256}`, solc: "0.8.36+commit.8a079791", solcBinarySha256: `sha256:${manifest.tools.solcBinarySha256}` },
+    tools: { image: "ghcr.io/trailofbits/eth-security-toolbox:nightly-20260824@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0", indexDigest: "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8", imageRevision: "8cad443280f7eeb5920a901b5f58f5a91872d9aa", slither: "0.11.6", cryticCompile: "0.4.2", forge: "1.8.0", forgeBinarySha256: `sha256:${manifest.tools.forgeBinarySha256}`, solc: "0.8.36+commit.8a079791", solcBinarySha256: `sha256:${manifest.tools.solcBinarySha256}` },
     inputs: { closureHash: `sha256:${digest(JSON.stringify(closure))}`, configHash: `sha256:${digest(configBytes)}`,
       policyHash: `sha256:${digest(policyBytes)}`, triageHash: `sha256:${digest(triageBytes)}` },
     analysis: { expectedTargets: ["A"], observedTargets: ["A"], expectedSources: ["src/A.sol"], observedSources: ["src/A.sol"],

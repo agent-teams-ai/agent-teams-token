@@ -1,4 +1,4 @@
-import { chmod, constants, copyFile, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
@@ -153,9 +153,9 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
   await mkdir(join(input, "tooling/security/slither"), { recursive: true, mode: 0o755 });
   await mkdir(output, { mode: 0o733 });
   await chmod(output, 0o733);
-  await copyFile(join(request.repositoryRoot, "tooling/security/slither/tests/fixtures/Vulnerable.sol"), join(input, "contracts/evm/src/Vulnerable.sol"));
-  await copyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"));
-  await copyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"));
+  await safeCopyFile(join(request.repositoryRoot, "tooling/security/slither/tests/fixtures/Vulnerable.sol"), join(input, "contracts/evm/src/Vulnerable.sol"));
+  await safeCopyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"));
+  await safeCopyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"));
   const result = await request.processPort.run(
     request.dockerPath,
     dockerVulnerableFixtureArguments({
@@ -396,14 +396,30 @@ async function closure(root: string, entries: readonly ClosureEntry[]): Promise<
 
 export async function verifyVersions(output: string): Promise<void> {
   const checks: [string, RegExp][] = [
-        ["forge.version", /^forge Version: 1\.8\.0(?:\r?\n|$)/u], ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\s*$/u],
+    ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\s*$/u],
     ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /^crytic-compile 0\.4\.2\s*$/u],
   ];
   for (const [file, pattern] of checks) {
-    if (!pattern.test((await readStableRegularFile(join(output, file), file)).toString("utf8"))) {
+    let raw: Buffer;
+    try { raw = await readStableRegularFile(join(output, file), file); }
+    catch { throw new SlitherGateError("TOOL_VERSION_MISMATCH", `${file} is missing or unreadable`); }
+    if (!pattern.test(raw.toString("utf8"))) {
       throw new SlitherGateError("TOOL_VERSION_MISMATCH", `${file} did not report the exact pinned version`);
     }
   }
+  let forgeRaw: Buffer;
+  try { forgeRaw = await readStableRegularFile(join(output, "forge.version"), "forge.version"); }
+  catch { throw new SlitherGateError("TOOL_VERSION_MISMATCH", "forge.version is missing or unreadable"); }
+  const forgeLines = forgeRaw.toString("utf8").split(/\r?\n/u);
+  if (forgeLines.at(-1) === "") forgeLines.pop();
+  if (forgeLines.length === 0 || forgeLines[0] !== "forge Version: 1.8.0" || forgeLines.slice(1).some((line) => line !== "" && !/^(?:Commit SHA|Build Timestamp|Build Profile): .+$/u.test(line))) {
+    throw new SlitherGateError("TOOL_VERSION_MISMATCH", "forge.version did not report the exact pinned version");
+  }
+}
+
+async function safeCopyFile(source: string, destination: string): Promise<void> {
+  const content = await readStableRegularFile(source, "vulnerable fixture input");
+  await writeFile(destination, content, { mode: 0o444, flag: "wx" });
 }
 
 async function parseCompiledOutput(output: string): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string }> {
