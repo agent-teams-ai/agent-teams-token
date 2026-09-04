@@ -166,7 +166,7 @@ function verifyAtaGroups(fact: TransactionFact): readonly [InstructionFact, Inst
 
 function verifyAtaCpis(inner: readonly [InstructionFact, InstructionFact, InstructionFact, InstructionFact], value: FixtureObservations): void {
   const [size, create, immutableOwner, initialize] = inner;
-  assertCondition(size.programId === CLASSIC_TOKEN_PROGRAM && size.kind === "getAccountDataSize" && size.dataHex === "15"
+  assertCondition(size.programId === CLASSIC_TOKEN_PROGRAM && size.kind === "getAccountDataSize" && size.dataHex === "150700"
     && sameAddresses(size.accounts, [value.mintAddress]), "SOLANA_ATA_GET_SIZE", "ATA CPI getAccountDataSize semantics differ");
   verifyAtaAccountCreation(create, value);
   verifyAtaInitialization(immutableOwner, initialize, value);

@@ -9,6 +9,13 @@ function mutateAta(change: (transaction: FixtureObservations["transactions"][num
   const base = observationFixture(); return { ...base, transactions: base.transactions.map((transaction) => transaction.operation === "createAta" ? change(transaction) : transaction) };
 }
 
+function mutateAtaGetSize(change: (instruction: FixtureObservations["transactions"][number]["instructions"][number]) => FixtureObservations["transactions"][number]["instructions"][number]): FixtureObservations {
+  return mutateAta((transaction) => ({
+    ...transaction,
+    instructions: transaction.instructions.map((item) => item.innerInstructionIndex === 0 ? change(item) : item),
+  }));
+}
+
 test("verifier reconstructs an exact seven-step mint/ATA/burn/authority lifecycle", () => {
   const report = verifyObservations(observationFixture());
   assert.equal(report.transactions.length, 7); assert.equal(report.transactions[2]?.operation, "createAta"); assert.equal(report.snapshots.finalTokenAccount.amount, "0");
@@ -72,6 +79,39 @@ test("verifier rejects zero, extra, duplicate, sparse, reordered and semanticall
     mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item) => item.kind === "getAccountDataSize" ? { ...item, accountIndices: [0] } : item) })),
   ];
   for (const attack of attacks) { assert.throws(() => verifyObservations(attack), /SOLANA_/u); }
+});
+
+test("verifier binds ATA account sizing to the exact immutable-owner request", () => {
+  const exact = observationFixture();
+  const size = exact.transactions[2]?.instructions[1];
+  assert.equal(size?.kind, "getAccountDataSize");
+  assert.equal(size?.dataHex, "150700");
+  assert.doesNotThrow(() => verifyObservations(exact));
+
+  for (const dataHex of ["15", "150000", "15070000", "150800"]) {
+    assert.throws(() => verifyObservations(mutateAtaGetSize((item) => ({ ...item, dataHex }))), /SOLANA_ATA_GET_SIZE/u);
+  }
+
+  const wrongKind = mutateAtaGetSize((item) => ({ ...item, kind: "raw" }));
+  const wrongProgram = mutateAtaGetSize((item) => ({
+    ...item,
+    programId: SYSTEM_PROGRAM,
+    programIdIndex: observationFixture().transactions[2]!.accountKeys.indexOf(SYSTEM_PROGRAM),
+  }));
+  const wrongAccount = mutateAtaGetSize((item) => ({
+    ...item,
+    accounts: [owner],
+    accountIndices: [observationFixture().transactions[2]!.accountKeys.indexOf(owner)],
+  }));
+  for (const attack of [wrongKind, wrongProgram, wrongAccount]) {
+    assert.throws(() => verifyObservations(attack), /SOLANA_ATA_GET_SIZE/u);
+  }
+
+  const wrongOrder = mutateAta((transaction) => ({
+    ...transaction,
+    instructions: [transaction.instructions[0]!, transaction.instructions[2]!, transaction.instructions[1]!, ...transaction.instructions.slice(3)],
+  }));
+  assert.throws(() => verifyObservations(wrongOrder), /SOLANA_ATA_INNER_SEQUENCE/u);
 });
 
 test("verifier accepts only raw or parsed Create bound to discriminant zero", () => {

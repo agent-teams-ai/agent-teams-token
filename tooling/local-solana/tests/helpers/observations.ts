@@ -18,7 +18,7 @@ function fact(operation: LifecycleKind, index: number): TransactionFact {
       const initializeData = Buffer.concat([Buffer.from([18]), Buffer.from(base58Decode(owner))]);
       return transaction({ ...common, signers: [payer] }, [
         instruction({ programId: ASSOCIATED_TOKEN_PROGRAM, kind: "raw", accounts: [payer, ata, owner, mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM], dataHex: "00" }),
-        instruction({ kind: "getAccountDataSize", accounts: [mintAddress], dataHex: "15", instructionIndex: 0, innerInstructionIndex: 0, innerGroupIndex: 0, mint: mintAddress }),
+        instruction({ kind: "getAccountDataSize", accounts: [mintAddress], dataHex: "150700", instructionIndex: 0, innerInstructionIndex: 0, innerGroupIndex: 0, mint: mintAddress }),
         instruction({ programId: SYSTEM_PROGRAM, kind: "createAccount", accounts: [payer, ata], dataHex: systemData.toString("hex"), instructionIndex: 0, innerInstructionIndex: 1, innerGroupIndex: 0, newAccount: ata, owner: CLASSIC_TOKEN_PROGRAM }),
         instruction({ kind: "initializeImmutableOwner", accounts: [ata], dataHex: "16", instructionIndex: 0, innerInstructionIndex: 2, innerGroupIndex: 0, tokenAccount: ata }),
         instruction({ kind: "initializeAccount3", accounts: [ata, mintAddress], dataHex: initializeData.toString("hex"), instructionIndex: 0, innerInstructionIndex: 3, innerGroupIndex: 0, tokenAccount: ata, mint: mintAddress, owner }),
