@@ -14,9 +14,13 @@ export {
 export {
   EvidenceRecorder,
   canonicalJson,
+  closeEvidenceDirectory,
   createEvidenceDirectory,
+  evidenceDirectoryPath,
   publishEvidenceSeal,
   publishReadyMarker,
+  runEvidenceLifecycle,
+  verifyEvidenceDirectory,
 } from "./runtime/evidence.mjs";
 export {
   abandonCleanupHandle,

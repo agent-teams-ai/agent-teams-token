@@ -7,9 +7,12 @@ import {
   assertPinnedNodeRuntime,
   basicRun,
   createEvidenceDirectory,
+  evidenceDirectoryPath,
   publishEvidenceSeal,
   publishReadyMarker,
+  runEvidenceLifecycle,
   trackedCandidateInventory,
+  verifyEvidenceDirectory,
 } from "../proof-runtime.mjs";
 import {
   completedGlobalManifestEvidence,
@@ -289,24 +292,24 @@ function runRecordedProof(options) {
     rollbackTemporaryRoot,
     repositoryRoot,
   );
-  const recorder = createProofRecorder(evidenceDirectory, options);
-  try {
-    const state = recordCandidateAndManifests(recorder, options);
-    recordGlobalEnvironment(recorder);
-    recordManifestGitCoverage(recorder, state);
-    proveAllSlices(recorder, options, state);
-    finalizeRecordedProof(recorder, options, state);
-    if (options.mode === "full") {
-      publishFullProof(recorder, evidenceDirectory, state);
-    }
-    printProofResult(options, state.candidate.sha, evidenceDirectory);
-  } catch (error) {
-    recorder.finalize("failed", error);
-    if (error instanceof Error) {
-      error.message += "\nROLLBACK_EVIDENCE path=" + evidenceDirectory;
-    }
-    throw error;
+  const candidateSha = runEvidenceLifecycle(
+    evidenceDirectory,
+    () => createProofRecorder(evidenceDirectory, options),
+    (recorder) => executeRecordedProof(recorder, evidenceDirectory, options),
+  );
+  printProofResult(options, candidateSha, evidenceDirectoryPath(evidenceDirectory));
+}
+
+function executeRecordedProof(recorder, evidenceDirectory, options) {
+  const state = recordCandidateAndManifests(recorder, options);
+  recordGlobalEnvironment(recorder);
+  recordManifestGitCoverage(recorder, state);
+  proveAllSlices(recorder, options, state);
+  finalizeRecordedProof(recorder, options, state);
+  if (options.mode === "full") {
+    publishFullProof(recorder, evidenceDirectory, state);
   }
+  return state.candidate.sha;
 }
 
 function createProofRecorder(evidenceDirectory, options) {
@@ -472,9 +475,10 @@ function publishFullProof(recorder, evidenceDirectory, state) {
 }
 
 function validatePublishedProof(evidenceDirectory, candidate, allowMissingReady) {
+  const path = verifyEvidenceDirectory(evidenceDirectory);
   const argumentsList = [
     join(repositoryRoot, "scripts/rollback/validate-evidence.mjs"),
-    "--bundle=" + evidenceDirectory,
+    "--bundle=" + path,
     "--expected-sha=" + candidate.sha,
   ];
   if (allowMissingReady) {
@@ -484,6 +488,7 @@ function validatePublishedProof(evidenceDirectory, candidate, allowMissingReady)
     cwd: repositoryRoot,
     timeout: 120_000,
   });
+  verifyEvidenceDirectory(evidenceDirectory);
   revalidateCandidate(
     candidate,
     allowMissingReady ? "post-seal-validator-candidate" : "post-ready-validator-candidate",

@@ -6,6 +6,7 @@ const registeredRollbackSuites = await Promise.all([
   import("./rollback-production-finalization.test.mjs"),
   import("./rollback-temporary-finalization.test.mjs"),
   import("./rollback-command-finalization.test.mjs"),
+  import("./rollback-evidence-custody.test.mjs"),
   import("./rollback-directory-open.test.mjs"),
   import("./rollback-consumer-finalization.test.mjs"),
   import("./rollback-runtime-finalization.test.mjs"),
@@ -22,6 +23,6 @@ const registeredRollbackSuites = await Promise.all([
   import("../rollback/test-support/proof-wiring.mjs"),
 ]);
 
-if (registeredRollbackSuites.length !== 21) {
+if (registeredRollbackSuites.length !== 22) {
   throw new Error("ROLLBACK_TEST_DISCOVERY_INCOMPLETE");
 }

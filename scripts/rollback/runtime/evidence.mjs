@@ -15,6 +15,13 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { closeDescriptorOnce, throwDescriptorCloseFailures } from "./descriptor-close.mjs";
+import {
+  assertCustodyCanonicalSpelling,
+  closeDirectoryCustody,
+  createDirectoryCustody,
+  refreshDirectoryCustody,
+  verifyDirectoryCustody,
+} from "./custody.mjs";
 
 const EVIDENCE_ENVIRONMENT_KEYS = [
   "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY",
@@ -66,9 +73,106 @@ function closeCommandLogDescriptors(descriptors) {
   return failures;
 }
 
+function evidenceTarget(value) {
+  if (typeof value === "string") {
+    return { custody: undefined, path: value };
+  }
+  if (value === null || typeof value !== "object" || typeof value.path !== "string"
+    || !("custody" in value)) {
+    throw new Error("ROLLBACK_EVIDENCE_TARGET_INVALID");
+  }
+  return value;
+}
+
+export function evidenceDirectoryPath(value) {
+  return evidenceTarget(value).path;
+}
+
+export function verifyEvidenceDirectory(
+  value,
+  code = "ROLLBACK_EVIDENCE_CUSTODY_SUBSTITUTED",
+) {
+  const target = evidenceTarget(value);
+  if (target.custody !== undefined) {
+    verifyDirectoryCustody(target.custody, code);
+  }
+  return target.path;
+}
+
+function mutateEvidenceDirectory(value, code, action) {
+  const target = evidenceTarget(value);
+  verifyEvidenceDirectory(target);
+  let result;
+  let primaryFailure;
+  try {
+    result = action(target.path);
+  } catch (error) {
+    primaryFailure = error;
+  }
+  const finalizationFailures = [];
+  if (target.custody !== undefined) {
+    try {
+      refreshDirectoryCustody(target.custody);
+    } catch (error) {
+      finalizationFailures.push(error);
+    }
+  }
+  throwDescriptorCloseFailures(finalizationFailures, code, primaryFailure);
+  return result;
+}
+
+export function closeEvidenceDirectory(value) {
+  const target = evidenceTarget(value);
+  if (target.custody !== undefined) {
+    closeDirectoryCustody(target.custody);
+  }
+}
+
+function combinedEvidenceFailure(message, primary, secondary) {
+  return new AggregateError([primary, secondary], message, { cause: primary });
+}
+
+export function runEvidenceLifecycle(value, createRecorder, action) {
+  let failure;
+  let recorder;
+  let result;
+  try {
+    recorder = createRecorder();
+    result = action(recorder);
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message += "\nROLLBACK_EVIDENCE path=" + evidenceDirectoryPath(value);
+    }
+    failure = error;
+    if (recorder !== undefined) {
+      try {
+        recorder.finalize("failed", error);
+      } catch (finalizationError) {
+        failure = combinedEvidenceFailure(
+          "ROLLBACK_EVIDENCE_FAILURE_FINALIZATION_FAILED",
+          failure,
+          finalizationError,
+        );
+      }
+    }
+  }
+  try {
+    closeEvidenceDirectory(value);
+  } catch (closeError) {
+    failure = failure === undefined
+      ? closeError
+      : combinedEvidenceFailure("ROLLBACK_EVIDENCE_CUSTODY_CLOSE_FAILED", failure, closeError);
+  }
+  if (failure !== undefined) {
+    throw failure;
+  }
+  return result;
+}
+
 export class EvidenceRecorder {
   constructor(directory, initial) {
-    this.directory = directory;
+    this.target = evidenceTarget(directory);
+    this.directory = this.target.path;
     this.document = {
       schemaVersion: 1,
       kind: "agtmai-slice-rollback-proof",
@@ -86,14 +190,19 @@ export class EvidenceRecorder {
   directory;
   document;
   sequence;
+  target;
 
   writeArtifact(relativePath, value) {
     const path = resolveInside(this.directory, relativePath);
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_ARTIFACT_DIRECTORY_FAILED", () => {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    });
     const bytes = Buffer.isBuffer(value)
       ? value
       : Buffer.from(typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n", "utf8");
-    writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_ARTIFACT_WRITE_FAILED", () => {
+      writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+    });
     return {
       path: relativePath,
       byteLength: bytes.length,
@@ -108,7 +217,9 @@ export class EvidenceRecorder {
     const stderrRelative = "commands/" + stem + ".stderr.log";
     const stdoutPath = resolveInside(this.directory, stdoutRelative);
     const stderrPath = resolveInside(this.directory, stderrRelative);
-    mkdirSync(dirname(stdoutPath), { recursive: true, mode: 0o700 });
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_COMMAND_DIRECTORY_FAILED", () => {
+      mkdirSync(dirname(stdoutPath), { recursive: true, mode: 0o700 });
+    });
     const startedAt = new Date();
     const started = Date.now();
     let stdoutDescriptor;
@@ -117,8 +228,16 @@ export class EvidenceRecorder {
     let invocation;
     let primaryFailure;
     try {
-      stdoutDescriptor = openSync(stdoutPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-      stderrDescriptor = openSync(stderrPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      stdoutDescriptor = mutateEvidenceDirectory(
+        this.target,
+        "ROLLBACK_EVIDENCE_COMMAND_STDOUT_CREATE_FAILED",
+        () => openSync(stdoutPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600),
+      );
+      stderrDescriptor = mutateEvidenceDirectory(
+        this.target,
+        "ROLLBACK_EVIDENCE_COMMAND_STDERR_CREATE_FAILED",
+        () => openSync(stderrPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600),
+      );
       invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
         workingDirectory: options.cwd,
       });
@@ -155,6 +274,7 @@ export class EvidenceRecorder {
     }
     let recorded;
     try {
+      verifyEvidenceDirectory(this.target);
       const stdout = readFileSync(stdoutPath);
       const stderr = readFileSync(stderrPath);
       if (primaryFailure !== undefined) {
@@ -255,8 +375,12 @@ export class EvidenceRecorder {
   flush() {
     const path = join(this.directory, "diagnostics.json");
     const partial = path + ".part";
-    writeFileSync(partial, JSON.stringify(this.document, null, 2) + "\n", { mode: 0o600 });
-    renameSync(partial, path);
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_DIAGNOSTICS_WRITE_FAILED", () => {
+      writeFileSync(partial, JSON.stringify(this.document, null, 2) + "\n", { mode: 0o600 });
+    });
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_DIAGNOSTICS_PUBLISH_FAILED", () => {
+      renameSync(partial, path);
+    });
   }
 }
 
@@ -279,10 +403,13 @@ export function canonicalJson(value) {
 }
 
 export function publishEvidenceSeal(directory, statement, schemaPath) {
+  const target = evidenceTarget(directory);
   const statementCanonical = Buffer.from(canonicalJson(statement), "utf8");
   const statementBytes = Buffer.concat([statementCanonical, Buffer.from("\n", "utf8")]);
-  const statementPath = join(directory, "statement.json");
-  writeFileSync(statementPath, statementBytes, { flag: "wx", mode: 0o600 });
+  const statementPath = join(target.path, "statement.json");
+  mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_STATEMENT_WRITE_FAILED", () => {
+    writeFileSync(statementPath, statementBytes, { flag: "wx", mode: 0o600 });
+  });
   const schemaBytes = readFileSync(schemaPath);
   const seal = {
     schemaVersion: 1,
@@ -301,11 +428,14 @@ export function publishEvidenceSeal(directory, statement, schemaPath) {
     },
   };
   const sealBytes = Buffer.from(canonicalJson(seal) + "\n", "utf8");
-  writeFileSync(join(directory, "seal.json"), sealBytes, { flag: "wx", mode: 0o600 });
+  mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_SEAL_WRITE_FAILED", () => {
+    writeFileSync(join(target.path, "seal.json"), sealBytes, { flag: "wx", mode: 0o600 });
+  });
   return { seal, sealSha256: sha256(sealBytes), statement };
 }
 
 export function publishReadyMarker(directory, publication) {
+  const target = evidenceTarget(directory);
   const ready = {
     schemaVersion: 1,
     kind: "agtmai-recovery-proof-ready",
@@ -313,11 +443,13 @@ export function publishReadyMarker(directory, publication) {
     sealSha256: publication.sealSha256,
     proofDigestSha256: publication.seal.statement.canonicalSha256,
   };
-  writeFileSync(
-    join(directory, "READY"),
-    Buffer.from(canonicalJson(ready) + "\n", "utf8"),
-    { flag: "wx", mode: 0o400 },
-  );
+  mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_READY_WRITE_FAILED", () => {
+    writeFileSync(
+      join(target.path, "READY"),
+      Buffer.from(canonicalJson(ready) + "\n", "utf8"),
+      { flag: "wx", mode: 0o400 },
+    );
+  });
   return ready;
 }
 
@@ -333,8 +465,15 @@ export function createEvidenceDirectory(configuredPath, temporaryRoot, repositor
     if (existsSync(directory)) {
       throw new Error("ROLLBACK_EVIDENCE_PATH_EXISTS path=" + directory);
     }
-    const parent = realpathSync(dirname(directory));
-    if (dirname(directory) !== parent) {
+    const requestedParent = dirname(directory);
+    const parent = realpathSync(requestedParent);
+    try {
+      assertCustodyCanonicalSpelling({
+        allowDarwinTemporaryAlias: true,
+        canonicalPath: parent,
+        requestedPath: requestedParent,
+      });
+    } catch {
       throw new Error("ROLLBACK_EVIDENCE_PARENT_SUBSTITUTED path=" + dirname(directory));
     }
     mkdirSync(directory, { mode: 0o700 });
@@ -344,5 +483,9 @@ export function createEvidenceDirectory(configuredPath, temporaryRoot, repositor
   if (repositoryRelative === "" || (!repositoryRelative.startsWith(".." + sep) && repositoryRelative !== "..")) {
     throw new Error("ROLLBACK_EVIDENCE_INSIDE_REPOSITORY path=" + real);
   }
-  return real;
+  const custody = createDirectoryCustody(real, {
+    allowDarwinTemporaryAlias: true,
+    owned: true,
+  });
+  return Object.freeze({ custody, path: real });
 }
