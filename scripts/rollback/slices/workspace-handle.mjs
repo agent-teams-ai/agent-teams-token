@@ -6,7 +6,7 @@ import {
   openSync,
   realpathSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import {
   assertCustodyCanonicalSpelling,
@@ -31,7 +31,9 @@ function assertRollbackRemovalIdentity(expected, actual, logicalPath) {
 export function safeCandidatePath(root, path) {
   validateExactPath(path, "candidate");
   const candidate = resolve(root, path);
-  if (relative(root, candidate).startsWith("..")) {throw new Error(`ROLLBACK_PATH_ESCAPE path=${path}`);}
+  if (relative(root, candidate).startsWith("..")) {
+    throw new Error(`ROLLBACK_PATH_ESCAPE path=${path}`);
+  }
   return candidate;
 }
 
@@ -90,6 +92,7 @@ export function createRollbackWorkspaceHandle(root, quarantineRoot) {
       quarantineInode: String(quarantineIdentity.ino),
     });
     rollbackWorkspaceStates.set(handle, {
+      checkoutRequestedPath: resolve(root),
       checkoutPath,
       quarantinePath,
       checkoutDescriptor,
@@ -149,8 +152,11 @@ function validateRollbackWorkspaceIdentities(checkout, quarantine, owner) {
 
 export function assertRollbackWorkspaceHandle(handle, root) {
   const state = rollbackWorkspaceStates.get(handle);
+  const requestedRoot = root === undefined ? undefined : resolve(root);
   if (state === undefined || state.closed
-    || (root !== undefined && resolve(root) !== handle.checkoutPath)) {
+    || (requestedRoot !== undefined
+      && requestedRoot !== state.checkoutRequestedPath
+      && requestedRoot !== state.checkoutPath)) {
     throw new Error("ROLLBACK_REMOVAL_WORKSPACE_HANDLE_INVALID");
   }
   try {

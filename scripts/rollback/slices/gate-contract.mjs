@@ -346,7 +346,9 @@ function captureStagingEntry(root, logicalPath) {
   const path = join(root, logicalPath);
   const before = custodyIdentity(lstatSync(path, { bigint: true }));
   if (before.kind === "file") {
-    if (before.nlink !== 1n) throw new Error(`ROLLBACK_STAGE_NLINK_UNSAFE path=${logicalPath}`);
+    if (before.nlink !== 1n) {
+      throw new Error(`ROLLBACK_STAGE_NLINK_UNSAFE path=${logicalPath}`);
+    }
     const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
@@ -374,7 +376,9 @@ function captureStagingEntry(root, logicalPath) {
       assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
       const repeated = readlinkSync(path, { encoding: "buffer" });
       assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
-      if (!bytes.equals(repeated)) throw new Error(`ROLLBACK_STAGE_SYMLINK_CHANGED path=${logicalPath}`);
+      if (!bytes.equals(repeated)) {
+        throw new Error(`ROLLBACK_STAGE_SYMLINK_CHANGED path=${logicalPath}`);
+      }
     };
     assertCurrent();
     return { assertCurrent, bytes, close() {}, mode: "120000" };
@@ -392,7 +396,9 @@ export function stageExactWorktreePaths(root, paths, recorder, group, label) {
     try {
       staged = captureStagingEntry(root, path);
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
       recorder.run(group, `${label}-remove-${index}`, git, [
         "update-index", "--force-remove", "--", path,
       ], { cwd: root, timeout: 60_000 });

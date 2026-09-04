@@ -183,8 +183,9 @@ function snapshotRollbackSharedAncestor(descriptor, component, context) {
   let held;
   let next;
   try {
+    const captured = lstatSync(candidate, { bigint: true });
     const identity = assertRollbackSharedSafeNode(
-      lstatSync(candidate, { bigint: true }),
+      captured,
       "directory",
       workspace,
       logicalPath,
@@ -201,7 +202,7 @@ function snapshotRollbackSharedAncestor(descriptor, component, context) {
       heldDescriptors.push(held);
       held = undefined;
     }
-    registerCustodyDescriptor(next, realpathSync(candidate), identity);
+    registerCustodyDescriptor(next, realpathSync(candidate), captured);
     const result = { descriptor: next, identity };
     next = undefined;
     return result;
@@ -257,13 +258,14 @@ function snapshotRollbackSharedFinal(descriptor, name, context) {
 function openHeldSharedDescriptor(candidate, identity, logicalPath, directory) {
   const descriptor = openSync(candidate, rollbackSharedOpenFlags({ directory }));
   try {
-    registerCustodyDescriptor(descriptor, realpathSync(candidate), identity);
+    const captured = fstatSync(descriptor, { bigint: true });
     assertRollbackSharedStableIdentity(
       identity,
-      fstatSync(descriptor, { bigint: true }),
+      captured,
       logicalPath,
     );
     assertRollbackSharedStableIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
+    registerCustodyDescriptor(descriptor, realpathSync(candidate), captured);
     return descriptor;
   } catch (error) {
     closeSync(descriptor);

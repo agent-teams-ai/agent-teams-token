@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -24,6 +25,8 @@ import {
   createDirectoryCustody,
   custodyBackendChild,
   custodyBackendDirectory,
+  custodyIdentityJson,
+  registerCustodyDescriptor,
   validateCustodyComponent,
   verifyDirectoryCustody,
 } from "../runtime/custody.mjs";
@@ -100,11 +103,21 @@ test("ancestor sibling churn is harmless but a held leaf substitution fails clos
   const held = join(parent, "owned.held");
   const successor = join(parent, "owned.successor-sentinel");
   mkdirSync(target, { mode: 0o700 });
-  const custody = createDirectoryCustody(target, { owned: true });
+  const custody = createDirectoryCustody(target, {
+    allowDarwinTemporaryAlias: true,
+    owned: true,
+  });
   try {
     const unrelated = join(tmpdir(), "agtmai-custody-unrelated-" + process.pid);
     mkdirSync(unrelated, { mode: 0o700 });
     rmSync(unrelated, { recursive: true });
+    assert.doesNotThrow(() => verifyDirectoryCustody(custody));
+    assert.throws(
+      () => registerCustodyDescriptor(
+        custody.descriptor, custody.canonicalPath, custodyIdentityJson(custody.identity),
+      ),
+      /ROLLBACK_CUSTODY_DESCRIPTOR_IDENTITY_INVALID/u,
+    );
     assert.doesNotThrow(() => verifyDirectoryCustody(custody));
 
     renameSync(target, held);
@@ -143,7 +156,9 @@ test("staging hashes held bytes and rejects a regular-file to symlink replacemen
     assert.equal(readlinkSync(path), "foreign-target");
     assert.equal(lstatSync(original).isFile(), true);
   } finally {
-    if (existsSync(path) && lstatSync(path).isSymbolicLink()) unlinkSync(path);
+    if (existsSync(path) && lstatSync(path).isSymbolicLink()) {
+      unlinkSync(path);
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -170,8 +185,19 @@ test("proof-slice and manifest-proof capture custody before untrusted Git and om
     mkdirSync(checkout, { mode: 0o700 });
     mkdirSync(gate, { mode: 0o700 });
     mkdirSync(evidence, { mode: 0o700 });
+    const canonicalCheckout = realpathSync(checkout);
     const handle = createRollbackWorkspaceHandle(checkout, gate);
     try {
+      assert.doesNotThrow(() => assertRollbackWorkspaceHandle(handle, checkout));
+      assert.doesNotThrow(() => assertRollbackWorkspaceHandle(handle, canonicalCheckout));
+      assert.throws(
+        () => assertRollbackWorkspaceHandle(handle, gate),
+        /ROLLBACK_REMOVAL_WORKSPACE_HANDLE_INVALID/u,
+      );
+      assert.throws(
+        () => assertRollbackWorkspaceHandle(Object.freeze({}), checkout),
+        /ROLLBACK_REMOVAL_WORKSPACE_HANDLE_INVALID/u,
+      );
       renameSync(checkout, held);
       mkdirSync(checkout, { mode: 0o700 });
       writeFileSync(join(checkout, "foreign-successor"), "survives\n");
@@ -184,8 +210,54 @@ test("proof-slice and manifest-proof capture custody before untrusted Git and om
       assert.equal(existsSync(join(evidence, "READY")), false);
     } finally {
       closeRollbackWorkspaceHandle(handle);
+      assert.throws(
+        () => assertRollbackWorkspaceHandle(handle, checkout),
+        /ROLLBACK_REMOVAL_WORKSPACE_HANDLE_INVALID/u,
+      );
       rmSync(boundary, { recursive: true, force: true });
     }
+  }
+});
+
+test("workspace custody rejects replaced parents and leaf symlinks", () => {
+  const boundary = mkdtempSync(join(tmpdir(), "agtmai-workspace-parent-"));
+  const heldBoundary = boundary + ".held";
+  chmodSync(boundary, 0o700);
+  const checkout = join(boundary, "checkout");
+  const gate = join(boundary, "gate-tmp");
+  mkdirSync(checkout, { mode: 0o700 });
+  mkdirSync(gate, { mode: 0o700 });
+  const handle = createRollbackWorkspaceHandle(checkout, gate);
+  try {
+    renameSync(boundary, heldBoundary);
+    mkdirSync(boundary, { mode: 0o700 });
+    mkdirSync(checkout, { mode: 0o700 });
+    mkdirSync(gate, { mode: 0o700 });
+    assert.throws(
+      () => assertRollbackWorkspaceHandle(handle, checkout),
+      /ROLLBACK_REMOVAL_WORKSPACE_SUBSTITUTED/u,
+    );
+  } finally {
+    closeRollbackWorkspaceHandle(handle);
+    rmSync(boundary, { recursive: true, force: true });
+    rmSync(heldBoundary, { recursive: true, force: true });
+  }
+
+  const symlinkBoundary = mkdtempSync(join(tmpdir(), "agtmai-workspace-symlink-"));
+  chmodSync(symlinkBoundary, 0o700);
+  const realCheckout = join(symlinkBoundary, "real-checkout");
+  const linkedCheckout = join(symlinkBoundary, "checkout");
+  const symlinkGate = join(symlinkBoundary, "gate-tmp");
+  mkdirSync(realCheckout, { mode: 0o700 });
+  mkdirSync(symlinkGate, { mode: 0o700 });
+  symlinkSync("real-checkout", linkedCheckout);
+  try {
+    assert.throws(
+      () => createRollbackWorkspaceHandle(linkedCheckout, symlinkGate),
+      /ROLLBACK_CUSTODY_CANONICALIZATION_UNSAFE/u,
+    );
+  } finally {
+    rmSync(symlinkBoundary, { recursive: true, force: true });
   }
 });
 
@@ -199,7 +271,10 @@ test("ancestor-chain descriptors close when custody creation fails after opening
   const before = readdirSync(descriptorDirectory).length;
   try {
     assert.throws(
-      () => createDirectoryCustody(target, { owned: true }),
+      () => createDirectoryCustody(target, {
+        allowDarwinTemporaryAlias: true,
+        owned: true,
+      }),
       /ROLLBACK_CUSTODY_OWNED_DIRECTORY_UNSAFE/u,
     );
     assert.equal(readdirSync(descriptorDirectory).length, before);

@@ -27,21 +27,31 @@ const descriptorRecords = new Map();
 const custodyRecords = new WeakMap();
 
 export function custodyKind(stat) {
-  if (stat.isDirectory() && !stat.isSymbolicLink()) return "directory";
-  if (stat.isFile() && !stat.isSymbolicLink()) return "file";
-  if (stat.isSymbolicLink()) return "symlink";
+  if (stat.isDirectory() && !stat.isSymbolicLink()) {
+    return "directory";
+  }
+  if (stat.isFile() && !stat.isSymbolicLink()) {
+    return "file";
+  }
+  if (stat.isSymbolicLink()) {
+    return "symlink";
+  }
   return "unsafe";
 }
 
 export function custodyIdentity(stat) {
   const value = { kind: custodyKind(stat) };
-  for (const field of CUSTODY_IDENTITY_FIELDS) value[field] = stat[field];
+  for (const field of CUSTODY_IDENTITY_FIELDS) {
+    value[field] = stat[field];
+  }
   return Object.freeze(value);
 }
 
 export function custodyIdentityJson(identity) {
   const value = { kind: identity.kind };
-  for (const field of CUSTODY_IDENTITY_FIELDS) value[field] = String(identity[field]);
+  for (const field of CUSTODY_IDENTITY_FIELDS) {
+    value[field] = String(identity[field]);
+  }
   return Object.freeze(value);
 }
 
@@ -76,7 +86,9 @@ export function validateCustodyComponent(component) {
 
 export function custodyBackendChild(platform, descriptor, canonicalPath, component) {
   validateCustodyComponent(component);
-  if (platform === "linux") return `/proc/self/fd/${descriptor}/${component}`;
+  if (platform === "linux") {
+    return `/proc/self/fd/${descriptor}/${component}`;
+  }
   if (platform === "darwin") {
     if (typeof canonicalPath !== "string" || !isAbsolute(canonicalPath)) {
       throw new Error("ROLLBACK_CUSTODY_CANONICAL_PATH_REQUIRED");
@@ -87,8 +99,12 @@ export function custodyBackendChild(platform, descriptor, canonicalPath, compone
 }
 
 export function custodyBackendDirectory(platform, descriptor, canonicalPath) {
-  if (platform === "linux") return `/proc/self/fd/${descriptor}/.`;
-  if (platform === "darwin") return canonicalPath;
+  if (platform === "linux") {
+    return `/proc/self/fd/${descriptor}/.`;
+  }
+  if (platform === "darwin") {
+    return canonicalPath;
+  }
   throw new Error("ROLLBACK_CUSTODY_PLATFORM_UNSUPPORTED platform=" + platform);
 }
 
@@ -99,9 +115,13 @@ export function assertCustodyCanonicalSpelling({
   allowDarwinTemporaryAlias = false,
 }) {
   const requested = resolve(requestedPath);
-  if (canonicalPath === requested) return;
+  if (canonicalPath === requested) {
+    return;
+  }
   if (platform === "darwin" && allowDarwinTemporaryAlias
-    && requested.startsWith("/var/folders/") && canonicalPath === "/private" + requested) return;
+    && requested.startsWith("/var/folders/") && canonicalPath === "/private" + requested) {
+    return;
+  }
   throw new Error("ROLLBACK_CUSTODY_CANONICALIZATION_UNSAFE requested=" + requestedPath
     + " canonical=" + canonicalPath);
 }
@@ -119,7 +139,9 @@ function openDirectoryRecord(path) {
   const identity = custodyIdentity(lstatSync(path, { bigint: true }));
   const descriptor = openSync(path, flags("directory"));
   try {
-    if (identity.kind !== "directory") throw new Error("ROLLBACK_CUSTODY_NOT_DIRECTORY");
+    if (identity.kind !== "directory") {
+      throw new Error("ROLLBACK_CUSTODY_NOT_DIRECTORY");
+    }
     assertCustodyIdentity(identity, fstatSync(descriptor, { bigint: true }));
     assertCustodyIdentity(identity, lstatSync(path, { bigint: true }));
     return { canonicalPath: path, descriptor, identity };
@@ -139,10 +161,14 @@ function ancestorsOf(path) {
   paths.push(current);
   const records = [];
   try {
-    for (const ancestorPath of paths.reverse()) records.push(openDirectoryRecord(ancestorPath));
+    for (const ancestorPath of paths.toReversed()) {
+      records.push(openDirectoryRecord(ancestorPath));
+    }
     return records;
   } catch (error) {
-    for (const record of records.toReversed()) closeSync(record.descriptor);
+    for (const record of records.toReversed()) {
+      closeSync(record.descriptor);
+    }
     throw error;
   }
 }
@@ -200,15 +226,21 @@ export function createDirectoryCustody(requestedPath, options = {}) {
     }
     return handle;
   } catch (error) {
-    if (target !== undefined) closeSync(target.descriptor);
-    for (const ancestor of ancestors.toReversed()) closeSync(ancestor.descriptor);
+    if (target !== undefined) {
+      closeSync(target.descriptor);
+    }
+    for (const ancestor of ancestors.toReversed()) {
+      closeSync(ancestor.descriptor);
+    }
     throw error;
   }
 }
 
 function stateOf(handle) {
   const state = custodyRecords.get(handle);
-  if (state === undefined || state.closed) throw new Error("ROLLBACK_CUSTODY_HANDLE_CLOSED");
+  if (state === undefined || state.closed) {
+    throw new Error("ROLLBACK_CUSTODY_HANDLE_CLOSED");
+  }
   return state;
 }
 
@@ -222,7 +254,9 @@ function verifyStableRecord(record, code) {
 
 export function verifyDirectoryCustody(handle, code = "ROLLBACK_CUSTODY_ANCESTOR_SUBSTITUTED") {
   const state = stateOf(handle);
-  for (const ancestor of state.ancestors) verifyStableRecord(ancestor, code);
+  for (const ancestor of state.ancestors) {
+    verifyStableRecord(ancestor, code);
+  }
   assertCustodyIdentity(state.identity, fstatSync(state.descriptor, { bigint: true }), code);
   assertCustodyIdentity(state.identity, lstatSync(state.canonicalPath, { bigint: true }), code);
   return custodyIdentityJson(state.identity);
@@ -245,10 +279,14 @@ export function refreshDirectoryCustody(handle) {
 
 export function closeDirectoryCustody(handle) {
   const state = custodyRecords.get(handle);
-  if (state === undefined || state.closed) return;
+  if (state === undefined || state.closed) {
+    return;
+  }
   state.closed = true;
   closeCustodyDescriptor(state.descriptor);
-  for (const ancestor of state.ancestors.toReversed()) closeCustodyDescriptor(ancestor.descriptor);
+  for (const ancestor of state.ancestors.toReversed()) {
+    closeCustodyDescriptor(ancestor.descriptor);
+  }
 }
 
 export function registerCustodyDescriptor(descriptor, canonicalPath, identity) {
@@ -256,8 +294,11 @@ export function registerCustodyDescriptor(descriptor, canonicalPath, identity) {
     || !isAbsolute(canonicalPath)) {
     throw new Error("ROLLBACK_CUSTODY_DESCRIPTOR_INVALID");
   }
-  descriptorRecords.set(descriptor, { canonicalPath,
-    identity: identity.kind === undefined ? custodyIdentity(identity) : identity });
+  const captured = identity.kind === undefined ? custodyIdentity(identity) : identity;
+  if (CUSTODY_IDENTITY_FIELDS.some((field) => typeof captured[field] !== "bigint")) {
+    throw new Error("ROLLBACK_CUSTODY_DESCRIPTOR_IDENTITY_INVALID");
+  }
+  descriptorRecords.set(descriptor, { canonicalPath, identity: captured });
 }
 
 export function forgetCustodyDescriptor(descriptor) { descriptorRecords.delete(descriptor); }
@@ -268,7 +309,9 @@ export function closeCustodyDescriptor(descriptor) {
 }
 export function updateCustodyDescriptor(descriptor, canonicalPath, identity) {
   const previous = descriptorRecords.get(descriptor);
-  if (previous === undefined) throw new Error("ROLLBACK_CUSTODY_DESCRIPTOR_UNREGISTERED");
+  if (previous === undefined) {
+    throw new Error("ROLLBACK_CUSTODY_DESCRIPTOR_UNREGISTERED");
+  }
   const observed = custodyIdentity(fstatSync(descriptor, { bigint: true }));
   assertCustodyStableObject(identity ?? previous.identity, observed);
   registerCustodyDescriptor(descriptor, canonicalPath, observed);
@@ -280,20 +323,26 @@ export function assertCustodyDescriptor(
   code = "ROLLBACK_CUSTODY_PARENT_SUBSTITUTED",
 ) {
   const record = descriptorRecords.get(descriptor);
-  if (record === undefined) throw new Error("ROLLBACK_CUSTODY_DESCRIPTOR_UNREGISTERED");
+  if (record === undefined) {
+    throw new Error("ROLLBACK_CUSTODY_DESCRIPTOR_UNREGISTERED");
+  }
   verifyStableRecord({ descriptor, ...record }, code);
   return record;
 }
 
 export function custodyDescriptorChild(descriptor, component) {
   const record = descriptorRecords.get(descriptor);
-  if (process.platform === "darwin") assertCustodyDescriptor(descriptor);
+  if (process.platform === "darwin") {
+    assertCustodyDescriptor(descriptor);
+  }
   return custodyBackendChild(process.platform, descriptor, record?.canonicalPath, component);
 }
 
 export function custodyDescriptorDirectory(descriptor) {
   const record = descriptorRecords.get(descriptor);
-  if (process.platform === "darwin") assertCustodyDescriptor(descriptor);
+  if (process.platform === "darwin") {
+    assertCustodyDescriptor(descriptor);
+  }
   return custodyBackendDirectory(process.platform, descriptor, record?.canonicalPath);
 }
 
@@ -309,7 +358,9 @@ export function openCustodyEntry(descriptor, component, options = {}) {
     const first = readlinkSync(path, { encoding: "buffer" });
     assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
     const second = readlinkSync(path, { encoding: "buffer" });
-    if (!first.equals(second)) throw new Error("ROLLBACK_CUSTODY_SYMLINK_CHANGED");
+    if (!first.equals(second)) {
+      throw new Error("ROLLBACK_CUSTODY_SYMLINK_CHANGED");
+    }
     assertCustodyDescriptor(descriptor);
     return { identity: before, linkBytes: first, path };
   }

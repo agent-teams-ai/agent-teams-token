@@ -15,6 +15,10 @@ import {
   custodyDescriptorDirectory,
   registerCustodyDescriptor,
 } from "./custody.mjs";
+import {
+  assertRuntimeExecutablePath,
+  assertSupportedRuntimePlatform,
+} from "./node-runtime-authority.mjs";
 import { validateRuntimeNodeLock } from "./node-runtime-lock.mjs";
 import { platformId } from "./offline-environment.mjs";
 import {
@@ -81,23 +85,13 @@ export function assertPinnedNodeRuntime(root) {
       executableSha256: expected.executableSha256,
     };
   } finally {
-    if (executable !== undefined) {closeSync(executable.descriptor);}
+    if (executable !== undefined) {
+      closeSync(executable.descriptor);
+    }
     closeSync(runtimeRoot.descriptor);
-    if (prepared !== undefined) {cleanupPreparedPayload(prepared);}
-  }
-}
-
-function assertSupportedRuntimePlatform(platform) {
-  if (platform === "darwin-arm64") {
-    throw new Error(
-      "ROLLBACK_RUNTIME_LOADED_IMAGE_BINDING_UNAVAILABLE platform=darwin-arm64",
-    );
-  }
-  if (platform !== "linux-x64") {
-    throw new Error("ROLLBACK_RUNTIME_PLATFORM_UNSUPPORTED platform=" + platform);
-  }
-  if (typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") {
-    throw new Error("ROLLBACK_RUNTIME_NOFOLLOW_UNAVAILABLE platform=" + platform);
+    if (prepared !== undefined) {
+      cleanupPreparedPayload(prepared);
+    }
   }
 }
 
@@ -123,28 +117,6 @@ function loadRuntimeExpectations(root, runtimeRoot, platform) {
   expected.executablePath = join(root, ".tools", expected.artifact.installDirectory, "bin", "node");
   assertRuntimeExecutablePath(expected.node, expected.executablePath);
   return expected;
-}
-
-function assertRuntimeExecutablePath(node, expectedExecutable) {
-  if (process.version !== "v" + node.version) {
-    throw new Error(
-      "ROLLBACK_RUNTIME_VERSION_MISMATCH expected=v" + node.version
-      + " actual=" + process.version,
-    );
-  }
-  let actualRealpath;
-  try {
-    actualRealpath = realpathSync(process.execPath);
-  } catch (error) {
-    throw new Error("ROLLBACK_RUNTIME_EXEC_PATH_UNSAFE path=" + process.execPath, { cause: error });
-  }
-  if (!isAbsolute(process.execPath) || resolve(process.execPath) !== expectedExecutable
-    || actualRealpath !== expectedExecutable) {
-    throw new Error(
-      "ROLLBACK_RUNTIME_EXEC_PATH_MISMATCH expected=" + expectedExecutable
-      + " actual=" + process.execPath + " realpath=" + actualRealpath,
-    );
-  }
 }
 
 function assertRuntimeArchive(runtimeRoot, artifact) {
