@@ -2,15 +2,21 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
-Current code candidate `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6` includes
+Current code candidate `b95c66be5d19367f85e864fc72b3b41d4826e906` includes
 independently accepted toolchain and deployment fixes. Combined lint, root TS
 build, deployment TS and Foundation pass; the actual Mac Anvil source checkpoint
-has125pass/3Linux skips. Separate local-EVM source passes7/7 runner integration
-cases, but review retained one introduced error-cause redaction P2. Its bounded
-fixae60e200 now covers25focused Mac cases and awaits independent review79.
-The two earlier local-EVM P2s are closed.
+has125pass/3Linux skips. Review79 accepted the error-cause redaction fix with
+no P0-P3. Both solc classification and redaction changes are integrated; combined
+actual Mac runner integration passes7/7 with no skips. All25 focused Mac source
+cases are covered. The two earlier local-EVM P2s are closed.
 The recovery checkpoint remains unaccepted, including actual Darwin failures;
 its failed partial writer was replaced with a fresh isolated filesystem lane.
+The original user-path plan contains1,416lines, including remediation addenda
+absent from this648line candidate copy. Independent audit80 is reconciling every
+required invariant against current code. Those requirements are not discarded
+and old rejected branches are not automatically accepted. See the ledger for
+exact original SHA256 and the review scope. Full remaining work is not yet
+reduced to recovery alone.
 See [the current reconciliation ledger](research/E2E-RECONCILIATION-2026-09-04.md).
 Final acceptance still requires a clean exact-SHA full local/CI run and repeated
 independent specialist plus holistic reviews of that same SHA.

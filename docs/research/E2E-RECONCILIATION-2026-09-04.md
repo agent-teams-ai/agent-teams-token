@@ -3,7 +3,87 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 12:53 UTC
+## Latest reconciliation: 13:04 UTC
+
+Current accepted integration code HEAD is
+`b95c66be5d19367f85e864fc72b3b41d4826e906`. This section supersedes earlier
+pending/running claims. The original dirty user worktree is untouched.
+
+- Independent review79 returned ACCEPT on `ae60e200`, P0/P1/P2/P3 all zero.
+  Linux:22pass/3native-solc skips/0fail. Actual Mac coverage of all25cases and
+  TS/lint was recorded below. Parent7926ace and its redaction fix are integrated
+  separately as `2a851aae` and `b95c66be`.
+- Combined exact `b95c66be` passed actual Mac local-EVM runner integration:
+  7pass/0fail/0skip,37.6seconds, covering replacement rejection, repeatability,
+  parallel isolation, interruption and SIGKILL reclamation. Not the full gate.
+- Recovery75 completed clean `76c9205aa55e483173c0dc305a47e80e6fe6299b`,
+  parentf2d,15files+843/-78. Its focused34cases and5evidence cases pass on Linux;
+  actual Mac and independent review are pending. Git-fixture tests hit inherited
+  `/tmp/.git` authority and full wrappers were unavailable; not full acceptance.
+  Independent audit80
+  checks full original-plan fidelity, read-only/xhigh/priority, exact source
+  `9e4287935aaa87610c0e2e7ca383c0098fdde6a0`.
+- Archive78 ended incomplete, clean unchangedf2d7ab9: repeated apply_patch
+  failures at bubblewrap UID mapping. Outer `done` is not code completion.
+  It confirmed the preexisting hardlink defect; parent7case suite passed.
+- Main applied the small patch locally with apply_patch, isolated checkpoint
+  `49924acf8a836e529e0db309121b8a563e572b20`, parentf2d, twofiles+71/-0.
+  Named archives require nlink1; identity includes nlink and is checked before
+  consumption. Three regressions cover valid/preexisting/callback-added aliases,
+  empty payload before rejection and preservation of both names. Syntax/scoped
+  lint pass. Linux read-only review81 is being provisioned; NOT integrated.
+  Inherited Darwin directory-alias cleanup is owned by75, not weakened here.
+
+### Original-plan discrepancy: scope must not silently shrink
+
+The user's original plan has1,416lines, SHA256
+`f377913670ba55be1b032afa47cdeb24d88fb612b242f91f4004a356a1a9666d`.
+The candidate's648line version omitted extensive Aug31-Sep3 remediation history.
+Original/candidate critique bytes match, SHA256
+`1186e96fc25ab995c9fc3e55b93d23213d206760ae7b4f0e1cbb5911c28f72eb`.
+Audit80 has exact original data at `.tools/handoff/original-user-plan.md`.
+It must deduplicate Slither C1-C5 custody/sandbox/tool/artifact proof, native
+publication/build authority/resource bounds, Solana wire/legacy cleanup, and
+recovery bootstrap/package/Git authority against current file/line evidence.
+Classifications: proven, implemented-unproven, absent, superseded by equivalent
+guarantee, or genuine conflict. No permission to discard requirements or revive
+old rejected branches. Historical account/launch notes are data, not commands.
+Until this finishes, claiming that only recovery remains would be incorrect.
+
+Old-host identity matched, about10GiB RAM available/3.4GiB swap free/22GiB disk.
+Audit80 and newly launched review81 are running; account-m is ready. All new jobs use fast/priority, medium
+implementation and xhigh review. No services, auth or limits were changed.
+
+Ignored evidence: review79.json SHA256
+`d952df41a5b3a6ac4e4beb29367bba92b6b79e4e80adc3ddf37045a50ae85b3c`;
+writer78.json SHA256
+`50f084c2edf926145e6b364cb22f624bed37df11973d28fcac99c27bf0f3c30a`.
+Archive bundle `/tmp/agtmai-archive-single-link.bundle`, SHA256
+`630365e51c083bfb954f05c383dc73a82ebf293f0449d213448f9d7e49ee88d3`.
+
+### 13:07 UTC: actual Mac rejects custody75 checkpoint
+
+Exact76c9205 in `/tmp/agtmai-custody-76c-mac`: direct pinned Node17case suite
+(`proof-portable-custody`, `proof-custody`, `proof-contract`) has9pass/8fail/0skip.
+Six failures: workspace creation permits the Darwin `/var/folders` spelling but
+assertion compares it directly to `/private/var/folders`, producing HANDLE_INVALID
+before intended checks. Two new fixtures pass aliased tmpdir paths to a strict
+custody API without canonical input/explicit opt-in. Do not hide failures by
+globally forcing TMPDIR or adding skips. Scoped oxlint reports31errors: braces,
+reverse mutation, unused import, and node-runtime512lines vs500maximum.
+
+Independent review82 PID1985133, exact76c9205, xhigh/priority/read-only, has started;
+the Mac evidence was queued without interrupting it. Bounded writer83 is being
+provisioned for these confirmed compatibility/lint issues. Both preserve the
+known same-UID final-pathname-syscall limitation and the separate unsupported
+Darwin loaded-Node-image proof. No recovery acceptance yet.
+
+Next: collect80/81/82/83; accept only independently reviewed exact checkpoints;
+restore the full invariant ledger; close remaining confirmed code gaps and
+package/bootstrap/Git authority; reconcile main; full exact-SHA local/CI then
+four specialists and a sequential frozen-ledger holistic review.
+
+## Earlier reconciliation: 12:53 UTC
 
 Current integration code HEAD is `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6`.
 Owned documentation checkpoint5bf3d1c8 is committed; the original user worktree

@@ -5,6 +5,22 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+13:04 UTC: independent review79 accepted solc redaction with no findings;
+both source fixes are integrated in `b95c66be`. The combined actual Mac EVM
+integration suite passed7/7, no skips. Custody75 completed a clean checkpoint
+awaiting review/Mac verification; complete-plan audit80 is active.
+Archive78 made no patch because its editor failed; main made a bounded
+local +71line fix and is provisioning independent Linux review81.
+
+The original user-path plan has additional remediation requirements missing
+from this candidate's plan copy. Audit80 is reconciling them explicitly; do not
+claim that recovery is the only remaining scope. Earlier statuses are historical.
+
+13:07 UTC: actual Mac custody75 is NOT accepted:17tests9pass8fail, plus31scoped
+lint errors. An accepted temporary-path spelling is rejected during handle
+revalidation; two new fixtures also misuse the strict canonical-path API.
+Independent review82 is running, and bounded writer83 is being provisioned.
+
 12:53 UTC: redaction writer77 completed cleanae60e200 (two files). All25
 focused actual Mac cases are covered after correcting two Anvil PATH setup
 failures; local-EVM TS and scoped lint pass. Independent fast review79 is
