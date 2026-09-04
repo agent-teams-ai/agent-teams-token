@@ -3,7 +3,55 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 16:46 UTC
+## Latest reconciliation: 17:10 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+Recovery candidate is now `04d0e6400cac74789ba8cd5a02f088133cb3521e`, parenta7add,
+in `/tmp/agtmai-custody-76c-mac`. Tracked clean; known node_modules symlink only.
+Do not integrate the unaccepted full recovery base on these tests alone.
+
+- Main fixed120/P1-4 directory-shape and staged-file finalization, reusing
+  existing custody helpers. Successor ownership precedes predecessor close;
+  primary validation/read/Git failure stays before terminal close errors;
+  every acquired owner gets one close attempt, no retries of reused FD numbers.
+  Iterator read/close ordering covered. No authority check or Foundation limit
+  weakened. Six files,+375/-57,309 new test/fixture lines; PLAN updated.
+- Actual pre-fix regressions0/16; first patch16/16. Added success/iterator-owner
+  assertions: Mac broader109/109, zero skips,62.24s. A test property lint error
+  was mechanically renamed; final changed file18/18, zero skips,5.81s.
+  Scoped lint and diff check pass. No local test session remains active.
+- Ordinary Linux verifier131 completed, NOT a model worker. Root
+  `/var/data/agtmai-custody131-linux.0EXee0`, exact source04d0e640;
+  validation passed; full structural suite **163/163**, zero failures/skips,
+  221.24s,exit0, source clean. Local session91014 finished; do not rerun this
+  unchanged checkpoint. Logs copied and hashed in the report below.
+  Machine/RAM/swap/disk/IO plus bundle/Node hashes were verified; existing5GB
+  admission guard retained. Free disk was7.3GiB at launch,6.2GiB on observation.
+  Bundle SHA2567023ccdaac322ce11d50116a7c819c41064077bbdffb5a46a409f566749f6121.
+- Source/evidence/handoff report:
+  `RECOVERY-CONSUMER-FINALIZATION-2026-09-04.md`. Read-only follow-up identifies
+  node-runtime's additional return-file-before-parent-close leak; the report
+  gives a bounded next implementation/test split. Node-runtime is NOT fixed.
+  Also open:120group2 evidence-directory custody, group5 partial construction,
+  architecture findings, R3-R8, Slither/Solana live qualification, main merge
+  and complete exact-head root/CI plus independent final reviews.
+- Fresh16:54 run-watch: zero running/alive,57 completed,two capacity-blocked;
+  latest125/126 quota blocked onaccount-m(tv goog five), reset11Sep11:19:36UTC.
+  No new subscription worker, account cycle or auth/capacity/sandbox change.
+  Future hosted workers remain sol medium/xhigh, fast/priority. Registry127
+  is still next free; ordinary verifier131 is not registered there.
+- Original user checkout remains212b278f with its recorded dirt preserved;
+  original plan hash stillf377913670ba55be1b032afa47cdeb24d88fb612b242f91f4004a356a1a9666d.
+  Slithere9292 and Solanaabf837 unchanged; no browser, public chain, signing,
+  tokenomics/vesting, spending or material deletion. Integration has only this
+  ledger edit and the new report; no source overlay integrated.
+
+Next: continue remaining120 node-runtime/group2/group5 work with bounded
+checkpoints and independent review when capacity returns, then every remaining
+original-matrix requirement. Current163/163 structural evidence is not complete
+cached rollback, exact-head root/CI or whole E2E acceptance.
+
+## Earlier reconciliation: 16:46 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
 Two additional bounded recovery corrections are committed in the isolated
