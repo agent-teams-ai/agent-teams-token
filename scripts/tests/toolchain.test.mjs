@@ -108,7 +108,9 @@ test("macOS trusted temp hierarchies reject descendant symlinks", (context) => {
   assert.equal(folders, "/private/var/folders");
   const macTemp = canonicalizeTrustedPath(tmpdir(), { platform: "darwin" });
   assert.equal(
-    [`${folders}/`, "/private/tmp/"].some((prefix) => macTemp.startsWith(prefix)),
+    macTemp === "/private/tmp"
+      || macTemp.startsWith("/private/tmp/")
+      || macTemp.startsWith(`${folders}/`),
     true,
   );
   const probe = mkdtempSync(join(macTemp, "agtmai-toolchain-probe-"));
