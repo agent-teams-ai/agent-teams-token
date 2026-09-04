@@ -5,6 +5,13 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+Current accepted code e723bc0d includes independently accepted Solana raw-wire
+verification. ActualMac source coverage:90total,87pass,3Linux-only skips,0fail;
+real integration4/4 has no skips. Filesystemff44c448 passes33/33actualMac
+expanded tests and is under independent92review, not integrated. Writer91 now
+implements the bounded Slither process/finalization correction. Both hosted
+jobs use fast/priority on the old server; read the latest reconciliation first.
+
 13:33 UTC: wrapper87 is independently ACCEPTed, Linux11/11 and actualMac
 portability evidence. Solana wire374a7d49 passes34focused cases, TS7/lint and
 is under independent89 review plus realMac integration. Custodye2b67d4a passes

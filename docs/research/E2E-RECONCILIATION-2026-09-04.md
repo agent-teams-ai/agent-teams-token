@@ -3,7 +3,60 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 13:33 UTC
+## Latest reconciliation: 13:38 UTC
+
+Accepted integration code is now e723bc0df8efa867a78f8a4cd68e8862e95a18f2.
+Original user worktree212b278f and all original dirty paths remain untouched.
+
+- Review89 independently ACCEPTed374a7d49, no severity findings, Linux13/13
+  wire/verifier tests. Main integrated only those four reviewed files as e723.
+  git diff374a7d49..e723 -- tooling/local-solana is empty, proving source identity.
+- ActualMac exact374a7d49 Solana coverage is90total:87pass,0fail,3Linux-only
+  skips. This combines13wire/verifier,21CLI/RPC/runner,52remaining cases
+  (49pass/3platform skips), and4/4real integration with required binaries,
+  including three parallel-process rounds. Real suite took127.7seconds.
+  TS7 and scoped lint pass. This closes L3 and current-source Mac L1 evidence,
+  not legacy-v3/N2/Slither/recovery/CI or production approval.
+- Writer90 returned the minimal rename-custody patch after one tool failure.
+  Main applied it locally as ff44c448378d907bb8f2715365f4221206c50b8e,
+  parente2b67d4a:2files+32/-6, actualMac33/33expanded custody/replay/removal
+  cases,0skips,20.6seconds, lint passes. No accepted recovery integration yet.
+  Entire filesystem series f2d..ff44 is19files+1252/-140, including tests.
+- New independent reviewer92 is running on exactff44 vsf2d, reviewing the
+  entire filesystem series and review82 closure. IDagtmai-r212-custody-review92-20260904,
+  PID3883654, xhigh/priority/read-only, separate standalone clone.
+- Planner88 completed the bounded Slither execution design. Main accepted the
+  corrective scope: monotonic aggregate deadlines, termination/finalization
+  reserves, bounded output, owned process-group kill/reap, exact-ID removal
+  acknowledgement and typed cleanup uncertainty. No stronger malicious-daemon,
+  uninterruptible-kernel or arbitrary non-cooperative-callback guarantee.
+- New writer91 implements only that S7 scope onb95 (Slither source unchanged
+  bye723). IDagtmai-r212-slither-execution91-20260904,PID3877551,medium/priority.
+  No overlapping Slither writer. Input/tool/Git authority and publication are
+  separate remaining lanes; no native helper/runtime redesign is authorized.
+- Both new jobs have full source packets, verified Git bundles/exact bases,
+  successful pre-dispatch Git-lock probes and direct pinnedNode24.20.0.
+  Old-host identity matched;11.8GiB RAM available,3.6GiB swap free,19GiB disk.
+  Editors failing bwrap are not retried/bypassed; source drafts remain useful
+  but require main application/tests and independent review.
+
+Independent accepted reports: review87.json SHA256
+c5c7c5785a0c6cdb95eb5b174b2ee12408e8ced2705b96466bc9c0b03bab0dcb;
+review89.json SHA256
+b00748370f985defd82bb590a79e444c75a0a06a8a8038a3ab994f6bc77f1d2e.
+planner88.json SHA256
+d65e0016d1db311e12f97fa0db7097b7033b5f13090671dabd20f67fd5bafe42;
+writer90.json SHA256
+db785b689dc8a14fb9df09c88752e48345d5e48877eb8229f46b82f89b162632.
+Review92 bundle /tmp/agtmai-custody90-reviewed-candidate.bundle SHA256
+2912291c142690b63077523c46c203c2e63345e86c7ae0353dfa24787917997a.
+
+Next: collect91/92 without duplicate jobs; review/qualify outputs, compose the
+accepted filesystem/archive/wrapper series safely, then remaining authority,
+legacy/publication obligations in the full audit. Final exact-head full local/CI
+and four specialists plus sequential holistic review remain mandatory.
+
+## Earlier reconciliation: 13:33 UTC
 
 Accepted integration code remains b95c66be. Original worktree212b278f and its
 dirty files are unchanged. Historical entries below are source-bound evidence.
