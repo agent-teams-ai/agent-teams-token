@@ -13,7 +13,7 @@ import {
   replaceObservedFile,
   validatePrivateDirectory,
   type PublicationHooks,
-  type RegularFileIdentity,
+  type RegularFileObservation,
 } from "./safe-fs.ts";
 
 const KIND = "agtmai-local-evm-run";
@@ -68,7 +68,7 @@ export async function registerRunAnvil(
   await replaceObservedFile(
     join(directory, LEASE),
     serializeLease({...lease, anvil}),
-    observed.identity,
+    observed.observation,
     {mode: 0o600, bounds: RUN_LEASE_BOUNDS, hooks},
   );
 }
@@ -173,16 +173,19 @@ function serializeLease(lease: RunLease): Buffer {
 
 async function readLease(
   directory: string,
-): Promise<{readonly lease: RunLease; readonly identity: RegularFileIdentity}> {
+): Promise<{
+  readonly lease: RunLease;
+  readonly observation: RegularFileObservation;
+}> {
   let raw: unknown;
-  let identity: RegularFileIdentity;
+  let observation: RegularFileObservation;
   try {
     const observed = await readOwnedBoundedFile(
       join(directory, LEASE),
       "RUN_LEASE",
       RUN_LEASE_BOUNDS,
     );
-    identity = observed.identity;
+    observation = observed;
     raw = JSON.parse(observed.bytes.toString("utf8"));
   }
   catch (cause) {
@@ -195,7 +198,7 @@ async function readLease(
     || !isIdentity(raw.runner) || (raw.anvil !== null && !isIdentity(raw.anvil))) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_INVALID", "run lease fields are invalid");
   }
-  return {lease: raw as unknown as RunLease, identity};
+  return {lease: raw as unknown as RunLease, observation};
 }
 
 async function provisionalIsStale(name: string): Promise<boolean> {

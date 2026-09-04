@@ -12,17 +12,25 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { LocalEvmError } from "./model.ts";
-import { holdPublicationParent } from "./publication-parent.ts";
+import { finishWithCleanup } from "./cleanup.ts";
+import { holdPublicationParent, syncPublicationDirectory as syncDirectory } from "./publication-parent.ts";
+import { observeNamedHeldFile } from "./file-content.ts";
 
 import {
   assertPolicyInteger, assertRegularFile, assertSameFile, assertWithinBounds,
-  fileIdentity, type FileSizeBounds, type RegularFileIdentity,
+  fileIdentity, mutableFileSnapshot, type FileSizeBounds,
+  type RegularFileIdentity, type RegularFileObservation,
 } from "./file-state.ts";
 export { allocatedBytesFromStatBlocks } from "./file-state.ts";
-export type { FileSizeBounds, RegularFileIdentity } from "./file-state.ts";
+export type {
+  FileSizeBounds,
+  RegularFileIdentity,
+  RegularFileObservation,
+} from "./file-state.ts";
 
 export interface PublicationHooks {
   readonly beforePublish?: () => Promise<void>;
+  readonly afterPublish?: () => Promise<void>;
 }
 
 export async function readRegularFile(path: string, label: string): Promise<Buffer> {
@@ -34,7 +42,7 @@ export async function readOwnedBoundedFile(
   label: string,
   bounds: FileSizeBounds,
   mode = 0o600,
-): Promise<{readonly bytes: Buffer; readonly identity: RegularFileIdentity}> {
+): Promise<RegularFileObservation> {
   return await readRegularFileObserved(path, label, bounds, mode);
 }
 
@@ -43,76 +51,44 @@ async function readRegularFileObserved(
   label: string,
   bounds?: FileSizeBounds,
   ownedMode?: number,
-): Promise<{readonly bytes: Buffer; readonly identity: RegularFileIdentity}> {
+): Promise<RegularFileObservation> {
   const absolute = resolve(path);
   await assertNoPathSubstitution(absolute, label);
   let handle: FileHandle | undefined;
+  let primary: unknown;
   try {
     handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const before = await handle.stat({bigint: true});
-    assertRegularFile(before, label, ownedMode);
-    assertWithinBounds(before, label, bounds);
-    const identity = fileIdentity(before);
-    const bytes = bounds === undefined
-      ? await handle.readFile()
-      : await boundedRead(handle, bounds.logicalBytes, label);
-    const after = await handle.stat({bigint: true});
-    assertSameFile(identity, after, label);
-    assertWithinBounds(after, label, bounds);
-    if (after.size !== before.size || after.blocks !== before.blocks
-      || after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs
-      || after.size !== BigInt(bytes.byteLength)) {
-      throw new LocalEvmError(
-        `LOCAL_EVM_${label}_CHANGED`,
-        `${label} changed while it was read`,
-      );
-    }
-    assertSameFile(identity, await lstat(absolute, {bigint: true}), label);
-    return {bytes, identity};
+    const initial = await handle.stat({bigint: true});
+    assertRegularFile(initial, label, ownedMode);
+    assertWithinBounds(initial, label, bounds);
+    const identity = fileIdentity(initial);
+    const observed = await observeNamedHeldFile(
+      absolute,
+      handle,
+      identity,
+      {
+        label,
+        bounds,
+        expectedMutable: mutableFileSnapshot(initial),
+      },
+    );
+    return {identity, ...observed};
   } catch (cause) {
-    if (cause instanceof LocalEvmError) {throw cause;}
-    const error = cause as NodeJS.ErrnoException;
-    throw new LocalEvmError(`LOCAL_EVM_${label}_${error.code ?? "READ_FAILED"}`, `${label} could not be read safely`);
-  } finally {
-    await handle?.close();
-  }
-}
-
-async function boundedRead(
-  handle: FileHandle,
-  cap: number,
-  label: string,
-): Promise<Buffer> {
-  assertPolicyInteger(cap, label, "logical byte", true);
-  const allocation = Buffer.alloc(cap + 1);
-  let offset = 0;
-  while (offset < allocation.length) {
-    const result = await handle.read(
-      allocation,
-      offset,
-      allocation.length - offset,
-      null,
-    );
-    if (!Number.isSafeInteger(result.bytesRead)
-      || result.bytesRead < 0
-      || result.bytesRead > allocation.length - offset) {
-      throw new LocalEvmError(
-        `LOCAL_EVM_${label}_STAT_INVALID`,
-        `${label} returned an invalid read count`,
+    primary = cause instanceof LocalEvmError
+      ? cause
+      : new LocalEvmError(
+        `LOCAL_EVM_${label}_${(cause as NodeJS.ErrnoException).code
+          ?? "READ_FAILED"}`,
+        `${label} could not be read safely`,
       );
-    }
-    if (result.bytesRead === 0) {break;}
-    offset += result.bytesRead;
-  }
-  if (offset > cap) {
-    throw new LocalEvmError(
-      `LOCAL_EVM_${label}_TOO_LARGE`,
-      `${label} exceeds its logical byte limit`,
+    throw primary;
+  } finally {
+    await finishWithCleanup(
+      primary,
+      [async () => await handle?.close()],
     );
   }
-  return allocation.subarray(0, offset);
 }
-
 
 export async function assertNoPathSubstitution(path: string, label: string): Promise<void> {
   const absolute = resolve(path);
@@ -236,6 +212,7 @@ export async function publishInitialFile(
   const parent = await holdPublicationParent(dirname(absolute));
   let handle: FileHandle | undefined;
   let created: RegularFileIdentity | undefined;
+  let primary: unknown;
   try {
     handle = await open(
       temporary,
@@ -255,19 +232,21 @@ export async function publishInitialFile(
     assertSameFile(created, written, "INITIAL_TEMP");
     assertWithinBounds(written, "INITIAL_FILE", bounds);
     if (written.size !== BigInt(bytes.byteLength)) {
-      throw new LocalEvmError(
-        "LOCAL_EVM_INITIAL_FILE_CHANGED",
-        "initial file length differs from the supplied bytes",
-      );
+      changed("INITIAL_FILE", "length differs from the supplied bytes");
     }
-    await assertExpectedBytes(handle, bytes, "INITIAL_FILE");
     await hooks.beforePublish?.();
     await parent.assertReady();
     await assertAbsent(absolute, "INITIAL_FILE");
-    assertSameFile(
+    await observeNamedHeldFile(
+      temporary,
+      handle,
       created,
-      await lstat(temporary, {bigint: true}),
-      "INITIAL_TEMP",
+      {
+        label: "INITIAL_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedMutable: mutableFileSnapshot(written),
+      },
     );
     try {
       await link(temporary, absolute);
@@ -280,39 +259,80 @@ export async function publishInitialFile(
       }
       throw cause;
     }
-    assertSameFile(
+    await observeNamedHeldFile(
+      absolute,
+      handle,
       created,
-      await lstat(absolute, {bigint: true}),
-      "INITIAL_FILE",
-      2n,
+      {
+        label: "INITIAL_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedLinks: 2n,
+      },
     );
-    assertSameFile(
+    await observeNamedHeldFile(
+      temporary,
+      handle,
       created,
-      await lstat(temporary, {bigint: true}),
-      "INITIAL_TEMP",
-      2n,
+      {
+        label: "INITIAL_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedLinks: 2n,
+      },
     );
     await unlink(temporary);
-    assertSameFile(
+    const published = await observeNamedHeldFile(
+      absolute,
+      handle,
       created,
-      await lstat(absolute, {bigint: true}),
-      "INITIAL_FILE",
+      {label: "INITIAL_FILE", bounds, expectedBytes: bytes},
+    );
+    await hooks.afterPublish?.();
+    const verified = await observeNamedHeldFile(
+      absolute,
+      handle,
+      created,
+      {
+        label: "INITIAL_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedMutable: published.mutable,
+      },
     );
     await syncDirectory(dirname(absolute));
     await parent.assertReady();
+    await observeNamedHeldFile(
+      absolute,
+      handle,
+      created,
+      {
+        label: "INITIAL_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedMutable: verified.mutable,
+      },
+    );
+  } catch (cause) {
+    primary = cause;
+    throw cause;
   } finally {
-    try {await handle?.close();} finally {
-      try {
-        if (created !== undefined) {await unlinkIfOwnedTemporary(temporary, created);}
-      } finally {await parent.close();}
-    }
+    await finishWithCleanup(primary, [
+      async () => await handle?.close(),
+      async () => {
+        if (created !== undefined) {
+          await unlinkIfOwnedTemporary(temporary, created);
+        }
+      },
+      async () => await parent.close(),
+    ]);
   }
 }
 
 export async function replaceObservedFile(
   path: string,
   bytes: Uint8Array,
-  expected: RegularFileIdentity,
+  expected: RegularFileObservation,
   options: {readonly mode?: number; readonly bounds?: FileSizeBounds; readonly hooks?: PublicationHooks} = {},
 ): Promise<void> {
   const {mode = 0o600, bounds, hooks = {}} = options;
@@ -322,7 +342,9 @@ export async function replaceObservedFile(
   const temporary = `${absolute}.${process.pid}.${randomUUID()}.tmp`;
   let handle: FileHandle | undefined;
   let created: RegularFileIdentity | undefined;
+  let predecessor: FileHandle | undefined;
   const parent = await holdPublicationParent(dirname(absolute));
+  let primary: unknown;
   try {
     handle = await open(
       temporary,
@@ -342,36 +364,85 @@ export async function replaceObservedFile(
     assertSameFile(created, written, "UPDATED_TEMP");
     assertWithinBounds(written, "UPDATED_FILE", bounds);
     if (written.size !== BigInt(bytes.byteLength)) {
-      throw new LocalEvmError(
-        "LOCAL_EVM_UPDATED_FILE_CHANGED",
-        "updated file length differs from the supplied bytes",
-      );
+      changed("UPDATED_FILE", "length differs from the supplied bytes");
     }
-    await assertExpectedBytes(handle, bytes, "UPDATED_FILE");
     await hooks.beforePublish?.();
     await parent.assertReady();
-    assertSameFile(
-      expected,
-      await lstat(absolute, {bigint: true}),
-      "UPDATED_FILE",
+    await observeNamedHeldFile(
+      temporary,
+      handle,
+      created,
+      {
+        label: "UPDATED_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedMutable: mutableFileSnapshot(written),
+      },
+    );
+    predecessor = await open(
+      absolute,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    await observeNamedHeldFile(
+      absolute,
+      predecessor,
+      expected.identity,
+      {
+        label: "UPDATED_FILE",
+        bounds,
+        expectedBytes: expected.bytes,
+        expectedMutable: expected.mutable,
+      },
     );
     // This binds the authenticated predecessor immediately before rename.
     // Without a native renameat2 helper, a malicious same-UID actor may still
     // race that final syscall; no broader guarantee is claimed.
     await rename(temporary, absolute);
-    assertSameFile(
+    const published = await observeNamedHeldFile(
+      absolute,
+      handle,
       created,
-      await lstat(absolute, {bigint: true}),
-      "UPDATED_FILE",
+      {label: "UPDATED_FILE", bounds, expectedBytes: bytes},
+    );
+    await hooks.afterPublish?.();
+    const verified = await observeNamedHeldFile(
+      absolute,
+      handle,
+      created,
+      {
+        label: "UPDATED_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedMutable: published.mutable,
+      },
     );
     await syncDirectory(dirname(absolute));
     await parent.assertReady();
+    await observeNamedHeldFile(
+      absolute,
+      handle,
+      created,
+      {
+        label: "UPDATED_FILE",
+        bounds,
+        expectedBytes: bytes,
+        expectedMutable: verified.mutable,
+      },
+    );
+  } catch (cause) {
+    primary = cause;
+    throw cause;
   } finally {
-    try {await handle?.close();} finally {
-      try {
-        if (created !== undefined) {await unlinkIfOwnedTemporary(temporary, created);}
-      } finally {await parent.close();}
-    }
+    await finishWithCleanup(primary, [
+      async () => await handle?.close(),
+      async () => await predecessor?.close(),
+      async () => {
+        if (created !== undefined) {
+          await unlinkIfOwnedTemporary(temporary, created);
+        }
+      },
+      async () => await parent.close(),
+    ]);
   }
 }
 
@@ -388,32 +459,6 @@ function assertBytesWithinBounds(
     throw new LocalEvmError(
       `LOCAL_EVM_${label}_TOO_LARGE`,
       `${label} exceeds its logical byte limit`,
-    );
-  }
-}
-
-async function assertExpectedBytes(
-  handle: FileHandle,
-  expected: Uint8Array,
-  label: string,
-): Promise<void> {
-  const actual = Buffer.alloc(expected.byteLength + 1);
-  let offset = 0;
-  while (offset < actual.length) {
-    const result = await handle.read(
-      actual,
-      offset,
-      actual.length - offset,
-      offset,
-    );
-    if (result.bytesRead === 0) {break;}
-    offset += result.bytesRead;
-  }
-  if (offset !== expected.byteLength
-    || !actual.subarray(0, offset).equals(Buffer.from(expected))) {
-    throw new LocalEvmError(
-      `LOCAL_EVM_${label}_CHANGED`,
-      `${label} does not contain the supplied bytes`,
     );
   }
 }
@@ -451,16 +496,11 @@ async function unlinkIfOwnedTemporary(
   }
 }
 
-async function syncDirectory(path: string): Promise<void> {
-  const directory = await open(
-    path,
-    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+function changed(label: string, detail: string): never {
+  throw new LocalEvmError(
+    `LOCAL_EVM_${label}_CHANGED`,
+    `${label} ${detail}`,
   );
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
 }
 
 export function assertExpectedBasename(path: string, expected: string, label: string): void {

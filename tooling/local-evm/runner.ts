@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
+import { finishWithCleanup } from "./cleanup.ts";
 import { canonicalJson, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
@@ -51,6 +52,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   };
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
+  let primary: unknown;
   try {
     const solcCustody = join(runDirectory, "solc-custody");
     await ensurePrivateDirectory(solcCustody);
@@ -169,14 +171,34 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
       reportDirectory: verifierOutput.directory, reportSha256: verifierOutput.reportSha256,
       normalizedEvidenceSha256: verifierOutput.normalizedEvidenceSha256,
     };
+  } catch (cause) {
+    primary = cause;
+    throw cause;
   } finally {
-    process.removeListener("SIGINT", interrupt);
-    process.removeListener("SIGTERM", interrupt);
-    solc?.close();
-    await anvil?.stop();
-    await removeOwnedRunDirectory(runDirectory);
-    if (interruptedSignal) {process.exitCode = interruptedSignal === "SIGINT" ? 130 : 143;}
+    await finalizeLocalRun({primary, interrupt, solc, anvil, runDirectory, interruptedSignal});
   }
+}
+
+async function finalizeLocalRun(state: {
+  readonly primary: unknown;
+  readonly interrupt: (signal: NodeJS.Signals) => void;
+  readonly solc?: PinnedSolc;
+  readonly anvil?: OwnedAnvil;
+  readonly runDirectory: string;
+  readonly interruptedSignal?: NodeJS.Signals;
+}): Promise<void> {
+  await finishWithCleanup(state.primary, [
+    () => {process.removeListener("SIGINT", state.interrupt);},
+    () => {process.removeListener("SIGTERM", state.interrupt);},
+    () => state.solc?.close(),
+    async () => await state.anvil?.stop(),
+    async () => await removeOwnedRunDirectory(state.runDirectory),
+    () => {
+      if (state.interruptedSignal) {
+        process.exitCode = state.interruptedSignal === "SIGINT" ? 130 : 143;
+      }
+    },
+  ]);
 }
 
 async function publishProcessId(directory: string, name: "runner.pid" | "anvil.pid", pid: number): Promise<void> {

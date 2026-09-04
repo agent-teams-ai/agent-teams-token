@@ -15,6 +15,19 @@ export interface RegularFileIdentity {
   readonly nlink: bigint;
 }
 
+export interface FileMutableSnapshot {
+  readonly size: bigint;
+  readonly blocks: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+export interface RegularFileObservation {
+  readonly bytes: Buffer;
+  readonly identity: RegularFileIdentity;
+  readonly mutable: FileMutableSnapshot;
+}
+
 export function assertPolicyInteger(
   value: number,
   label: string,
@@ -83,6 +96,33 @@ export function fileIdentity(stat: BigIntStats): RegularFileIdentity {
     mode: stat.mode,
     nlink: stat.nlink,
   };
+}
+
+export function mutableFileSnapshot(
+  stat: BigIntStats,
+): FileMutableSnapshot {
+  return {
+    size: stat.size,
+    blocks: stat.blocks,
+    mtimeNs: stat.mtimeNs,
+    ctimeNs: stat.ctimeNs,
+  };
+}
+
+export function assertSameMutableSnapshot(
+  expected: FileMutableSnapshot,
+  actual: BigIntStats,
+  label: string,
+): void {
+  if (actual.size !== expected.size
+    || actual.blocks !== expected.blocks
+    || actual.mtimeNs !== expected.mtimeNs
+    || actual.ctimeNs !== expected.ctimeNs) {
+    throw new LocalEvmError(
+      `LOCAL_EVM_${label}_CHANGED`,
+      `${label} content metadata changed`,
+    );
+  }
 }
 
 export function assertRegularFile(

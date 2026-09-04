@@ -1,5 +1,22 @@
 import { constants, lstat, open, realpath } from "node:fs/promises";
 import { LocalEvmError } from "./model.ts";
+import { finishWithCleanup } from "./cleanup.ts";
+
+export async function syncPublicationDirectory(path: string): Promise<void> {
+  const directory = await open(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  let primary: unknown;
+  try {
+    await directory.sync();
+  } catch (cause) {
+    primary = cause;
+    throw cause;
+  } finally {
+    await finishWithCleanup(primary, [async () => await directory.close()]);
+  }
+}
 
 /** Holds the directory alive while publishing; content metadata may change. */
 export async function holdPublicationParent(path: string): Promise<{
@@ -30,7 +47,10 @@ export async function holdPublicationParent(path: string): Promise<{
     await capability.assertReady();
     return capability;
   } catch (cause) {
-    await handle.close();
+    await finishWithCleanup(
+      cause,
+      [async () => await handle.close()],
+    );
     throw cause;
   }
 }

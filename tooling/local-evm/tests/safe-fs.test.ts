@@ -5,9 +5,11 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
+  stat,
   symlink,
   truncate,
   writeFile,
@@ -144,6 +146,104 @@ test("destination injected at publication boundary is preserved", async () => {
   assert.equal(await readFile(destination, "utf8"), "foreign");
 });
 
+test("initial publication rejects a same-length rewrite of its owned temporary", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-safe-rewrite-")));
+  roots.push(root);
+  const destination = join(root, "destination");
+  await assert.rejects(
+    publishInitialFile(
+      destination,
+      Buffer.from("owned"),
+      0o600,
+      undefined,
+      {
+        beforePublish: async () => {
+          await writeFile(await ownedTemporary(root), "other");
+        },
+      },
+    ),
+    changed("LOCAL_EVM_INITIAL_FILE_CHANGED"),
+  );
+  await assert.rejects(lstat(destination), {code: "ENOENT"});
+});
+
+test("initial publication rejects temporary growth beyond its lease bound", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-safe-growth-")));
+  roots.push(root);
+  const destination = join(root, "destination");
+  await assert.rejects(
+    publishInitialFile(
+      destination,
+      Buffer.from("owned"),
+      0o600,
+      {logicalBytes: 16 * 1024, allocatedBytes: 64 * 1024},
+      {
+        beforePublish: async () => {
+          await truncate(await ownedTemporary(root), 16 * 1024 + 1);
+        },
+      },
+    ),
+    // The authenticated snapshot changed before publication. Reject that
+    // mutation before using the replacement size as a new trusted bound.
+    changed("LOCAL_EVM_INITIAL_FILE_CHANGED"),
+  );
+  await assert.rejects(lstat(destination), {code: "ENOENT"});
+});
+
+test("initial publication rejects changed allocation where observable", async (context) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-safe-reallocate-")));
+  roots.push(root);
+  const destination = join(root, "destination");
+  let allocationChanged = false;
+  await assert.rejects(
+    publishInitialFile(
+      destination,
+      Buffer.alloc(8192),
+      0o600,
+      {logicalBytes: 16 * 1024, allocatedBytes: 64 * 1024},
+      {
+        beforePublish: async () => {
+          const temporary = await ownedTemporary(root);
+          const before = await stat(temporary);
+          await truncate(temporary, 0);
+          await truncate(temporary, 8192);
+          const afterEntry = await stat(temporary);
+          allocationChanged = before.blocks !== afterEntry.blocks;
+        },
+      },
+    ),
+    changed("LOCAL_EVM_INITIAL_FILE_CHANGED"),
+  );
+  await assert.rejects(lstat(destination), {code: "ENOENT"});
+  if (!allocationChanged) {
+    context.skip("filesystem does not expose the allocation transition");
+  }
+});
+
+test("post-publication mutation is rejected without erasing a foreign successor", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-safe-post-publish-")));
+  roots.push(root);
+  const destination = join(root, "destination");
+  const displaced = join(root, "published-owned");
+  await assert.rejects(
+    publishInitialFile(
+      destination,
+      Buffer.from("owned"),
+      0o600,
+      undefined,
+      {
+        afterPublish: async () => {
+          await rename(destination, displaced);
+          await writeFile(destination, "other", {mode: 0o600});
+        },
+      },
+    ),
+    changed("LOCAL_EVM_INITIAL_FILE_CHANGED"),
+  );
+  assert.equal(await readFile(destination, "utf8"), "other");
+  assert.equal(await readFile(displaced, "utf8"), "owned");
+});
+
 test("bounded publication rejects logical excess before creating a target", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-safe-write-cap-")));
   roots.push(root);
@@ -244,3 +344,16 @@ test("lease-only bounds do not truncate ordinary large artifact reads", async ()
   await writeFile(path, expected, {mode: 0o600});
   assert.deepEqual(await readRegularFile(path, "CONTRACT_ARTIFACT"), expected);
 });
+
+async function ownedTemporary(directory: string): Promise<string> {
+  const candidates = (await readdir(directory))
+    .filter((name) => name.endsWith(".tmp"));
+  assert.equal(candidates.length, 1);
+  return join(directory, candidates[0]!);
+}
+
+function changed(code: string): (cause: unknown) => boolean {
+  return (cause: unknown): boolean => cause instanceof Error
+    && "code" in cause
+    && cause.code === code;
+}

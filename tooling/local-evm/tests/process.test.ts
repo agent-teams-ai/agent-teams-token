@@ -244,6 +244,35 @@ test("authenticated lease update preserves a substituted foreign successor", asy
   }
 });
 
+test("authenticated lease update rejects an in-place predecessor rewrite", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-rewrite-")));
+  const runDirectory = await createProvisionalRunDirectory(root, "rewrite-Z9");
+  const leasePath = join(runDirectory, "lease.v1.json");
+  try {
+    await createRunLease(runDirectory);
+    const predecessor = await readFile(leasePath);
+    const mutated = Buffer.alloc(predecessor.byteLength, 0x78);
+    const identity = {
+      pid: process.pid,
+      processStart: await processStartIdentity(process.pid),
+    };
+    await assert.rejects(
+      registerRunAnvil(runDirectory, identity, {
+        beforePublish: async () => {
+          await writeFile(leasePath, mutated);
+        },
+      }),
+      (cause: unknown) => cause instanceof Error
+        && "code" in cause
+        && cause.code === "LOCAL_EVM_UPDATED_FILE_CHANGED",
+    );
+    assert.deepEqual(await readFile(leasePath), mutated);
+    assert.equal((await lstat(leasePath)).nlink, 1);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
 test("two reclaimers atomically claim one stale run without recreating it", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-concurrent-reclaim-")));
   const runDirectory = join(root, "run-stale-concurrent-Z9");
