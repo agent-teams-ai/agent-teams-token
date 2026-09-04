@@ -1,5 +1,8 @@
 # Full recovery base critique
 
+Repository links below locate the cited files; line numbers refer to the
+historical review checkpoint, not necessarily their current contents.
+
 Source-bound independent review120, not current acceptance. The reviewer could
 not inspect archive499 and wrapper430. Its suggestion that those overlays may
 close post-backup transaction errors is unproven; their prior acceptance was
@@ -19,7 +22,7 @@ None found.
 
 1. **Production finalization masks the original proof failure when workspace descriptor close also fails.**
 
-   [gate-execution.mjs:401](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/gate-execution.mjs:401) preserves primary and cleanup failures until the unconditional close at line 445. If [closeRollbackWorkspaceHandle](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/workspace-handle.mjs:205) throws, that exception escapes the `finally`, discarding both recorded failures.
+   [gate-execution.mjs:401](../../scripts/rollback/slices/gate-execution.mjs) preserves primary and cleanup failures until the unconditional close at line 445. If [closeRollbackWorkspaceHandle:205](../../scripts/rollback/slices/workspace-handle.mjs) throws, that exception escapes the `finally`, discarding both recorded failures.
 
    Disposable production-boundary reproducer, using the existing uncertain-close seam:
 
@@ -31,7 +34,7 @@ None found.
 
 2. **The evidence bundle has no retained filesystem custody and follows a foreign successor.**
 
-   [createEvidenceDirectory](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/evidence.mjs:285) returns only a pathname. Recorder writes at [evidence.mjs:216](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/evidence.mjs:216), seal/READY publication at [evidence.mjs:242](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/evidence.mjs:242), and validation at [cli.mjs:462](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/cli.mjs:462) all reuse that unheld pathname.
+   [createEvidenceDirectory:285](../../scripts/rollback/runtime/evidence.mjs) returns only a pathname. Recorder writes at [evidence.mjs:216](../../scripts/rollback/runtime/evidence.mjs), seal/READY publication at [evidence.mjs:242](../../scripts/rollback/runtime/evidence.mjs), and validation at [cli.mjs:462](../../scripts/rollback/slices/cli.mjs) all reuse that unheld pathname.
 
    Actual disposable substitution result:
 
@@ -45,7 +48,7 @@ None found.
 
 3. **Evidence command-log descriptor acquisition leaks and its raw teardown can mask primary failures.**
 
-   [EvidenceRecorder.run](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/evidence.mjs:89) opens stdout and stderr before entering the protected region; `trustedChildInvocation` is also outside it. A failed second open leaks stdout. Its `finally` closes stdout before stderr, so an uncertain first close skips the second and masks command failure.
+   [EvidenceRecorder.run:89](../../scripts/rollback/runtime/evidence.mjs) opens stdout and stderr before entering the protected region; `trustedChildInvocation` is also outside it. A failed second open leaks stdout. Its `finally` closes stdout before stderr, so an uncertain first close skips the second and masks command failure.
 
    Actual disposable reproducer pre-created only the stderr destination:
 
@@ -57,21 +60,21 @@ None found.
 
 4. **The adopted descriptor-finalization discipline does not cover several production recovery paths.**
 
-   The clearest unsafe ownership transfer is [node-runtime.mjs:341](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/node-runtime.mjs:341): line 363 closes the predecessor before assigning `directory = next`; an uncertain close throws, the successor is lost, and line 377 retries the stale descriptor number. Top-level cleanup at [node-runtime.mjs:87](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/node-runtime.mjs:87) similarly lets the first close suppress later closes, prepared-payload cleanup, and the primary error.
+   The clearest unsafe ownership transfer is [node-runtime.mjs:341](../../scripts/rollback/runtime/node-runtime.mjs): line 363 closes the predecessor before assigning `directory = next`; an uncertain close throws, the successor is lost, and line 377 retries the stale descriptor number. Top-level cleanup at [node-runtime.mjs:87](../../scripts/rollback/runtime/node-runtime.mjs) similarly lets the first close suppress later closes, prepared-payload cleanup, and the primary error.
 
    The same incomplete migration exists in:
 
-   - [common.mjs:61](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/common.mjs:61): `fstat`, `realpath`, or registration failure can leak the opened descriptor.
-   - [directory-shape.mjs:92](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/directory-shape.mjs:92): raw sequential closes can mask validation failures or skip remaining descriptors.
-   - [gate-contract.mjs:345](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/gate-contract.mjs:345): staged-file raw closure can replace a Git/staging primary failure.
+   - [common.mjs:61](../../scripts/rollback/runtime/common.mjs): `fstat`, `realpath`, or registration failure can leak the opened descriptor.
+   - [directory-shape.mjs:92](../../scripts/rollback/runtime/directory-shape.mjs): raw sequential closes can mask validation failures or skip remaining descriptors.
+   - [gate-contract.mjs:345](../../scripts/rollback/slices/gate-contract.mjs): staged-file raw closure can replace a Git/staging primary failure.
 
    Existing close-fault regressions cover custody, cleanup, shared paths and removal, but not these production consumers. Runtime/custody owner should migrate them to the common terminal close collector and add actual consumer-level regressions.
 
 5. **Proof ownership begins before the finalization boundary.**
 
-   [proveSlice](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/proof-slice.mjs:46) calls `createSliceContext` before its `try`. That constructor creates a temporary parent and cleanup handle, then performs directory creation, workspace acquisition, assertion and evidence update at [proof-slice.mjs:78](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/proof-slice.mjs:78). Any later acquisition failure escapes without `finalizeSlice`, leaving the cleanup/workspace ownership and temporary tree unfinalized.
+   [proveSlice:46](../../scripts/rollback/slices/proof-slice.mjs) calls `createSliceContext` before its `try`. That constructor creates a temporary parent and cleanup handle, then performs directory creation, workspace acquisition, assertion and evidence update at [proof-slice.mjs:78](../../scripts/rollback/slices/proof-slice.mjs). Any later acquisition failure escapes without `finalizeSlice`, leaving the cleanup/workspace ownership and temporary tree unfinalized.
 
-   [manifest-proof.mjs:38](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/manifest-proof.mjs:38) has the equivalent gap: workspace creation occurs before its protected block.
+   [manifest-proof.mjs:38](../../scripts/rollback/slices/manifest-proof.mjs) has the equivalent gap: workspace creation occurs before its protected block.
 
    Proof-lifecycle owner should make construction a transaction with explicit partial state, close/abandon every acquired owner on failure, and test failure after each acquisition boundary.
 
@@ -79,7 +82,7 @@ None found.
 
 This is not a new reviewer120 finding: the current SHA retains the separately accepted archive/Bash lane and its commits are absent from this object database.
 
-In particular, [toolchain-installation.mjs:268](/var/data/agtmai-r212-recovery-base120-workspace/scripts/toolchain-installation.mjs:268) publishes the new destination before wrapper creation and backup cleanup. A subsequent failure reaches line 280, but restoration is conditional on the destination being absent. The new installation therefore remains live while the old installation is stranded in backup; Node/pnpm may be a mixed destination/wrapper installation and retry observes changed state.
+In particular, [toolchain-installation.mjs:268](../../scripts/toolchain-installation.mjs) publishes the new destination before wrapper creation and backup cleanup. A subsequent failure reaches line 280, but restoration is conditional on the destination being absent. The new installation therefore remains live while the old installation is stranded in backup; Node/pnpm may be a mixed destination/wrapper installation and retry observes changed state.
 
 The accepted overlays `49924acf8a836e529e0db309121b8a563e572b20` and `430b0b52` must be integrated and verified against this exact transaction. Neither object is locally available, so I cannot confirm their contents or closure.
 
@@ -94,11 +97,11 @@ The accepted overlays `49924acf8a836e529e0db309121b8a563e572b20` and `430b0b52` 
   - `removal-quarantine.mjs`: 503
   - `scripts/tests/toolchain.test.mjs`: 521
 
-  `cleanupIdentityBoundDirectory` spans lines 211–364, or 154 physical lines. Three functions conceal more than five logical parameters behind rest arrays: [gate-contract.mjs:253](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/gate-contract.mjs:253), [gate-execution.mjs:27](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/gate-execution.mjs:27), and [shared-file-operations.mjs:147](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/slices/shared-file-operations.mjs:147). Architecture/Foundation owner should split by ownership responsibility and use named context objects, not compression.
+  `cleanupIdentityBoundDirectory` spans lines 211–364, or 154 physical lines. Three functions conceal more than five logical parameters behind rest arrays: [gate-contract.mjs:253](../../scripts/rollback/slices/gate-contract.mjs), [gate-execution.mjs:27](../../scripts/rollback/slices/gate-execution.mjs), and [shared-file-operations.mjs:147](../../scripts/rollback/slices/shared-file-operations.mjs). Architecture/Foundation owner should split by ownership responsibility and use named context objects, not compression.
 
-- **The documented root gate differs from the executable root gate.** [package.json:50](/var/data/agtmai-r212-recovery-base120-workspace/package.json:50) makes `pnpm check` run only `rollback:test`; preflight/full proof are exclusive to `check:linux` on line 51. That contradicts [NEXT_ZERO_COST_SLICES_PLAN.md:696](/var/data/agtmai-r212-recovery-base120-workspace/docs/NEXT_ZERO_COST_SLICES_PLAN.md:696) and [architecture/rollback/README.md:243](/var/data/agtmai-r212-recovery-base120-workspace/architecture/rollback/README.md:243). CI correctly calls `check:linux`, but the AGENTS handoff command does not. Plan/CI owner must immediately reconcile the confirmed plan error and choose one canonical command without introducing recursive proof execution.
+- **The documented root gate differs from the executable root gate.** [package.json:50](../../package.json) makes `pnpm check` run only `rollback:test`; preflight/full proof are exclusive to `check:linux` on line 51. That contradicts [NEXT_ZERO_COST_SLICES_PLAN.md:696](../NEXT_ZERO_COST_SLICES_PLAN.md) and [architecture/rollback/README.md:243](../../architecture/rollback/README.md). CI correctly calls `check:linux`, but the AGENTS handoff command does not. Plan/CI owner must immediately reconcile the confirmed plan error and choose one canonical command without introducing recursive proof execution.
 
-- **The Darwin fail-closed regression is stale.** [proof-runtime.mjs:97](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/test-support/proof-runtime.mjs:97) searches `node-runtime.mjs` for the Darwin error literal after that behavior moved to [node-runtime-authority.mjs:4](/var/data/agtmai-r212-recovery-base120-workspace/scripts/rollback/runtime/node-runtime-authority.mjs:4). The behavior remains correctly fail-closed; update the test to exercise the authority function without bypassing loaded-image binding.
+- **The Darwin fail-closed regression is stale.** [proof-runtime.mjs:97](../../scripts/rollback/test-support/proof-runtime.mjs) searches `node-runtime.mjs` for the Darwin error literal after that behavior moved to [node-runtime-authority.mjs:4](../../scripts/rollback/runtime/node-runtime-authority.mjs). The behavior remains correctly fail-closed; update the test to exercise the authority function without bypassing loaded-image binding.
 
 ### P3
 
