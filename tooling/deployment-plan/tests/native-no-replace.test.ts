@@ -276,7 +276,9 @@ test("compiler consumes pinned private source bytes from stdin after pathname re
 
 test("alias resolving to an unapproved canonical compiler fails before spawn", async () => {
   const previous = process.env.AGTMAI_CC_BINARY;
-  process.env.AGTMAI_CC_BINARY = "/bin/false";
+  const unapprovedCompiler = process.platform === "darwin" ? "/usr/bin/false" : "/bin/false";
+  assert.match(await realpath(unapprovedCompiler), /^\/(?:usr\/)?bin\/false$/u);
+  process.env.AGTMAI_CC_BINARY = unapprovedCompiler;
   let spawned = false;
   try {
     await assert.rejects(
