@@ -43,8 +43,8 @@ function exactObjectKeys(value, expected, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`TOOLCHAIN_LOCK_NATIVE_${label}`);
   }
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
+  const actual = Object.keys(value).toSorted();
+  const wanted = expected.toSorted();
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     throw new Error(`TOOLCHAIN_LOCK_NATIVE_${label}`);
   }

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync,
-  openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync,
+  openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalizeTrustedPath, assertOwnedDirectoryChain } from "./toolchain-paths.mjs";
@@ -13,6 +13,9 @@ import { pnpmWrapper, writePnpmWrapper } from "./toolchain-pnpm-wrapper.mjs";
 import { fileURLToPath } from "node:url";
 import { assertExpectedFileHashes, lockedFileMismatch } from "./toolchain-policy.mjs";
 import { parseToolchainJson, TOOLCHAIN_JSON_LIMITS } from "./toolchain-json.mjs";
+import {
+  checkedRegularDescriptor, hashDescriptor, readVerifiedBytes, sameIdentity,
+} from "./toolchain-files.mjs";
 
 export { canonicalizeTrustedPath, descriptorRoot, executeVerifiedFile, validateLock };
 
@@ -174,57 +177,6 @@ function verifyArchive({ name, platform, artifact, archive, missingCode }) {
   catch (error) { if (error?.code === "ENOENT") {throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`, { cause: error });} throw error; }
   if (actual.hash !== artifact.sha256) {throw new Error(`TOOLCHAIN_OFFLINE_UNVERIFIED_CACHE tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual.hash}`);}
   return actual.bytes;
-}
-
-function readVerifiedBytes(path, { maximumBytes } = {}) {
-  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-  try {
-    const before = checkedRegularDescriptor(fd);
-    if (!Number.isSafeInteger(before.size)
-      || (maximumBytes !== undefined && before.size > maximumBytes)) {
-      throw new Error("TOOLCHAIN_JSON_LIMIT_BYTES");
-    }
-    const bytes = readDescriptorBytes(fd, before.size);
-    const after = checkedRegularDescriptor(fd);
-    const pathStat = lstatSync(path);
-    if (!sameIdentity(before, after) || !sameIdentity(before, pathStat) || pathStat.nlink !== 1) {
-      throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
-    }
-    return { bytes, hash: createHash("sha256").update(bytes).digest("hex") };
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function checkedRegularDescriptor(fd) {
-  const stat = fstatSync(fd);
-  if (!stat.isFile() || stat.nlink !== 1) { throw new Error("TOOLCHAIN_FILE_IDENTITY_INVALID"); }
-  return stat;
-}
-
-function readDescriptorBytes(fd, size = checkedRegularDescriptor(fd).size) {
-  const bytes = Buffer.alloc(size);
-  let offset = 0;
-  while (offset < size) {
-    const count = readSync(fd, bytes, offset, size - offset, offset);
-    if (count === 0) { throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED"); }
-    offset += count;
-  }
-  return bytes;
-}
-
-function hashDescriptor(fd) {
-  const before = checkedRegularDescriptor(fd);
-  const bytes = readDescriptorBytes(fd, before.size);
-  const after = checkedRegularDescriptor(fd);
-  if (!sameIdentity(before, after) || before.size !== after.size) {
-    throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
-  }
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-function sameIdentity(left, right) {
-  return left.isFile() && right.isFile() && left.dev === right.dev && left.ino === right.ino;
 }
 
 function containedPath(root, value) {

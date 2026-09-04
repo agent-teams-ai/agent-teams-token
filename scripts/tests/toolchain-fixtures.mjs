@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+
+export function brokenDownloader(_url, partFd) {
+  writeSync(partFd, "truncated");
+  return 0;
+}
 export function artifact({ name, path, archive, installDirectory, expectedFiles, versionPath, pattern }) {
   return {
     url: `https://fixtures.invalid/${name}`,

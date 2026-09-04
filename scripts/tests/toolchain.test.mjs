@@ -26,14 +26,10 @@ import {
   assertTimedOutProcessGroupCannotWriteLate,
   makeFixture,
 } from "../toolchain-test-fixture.mjs";
-import { digest, writeExecutable } from "./toolchain-fixtures.mjs";
+import { brokenDownloader, digest, writeExecutable } from "./toolchain-fixtures.mjs";
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
-function brokenDownloader(_url, partFd) {
-  writeSync(partFd, "truncated");
-  return 0;
-}
 
 test("Solana scope installs exact Agave and rejects a tampered inner binary", (context) => {
   const fixture = makeFixture();

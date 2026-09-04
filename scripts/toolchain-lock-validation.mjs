@@ -34,14 +34,18 @@ export function validateLock(lock) {
   validateFixtureTool(lock, "agave");
   validateSecurityImage(lock.securityImages?.slither);
   validatePackageManager(lock.tools?.pnpm);
+  validatePackageTools(lock.tools);
+}
+
+function validatePackageTools(tools) {
   for (const name of ["pnpm", "typescript", "oxlint", "engineeringFoundation"]) {
-    const tool = lock.tools?.[name];
+    const tool = tools?.[name];
     if (!tool?.version || !tool.source.startsWith('https://')) {
       throw new Error(`TOOLCHAIN_LOCK_PACKAGE tool=${name}`);
     }
   }
   for (const name of ["ccipSdk", "ccipSolanaPrograms"]) {
-    if (lock.tools?.[name]?.scope !== "future-non-core" || lock.tools[name].enabledForCore !== false) {
+    if (tools?.[name]?.scope !== "future-non-core" || tools[name].enabledForCore !== false) {
       throw new Error(`TOOLCHAIN_LOCK_FUTURE_SCOPE tool=${name}`);
     }
   }
