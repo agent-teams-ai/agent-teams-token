@@ -10,7 +10,12 @@ import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_LOCAL_
 import { checkedCommand, command, CommandExitError, CommandSpawnError, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
 import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
-import { atomicWrite, ensurePrivateDirectory, ensurePrivateDirectoryPath, readRegularFile } from "./safe-fs.ts";
+import {
+  ensurePrivateDirectory,
+  ensurePrivateDirectoryPath,
+  publishInitialFile,
+  readRegularFile,
+} from "./safe-fs.ts";
 import { assertPinnedSolcVersionOutput, pinnedSolc, type PinnedSolc } from "./toolchain.ts";
 
 export interface RunnerOptions {
@@ -34,7 +39,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   await ensurePrivateDirectory(runDirectory);
   await faultPause("after-run-directory-before-lease");
   await createRunLease(runDirectory);
-  await atomicWrite(join(runDirectory, "runner.pid"), Buffer.from(`${process.pid}\n`, "ascii"));
+  await publishProcessId(runDirectory, "runner.pid", process.pid);
   let anvil: OwnedAnvil | undefined;
   let solc: PinnedSolc | undefined;
   let interruptedSignal: NodeJS.Signals | undefined;
@@ -58,7 +63,11 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     const walletResult = await checkedCommand("cast", ["wallet", "new", "--json"], { code: "LOCAL_EVM_WALLET_GENERATION_FAILED", signal: commandAbort.signal });
     const wallet = parseWallet(walletResult.stdout);
     const keyPath = join(runDirectory, "ephemeral-signing-key");
-    await atomicWrite(keyPath, Buffer.from(`${wallet.privateKey}\n`, "ascii"), 0o600);
+    await publishInitialFile(
+      keyPath,
+      Buffer.from(`${wallet.privateKey}\n`, "ascii"),
+      0o600,
+    );
     anvil = await startOwnedAnvil(
       "anvil",
       wallet.address,
@@ -69,7 +78,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
         await registerRunAnvil(runDirectory, identity);
       },
     );
-    await atomicWrite(join(runDirectory, "anvil.pid"), Buffer.from(`${anvil.pid}\n`, "ascii"));
+    await publishProcessId(runDirectory, "anvil.pid", anvil.pid);
     if (interruptedSignal) {throw new LocalEvmError("LOCAL_EVM_INTERRUPTED", `interrupted by ${interruptedSignal}`);}
     const chain = await bootstrapRpcRequest(anvil.rpcUrl, "eth_chainId", []);
     if (BigInt(chain).toString() !== "31337") {throw new LocalEvmError("LOCAL_EVM_CHAIN_ID_MISMATCH", "Anvil chain ID is not exactly 31337");}
@@ -124,7 +133,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     const constructorInputs = constructorInputsFromManifest(approved.manifest);
     const constructorPath = join(runDirectory, "constructor-inputs.v1.json");
     const constructorBytes = Buffer.from(canonicalJson(constructorInputs), "utf8");
-    await atomicWrite(constructorPath, constructorBytes);
+    await publishInitialFile(constructorPath, constructorBytes);
     const creationInput = reconstructCreationInput(build, artifact, constructorInputs);
     const key = (await readRegularFile(keyPath, "EPHEMERAL_KEY")).toString("ascii").trim();
     const send = await checkedCommand("cast", ["send", "--private-key", key, "--rpc-url", anvil.rpcUrl, "--json", "--create", creationInput], { code: "LOCAL_EVM_DEPLOY_FAILED", signal: commandAbort.signal });
@@ -139,7 +148,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     };
     const deploymentPath = join(runDirectory, "deployment-report.v1.json");
     const deploymentBytes = Buffer.from(canonicalJson(deployment), "utf8");
-    await atomicWrite(deploymentPath, deploymentBytes);
+    await publishInitialFile(deploymentPath, deploymentBytes);
     const verificationInput: VerificationInput = {
       rpcUrl: anvil.rpcUrl, manifestPath, readyPath, approvedArtifactSha256: approvedDigest,
       buildInfoPath, expectedBuildInfoSha256: buildInfoSha256,
@@ -151,7 +160,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
       toolVersions: tools, reportOutputRoot: reportsRoot, runId,
     };
     const verificationInputPath = join(runDirectory, "verification-input.v1.json");
-    await atomicWrite(verificationInputPath, Buffer.from(canonicalJson(verificationInput), "utf8"));
+    await publishInitialFile(verificationInputPath, Buffer.from(canonicalJson(verificationInput), "utf8"));
     const verify = await command(process.execPath, [join(root, "tooling", "local-evm", "verify-cli.ts"), verificationInputPath], { cwd: root, signal: commandAbort.signal });
     const verifierOutput = parseLastJsonObject(verify.stdout);
     if (verify.exitCode !== 0 || verifierOutput.status !== "passed") {throw new LocalEvmError(String(verifierOutput.diagnostic ?? "LOCAL_EVM_VERIFICATION_FAILED"), "independent verifier rejected the deployment");}
@@ -168,6 +177,10 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     await removeOwnedRunDirectory(runDirectory);
     if (interruptedSignal) {process.exitCode = interruptedSignal === "SIGINT" ? 130 : 143;}
   }
+}
+
+async function publishProcessId(directory: string, name: "runner.pid" | "anvil.pid", pid: number): Promise<void> {
+  await publishInitialFile(join(directory, name), Buffer.from(`${pid}\n`, "ascii"));
 }
 
 async function faultPause(point: string, details: Record<string, unknown> = {}): Promise<void> {

@@ -1,6 +1,6 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { atomicWrite, readRegularFile } from "./safe-fs.ts";
+import { publishInitialFile, readRegularFile } from "./safe-fs.ts";
 import { canonicalJson, keccak256, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { assertConstructorInputs, constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
@@ -105,9 +105,9 @@ export async function writeEvidence(input: VerificationInput, report: Verificati
   await mkdir(directory, { recursive: false, mode: 0o700 });
   const jsonPath = join(directory, "verification-report.v1.json");
   const markdownPath = join(directory, "verification-summary.md");
-  await atomicWrite(jsonPath, reportBytes);
+  await publishInitialFile(jsonPath, reportBytes);
   const summary = `# AGTMAI local EVM verification\n\nStatus: ${report.exit.status}\n\nDiagnostic: ${report.exit.code}\n\nChain: local Anvil 31337\n\nClaims: ${report.claims.proven.length} proven; public networks, mainnet readiness, audit, production tokenomics and CCIP are not proven.\n`;
-  await atomicWrite(markdownPath, Buffer.from(summary, "utf8"));
+  await publishInitialFile(markdownPath, Buffer.from(summary, "utf8"));
   return { directory, jsonPath, markdownPath, reportSha256: digest };
 }
 

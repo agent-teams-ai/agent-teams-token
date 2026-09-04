@@ -7,7 +7,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { authenticateProcess, processStartIdentity, startOwnedAnvil } from "../process.ts";
-import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns } from "../run-lease.ts";
+import {
+  createProvisionalRunDirectory,
+  createRunLease,
+  reclaimStaleRuns,
+  registerRunAnvil,
+} from "../run-lease.ts";
 
 const execute = promisify(execFile);
 const firstAddress = "0x7000000000000000000000000000000000000001";
@@ -156,6 +161,86 @@ test("parallel recovery preserves a run while the production atomic lease writer
   } finally {
     await writer.catch(() => {});
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initial lease publication preserves a preexisting foreign sentinel", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-sentinel-")));
+  const runDirectory = await createProvisionalRunDirectory(root, "sentinel-Z9");
+  const leasePath = join(runDirectory, "lease.v1.json");
+  await writeFile(leasePath, "foreign-sentinel", {mode: 0o600});
+  try {
+    await assert.rejects(createRunLease(runDirectory));
+    assert.equal(await readFile(leasePath, "utf8"), "foreign-sentinel");
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test("two concurrent lease creators publish exactly one owned lease", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-race-")));
+  const runDirectory = await createProvisionalRunDirectory(root, "race-Z9");
+  try {
+    const results = await Promise.allSettled([
+      createRunLease(runDirectory),
+      createRunLease(runDirectory),
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+    const entry = await lstat(join(runDirectory, "lease.v1.json"));
+    assert.equal(entry.nlink, 1);
+    assert.equal(entry.mode & 0o777, 0o600);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test("normal create and authenticated Anvil registration retain update semantics", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-update-")));
+  const runDirectory = await createProvisionalRunDirectory(root, "update-Z9");
+  try {
+    await createRunLease(runDirectory);
+    const identity = {
+      pid: process.pid,
+      processStart: await processStartIdentity(process.pid),
+    };
+    await registerRunAnvil(runDirectory, identity);
+    const lease = JSON.parse(
+      await readFile(join(runDirectory, "lease.v1.json"), "utf8"),
+    ) as Record<string, unknown>;
+    assert.deepEqual(lease.anvil, identity);
+    const entry = await lstat(join(runDirectory, "lease.v1.json"));
+    assert.equal(entry.nlink, 1);
+    assert.equal(entry.mode & 0o777, 0o600);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test("authenticated lease update preserves a substituted foreign successor", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-substitution-")));
+  const runDirectory = await createProvisionalRunDirectory(root, "substitution-Z9");
+  const leasePath = join(runDirectory, "lease.v1.json");
+  const displaced = join(runDirectory, "authenticated-predecessor");
+  try {
+    await createRunLease(runDirectory);
+    const predecessor = await readFile(leasePath, "utf8");
+    const identity = {
+      pid: process.pid,
+      processStart: await processStartIdentity(process.pid),
+    };
+    await assert.rejects(registerRunAnvil(runDirectory, identity, {
+      beforePublish: async () => {
+        await rename(leasePath, displaced);
+        await writeFile(leasePath, "foreign-successor", {mode: 0o600});
+      },
+    }), (cause: unknown) => cause instanceof Error
+      && "code" in cause
+      && cause.code === "LOCAL_EVM_UPDATED_FILE_CHANGED");
+    assert.equal(await readFile(leasePath, "utf8"), "foreign-successor");
+    assert.equal(await readFile(displaced, "utf8"), predecessor);
+  } finally {
+    await rm(root, {recursive: true, force: true});
   }
 });
 

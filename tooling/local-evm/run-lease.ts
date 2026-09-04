@@ -7,10 +7,23 @@ import {
   processStartIdentity,
   type OwnedProcessIdentity,
 } from "./process.ts";
-import { atomicWrite, readRegularFile, validatePrivateDirectory } from "./safe-fs.ts";
+import {
+  publishInitialFile,
+  readOwnedBoundedFile,
+  replaceObservedFile,
+  validatePrivateDirectory,
+  type PublicationHooks,
+  type RegularFileIdentity,
+} from "./safe-fs.ts";
 
 const KIND = "agtmai-local-evm-run";
 const LEASE = "lease.v1.json";
+// The fixed schema is currently below 1 KiB. These explicit ceilings permit
+// substantial schema growth while bounding both buffers and 512-byte blocks.
+export const RUN_LEASE_BOUNDS = {
+  logicalBytes: 16 * 1024,
+  allocatedBytes: 64 * 1024,
+} as const;
 
 interface RunLease {
   readonly schemaVersion: 1;
@@ -19,13 +32,16 @@ interface RunLease {
   readonly anvil: OwnedProcessIdentity | null;
 }
 
-export async function createRunLease(directory: string): Promise<void> {
-  await writeLease(directory, {
+export async function createRunLease(
+  directory: string,
+  hooks: PublicationHooks = {},
+): Promise<void> {
+  await publishLease(directory, {
     schemaVersion: 1,
     kind: KIND,
     runner: { pid: process.pid, processStart: await processStartIdentity(process.pid) },
     anvil: null,
-  });
+  }, hooks);
 }
 
 export async function createProvisionalRunDirectory(root: string, runId: string): Promise<string> {
@@ -40,14 +56,21 @@ export async function createProvisionalRunDirectory(root: string, runId: string)
 export async function registerRunAnvil(
   directory: string,
   anvil: OwnedProcessIdentity,
+  hooks: PublicationHooks = {},
 ): Promise<void> {
-  const lease = await readLease(directory);
+  const observed = await readLease(directory);
+  const lease = observed.lease;
   if (lease.runner.pid !== process.pid
     || lease.runner.processStart !== await processStartIdentity(process.pid)
     || lease.anvil !== null) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "run lease cannot register this Anvil identity");
   }
-  await writeLease(directory, { ...lease, anvil });
+  await replaceObservedFile(
+    join(directory, LEASE),
+    serializeLease({...lease, anvil}),
+    observed.identity,
+    {mode: 0o600, bounds: RUN_LEASE_BOUNDS, hooks},
+  );
 }
 
 interface ReclaimHooks { readonly afterDirectoryList?: (directory: string) => Promise<void> }
@@ -74,7 +97,7 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     let lease: RunLease;
     try {
       await validatePrivateDirectory(directory);
-      lease = await readLease(directory);
+      lease = (await readLease(directory)).lease;
     } catch (cause) {
       if (await reclaimProvisionalEntry(directory, expectedDirectory, entry.runName, cause, hooks)) {reclaimed += 1;}
       continue;
@@ -94,7 +117,7 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     const claim = await claimDirectory(directory, expectedDirectory);
     if (claim === undefined) {continue;}
     await validatePrivateDirectory(claim);
-    const confirmed = await readLease(claim);
+    const confirmed = (await readLease(claim)).lease;
     if (JSON.stringify(confirmed) !== JSON.stringify(lease)) {
       throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "stale-run lease changed during reclamation");
     }
@@ -123,13 +146,45 @@ async function reclaimProvisionalEntry(
   return true;
 }
 
-async function writeLease(directory: string, lease: RunLease): Promise<void> {
-  await atomicWrite(join(directory, LEASE), Buffer.from(`${JSON.stringify(lease)}\n`, "utf8"));
+async function publishLease(
+  directory: string,
+  lease: RunLease,
+  hooks: PublicationHooks,
+): Promise<void> {
+  await publishInitialFile(
+    join(directory, LEASE),
+    serializeLease(lease),
+    0o600,
+    RUN_LEASE_BOUNDS,
+    hooks,
+  );
 }
 
-async function readLease(directory: string): Promise<RunLease> {
+function serializeLease(lease: RunLease): Buffer {
+  const bytes = Buffer.from(`${JSON.stringify(lease)}\n`, "utf8");
+  if (bytes.byteLength > RUN_LEASE_BOUNDS.logicalBytes) {
+    throw new LocalEvmError(
+      "LOCAL_EVM_RUN_LEASE_TOO_LARGE",
+      "serialized run lease exceeds its logical byte limit",
+    );
+  }
+  return bytes;
+}
+
+async function readLease(
+  directory: string,
+): Promise<{readonly lease: RunLease; readonly identity: RegularFileIdentity}> {
   let raw: unknown;
-  try { raw = JSON.parse((await readRegularFile(join(directory, LEASE), "RUN_LEASE")).toString("utf8")); }
+  let identity: RegularFileIdentity;
+  try {
+    const observed = await readOwnedBoundedFile(
+      join(directory, LEASE),
+      "RUN_LEASE",
+      RUN_LEASE_BOUNDS,
+    );
+    identity = observed.identity;
+    raw = JSON.parse(observed.bytes.toString("utf8"));
+  }
   catch (cause) {
     if (cause instanceof LocalEvmError) { throw cause; }
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_INVALID", "run lease is invalid JSON");
@@ -140,7 +195,7 @@ async function readLease(directory: string): Promise<RunLease> {
     || !isIdentity(raw.runner) || (raw.anvil !== null && !isIdentity(raw.anvil))) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_INVALID", "run lease fields are invalid");
   }
-  return raw as unknown as RunLease;
+  return {lease: raw as unknown as RunLease, identity};
 }
 
 async function provisionalIsStale(name: string): Promise<boolean> {
@@ -198,7 +253,7 @@ export async function removeOwnedRunDirectory(directory: string): Promise<void> 
   const claim = await claimDirectory(directory, expectedDirectory);
   if (claim === undefined) {return;}
   await validatePrivateDirectory(claim);
-  const lease = await readLease(claim);
+  const lease = (await readLease(claim)).lease;
   const current = await processStartIdentity(process.pid);
   if (lease.runner.pid !== process.pid || lease.runner.processStart !== current) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "refusing to delete a claimed directory not owned by this runner");
