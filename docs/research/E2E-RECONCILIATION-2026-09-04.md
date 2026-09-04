@@ -3,6 +3,40 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
+## Latest reconciliation: 19:21 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+The isolated recovery candidate advanced to
+`f6935e9fb20daf0859795b9eca2153b0aca3e29b`, tree `5166a728`, and remains
+unaccepted/unintegrated pending independent review of its full ancestry.
+
+- Candidate commit `f6935e9f` is the bounded R7 toolchain-publication
+  transaction on top of `755e1c1a`. Payload and wrapper are backed up and
+  published as one recoverable unit; failures after backup, payload publish or
+  wrapper publish restore the complete previous install. The cleanup path
+  rejects substituted/unknown objects and retains primary plus rollback
+  failures. The Node wrapper also uses Bash 3.2-compatible set detection.
+- macOS focused and adjacent evidence is effectively **57/57**, zero skips:
+  the combined toolchain run first passed 38/39 and exposed only an absent
+  ignored local Darwin archive; the single unproved case then passed 1/1 using
+  the byte-exact pinned archives already held in the integration tool cache.
+  Cleanup descriptor/finalizer regressions pass 18/18. Scoped oxlint, syntax
+  and diff checks pass. No network or dependency install was used.
+- Complete-history bundle SHA256 is
+  `d13ce5ca3f9a41c84d635efb7f32f4750eb08149f2648cdd1184474882a55c72`.
+  Oldhost verified the bundle/head/tree and clean source; Linux R7 plus cleanup
+  qualification passes **23/23**, zero skips.
+- `tv goog six` is unavailable on oldhost because its exact `account-n`
+  `auth.json` is absent there; no relogin or auth mutation was attempted. The
+  same account is present on the primary host, which now has 11GiB available
+  RAM and 13GiB disk. Independent reviewer128 launched there against exact
+  `f6935e9f` with `gpt-5.6-sol`, xhigh, fast tier, network disabled and a clean
+  isolated workspace. Its first watch is productive/alive; no result yet.
+
+Next: consume reviewer128, remediate any findings, and only then qualify the
+complete recovery ancestry for integration. R3-R6/R8, remaining Solana/Slither
+and final exact-head local/CI/specialist/holistic gates remain open.
+
 ## Latest reconciliation: 19:00 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
