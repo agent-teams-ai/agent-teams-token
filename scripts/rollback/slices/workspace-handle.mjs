@@ -8,16 +8,23 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
+import {
+  assertCustodyCanonicalSpelling,
+  assertCustodyStableObject,
+  assertCustodyDirectChild,
+  forgetCustodyDescriptor,
+  registerCustodyDescriptor,
+} from "../runtime/custody.mjs";
+
 import { validateExactPath } from "./manifests.mjs";
 
 const rollbackWorkspaceStates = new WeakMap();
 
 function assertRollbackRemovalIdentity(expected, actual, logicalPath) {
-  if (String(expected.dev) !== String(actual.dev) || String(expected.ino) !== String(actual.ino)
-    || expected.isDirectory() !== actual.isDirectory()
-    || expected.isFile() !== actual.isFile()
-    || expected.isSymbolicLink() !== actual.isSymbolicLink()) {
-    throw new Error("ROLLBACK_REMOVAL_IDENTITY_MISMATCH path=" + logicalPath);
+  try {
+    assertCustodyStableObject(expected, actual);
+  } catch (error) {
+    throw new Error("ROLLBACK_REMOVAL_IDENTITY_MISMATCH path=" + logicalPath, { cause: error });
   }
 }
 
@@ -62,6 +69,8 @@ export function createRollbackWorkspaceHandle(root, quarantineRoot) {
       quarantinePath,
       constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
     );
+    registerCustodyDescriptor(checkoutDescriptor, checkoutPath, checkoutIdentity);
+    registerCustodyDescriptor(quarantineDescriptor, quarantinePath, quarantineIdentity);
     assertRollbackRemovalIdentity(
       checkoutIdentity,
       fstatSync(checkoutDescriptor, { bigint: true }),
@@ -81,6 +90,8 @@ export function createRollbackWorkspaceHandle(root, quarantineRoot) {
       quarantineInode: String(quarantineIdentity.ino),
     });
     rollbackWorkspaceStates.set(handle, {
+      checkoutPath,
+      quarantinePath,
       checkoutDescriptor,
       quarantineDescriptor,
       checkoutIdentity,
@@ -91,9 +102,11 @@ export function createRollbackWorkspaceHandle(root, quarantineRoot) {
     return handle;
   } catch (error) {
     if (quarantineDescriptor !== undefined) {
+      forgetCustodyDescriptor(quarantineDescriptor);
       closeSync(quarantineDescriptor);
     }
     if (checkoutDescriptor !== undefined) {
+      forgetCustodyDescriptor(checkoutDescriptor);
       closeSync(checkoutDescriptor);
     }
     throw error;
@@ -108,10 +121,19 @@ function validateRollbackWorkspaceArguments(root, quarantineRoot) {
 }
 
 function validateRollbackWorkspacePaths(root, quarantineRoot, checkoutPath, quarantinePath) {
-  if (checkoutPath !== resolve(root) || quarantinePath !== resolve(quarantineRoot)
-    || quarantinePath !== join(dirname(checkoutPath), "gate-tmp")) {
+  assertCustodyCanonicalSpelling({
+    requestedPath: root, canonicalPath: checkoutPath, allowDarwinTemporaryAlias: true,
+  });
+  assertCustodyCanonicalSpelling({
+    requestedPath: quarantineRoot, canonicalPath: quarantinePath, allowDarwinTemporaryAlias: true,
+  });
+  const requestedParent = dirname(resolve(root));
+  if (dirname(resolve(quarantineRoot)) !== requestedParent) {
     throw new Error("ROLLBACK_REMOVAL_WORKSPACE_UNSAFE");
   }
+  const canonicalParent = dirname(checkoutPath);
+  assertCustodyDirectChild(canonicalParent, checkoutPath, "checkout");
+  assertCustodyDirectChild(canonicalParent, quarantinePath, "gate-tmp");
 }
 
 function validateRollbackWorkspaceIdentities(checkout, quarantine, owner) {
@@ -119,7 +141,8 @@ function validateRollbackWorkspaceIdentities(checkout, quarantine, owner) {
     || !quarantine.isDirectory() || quarantine.isSymbolicLink()
     || String(checkout.uid) !== owner || String(quarantine.uid) !== owner
     || String(checkout.dev) !== String(quarantine.dev)
-    || (quarantine.mode & 0o077n) !== 0n) {
+    || (checkout.mode & 0o022n) !== 0n
+    || (quarantine.mode & 0o777n) !== 0o700n) {
     throw new Error("ROLLBACK_REMOVAL_WORKSPACE_UNSAFE");
   }
 }
@@ -165,6 +188,8 @@ export function closeRollbackWorkspaceHandle(handle) {
     return;
   }
   state.closed = true;
+  forgetCustodyDescriptor(state.quarantineDescriptor);
+  forgetCustodyDescriptor(state.checkoutDescriptor);
   closeSync(state.quarantineDescriptor);
   closeSync(state.checkoutDescriptor);
 }

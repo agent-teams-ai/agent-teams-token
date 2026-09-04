@@ -19,12 +19,19 @@ import {
   compareUtf8,
   createCleanupQuarantine,
   createStagingDirectory,
-  descriptorChild,
   openDirectoryDescriptor,
   preflightCleanupTree,
   removeQuarantinedEntry,
   sortedDirectoryEntries,
 } from "./cleanup-tree.mjs";
+import {
+  assertCustodyCanonicalSpelling,
+  assertCustodyDescriptor,
+  assertCustodyDirectChild,
+  custodyDescriptorChild as descriptorChild,
+  custodyDescriptorDirectory,
+  updateCustodyDescriptor,
+} from "./custody.mjs";
 
 const CLEANUP_MAX_ALLOWED_ENTRIES = 2;
 const CLEANUP_MAX_DEPTH = 128;
@@ -58,10 +65,17 @@ export function createCleanupHandle(path, policy) {
   try {
     const rootIdentity = fstatSync(rootDescriptor, { bigint: true });
     assertDirectoryIdentity(
-      descriptorChild(rootDescriptor, "."),
+      custodyDescriptorDirectory(rootDescriptor),
       rootIdentity,
       "ROLLBACK_CLEANUP_TEMP_ROOT_IDENTITY_MISMATCH",
     );
+    const rootMode = rootIdentity.mode & 0o7777n;
+    const ownedPrivateRoot = String(rootIdentity.uid) === owner && (rootMode & 0o022n) === 0n;
+    const rootOwnedStickyRoot = rootIdentity.uid === 0n && (rootMode & 0o1000n) !== 0n
+      && (rootMode & 0o002n) !== 0n;
+    if (!ownedPrivateRoot && !rootOwnedStickyRoot) {
+      throw new Error("ROLLBACK_CLEANUP_TEMP_ROOT_AUTHORITY_UNSAFE");
+    }
     descriptor = openDirectoryDescriptor(descriptorChild(rootDescriptor, configuration.targetName));
     const identity = fstatSync(descriptor, { bigint: true });
     assertDirectoryIdentity(
@@ -75,7 +89,7 @@ export function createCleanupHandle(path, policy) {
     if (String(identity.uid) !== owner) {
       throw new Error("ROLLBACK_CLEANUP_TARGET_OWNER_UNSAFE path=" + path);
     }
-    if ((identity.mode & 0o077n) !== 0n) {
+    if ((identity.mode & 0o777n) !== 0o700n) {
       throw new Error("ROLLBACK_CLEANUP_TARGET_PERMISSIONS_UNSAFE path=" + path);
     }
     return {
@@ -213,6 +227,8 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
       sourcePath,
       quarantinedPath,
     });
+    assertCustodyDescriptor(handle.rootDescriptor);
+    assertCustodyDescriptor(quarantine.descriptor);
     assertDirectoryIdentity(
       sourcePath,
       fstatSync(handle.descriptor, { bigint: true }),
@@ -223,6 +239,9 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
       "ROLLBACK_CLEANUP_TARGET_DESTINATION_SUBSTITUTED",
     );
     renameSync(sourcePath, quarantinedPath);
+    updateCustodyDescriptor(
+      handle.descriptor, realpathSync(quarantinedPath), fstatSync(handle.descriptor, { bigint: true }),
+    );
     assertDirectoryIdentity(
       quarantinedPath,
       fstatSync(handle.descriptor, { bigint: true }),
@@ -258,6 +277,7 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
       targetName: handle.targetName,
       quarantinedPath,
     });
+    assertCustodyDescriptor(quarantine.descriptor);
     assertCleanupStrictFingerprint(
       targetDeleteFingerprint,
       quarantinedPath,
@@ -273,6 +293,8 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
     closeSync(handle.descriptor);
     handle.descriptor = undefined;
 
+    assertCustodyDescriptor(quarantine.descriptor);
+    assertCustodyDescriptor(staging.descriptor);
     assertDirectoryIdentity(
       descriptorChild(quarantine.descriptor, staging.name),
       fstatSync(staging.descriptor, { bigint: true }),
@@ -282,6 +304,8 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
     closeSync(staging.descriptor);
     staging.descriptor = undefined;
 
+    assertCustodyDescriptor(handle.rootDescriptor);
+    assertCustodyDescriptor(quarantine.descriptor);
     assertDirectoryIdentity(
       descriptorChild(handle.rootDescriptor, quarantine.name),
       fstatSync(quarantine.descriptor, { bigint: true }),
@@ -353,8 +377,7 @@ function cleanupPolicy(path, policy) {
     throw new Error("ROLLBACK_CLEANUP_POLICY_INVALID");
   }
   const temporaryRoot = realpathSync(policy.temporaryRoot);
-  if (!isAbsolute(policy.temporaryRoot) || temporaryRoot !== resolve(policy.temporaryRoot)
-    || dirname(path) !== temporaryRoot) {
+  if (!isAbsolute(policy.temporaryRoot) || resolve(policy.temporaryRoot) !== policy.temporaryRoot) {
     throw new Error("ROLLBACK_CLEANUP_TEMP_ROOT_INVALID path=" + String(policy.temporaryRoot));
   }
   if (!CLEANUP_TARGET_PREFIX_ALLOWLIST.has(policy.targetPrefix)) {
@@ -366,6 +389,17 @@ function cleanupPolicy(path, policy) {
     throw new Error("ROLLBACK_CLEANUP_TARGET_NAME_INVALID name=" + targetName);
   }
   const allowedEntries = validateAllowedEntries(policy.allowedEntries);
+  const requestedTemporaryRoot = resolve(policy.temporaryRoot);
+  const canonicalPath = realpathSync(path);
+  assertCustodyCanonicalSpelling({
+    requestedPath: policy.temporaryRoot,
+    canonicalPath: temporaryRoot,
+    allowDarwinTemporaryAlias: true,
+  });
+  if (dirname(path) !== requestedTemporaryRoot) {
+    throw new Error("ROLLBACK_CLEANUP_TEMP_ROOT_INVALID path=" + policy.temporaryRoot);
+  }
+  assertCustodyDirectChild(temporaryRoot, canonicalPath, targetName);
   return {
     temporaryRoot,
     targetName,
@@ -456,7 +490,7 @@ function assertHandleIdentities(handle) {
     throw new Error("ROLLBACK_CLEANUP_TEMP_ROOT_DESCRIPTOR_MISMATCH");
   }
   assertDirectoryIdentity(
-    descriptorChild(handle.rootDescriptor, "."),
+    custodyDescriptorDirectory(handle.rootDescriptor),
     rootIdentity,
     "ROLLBACK_CLEANUP_TEMP_ROOT_IDENTITY_MISMATCH",
   );

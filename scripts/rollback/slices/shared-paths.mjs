@@ -3,10 +3,15 @@ import {
   constants,
   fstatSync,
   lstatSync,
+  realpathSync,
   openSync,
 } from "node:fs";
 
 import { descriptorChild as rollbackDescriptorChild } from "../runtime/common.mjs";
+import {
+  custodyDescriptorDirectory,
+  registerCustodyDescriptor,
+} from "../runtime/custody.mjs";
 import { validateExactPath } from "./manifests.mjs";
 import { rollbackWorkspaceState } from "./workspace-handle.mjs";
 
@@ -80,7 +85,7 @@ export function openRollbackSharedRoot(workspace, logicalPath) {
   let descriptor;
   try {
     descriptor = openSync(
-      rollbackDescriptorChild(workspace.checkoutDescriptor, "."),
+      custodyDescriptorDirectory(workspace.checkoutDescriptor),
       rollbackSharedOpenFlags({ directory: true }),
     );
     assertRollbackSharedStableIdentity(
@@ -88,6 +93,12 @@ export function openRollbackSharedRoot(workspace, logicalPath) {
       fstatSync(descriptor, { bigint: true }),
       logicalPath,
     );
+    assertRollbackSharedStableIdentity(
+      rollbackSharedIdentity(workspace.checkoutIdentity),
+      lstatSync(workspace.checkoutPath, { bigint: true }),
+      logicalPath,
+    );
+    registerCustodyDescriptor(descriptor, workspace.checkoutPath, workspace.checkoutIdentity);
     return descriptor;
   } catch (error) {
     if (descriptor !== undefined) {
@@ -184,11 +195,13 @@ function snapshotRollbackSharedAncestor(descriptor, component, context) {
       fstatSync(next, { bigint: true }),
       logicalPath,
     );
+    assertRollbackSharedStableIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
     if (holdDescriptors) {
       held = openHeldSharedDescriptor(candidate, identity, logicalPath, true);
       heldDescriptors.push(held);
       held = undefined;
     }
+    registerCustodyDescriptor(next, realpathSync(candidate), identity);
     const result = { descriptor: next, identity };
     next = undefined;
     return result;
@@ -244,11 +257,13 @@ function snapshotRollbackSharedFinal(descriptor, name, context) {
 function openHeldSharedDescriptor(candidate, identity, logicalPath, directory) {
   const descriptor = openSync(candidate, rollbackSharedOpenFlags({ directory }));
   try {
+    registerCustodyDescriptor(descriptor, realpathSync(candidate), identity);
     assertRollbackSharedStableIdentity(
       identity,
       fstatSync(descriptor, { bigint: true }),
       logicalPath,
     );
+    assertRollbackSharedStableIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
     return descriptor;
   } catch (error) {
     closeSync(descriptor);
@@ -291,6 +306,7 @@ export function openRollbackSharedParent(root, logicalPath, plan, workspaceHandl
           fstatSync(next, { bigint: true }),
           logicalPath,
         );
+        registerCustodyDescriptor(next, realpathSync(candidate), before);
       } catch (error) {
         if (next !== undefined) {
           closeSync(next);

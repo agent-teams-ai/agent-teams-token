@@ -86,7 +86,10 @@ function createSliceContext(input) {
   });
   const checkout = join(temporaryParent, "checkout");
   const gateTemporaryDirectory = join(temporaryParent, "gate-tmp");
+  mkdirSync(checkout, { mode: 0o700 });
   mkdirSync(gateTemporaryDirectory, { mode: 0o700 });
+  const workspaceHandle = createRollbackWorkspaceHandle(checkout, gateTemporaryDirectory);
+  const workspaceIdentity = assertRollbackWorkspaceHandle(workspaceHandle, checkout);
   const record = {
     sliceId: group,
     manifestSha256: manifestFingerprint(input.manifest),
@@ -94,6 +97,7 @@ function createSliceContext(input) {
     candidateSha: input.candidateSha,
     status: "preparing",
     cleanup: { status: "pending", device: cleanupHandle.device, inode: cleanupHandle.inode },
+    workspaceIdentity,
   };
   input.recorder.update((document) => {
     document.slices.push(record);
@@ -105,7 +109,7 @@ function createSliceContext(input) {
     gateTemporaryDirectory,
     group,
     record,
-    workspaceHandle: undefined,
+    workspaceHandle,
   };
 }
 
@@ -126,8 +130,7 @@ function prepareSlicePreState(context) {
     recorder,
     group,
   });
-  context.workspaceHandle = createRollbackWorkspaceHandle(checkout, context.gateTemporaryDirectory);
-  record.workspaceIdentity = assertRollbackWorkspaceHandle(context.workspaceHandle, checkout);
+  assertRollbackWorkspaceHandle(context.workspaceHandle, checkout);
   const environment = copyAndInstallOfflineEnvironment({
     sourceRoot: repositoryRoot,
     checkout,

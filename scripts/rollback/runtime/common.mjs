@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+
+import { registerCustodyDescriptor } from "./custody.mjs";
+export { custodyDescriptorChild as descriptorChild } from "./custody.mjs";
 
 const SAFE_PATH = /^[^\\\0]+$/u;
 
@@ -55,11 +58,6 @@ export function compareUtf8(left, right) {
   return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
 
-export function descriptorChild(descriptor, name) {
-  const root = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
-  return root + "/" + String(descriptor) + "/" + name;
-}
-
 export function openDirectoryDescriptor(path, errorPrefix = "ROLLBACK_CLEANUP_NOT_DIRECTORY") {
   const descriptor = openSync(
     path,
@@ -70,5 +68,6 @@ export function openDirectoryDescriptor(path, errorPrefix = "ROLLBACK_CLEANUP_NO
     closeSync(descriptor);
     throw new Error(errorPrefix + " path=" + path);
   }
+  registerCustodyDescriptor(descriptor, realpathSync(path), identity);
   return descriptor;
 }

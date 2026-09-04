@@ -18,6 +18,7 @@ import {
   sha256,
   validateTrackedPath,
 } from "./common.mjs";
+import { custodyDescriptorDirectory } from "./custody.mjs";
 
 export function assertPathsAbsent(root, paths, label = "rollback") {
   if (!Array.isArray(paths) || paths.length === 0
@@ -153,7 +154,7 @@ const SHAPE_MAX_FILE_BYTES = 16 * 1024 * 1024;
 const SHAPE_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 function openShapeDirectoryPath(rootDescriptor, logicalPath, rootIdentity, label) {
-  let descriptor = openDirectoryDescriptor(descriptorChild(rootDescriptor, "."));
+  let descriptor = openDirectoryDescriptor(custodyDescriptorDirectory(rootDescriptor));
   let identity = fstatSync(descriptor, { bigint: true });
   try {
     assertShapeIdentity(rootIdentity, identity, ".", label);
@@ -248,7 +249,7 @@ function visitShapeDirectory(
 }
 
 function readShapeDirectoryNames(descriptor, state, label, countEntries) {
-  const directory = opendirSync(descriptorChild(descriptor, "."), { encoding: "buffer" });
+  const directory = opendirSync(custodyDescriptorDirectory(descriptor), { encoding: "buffer" });
   const names = [];
   try {
     while (true) {

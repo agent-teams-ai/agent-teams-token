@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -9,6 +18,10 @@ import {
   gitExecutable,
   trackedCandidateInventory,
 } from "../runtime/candidate.mjs";
+import {
+  assertCustodyIdentity,
+  custodyIdentity,
+} from "../runtime/custody.mjs";
 import { toolPath } from "../runtime/offline-environment.mjs";
 import { repositoryRoot } from "./config.mjs";
 import { validateExactPath } from "./manifests.mjs";
@@ -329,42 +342,79 @@ export function syntheticRollbackCommit(root, manifest, candidateSha, recorder, 
   return { sha, tree };
 }
 
+function captureStagingEntry(root, logicalPath) {
+  const path = join(root, logicalPath);
+  const before = custodyIdentity(lstatSync(path, { bigint: true }));
+  if (before.kind === "file") {
+    if (before.nlink !== 1n) throw new Error(`ROLLBACK_STAGE_NLINK_UNSAFE path=${logicalPath}`);
+    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
+      assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
+      const bytes = readFileSync(descriptor);
+      assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
+      assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
+      return {
+        assertCurrent() {
+          assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
+          assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
+        },
+        bytes,
+        close() { closeSync(descriptor); },
+        mode: (before.mode & 0o111n) === 0n ? "100644" : "100755",
+      };
+    } catch (error) {
+      closeSync(descriptor);
+      throw error;
+    }
+  }
+  if (before.kind === "symlink") {
+    const bytes = readlinkSync(path, { encoding: "buffer" });
+    const assertCurrent = () => {
+      assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
+      const repeated = readlinkSync(path, { encoding: "buffer" });
+      assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
+      if (!bytes.equals(repeated)) throw new Error(`ROLLBACK_STAGE_SYMLINK_CHANGED path=${logicalPath}`);
+    };
+    assertCurrent();
+    return { assertCurrent, bytes, close() {}, mode: "120000" };
+  }
+  throw new Error(`ROLLBACK_STAGE_ENTRY_UNSUPPORTED path=${logicalPath}`);
+}
+
 export function stageExactWorktreePaths(root, paths, recorder, group, label) {
   const git = gitExecutable();
   let index = 0;
   for (const path of [...paths].toSorted()) {
     validateExactPath(path, group + ":" + label);
     index += 1;
-    let entry;
+    let staged;
     try {
-      entry = lstatSync(join(root, path));
+      staged = captureStagingEntry(root, path);
     } catch (error) {
-      if (error?.code !== "ENOENT") {throw error;}
+      if (error?.code !== "ENOENT") throw error;
       recorder.run(group, `${label}-remove-${index}`, git, [
         "update-index", "--force-remove", "--", path,
       ], { cwd: root, timeout: 60_000 });
       continue;
     }
-    let bytes;
-    let mode;
-    if (entry.isFile() && !entry.isSymbolicLink()) {
-      bytes = readFileSync(join(root, path));
-      mode = (entry.mode & 0o111) === 0 ? "100644" : "100755";
-    } else if (entry.isSymbolicLink()) {
-      bytes = Buffer.from(readlinkSync(join(root, path)), "utf8");
-      mode = "120000";
-    } else {
-      throw new Error(`ROLLBACK_STAGE_ENTRY_UNSUPPORTED path=${path}`);
+    try {
+      staged.assertCurrent();
+      const oid = recorder.run(group, `${label}-hash-${index}`, git, [
+        "hash-object", "-w", "--no-filters", "--stdin",
+      ], { cwd: root, input: staged.bytes, timeout: 60_000 }).stdout.trim();
+      staged.assertCurrent();
+      if (!/^[a-f0-9]{40}$/u.test(oid)) {
+        throw new Error(`ROLLBACK_STAGE_OBJECT_INVALID path=${path}`);
+      }
+      staged.assertCurrent();
+      recorder.run(group, `${label}-index-${index}`, git, [
+        "update-index", "--add", "--cacheinfo", staged.mode, oid, path,
+      ], { cwd: root, timeout: 60_000 });
+      staged.assertCurrent();
+    } finally {
+      staged.close();
     }
-    const oid = recorder.run(group, `${label}-hash-${index}`, git, [
-      "hash-object", "-w", "--no-filters", "--stdin",
-    ], { cwd: root, input: bytes, timeout: 60_000 }).stdout.trim();
-    if (!/^[a-f0-9]{40}$/u.test(oid)) {
-      throw new Error(`ROLLBACK_STAGE_OBJECT_INVALID path=${path}`);
-    }
-    recorder.run(group, `${label}-index-${index}`, git, [
-      "update-index", "--add", "--cacheinfo", mode, oid, path,
-    ], { cwd: root, timeout: 60_000 });
   }
 }
 

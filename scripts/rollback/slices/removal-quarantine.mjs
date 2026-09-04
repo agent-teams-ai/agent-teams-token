@@ -7,8 +7,18 @@ import {
   mkdirSync,
   openSync,
   opendirSync,
+  realpathSync,
   renameSync,
 } from "node:fs";
+
+import {
+  assertCustodyDescriptor,
+  assertCustodyIdentity,
+  assertCustodyStableObject,
+  custodyDescriptorChild as rollbackDescriptorChild,
+  custodyDescriptorDirectory,
+  registerCustodyDescriptor,
+} from "../runtime/custody.mjs";
 
 import {
   ROLLBACK_PATH_MAX_DEPTH,
@@ -123,13 +133,17 @@ function createRollbackRemovalQuarantineUnchecked(root, manifest, options) {
       constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
     );
     const identity = fstatSync(descriptor, { bigint: true });
-    if (!identity.isDirectory() || (identity.mode & 0o077n) !== 0n
+    assertRollbackRemovalIdentity(
+      lstatSync(created, { bigint: true }), identity, created,
+    );
+    if (!identity.isDirectory() || (identity.mode & 0o777n) !== 0o700n
       || String(identity.uid) !== String(process.getuid())
       || String(identity.dev) !== String(workspace.quarantineIdentity.dev)) {
       closeSync(descriptor);
       descriptor = undefined;
       throw new Error("ROLLBACK_REMOVAL_QUARANTINE_UNSAFE path=" + created);
     }
+    registerCustodyDescriptor(descriptor, realpathSync(created), identity);
     assertRollbackWorkspaceHandle(options.workspaceHandle, root);
     const result = {
       descriptor,
@@ -205,6 +219,7 @@ function snapshotRollbackRemovalIdentity(quarantine, logicalPath, expectedKind) 
       fstatSync(descriptor, { bigint: true }),
       logicalPath,
     );
+    registerCustodyDescriptor(descriptor, realpathSync(sourcePath), identity);
     const result = { descriptor, identity, kind };
     descriptor = undefined;
     return result;
@@ -289,6 +304,8 @@ function stageRollbackRemovalUnchecked(quarantine, logicalPath, expectedKind, on
       sourcePath,
       stagedPath,
     });
+    assertCustodyDescriptor(parent.descriptor);
+    assertCustodyDescriptor(quarantine.descriptor);
     const atBoundary = lstatSync(sourcePath, { bigint: true });
     if (rollbackRemovalKind(atBoundary) !== expectedKind
       || String(atBoundary.dev) !== quarantine.device
@@ -314,6 +331,7 @@ function stageRollbackRemovalUnchecked(quarantine, logicalPath, expectedKind, on
       staged,
       fstatSync(planned.descriptor, { bigint: true }),
       logicalPath,
+      { transition: true },
     );
     if (expectedKind === "directory" && rollbackDirectoryHasEntries(planned.descriptor)) {
       throw new Error("ROLLBACK_FORBIDDEN_DIRECTORY_RESIDUE path=" + logicalPath);
@@ -336,9 +354,11 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
     throw new Error("ROLLBACK_REMOVAL_PATH_DEPTH_UNSAFE path=" + logicalPath);
   }
   let descriptor = openSync(
-    rollbackDescriptorChild(quarantine.rootDescriptor, "."),
+    custodyDescriptorDirectory(quarantine.rootDescriptor),
     constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
   );
+  registerCustodyDescriptor(
+    descriptor, quarantine.workspaceHandle.checkoutPath, fstatSync(descriptor, { bigint: true }));
   try {
     for (const component of components.slice(0, -1)) {
       const candidate = rollbackDescriptorChild(descriptor, component);
@@ -362,6 +382,7 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
         closeSync(next);
         throw error;
       }
+      registerCustodyDescriptor(next, realpathSync(candidate), before);
       closeSync(descriptor);
       descriptor = next;
     }
@@ -383,7 +404,7 @@ function rollbackRemovalKind(identity) {
 }
 
 function rollbackDirectoryHasEntries(descriptor) {
-  const directory = opendirSync(rollbackDescriptorChild(descriptor, "."), {
+  const directory = opendirSync(custodyDescriptorDirectory(descriptor), {
     encoding: "buffer",
   });
   try {
@@ -393,16 +414,14 @@ function rollbackDirectoryHasEntries(descriptor) {
   }
 }
 
-function assertRollbackRemovalIdentity(expected, actual, logicalPath) {
-  if (String(expected.dev) !== String(actual.dev)
-    || String(expected.ino) !== String(actual.ino)
-    || expected.isFile() !== actual.isFile()
-    || expected.isDirectory() !== actual.isDirectory()) {
-    throw new Error("ROLLBACK_REMOVAL_SUBSTITUTED path=" + logicalPath);
+function assertRollbackRemovalIdentity(expected, actual, logicalPath, { transition = false } = {}) {
+  try {
+    if (!transition && expected.isFile?.() && actual.isFile?.()) {
+      assertCustodyIdentity(expected, actual);
+    } else {
+      assertCustodyStableObject(expected, actual);
+    }
+  } catch (error) {
+    throw new Error("ROLLBACK_REMOVAL_SUBSTITUTED path=" + logicalPath, { cause: error });
   }
-}
-
-function rollbackDescriptorChild(descriptor, name) {
-  return (process.platform === "linux" ? "/proc/self/fd/" : "/dev/fd/")
-    + String(descriptor) + "/" + name;
 }

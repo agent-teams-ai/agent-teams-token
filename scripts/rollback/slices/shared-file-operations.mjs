@@ -7,10 +7,12 @@ import {
   lstatSync,
   openSync,
   readSync,
+  realpathSync,
   writeSync,
 } from "node:fs";
 
 import { descriptorChild as rollbackDescriptorChild } from "../runtime/common.mjs";
+import { registerCustodyDescriptor } from "../runtime/custody.mjs";
 import { ROLLBACK_SHARED_PATH_MAX_BYTES } from "./config.mjs";
 import { validateExactPath } from "./manifests.mjs";
 import {
@@ -297,6 +299,12 @@ export function assertRollbackPathAbsentFromCheckout(root, logicalPath, workspac
           fstatSync(next, { bigint: true }),
           logicalPath,
         );
+        assertRollbackSharedStableIdentity(
+          rollbackSharedIdentity(identity),
+          lstatSync(candidate, { bigint: true }),
+          logicalPath,
+        );
+        registerCustodyDescriptor(next, realpathSync(candidate), identity);
       } catch (error) {
         if (next !== undefined) {
           closeSync(next);

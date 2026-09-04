@@ -47,9 +47,10 @@ export function printReverseHashes(manifest, candidateSha, candidateInventory) {
   });
   const checkout = join(temporaryParent, "checkout");
   const quarantineRoot = join(temporaryParent, "gate-tmp");
+  mkdirSync(checkout, { mode: 0o700 });
   mkdirSync(quarantineRoot, { mode: 0o700 });
   let failure;
-  let workspaceHandle;
+  const workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
   try {
     run("git", [
       "clone", "--local", "--no-hardlinks", "--no-checkout", repositoryRoot, checkout,
@@ -57,7 +58,6 @@ export function printReverseHashes(manifest, candidateSha, candidateInventory) {
     run("git", ["checkout", "--detach", "--force", candidateSha], { cwd: checkout });
     assertExactCleanCandidate(checkout, candidateSha);
     assertInventoryEqual(candidateInventory, trackedCandidateInventory(checkout, candidateSha));
-    workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
     const beforePlan = snapshotRollbackSharedPaths(
       checkout,
       manifest.sharedPaths,

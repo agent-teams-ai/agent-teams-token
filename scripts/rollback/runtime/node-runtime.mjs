@@ -11,6 +11,10 @@ import {
 import { isAbsolute, join, resolve } from "node:path";
 
 import { descriptorChild } from "./common.mjs";
+import {
+  custodyDescriptorDirectory,
+  registerCustodyDescriptor,
+} from "./custody.mjs";
 import { validateRuntimeNodeLock } from "./node-runtime-lock.mjs";
 import { platformId } from "./offline-environment.mjs";
 import {
@@ -242,7 +246,7 @@ function assertRuntimeProvenance(runtimeRoot, platform, expected, prepared) {
 }
 
 function runtimeRootPath(runtimeRoot) {
-  return realpathSync(descriptorChild(runtimeRoot.descriptor, "."));
+  return realpathSync(custodyDescriptorDirectory(runtimeRoot.descriptor));
 }
 
 function assertLoadedRuntimeImage(executable, executableSha256) {
@@ -344,6 +348,12 @@ function openRuntimeRoot(root) {
       fstatSync(descriptor, { bigint: true }),
       "ROLLBACK_RUNTIME_ROOT_IDENTITY_CHANGED",
     );
+    assertRuntimeIdentity(
+      identity,
+      lstatSync(root, { bigint: true }),
+      "ROLLBACK_RUNTIME_ROOT_IDENTITY_CHANGED",
+    );
+    registerCustodyDescriptor(descriptor, canonical, identity);
   } catch (error) {
     if (descriptor !== undefined) {
       closeSync(descriptor);
@@ -353,7 +363,7 @@ function openRuntimeRoot(root) {
     }
     throw new Error("ROLLBACK_RUNTIME_ROOT_UNSAFE path=" + root, { cause: error });
   }
-  return { descriptor, identity };
+  return { canonicalPath: canonical, descriptor, identity };
 }
 
 function openRuntimeRegularFile(runtimeRoot, components, options) {
@@ -364,7 +374,7 @@ function openRuntimeRegularFile(runtimeRoot, components, options) {
   let directory;
   try {
     directory = openSync(
-      descriptorChild(runtimeRoot.descriptor, "."),
+      custodyDescriptorDirectory(runtimeRoot.descriptor),
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
     );
     assertRuntimeIdentity(
@@ -372,6 +382,7 @@ function openRuntimeRegularFile(runtimeRoot, components, options) {
       fstatSync(directory, { bigint: true }),
       options.unsafeCode + " path=.",
     );
+    registerCustodyDescriptor(directory, runtimeRoot.canonicalPath, runtimeRoot.identity);
     for (const component of components.slice(0, -1)) {
       const candidate = descriptorChild(directory, component);
       const before = readRuntimePathEntry(candidate, options);
@@ -425,6 +436,12 @@ function openRuntimeDirectoryEntry(candidate, identity, options) {
       fstatSync(descriptor, { bigint: true }),
       options.unsafeCode + " path=" + options.label,
     );
+    assertRuntimeIdentity(
+      identity,
+      lstatSync(candidate, { bigint: true }),
+      options.unsafeCode + " path=" + options.label,
+    );
+    registerCustodyDescriptor(descriptor, realpathSync(candidate), identity);
     return descriptor;
   } catch (error) {
     closeSync(descriptor);

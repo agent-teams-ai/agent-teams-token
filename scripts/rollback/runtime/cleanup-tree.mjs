@@ -8,11 +8,20 @@ import {
   openSync,
   opendirSync,
   readlinkSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   unlinkSync,
 } from "node:fs";
 import { basename } from "node:path";
+
+import {
+  assertCustodyDescriptor,
+  custodyDescriptorChild as descriptorChild,
+  custodyDescriptorDirectory,
+  registerCustodyDescriptor,
+  updateCustodyDescriptor,
+} from "./custody.mjs";
 
 const CLEANUP_MAX_DEPTH = 128;
 const CLEANUP_MAX_ENTRIES = 1_000_000;
@@ -47,6 +56,9 @@ function preflightEntry(parentDescriptor, name, logicalPath, depth, context) {
   const kind = cleanupEntryKind(identity, logicalPath);
   if (kind !== "symlink" && String(identity.dev) !== rootDevice) {
     throw new Error("ROLLBACK_CLEANUP_CROSS_DEVICE_ENTRY path=" + logicalPath);
+  }
+  if (kind === "file" && identity.nlink !== 1n) {
+    throw new Error("ROLLBACK_CLEANUP_FILE_NLINK_UNSAFE path=" + logicalPath);
   }
   if (String(identity.uid) !== owner) {
     throw new Error("ROLLBACK_CLEANUP_ENTRY_OWNER_UNSAFE path=" + logicalPath);
@@ -133,6 +145,9 @@ export function removeQuarantinedEntry({
   if (kind !== "symlink" && String(before.dev) !== rootDevice) {
     throw new Error("ROLLBACK_CLEANUP_CROSS_DEVICE_ENTRY path=" + logicalPath);
   }
+  if (kind === "file" && before.nlink !== 1n) {
+    throw new Error("ROLLBACK_CLEANUP_FILE_NLINK_UNSAFE path=" + logicalPath);
+  }
   if (String(before.uid) !== owner) {
     throw new Error("ROLLBACK_CLEANUP_ENTRY_OWNER_UNSAFE path=" + logicalPath);
   }
@@ -155,6 +170,8 @@ export function removeQuarantinedEntry({
       sourcePath,
       stagedPath,
     });
+    assertCustodyDescriptor(parentDescriptor);
+    assertCustodyDescriptor(staging.descriptor);
     const atQuarantineBoundary = assertCleanupStrictFingerprint(
       expected.fingerprint,
       sourcePath,
@@ -173,6 +190,9 @@ export function removeQuarantinedEntry({
     );
     renameSync(sourcePath, stagedPath);
     const stagedIdentity = lstatSync(stagedPath, { bigint: true });
+    if (kind === "directory") {
+      updateCustodyDescriptor(heldDescriptor, realpathSync(stagedPath), stagedIdentity);
+    }
     assertSameIdentity(before, stagedIdentity, logicalPath);
     if (heldDescriptor !== undefined) {
       assertSameIdentity(stagedIdentity, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
@@ -205,6 +225,7 @@ export function removeQuarantinedEntry({
         stagedPath,
       );
       boundary(options, "before-entry-delete", { path: logicalPath, kind, stagedPath });
+      assertCustodyDescriptor(staging.descriptor);
       assertCleanupStrictFingerprint(stagedFingerprint, stagedPath, logicalPath);
       assertDirectoryIdentity(
         stagedPath,
@@ -214,6 +235,7 @@ export function removeQuarantinedEntry({
       rmdirSync(stagedPath);
     } else {
       boundary(options, "before-entry-delete", { path: logicalPath, kind, stagedPath });
+      assertCustodyDescriptor(staging.descriptor);
       const atBoundary = assertCleanupStrictFingerprint(
         stagedFingerprint,
         stagedPath,
@@ -224,6 +246,13 @@ export function removeQuarantinedEntry({
         assertSameIdentity(atBoundary, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
       }
       unlinkSync(stagedPath);
+      if (heldDescriptor !== undefined) {
+        const unlinked = fstatSync(heldDescriptor, { bigint: true });
+        assertSameIdentity(stagedIdentity, unlinked, logicalPath);
+        if (unlinked.nlink !== 0n) {
+          throw new Error("ROLLBACK_CLEANUP_UNLINK_TRANSITION_UNSAFE path=" + logicalPath);
+        }
+      }
     }
     report.push({ path: logicalPath, kind });
   } finally {
@@ -243,7 +272,7 @@ export function createCleanupQuarantine(handle) {
     identity,
     "ROLLBACK_CLEANUP_QUARANTINE_IDENTITY_MISMATCH",
   );
-  if ((identity.mode & 0o077n) !== 0n) {
+  if ((identity.mode & 0o777n) !== 0o700n) {
     closeSync(descriptor);
     throw new Error("ROLLBACK_CLEANUP_QUARANTINE_PERMISSIONS_UNSAFE");
   }
@@ -264,7 +293,7 @@ export function createStagingDirectory(quarantineDescriptor) {
     identity,
     "ROLLBACK_CLEANUP_STAGING_IDENTITY_MISMATCH",
   );
-  if ((identity.mode & 0o077n) !== 0n || String(identity.uid) !== String(process.getuid())) {
+  if ((identity.mode & 0o777n) !== 0o700n || String(identity.uid) !== String(process.getuid())) {
     closeSync(descriptor);
     throw new Error("ROLLBACK_CLEANUP_STAGING_PERMISSIONS_UNSAFE");
   }
@@ -298,7 +327,7 @@ function cleanupEntryKind(identity, logicalPath) {
 }
 
 export function sortedDirectoryEntries(descriptor) {
-  const directory = opendirSync(descriptorChild(descriptor, "."), { encoding: "buffer" });
+  const directory = opendirSync(custodyDescriptorDirectory(descriptor), { encoding: "buffer" });
   const entries = [];
   try {
     while (true) {
@@ -335,12 +364,8 @@ export function openDirectoryDescriptor(path) {
     closeSync(descriptor);
     throw new Error("ROLLBACK_CLEANUP_NOT_DIRECTORY path=" + path);
   }
+  registerCustodyDescriptor(descriptor, realpathSync(path), identity);
   return descriptor;
-}
-
-export function descriptorChild(descriptor, name) {
-  const root = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
-  return root + "/" + String(descriptor) + "/" + name;
 }
 
 function lstatDescriptorChild(descriptor, name) {
@@ -391,7 +416,15 @@ export function cleanupStrictIdentityFingerprint(identity, kind, path) {
     fingerprint[field] = String(identity[field]);
   }
   if (kind === "symlink") {
-    fingerprint.linkTargetBase64 = readlinkSync(path, { encoding: "buffer" }).toString("base64");
+    const first = readlinkSync(path, { encoding: "buffer" });
+    const repeatedIdentity = lstatSync(path, { bigint: true });
+    const second = readlinkSync(path, { encoding: "buffer" });
+    if (!first.equals(second) || CLEANUP_STRICT_IDENTITY_FIELDS.some(
+      (field) => identity[field] !== repeatedIdentity[field],
+    ) || !repeatedIdentity.isSymbolicLink()) {
+      throw new Error("ROLLBACK_CLEANUP_SYMLINK_CHANGED");
+    }
+    fingerprint.linkTargetBase64 = first.toString("base64");
   } else {
     fingerprint.linkTargetBase64 = null;
   }
