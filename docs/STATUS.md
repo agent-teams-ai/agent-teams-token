@@ -5,6 +5,13 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+15:05 UTC: Solana6b8770c7 passes69Mac tests with5Linux-onlyskips, TS7/lint;
+111 plus main READY-link rollback and actual config fixtures, underreview116.
+Slither112 AMEND found late-cancellation falseREADY, owned by114. Custody113
+accepted7437delta, but independently proved inherited ancestor metadata
+false rejection;115 corrects only ancestors, keeping owned targets strict.
+114/115/116 alive and fast. Accepted integration31e909 EVM86/86 unchanged.
+
 14:58 UTC:111 returned a full unapplied source patch, testsNOTRUN after bwrap;
 one real process-test fixture was absent from its packet and still needs
 adaptation by the integrator.112/113 remain observed alive. Root is progressing.

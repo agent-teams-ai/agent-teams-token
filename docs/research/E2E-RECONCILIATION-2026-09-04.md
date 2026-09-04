@@ -3,7 +3,61 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 14:56 UTC
+## Latest reconciliation: 15:05 UTC
+
+Accepted integration source remains31e909f7 (actualMac EVM86/86,0skips).
+The previous turn made source/evidence progress; this continuation also
+advances Solana source. No root completion or blocker claim is justified.
+
+- Solana111 applied on80bb, with main adapting all seven process-test config
+  strings to explicit private config capabilities and updating fake runner
+  fixtures. FirstTS7 caught those7type errors; corrected TS7/lint passes.
+  Main additionally closed publication failure AFTER linkingREADY but BEFORE
+  publishInitialFile returns: linked flag plus retained inode withdraw only
+  the owned destination before temporary cleanup/close; actualPrivateRunStore
+  regressions cover an owned marker and a substituted foreign successor.
+  Exact /tmp/agtmai-solana-97-mac6b8770c7c2a63735aa34183eaeb1bcbe48409c37,
+  parent80bb,12files+454/-44. FocusedMac74total69pass5Linux-onlyskips,0fail,
+  8.49seconds. No actual current-source Agave qualification yet.
+  Independent116 is launched PID1562344, exact candidate, xhigh/priority.
+  Bundle /tmp/agtmai-solana111-candidate.bundle prerequisite80bb, SHA256
+  023bcff1bbc52d2ef706875be827c09a6f6dfc13c076d12cf2ee9473b05f89ab.
+- Review112 AMEND on Slitherb74e: late cancellation after the old evidence
+  precondition but before destinationREADY can still publish clean success.
+  New narrowwriter114 owns the cancellation-aware final publication commit
+  and real barrier-driven regression, preserving failure evidence publication.
+  114 launched PID1517668 fromb74e, medium/priority.112 confirmed earlier
+  signal/createID/postauth closures and unchanged parser relocation. Its
+  independentLinux135total134pass1fail was the unchanged descendant timeout
+  reaching hard deadline, so Mac135/135 is not relabeled Linux acceptance.
+  Review112 JSON SHA256fa0d5db4a6196adcc4be30c9cca875b87182ae702de5fc6a1f41339389c68bbd.
+- Review113 ACCEPT exact7437 four-file110delta, independentLinux15/15 and
+  confirms original digest failure plus5closes in corrected injectiontest.
+  Separate inherited P1 is proven: sibling creation changes full directory
+  metadata without replacingdev/ino, and openDirectoryRecord rejects shared
+  ancestors before the intended owned-target policy.115 now owns a minimal
+  ancestor-only stableobject comparison; owned target fullmetadata checks
+  must remain strict. Deterministic sibling-churn/replacement/EINTR regressions
+  required.115 launched PID1546449 from7437, medium/priority.
+  Review113 JSON SHA256e565ff85650ade6cb889d192abfc38fa968e2a964047fba33704fd2c23015f62.
+  No wholef2d recovery acceptance or Macloadedimage bypass.
+- 114/115/116 are observed running/alive, all isolated old-host account-m jobs
+  with priority. Latest machine-id/RAM/swap/disk admission valid:~9.8GiBdisk,
+  ~11GiBavailableRAM/~4GiBfreeswap. No runtime changes or tools unpacked.
+  FreshghAPI main is still370c3aac97e4b3ddc7fcc9ada762a050580d0f39.
+  Read-only graph check finds2upstreamcommits after common3231e8a9: managed
+  documentation adoption6174b253 and ReviewRouter370c3aac,26files+2157/-18
+  (1391lockfilelines). Semantic reconciliation remains OPEN; no upstream
+  commit was integrated and noGitHubwrite made.
+  Original userHEAD212b, dirtyfileinventory and originalplanSHA256f3779136...
+  are unchanged. Integration origin is an old localbundle, notGitHub: use
+  explicitghAPI and exactknownobjects, don't assume origin/main exists.
+
+Next: consume114/115/116; apply sourcepackets once and independentlyverify;
+qualify accepted Solana on realAgave beforeintegration. Full S5/S11/S13,
+L5/L6,R3-R8,Linuxrealruns,semanticmain,exactheadroot/CI andfinalreviewsremainopen.
+
+## Earlier reconciliation: 14:56 UTC
 
 14:58 update:111 terminal, full23966-character output is preserved at
 .tools/hosted-evidence/2026-09-04/agtmai-r212-solana-amend111-20260904.latest-result.json,

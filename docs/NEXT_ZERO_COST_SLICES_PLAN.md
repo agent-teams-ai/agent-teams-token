@@ -2,6 +2,9 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest15:05: Solana6b87769pass5Linux-onlyskip+TS7/lint under116; Slither112
+AMEND latecancelREADY ->114; custody113 ACCEPT7437delta but inherited
+ancestor-metadata P1 ->115.114/115/116 alive/fast. Full E2E stillOPEN.
 Latest14:56: reviewed EVM N2 integrated31e909f7; cleanup test root registration
 included, TS7/lint passed, combined real-EVM86/86,0skips. Slitherb74e
 135/135Mac under112. Solana108AMEND ->111 publication/config-at-use fixes.
