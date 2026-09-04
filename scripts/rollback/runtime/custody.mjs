@@ -9,6 +9,11 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
+import {
+  closeDescriptorOnce,
+  throwDescriptorCloseFailures,
+} from "./descriptor-close.mjs";
+
 /**
  * Backend-neutral custody for recovery filesystem authority.
  *
@@ -300,6 +305,12 @@ export function closeDirectoryCustody(handle) {
     return;
   }
   state.closed = true;
+  const descriptors = [
+    state.descriptor,
+    ...state.ancestors.toReversed().map((ancestor) => ancestor.descriptor),
+  ];
+  state.descriptor = undefined;
+  state.ancestors = [];
   const failures = [];
   const close = (descriptor) => {
     try {
@@ -310,13 +321,10 @@ export function closeDirectoryCustody(handle) {
       failures.push(error);
     }
   };
-  close(state.descriptor);
-  for (const ancestor of state.ancestors.toReversed()) {
-    close(ancestor.descriptor);
+  for (const descriptor of descriptors) {
+    close(descriptor);
   }
-  if (failures.length > 0) {
-    throw new AggregateError(failures, "ROLLBACK_CUSTODY_CLOSE_FAILED");
-  }
+  throwDescriptorCloseFailures(failures, "ROLLBACK_CUSTODY_CLOSE_FAILED");
 }
 
 export function registerCustodyDescriptor(descriptor, canonicalPath, identity) {
@@ -335,7 +343,7 @@ export function forgetCustodyDescriptor(descriptor) { descriptorRecords.delete(d
 
 export function closeCustodyDescriptor(descriptor) {
   forgetCustodyDescriptor(descriptor);
-  closeSync(descriptor);
+  closeDescriptorOnce(descriptor);
 }
 export function updateCustodyDescriptor(descriptor, canonicalPath, identity) {
   const previous = descriptorRecords.get(descriptor);

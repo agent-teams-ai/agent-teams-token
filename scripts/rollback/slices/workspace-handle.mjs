@@ -1,5 +1,4 @@
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -15,6 +14,10 @@ import {
   forgetCustodyDescriptor,
   registerCustodyDescriptor,
 } from "../runtime/custody.mjs";
+import {
+  closeDescriptorOnce,
+  throwDescriptorCloseFailures,
+} from "../runtime/descriptor-close.mjs";
 
 import { validateExactPath } from "./manifests.mjs";
 
@@ -104,15 +107,26 @@ export function createRollbackWorkspaceHandle(root, quarantineRoot) {
     });
     return handle;
   } catch (error) {
-    if (quarantineDescriptor !== undefined) {
-      forgetCustodyDescriptor(quarantineDescriptor);
-      closeSync(quarantineDescriptor);
+    const failures = [];
+    const descriptors = [quarantineDescriptor, checkoutDescriptor];
+    quarantineDescriptor = undefined;
+    checkoutDescriptor = undefined;
+    for (const descriptor of descriptors) {
+      if (!Number.isInteger(descriptor)) {
+        continue;
+      }
+      forgetCustodyDescriptor(descriptor);
+      try {
+        closeDescriptorOnce(descriptor);
+      } catch (closeError) {
+        failures.push(closeError);
+      }
     }
-    if (checkoutDescriptor !== undefined) {
-      forgetCustodyDescriptor(checkoutDescriptor);
-      closeSync(checkoutDescriptor);
-    }
-    throw error;
+    throwDescriptorCloseFailures(
+      failures,
+      "ROLLBACK_REMOVAL_WORKSPACE_CLOSE_FAILED",
+      error,
+    );
   }
 }
 
@@ -194,10 +208,22 @@ export function closeRollbackWorkspaceHandle(handle) {
     return;
   }
   state.closed = true;
-  forgetCustodyDescriptor(state.quarantineDescriptor);
-  forgetCustodyDescriptor(state.checkoutDescriptor);
-  closeSync(state.quarantineDescriptor);
-  closeSync(state.checkoutDescriptor);
+  const descriptors = [state.quarantineDescriptor, state.checkoutDescriptor];
+  state.quarantineDescriptor = undefined;
+  state.checkoutDescriptor = undefined;
+  const failures = [];
+  for (const descriptor of descriptors) {
+    forgetCustodyDescriptor(descriptor);
+    try {
+      closeDescriptorOnce(descriptor);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  throwDescriptorCloseFailures(
+    failures,
+    "ROLLBACK_REMOVAL_WORKSPACE_CLOSE_FAILED",
+  );
 }
 
 export function rollbackWorkspaceState(handle, root) {

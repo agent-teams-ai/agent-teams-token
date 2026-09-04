@@ -10,8 +10,13 @@ import {
 import { descriptorChild as rollbackDescriptorChild } from "../runtime/common.mjs";
 import {
   custodyDescriptorDirectory,
+  forgetCustodyDescriptor,
   registerCustodyDescriptor,
 } from "../runtime/custody.mjs";
+import {
+  closeDescriptorOnce,
+  throwDescriptorCloseFailures,
+} from "../runtime/descriptor-close.mjs";
 import { validateExactPath } from "./manifests.mjs";
 import { rollbackWorkspaceState } from "./workspace-handle.mjs";
 
@@ -119,15 +124,29 @@ export function openRollbackSharedRoot(workspace, logicalPath) {
   }
 }
 
-export function closeRollbackSharedPlan(plan) {
+export function closeRollbackSharedPlan(plan, primaryFailure) {
   const descriptors = rollbackSharedPlanDescriptors.get(plan);
   if (descriptors === undefined) {
+    if (primaryFailure !== undefined) {
+      throw primaryFailure;
+    }
     return;
   }
   rollbackSharedPlanDescriptors.delete(plan);
-  for (const descriptor of descriptors.toReversed()) {
-    closeSync(descriptor);
+  const closing = descriptors.toReversed();
+  descriptors.length = 0;
+  const failures = [];
+  for (const descriptor of closing) {
+    forgetCustodyDescriptor(descriptor);
+    try {
+      closeDescriptorOnce(descriptor);
+    } catch (error) {
+      failures.push(error);
+    }
   }
+  throwDescriptorCloseFailures(
+    failures, "ROLLBACK_SHARED_PATH_CLOSE_FAILED", primaryFailure,
+  );
 }
 
 export function snapshotRollbackSharedPaths(root, paths, workspaceHandle, options = {}) {
@@ -158,8 +177,7 @@ export function snapshotRollbackSharedPaths(root, paths, workspaceHandle, option
     }
     return plan;
   } catch (error) {
-    closeRollbackSharedPlan(plan);
-    throw error;
+    closeRollbackSharedPlan(plan, error);
   }
 }
 

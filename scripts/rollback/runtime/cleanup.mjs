@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
+import { cleanupRemovalResult, cleanupSnapshotSha256 } from "./cleanup-evidence.mjs";
 import {
-  closeSync,
   fstatSync,
   lstatSync,
   realpathSync,
@@ -10,13 +9,16 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
+  closeDescriptorOnce,
+  throwDescriptorCloseFailures,
+} from "./descriptor-close.mjs";
+import {
   assertCleanupDestinationAbsent,
   assertCleanupStrictFingerprint,
   assertCleanupTreeSnapshot,
   assertDirectoryIdentity,
   boundary,
   cleanupStrictIdentityFingerprint,
-  compareUtf8,
   createCleanupQuarantine,
   createStagingDirectory,
   openDirectoryDescriptor,
@@ -30,6 +32,7 @@ import {
   assertCustodyDirectChild,
   custodyDescriptorChild as descriptorChild,
   custodyDescriptorDirectory,
+  forgetCustodyDescriptor,
   updateCustodyDescriptor,
 } from "./custody.mjs";
 
@@ -60,7 +63,7 @@ export function createCleanupHandle(path, policy) {
   }
   const configuration = cleanupPolicy(path, policy);
   const owner = String(process.getuid());
-  const rootDescriptor = openDirectoryDescriptor(configuration.temporaryRoot);
+  let rootDescriptor = openDirectoryDescriptor(configuration.temporaryRoot);
   let descriptor;
   try {
     const rootIdentity = fstatSync(rootDescriptor, { bigint: true });
@@ -108,11 +111,22 @@ export function createCleanupHandle(path, policy) {
       closed: false,
     };
   } catch (error) {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
+    const failures = [];
+    const descriptors = [descriptor, rootDescriptor];
+    descriptor = undefined;
+    rootDescriptor = undefined;
+    for (const openedDescriptor of descriptors) {
+      if (!Number.isInteger(openedDescriptor)) {
+        continue;
+      }
+      forgetCustodyDescriptor(openedDescriptor);
+      try {
+        closeDescriptorOnce(openedDescriptor);
+      } catch (closeError) {
+        failures.push(closeError);
+      }
     }
-    closeSync(rootDescriptor);
-    throw error;
+    throwDescriptorCloseFailures(failures, "ROLLBACK_CLEANUP_CLOSE_FAILED", error);
   }
 }
 
@@ -199,14 +213,22 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
   if (options === null || typeof options !== "object" || Array.isArray(options)
     || Object.keys(options).some((key) => key !== "onBoundary")
     || (options.onBoundary !== undefined && typeof options.onBoundary !== "function")) {
-    closeCleanupHandle(handle);
-    throw new Error("ROLLBACK_CLEANUP_OPTIONS_INVALID");
+    const primaryFailure = new Error("ROLLBACK_CLEANUP_OPTIONS_INVALID");
+    const failures = [];
+    closeCleanupHandle(handle, failures);
+    throwDescriptorCloseFailures(
+      failures, "ROLLBACK_CLEANUP_CLOSE_FAILED", primaryFailure,
+    );
   }
 
   const snapshot = cleanupTreeSnapshots.get(handle);
   if (snapshot === undefined) {
-    closeCleanupHandle(handle);
-    throw new Error("ROLLBACK_CLEANUP_SNAPSHOT_REQUIRED");
+    const primaryFailure = new Error("ROLLBACK_CLEANUP_SNAPSHOT_REQUIRED");
+    const failures = [];
+    closeCleanupHandle(handle, failures);
+    throwDescriptorCloseFailures(
+      failures, "ROLLBACK_CLEANUP_CLOSE_FAILED", primaryFailure,
+    );
   }
   cleanupTreeSnapshots.delete(handle);
 
@@ -214,6 +236,8 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
   let staging;
   const report = [];
   const state = { count: 0, nextSlot: 0 };
+  let result;
+  let primaryFailure;
   try {
     assertHandleIdentities(handle);
     assertCleanupTreeSnapshot(handle.descriptor, snapshot);
@@ -290,8 +314,7 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
       "ROLLBACK_CLEANUP_TARGET_SUBSTITUTED_AT_DELETE",
     );
     rmdirSync(quarantinedPath);
-    closeSync(handle.descriptor);
-    handle.descriptor = undefined;
+    closeCleanupOwnedDescriptor(handle, "descriptor");
 
     assertCustodyDescriptor(quarantine.descriptor);
     assertCustodyDescriptor(staging.descriptor);
@@ -301,8 +324,7 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
       "ROLLBACK_CLEANUP_STAGING_IDENTITY_MISMATCH",
     );
     rmdirSync(descriptorChild(quarantine.descriptor, staging.name));
-    closeSync(staging.descriptor);
-    staging.descriptor = undefined;
+    closeCleanupOwnedDescriptor(staging, "descriptor");
 
     assertCustodyDescriptor(handle.rootDescriptor);
     assertCustodyDescriptor(quarantine.descriptor);
@@ -312,43 +334,33 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
       "ROLLBACK_CLEANUP_QUARANTINE_IDENTITY_MISMATCH",
     );
     rmdirSync(descriptorChild(handle.rootDescriptor, quarantine.name));
-    closeSync(quarantine.descriptor);
-    quarantine.descriptor = undefined;
+    closeCleanupOwnedDescriptor(quarantine, "descriptor");
 
-    report.sort((left, right) => compareUtf8(left.path, right.path));
-    return {
-      schemaVersion: 2,
-      result: "contents-removed",
-      device: handle.device,
-      inode: handle.inode,
-      allowedEntries: [...handle.allowedEntries],
-      limits: {
-        maxDepth: CLEANUP_MAX_DEPTH,
-        maxEntries: CLEANUP_MAX_ENTRIES,
-        maxRelativeBytes: CLEANUP_MAX_RELATIVE_BYTES,
-      },
-      removedEntryCount: report.length,
-      removedEntries: report,
-    };
+    result = cleanupRemovalResult(handle, report, {
+      maxDepth: CLEANUP_MAX_DEPTH,
+      maxEntries: CLEANUP_MAX_ENTRIES,
+      maxRelativeBytes: CLEANUP_MAX_RELATIVE_BYTES,
+    });
   } catch (error) {
     if (quarantine !== undefined) {
       const preserved = join(handle.temporaryRoot, quarantine.name);
-      throw new Error(
+      primaryFailure = new Error(
         (error instanceof Error ? error.message : String(error))
         + " preservedQuarantine=" + preserved,
         { cause: error },
       );
+    } else {
+      primaryFailure = error;
     }
-    throw error;
-  } finally {
-    if (staging?.descriptor !== undefined) {
-      closeSync(staging.descriptor);
-    }
-    if (quarantine?.descriptor !== undefined) {
-      closeSync(quarantine.descriptor);
-    }
-    closeCleanupHandle(handle);
   }
+  const failures = [];
+  closeCleanupOwnedDescriptor(staging, "descriptor", failures);
+  closeCleanupOwnedDescriptor(quarantine, "descriptor", failures);
+  closeCleanupHandle(handle, failures);
+  throwDescriptorCloseFailures(
+    failures, "ROLLBACK_CLEANUP_CLOSE_FAILED", primaryFailure,
+  );
+  return result;
 }
 
 export function abandonCleanupHandle(handle) {
@@ -441,20 +453,6 @@ function assertRetainedCustodyIdentity(expected, actual, logicalPath) {
   }
 }
 
-function cleanupSnapshotSha256(snapshot) {
-  return createHash("sha256")
-    .update(JSON.stringify(snapshot.entries.map(cleanupSnapshotEntry)))
-    .digest("hex");
-}
-
-function cleanupSnapshotEntry(entry) {
-  return {
-    name: entry.name,
-    kind: entry.kind,
-    fingerprint: entry.fingerprint,
-    children: entry.children.map(cleanupSnapshotEntry),
-  };
-}
 
 function validateCleanupHandle(handle) {
   if (handle === null || typeof handle !== "object" || handle.closed) {
@@ -467,20 +465,38 @@ function validateCleanupHandle(handle) {
   }
 }
 
-function closeCleanupHandle(handle) {
+function closeCleanupOwnedDescriptor(owner, key, failures) {
+  const descriptor = owner?.[key];
+  if (!Number.isInteger(descriptor)) {
+    return;
+  }
+  owner[key] = undefined;
+  forgetCustodyDescriptor(descriptor);
+  try {
+    closeDescriptorOnce(descriptor);
+  } catch (error) {
+    if (failures === undefined) {
+      throw error;
+    }
+    failures.push(error);
+  }
+}
+
+function closeCleanupHandle(handle, failures) {
   if (handle.closed) {
     return;
   }
-  if (Number.isInteger(handle.descriptor)) {
-    closeSync(handle.descriptor);
-  }
-  if (Number.isInteger(handle.rootDescriptor)) {
-    closeSync(handle.rootDescriptor);
-  }
-  handle.descriptor = undefined;
-  handle.rootDescriptor = undefined;
   handle.closed = true;
   cleanupTreeSnapshots.delete(handle);
+  const collectedFailures = failures ?? [];
+  closeCleanupOwnedDescriptor(handle, "descriptor", collectedFailures);
+  closeCleanupOwnedDescriptor(handle, "rootDescriptor", collectedFailures);
+  if (failures === undefined) {
+    throwDescriptorCloseFailures(
+      collectedFailures,
+      "ROLLBACK_CLEANUP_CLOSE_FAILED",
+    );
+  }
 }
 
 function assertHandleIdentities(handle) {

@@ -17,9 +17,14 @@ import {
   assertCustodyStableObject,
   custodyDescriptorChild as rollbackDescriptorChild,
   custodyDescriptorDirectory,
+  forgetCustodyDescriptor,
   registerCustodyDescriptor,
   updateCustodyDescriptor,
 } from "../runtime/custody.mjs";
+import {
+  closeDescriptorOnce,
+  throwDescriptorCloseFailures,
+} from "../runtime/descriptor-close.mjs";
 
 import {
   ROLLBACK_PATH_MAX_DEPTH,
@@ -192,8 +197,7 @@ export function snapshotRollbackRemovalPlan(quarantine, plan) {
       assertRollbackWorkspaceHandle(quarantine.workspaceHandle, quarantine.rootPath);
       quarantine.plannedIdentities = plannedIdentities;
     } catch (error) {
-      closeRollbackRemovalDescriptors(plannedIdentities);
-      throw error;
+      closeRollbackRemovalDescriptors(plannedIdentities, error);
     }
   });
 }
@@ -234,33 +238,39 @@ function snapshotRollbackRemovalIdentity(quarantine, logicalPath, expectedKind) 
 
 function closeRollbackRemovalDescriptor(planned) {
   if (Number.isInteger(planned?.descriptor)) {
-    closeSync(planned.descriptor);
+    const descriptor = planned.descriptor;
     planned.descriptor = undefined;
+    forgetCustodyDescriptor(descriptor);
+    closeDescriptorOnce(descriptor);
   }
 }
 
-function closeRollbackRemovalDescriptors(plannedIdentities) {
+function closeRollbackRemovalDescriptors(plannedIdentities, primaryFailure) {
   if (!(plannedIdentities instanceof Map)) {
+    if (primaryFailure !== undefined) {
+      throw primaryFailure;
+    }
     return;
   }
-  let closeFailure;
+  const failures = [];
   for (const planned of plannedIdentities.values()) {
     try {
       closeRollbackRemovalDescriptor(planned);
     } catch (error) {
-      closeFailure = closeFailure === undefined
-        ? error
-        : new AggregateError([closeFailure, error], "rollback removal descriptor close failed");
+      failures.push(error);
     }
   }
-  if (closeFailure !== undefined) {
-    throw closeFailure;
-  }
+  throwDescriptorCloseFailures(
+    failures,
+    "ROLLBACK_REMOVAL_DESCRIPTOR_CLOSE_FAILED",
+    primaryFailure,
+  );
 }
 
 export function closeRollbackRemovalPlan(quarantine) {
-  closeRollbackRemovalDescriptors(quarantine.plannedIdentities);
+  const plannedIdentities = quarantine.plannedIdentities;
   quarantine.plannedIdentities = undefined;
+  closeRollbackRemovalDescriptors(plannedIdentities);
 }
 
 export function stageRollbackRemoval(quarantine, logicalPath, expectedKind, onBoundary) {
