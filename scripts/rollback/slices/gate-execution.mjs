@@ -87,7 +87,7 @@ function directPreflightCommand(_id, command, arguments_, options) {
 export function pinnedEnvironmentPreflight(root, {
   dockerPath,
   execute = directPreflightCommand,
-}) {
+} = {}) {
   const runtime = assertPinnedNodeRuntime(root);
   const bootstrapEnvironment = allowlistedChildEnvironment(process.env, {
     PATH: "/usr/local/bin:/usr/bin:/bin:/usr/lib/git-core",

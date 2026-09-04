@@ -450,3 +450,30 @@ declarations stay with their coordinated external lanes and the direct-HTTP P1
 remains open. This update uses no network or public chain and is not an audit,
 production, Devnet or Mainnet readiness, or permission to use a real identity,
 sign or broadcast.
+
+## Semantic rollback repair at c8d5d35a — NOT FULLY ACCEPTED
+
+This rollback-only update starts from exact checkpoint
+`c8d5d35a412ac85a69185201540ceab227a87148`, tree
+`5b7f8227e3ccb199eb5da192bf14fadb42a46739`. It supersedes the older rollback
+hash-maintenance status, without changing historical acceptance or provenance.
+The manifests now enumerate the integrated deployment-plan and Slither additions
+and bind the checkpoint's workflow, Foundation, package, workflow-test and
+toolchain bytes. Reverse digests were calculated by applying the production
+transformation in disposable checkouts; retained fingerprints use exact source
+bytes. No hash assertion, ownership check or survivor requirement is removed.
+
+Canonical temporary fixture paths preserve strict binary-path checks on Darwin.
+The CLI regression requires clean committed validation before deliberately
+committing drift, then requires rejection before materialization. Unpinned hash
+maintenance checks the precise platform/version/path rejection; Darwin loaded
+image binding still fails closed. Default preflight options now reach runtime
+verification, with a regression requiring failure before any gate when the
+runtime lock is absent.
+
+Status remains R7 AMEND, not acceptance. Structural regressions are not a full
+rollback proof. The source integration commit, pinned offline environment,
+exact-head full local/hosted gates and independent acceptance remain pending.
+This repair does not close the direct-HTTP finding or approve the proxy-disabled
+transports and Foundation dependency declarations owned by coordinated external
+lanes. No public RPC, wallet, secret or deployment is involved.

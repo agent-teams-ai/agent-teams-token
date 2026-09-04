@@ -1,7 +1,23 @@
+import { pinnedEnvironmentPreflight } from "../slices/gate-execution.mjs";
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
 const { cloneRepository } = proofSupport;
+
+test("default preflight options reach fail-closed runtime validation", () => {
+  const root = temporaryDirectory("agtmai-rollback-preflight-defaults-");
+  try {
+    assert.throws(
+      () => pinnedEnvironmentPreflight(root),
+      process.platform === "darwin"
+        ? /ROLLBACK_RUNTIME_LOADED_IMAGE_BINDING_UNAVAILABLE/u
+        : /ROLLBACK_RUNTIME_LOCK_MISSING/u,
+    );
+    assert.deepEqual(readdirSync(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("non-pulling image preflight verifies exact cached Slither image identity", () => {
   const root = temporaryDirectory("agtmai-rollback-preflight-");
@@ -237,7 +253,7 @@ test("full-mode preflight failure still finalizes machine-readable evidence", ()
   }
 });
 
-test("clean-candidate CLI fails stale validation and unpinned hash maintenance fails closed", () => {
+test("clean-candidate CLI validates current hashes and rejects drift and unpinned maintenance", () => {
   const boundary = temporaryDirectory("agtmai-rollback-cli-lifecycle-");
   const checkout = join(boundary, "candidate");
   const temporaryRoot = join(boundary, "tmp");
@@ -270,7 +286,6 @@ test("clean-candidate CLI fails stale validation and unpinned hash maintenance f
       join(checkout, "scripts/tests/tooling-boundaries.test.mjs"),
     );
     writeFileSync(join(checkout, "package.json"), readFileSync(join(repositoryRoot, "package.json")));
-    appendFileSync(join(checkout, "package.json"), "\n");
     git(checkout, ["config", "user.name", "Rollback CLI Test"]);
     git(checkout, ["config", "user.email", "rollback-cli-test@invalid.local"]);
     git(checkout, [
@@ -287,13 +302,29 @@ test("clean-candidate CLI fails stale validation and unpinned hash maintenance f
       "package.json",
     ]);
     git(checkout, ["commit", "--quiet", "-m", "test: integrated rollback candidate"]);
-    const candidateSha = git(checkout, ["rev-parse", "HEAD"]).trim();
+    let candidateSha = git(checkout, ["rev-parse", "HEAD"]).trim();
     mkdirSync(temporaryRoot, { mode: 0o700 });
     const environment = {
       ...process.env,
       AGTMAI_ROLLBACK_TMPDIR: temporaryRoot,
       PATH: "/usr/local/bin:/usr/bin:/bin",
     };
+
+    const cleanValidation = spawnSync(process.execPath, [
+      "scripts/rollback/prove-slices.mjs",
+      "--validate-only",
+      "--expected-sha=" + candidateSha,
+    ], { cwd: checkout, encoding: "utf8", env: environment, timeout: 120_000 });
+    assert.equal(cleanValidation.status, 0, cleanValidation.stderr);
+    assert.ok(cleanValidation.stdout.includes(
+      "rollback-validation candidate=" + candidateSha + " result=pass",
+    ));
+    assert.deepEqual(readdirSync(temporaryRoot), []);
+
+    appendFileSync(join(checkout, "package.json"), "\n");
+    git(checkout, ["add", "package.json"]);
+    git(checkout, ["commit", "--quiet", "-m", "test: stale rollback transition"]);
+    candidateSha = git(checkout, ["rev-parse", "HEAD"]).trim();
 
     const validation = spawnSync(process.execPath, [
       "scripts/rollback/prove-slices.mjs",
@@ -314,7 +345,13 @@ test("clean-candidate CLI fails stale validation and unpinned hash maintenance f
     ], { cwd: checkout, encoding: "utf8", env: environment, timeout: 120_000 });
     assert.notEqual(hashes.status, 0);
     assert.equal(hashes.stdout, "");
-    assert.match(hashes.stderr, /ROLLBACK_RUNTIME_(?:LOCK_INVALID|EXEC_PATH_MISMATCH)/u);
+    const lock = JSON.parse(readFileSync(join(checkout, "tooling/toolchain.lock.json"), "utf8"));
+    const expectedRuntimeFailure = process.platform === "darwin"
+      ? "ROLLBACK_RUNTIME_LOADED_IMAGE_BINDING_UNAVAILABLE"
+      : process.version !== "v" + lock.tools.node.version
+        ? "ROLLBACK_RUNTIME_VERSION_MISMATCH"
+        : "ROLLBACK_RUNTIME_EXEC_PATH_MISMATCH";
+    assert.ok(hashes.stderr.includes(expectedRuntimeFailure), hashes.stderr);
     assert.deepEqual(readdirSync(temporaryRoot), []);
   } finally {
     rmSync(boundary, { recursive: true, force: true });

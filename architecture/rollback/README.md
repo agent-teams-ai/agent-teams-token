@@ -64,11 +64,12 @@ two-slice survivor complement. Missing, unknown, self-referencing or duplicate
 survivor gates fail validation.
 
 Final-manifest state at this documentation edit:
-`REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`. After the feature
-and CI bytes were fixed, the final integrator regenerated every declared shared
-before/after transition and retained-path fingerprint. Exact current-byte
-coverage and production apply regressions pass. No commit was authorized here,
-so clean exact-head `--validate-only` remains pending. This is not a full
+`REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`. The semantic repair
+uses checkpoint `c8d5d35a412ac85a69185201540ceab227a87148` (tree
+`5b7f8227e3ccb199eb5da192bf14fadb42a46739`) for every owned-path inventory,
+shared before/after transition and retained-path fingerprint. Exact current-byte
+coverage and production apply regressions pass. The source candidate still
+requires a clean integration commit and exact-head gates. This is not a full
 rollback proof or hosted CI result. A later integration change invalidates it
 and must return it to pending rather than preserving a stale success claim.
 

@@ -99,7 +99,9 @@ function copyCurrentRollbackSharedState(checkout, manifest) {
 }
 
 function temporaryDirectory(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  // Darwin's temporary root can be an alias; strict binary custody requires
+  // canonical paths even for test-only executable fixtures.
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 }
 
 function cleanupIdentityBoundDirectory(handle, options) {

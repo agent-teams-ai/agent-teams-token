@@ -2,6 +2,12 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Rollback R7 remains AMEND, not acceptance. The semantic checkpoint
+`c8d5d35a412ac85a69185201540ceab227a87148` requires refreshed exact owned-path
+inventories, shared reversals and retained fingerprints. The proxy-disabled
+transports and Foundation dependency declarations belong to coordinated
+external lanes; this rollback repair does not close the direct-HTTP finding.
+Exact-head full proof and hosted CI evidence remain pending.
 Latest15:45: Solanaabf837 candidate79Mac pass/5Linux skips+runner13/13 ->126;
 Slither122AMEND3findings ->125;120 wholebase review.121 main merge plan
 recorded, not executed.19 inactive tool duplicates/partials removed safely;
