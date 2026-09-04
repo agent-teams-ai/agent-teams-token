@@ -5,6 +5,15 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+14:40 UTC: review103 AMEND found3Slither cancellation/terminal-deadline gaps,
+owned by106. Review104 AMEND found blocking FIFO reads in EVM, owned by107;
+its independentLinux37/37 did not cover FIFOs. Custody598b Mac41/41 is under105.
+Solana80bbca47 passes Mac31+1Linux-onlyskip, TS7/lint after main runtime-syntax,
+cleanup, held-payload and FIFO corrections; independent108 is being launched.
+105/106/107 are observed alive. Old-host IO delayed105 provisioning; newer jobs
+avoid duplicate tool extraction, not test or sandbox requirements. No new
+source is accepted/integrated and full original-plan E2E remains unfinished.
+
 14:27 UTC supersedes the snapshots below: isolated Slither fb416ec1 passes
 130/130Mac tests and TS7/lint. EVM1f4fc8d8 passes actualMac runner7/7 and TS7/lint;
 focused37cases are covered across36pass+1focused timeout retry. New cleanup

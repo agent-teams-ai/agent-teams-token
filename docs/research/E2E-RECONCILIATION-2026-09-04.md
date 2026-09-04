@@ -3,7 +3,66 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 14:27 UTC
+## Latest reconciliation: 14:40 UTC
+
+Accepted integration code is still e723bc0d. New drafts remain OUTSIDE
+integration, original user dirty worktree preserved. Do not mark the root
+goal complete or blocked: source work and verification are progressing.
+
+- Review103 returned AMEND on aggregate Slitherfb416: P1 production CLI lacks
+  signal wiring; P1 cancellation during create can discard the returned ID;
+  P1 cancellation/deadline expiry during final output authentication can return
+  false success. Writer106 owns these three exact issues fromfb416. Review103
+  independently ran15Linux cases14pass1typed hard-deadline failure while reaping
+  descendants; this is not a reproduced130/130Linux result. Mac130/130 remains
+  valid narrow evidence, not S7 acceptance. Review result SHA256
+  d14bd647131f6156d1dbb415ff67e7489df4124e20b2f03d60096a39d58798e8.
+- Review104 confirmed review98 regular-file content/cleanup fixes but AMEND
+  found P1 blocking FIFO opens in bounded lease read and predecessor reopen.
+  Independent pinnedLinux37/37 passed but missed FIFO. Writer107 owns only
+  O_NONBLOCK plus bounded FIFO actual-consumer regressions from1f4fc8d8.
+  Review SHA2565f1b1d6b29b433433b80d9abe15d09070f4c7c01171986ba64e49e3642ab82da.
+- Solana102 full patch is applied with main corrections in
+  /tmp/agtmai-solana-97-mac:80bbca4763da6ad2ebd28b35f0bfa09c0b012d80,
+  parenta226,5files+494/-59. First run failed before test discovery because a
+  TypeScript parameter property is unsupported by pinned Node strip-only mode;
+  lint found3unsafe-finally sites. Main replaced the parameter property, added
+  explicit primary+secondary cleanup aggregation, and transferred published
+  payload FDs into parent custody until all JSON/Markdown/READY checks complete.
+  This prevents inode reuse while checking the original published identities.
+  Main also added immediate named-temp pre-unlink check, post-read named checks,
+  O_NONBLOCK for the two read opens, and deterministic bounded-child FIFO,
+  payload-FD-lifetime and finalizer aggregation regressions. Exact Mac focused
+ 32total31pass1Linux-onlyskip,0fail,1.8seconds; TS7/lint/diffcheck pass.
+  This is not current-source real Agave integration evidence. Independent108
+  is being launched to review aggregate N2 versus e723, including main changes.
+  Writer102 result SHA256521f2781c03f9e6f9a3e7ab0405c53d525ee8a9c5290a4319b380e12c3c779a0.
+  Bundle /tmp/agtmai-solana102-candidate.bundle, prerequisitea226,
+  SHA256c600099019cb314273d333afd212de3940e3f10f5d3b81f37517b468d0711c5e.
+- Custody598b remains41/41Mac, independent105 is now running/alive, PID1259704.
+  Its tool extraction was delayed ~13minutes by old-host IO pressure before
+  the model actually started; earlier launch intention is not runtime evidence.
+  Active106 PID1216636,107 PID1238048 are running/alive.108 is a new isolated
+  read-only job, not counted alive until observed. Registry and old host unchanged.
+- Old-host disk recovered to6GiB but IO pressure some~99%, full~50%, memory
+  pressure and~15GiB used swap delayed even small writes. It later improved
+  to IO some32%/full14%, disk5.2GiB. No limits/services were changed. No extra
+  Node copies were deleted beyond the11 recorded earlier.106/107/108 omit
+  duplicate tool extraction: they can draft/review exact source packets and
+  must mark tests NOT RUN if no permitted pinned runtime is available. Main
+  continues actual pinned Mac verification. Never bypass bwrap or package pins.
+
+Next: consume105/106/107/108, apply writer patches only to their isolated exact
+base, test then independent review. Root EVM cleanup-test registration remains
+required at integration. Full original-plan S5/S11/S13, L5/L6, R3-R8, Linux
+qualification, semantic main reconciliation, exact-head root/CI and final
+specialist/holistic reviews remain open. All new jobs are priority/fast, sol
+medium writers and sol xhigh reviewers. Split observation: custody101 first
+focused run14/14; Solana102 first run exposed a runtime-syntax defect. Xhigh
+review caught4concrete P1 classes beyond otherwise green suites; don't replace
+independent review with model choice or test counts.
+
+## Earlier reconciliation: 14:27 UTC
 
 Custody101 complete inline patch was applied locally. Only overlapping diff
 context was corrected to apply it; no source fix was necessary. Exact candidate
