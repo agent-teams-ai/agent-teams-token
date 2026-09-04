@@ -1,18 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-  writeSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync,
+  rmSync, symlinkSync, unlinkSync, writeFileSync, writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -23,14 +13,12 @@ import {
   fetchArtifacts,
   hostPlatform,
   installArtifacts,
-  validateLock,
   verifyCache,
   canonicalizeTrustedPath,
 } from "../toolchain.mjs";
 import { runDoctor } from "../doctor.mjs";
-import {
-  artifact, coreTool, packageTool, packageManagerTool, futureTool, securityImage, digest, writeExecutable,
-} from "./toolchain-fixtures.mjs";
+import { assertDarwinSnapshotBehavior, makeFixture } from "../toolchain-test-fixture.mjs";
+import { digest, writeExecutable } from "./toolchain-fixtures.mjs";
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
@@ -128,16 +116,19 @@ test("Bash bootstrap starts from checksum-pinned Node without a system Node fall
   assert.match(bootstrap, /node-v24\.20\.0-darwin-arm64\.tar\.gz/);
   assert.match(bootstrap, /40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8/);
   assert.match(bootstrap, /\.part/);
-  assert.match(bootstrap, /exec \{token_part_fd\}>/);
+  assert.match(bootstrap, /local token_part_fd=9[\s\S]*exec 9>/);
+  assert.doesNotMatch(bootstrap, /exec \{token_part_fd\}/);
   assert.match(bootstrap, /--output - .*>&"\$token_part_fd"/);
   assert.doesNotMatch(bootstrap, /--output "?\$token_part/);
   assert.match(bootstrap, /token_pinned_node.*scripts\/toolchain\.mjs/);
   assert.match(bootstrap, /fetch --scope=solana/);
   assert.doesNotMatch(bootstrap, /foundry-v1\.8\.0-linux-x64:.*solc-v0\.8\.36-linux-x64/);
   assert.doesNotMatch(bootstrap, /TOKEN_BOOTSTRAP_NODE|\$\{[^}]+:-node\}/);
-  assert.ok(bootstrap.indexOf("token_validate_directory \"$token_tools_root\" false") < bootstrap.indexOf("/bin/mkdir -p -- \"$token_tools_root\""));
+  assert.ok(bootstrap.indexOf("token_validate_directory \"$token_tools_root\" false") < bootstrap.indexOf("/bin/mkdir -p \"$token_tools_root\""));
   const dev = readFileSync(join(repositoryRoot, "dev"), "utf8");
   assert.doesNotMatch(dev, /exec (?:node|pnpm)|source .*env\.sh/);
+  assert.doesNotMatch(bootstrap, /\/bin\/(?:chmod|mkdir|cp|mv|rm)[^\n]* --/);
+  assert.doesNotMatch(bootstrap, /dirname --/);
   assert.match(dev, /bootstrap\.sh" doctor/);
   assert.match(dev, /bootstrap\.sh" run-pnpm check/);
 });
@@ -231,10 +222,9 @@ test("environment helper requires Bash and runs Zsh portability where required o
   for (const shell of shells) {
     const result = spawnSync(shell, ["-c", `source '${join(scripts, "env.sh")}' && command -v agtmai-env-probe`], { encoding: "utf8" });
     assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
-    assert.equal(result.stdout.trim(), join(bin, "agtmai-env-probe"));
+    assert.equal(result.stdout.trim(), realpathSync(join(bin, "agtmai-env-probe")));
   }
 });
-
 test("pnpm offline cold cache ignores a system package manager", (context) => {
   const fixture = makeFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
@@ -326,6 +316,22 @@ test("verified execution fails closed when the pathname is replaced after hashin
 
 test("descriptor execution rejects unsupported hosts", () => {
   assert.throws(() => descriptorRoot("win32"), /TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED/);
+});
+
+test("Darwin execution uses private snapshots and preserves uncertain cleanup evidence", assertDarwinSnapshotBehavior);
+
+test("Linux verified execution retains proc descriptor execution", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-linux-exec-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const executable = join(root, "tool");
+  writeExecutable(executable, "#!/bin/sh\necho linux-descriptor\n");
+  if (process.platform !== "linux") {return;}
+  assert.equal(executeVerifiedFile({
+    path: executable,
+    expectedSha256: digest(executable),
+    platform: "linux",
+  }), "linux-descriptor");
+  assert.equal(descriptorRoot("linux"), "/proc/self/fd");
 });
 
 test("offline cold cache never uses PATH or a downloader", (context) => {
@@ -499,123 +505,14 @@ test("doctor reports exact checksums and actionable mismatch without exposing en
   assert.match(mismatch.join("\n"), /TOOL_MISMATCH tool=solc .*install=file-checksum:solc .*action=/);
 });
 
-function makeFixture() {
-  const root = mkdtempSync(join(tmpdir(), "agtmai-toolchain-test-"));
-  const artifacts = join(root, "artifacts");
-  const toolsRoot = join(root, "tools");
-  mkdirSync(artifacts);
-
-  const nodePayload = join(root, "node-payload", "node-test-linux-x64", "bin");
-  mkdirSync(nodePayload, { recursive: true });
-  writeExecutable(
-    join(nodePayload, "node"),
-    "#!/bin/sh\nif [ \"$#\" -ge 2 ]; then echo '11.24.0'; else echo 'v24.20.0'; fi\n",
-  );
-  const nodeArchive = join(artifacts, "node-test.tar.gz");
-  execFileSync("tar", ["-czf", nodeArchive, "-C", join(root, "node-payload"), "node-test-linux-x64"]);
-
-  const foundryPayload = join(root, "foundry-payload", "foundry-test-linux-x64");
-  mkdirSync(foundryPayload, { recursive: true });
-  for (const command of ["forge", "cast", "anvil", "chisel"]) {
-    writeExecutable(join(foundryPayload, command), `#!/bin/sh\necho '${command} Version: 1.8.0'\n`);
-  }
-  const foundryArchive = join(artifacts, "foundry-test.tar.gz");
-  execFileSync("tar", ["-czf", foundryArchive, "-C", join(root, "foundry-payload"), "foundry-test-linux-x64"]);
-
-  const solcArchive = join(artifacts, "solc-test");
-  writeExecutable(solcArchive, "#!/bin/sh\necho 'Version: 0.8.36+commit.8a079791.Linux.g++'\n");
-
-  const agavePayload = join(root, "agave-payload", "solana-release", "bin");
-  mkdirSync(agavePayload, { recursive: true });
-  const agaveVersions = {
-    solana: "solana-cli 4.2.1 (src:test; feat:test, client:Agave)",
-    "solana-keygen": "solana-keygen 4.2.1 (src:test; feat:test, client:Agave)",
-    "solana-test-validator": "solana-test-validator 4.2.1 (src:test; feat:test, client:Agave)",
-    "spl-token": "spl-token-cli 5.6.1",
-  };
-  for (const [command, version] of Object.entries(agaveVersions)) {
-    writeExecutable(join(agavePayload, command), `#!/bin/sh\necho '${version}'\n`);
-  }
-  const agaveArchive = join(artifacts, "agave-test.tar.bz2");
-  execFileSync("tar", ["-cjf", agaveArchive, "-C", join(root, "agave-payload"), "solana-release"]);
-
-  const pnpmPayload = join(root, "pnpm-payload", "package");
-  mkdirSync(join(pnpmPayload, "bin"), { recursive: true });
-  writeFileSync(join(pnpmPayload, "bin", "pnpm.cjs"), "process.stdout.write('11.24.0\\n');\n");
-  writeFileSync(join(pnpmPayload, "package.json"), '{"name":"pnpm","version":"11.24.0"}\n');
-  const pnpmArchive = join(artifacts, "pnpm-test.tgz");
-  execFileSync("tar", ["-czf", pnpmArchive, "-C", join(root, "pnpm-payload"), "package"]);
-
-  const definitions = {
-    node: artifact({ name: "node-test.tar.gz", path: nodeArchive, archive: "tar.gz", installDirectory: "node-test-linux-x64", expectedFiles: ["bin/node"], versionPath: "bin/node", pattern: "^v24\\.20\\.0$" }),
-    foundry: artifact({ name: "foundry-test.tar.gz", path: foundryArchive, archive: "tar.gz", installDirectory: "foundry-test-linux-x64", expectedFiles: ["forge", "cast", "anvil", "chisel"], versionPath: "forge", pattern: "^forge Version: 1\\.8\\.0$" }),
-    solc: artifact({ name: "solc-test", path: solcArchive, archive: "executable", installDirectory: "solc-test-linux-x64", expectedFiles: ["solc"], versionPath: "solc", pattern: "Version: 0\\.8\\.36\\+commit\\.8a079791\\." }),
-    agave: artifact({
-      name: "agave-test.tar.bz2",
-      path: agaveArchive,
-      archive: "tar.bz2",
-      installDirectory: "agave-test-linux-x64",
-      expectedFiles: Object.keys(agaveVersions).map((name) => `bin/${name}`),
-      versionPath: "bin/solana",
-      pattern: "^solana-cli 4\\.2\\.1 .*client:Agave\\)$",
-    }),
-  };
-  definitions.agave.versionChecks = Object.keys(agaveVersions).map((name) => ({
-    name,
-    path: `bin/${name}`,
-    args: ["--version"],
-    pattern: name === "spl-token"
-      ? "^spl-token-cli 5\\.6\\.1$"
-      : `^${name === "solana" ? "solana-cli" : name} 4\\.2\\.1 .*client:Agave\\)$`,
-  }));
-  definitions.agave.expectedFileSha256 = Object.fromEntries(
-    Object.keys(agaveVersions).map((name) => [`bin/${name}`, digest(join(agavePayload, name))]),
-  );
-  const lock = {
-    schemaVersion: 2,
-    platforms: ["darwin-arm64", "linux-x64"],
-    coreTools: ["node", "foundry", "solc"],
-    fixtureTools: ["agave"],
-    tools: {
-      node: coreTool("24.20.0", definitions.node),
-      foundry: coreTool("1.8.0", definitions.foundry),
-      solc: coreTool("0.8.36", definitions.solc),
-      pnpm: packageManagerTool(pnpmArchive),
-      typescript: packageTool("7.0.2"),
-      oxlint: packageTool("1.80.0"),
-      engineeringFoundation: packageTool("0.20.0"),
-      agave: {
-        scope: "local-solana-fixture",
-        enabledForCore: false,
-        version: "4.2.1",
-        splTokenVersion: "5.6.1",
-        sourceRelease: "https://github.com/anza-xyz/agave/releases/tag/v4.2.1",
-        platforms: { "darwin-arm64": definitions.agave, "linux-x64": definitions.agave },
-      },
-      ccipSdk: futureTool(),
-      ccipSolanaPrograms: futureTool(),
-    },
-    securityImages: { slither: securityImage() },
-  };
-  validateLock(lock);
-  return {
-    root,
-    toolsRoot,
-    lock,
-    downloader: (url, partFd) => {
-      writeSync(partFd, readFileSync(join(artifacts, basename(url))));
-      return 0;
-    },
-  };
-}
-
-
-
 test("toolchain subprocesses use a minimal environment and protected download parts", () => {
-  const source = readFileSync(join(repositoryRoot, "scripts/toolchain.mjs"), "utf8");
+  const executionSource = readFileSync(join(repositoryRoot, "scripts/toolchain-execution.mjs"), "utf8");
+  const source = [readFileSync(join(repositoryRoot, "scripts/toolchain.mjs"), "utf8"), executionSource]
+    .join("\n");
   assert.doesNotMatch(source, /env:\s*\{\s*\.\.\.process\.env/);
   assert.match(source, /O_NOFOLLOW/);
   assert.match(source, /O_EXCL/);
   assert.match(source, /nlink !== 1/);
   assert.match(source, /function minimalSubprocessEnv/);
+  assert.doesNotMatch(executionSource, /beforeSnapshotSpawn|rmSync\([^\n]+recursive/);
 });

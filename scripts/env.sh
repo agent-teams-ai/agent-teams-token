@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 if [[ -n "${ZSH_VERSION:-}" ]]; then
-  eval 'token_env_script=${(%):-%N}'
+  eval 'token_env_script=${(%):-%x}'
 else
   token_env_script=${BASH_SOURCE[0]}
 fi
@@ -11,7 +11,13 @@ token_env_main() {
   local token_env_node token_env_foundry token_env_solc token_env_agave token_env_package_bin
   local token_env_executable
   token_env_script=$1
-  token_env_repo_root=$(CDPATH='' cd -- "$(/usr/bin/dirname -- "$token_env_script")/.." && pwd)
+  [[ "$token_env_script" == */* ]] || token_env_script="./$token_env_script"
+  if [[ -L "$token_env_script" || ! -f "$token_env_script" ]]; then
+    printf 'TOOLCHAIN_ENV_SOURCE_IDENTITY_INVALID path=%s\n' "$token_env_script" >&2
+    unset -f token_env_main 2>/dev/null || unfunction token_env_main 2>/dev/null || true
+    return 1
+  fi
+  token_env_repo_root=$(CDPATH='' cd -P -- "${token_env_script%/*}/.." && pwd -P)
   token_env_tools_root="$token_env_repo_root/.tools"
   export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
   export COREPACK_ENABLE_PROJECT_SPEC=0

@@ -2,30 +2,18 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  closeSync,
-  fstatSync,
-  lstatSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-  writeSync,constants as fsConstants
+  chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync,
+  openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalizeTrustedPath, assertOwnedDirectoryChain } from "./toolchain-paths.mjs";
 import { validateLock } from "./toolchain-lock-validation.mjs";
+import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolchain-execution.mjs";
+import { pnpmWrapper, writePnpmWrapper } from "./toolchain-pnpm-wrapper.mjs";
 import { fileURLToPath } from "node:url";
 import { assertExpectedFileHashes, lockedFileMismatch } from "./toolchain-policy.mjs";
 
-export { canonicalizeTrustedPath, validateLock };
+export { canonicalizeTrustedPath, descriptorRoot, executeVerifiedFile, validateLock };
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const provenanceFile = ".agtmai-toolchain-install.json";
@@ -134,7 +122,7 @@ function fetchArtifact({ name, platform, artifact, target, downloader }) {
 }
 
 function verifiedCacheHash(path) {
-  try { return readVerifiedBytes(path).hash; } catch { return undefined; }
+  try { return readVerifiedBytes(path).hash; } catch { return; }
 }
 
 function downloadWithCurl(url, partFd) {
@@ -145,8 +133,9 @@ function downloadWithCurl(url, partFd) {
   ).status ?? 1;
 }
 
-function minimalSubprocessEnv() {
-  return { PATH: "/usr/bin:/bin", HOME: "/tmp", LANG: "C", LC_ALL: "C", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", COREPACK_ENABLE_PROJECT_SPEC: "0" };
+function minimalSubprocessEnv(executableDirectory) {
+  const path = executableDirectory ? `${executableDirectory}:/usr/bin:/bin` : "/usr/bin:/bin";
+  return { PATH: path, HOME: "/tmp", LANG: "C", LC_ALL: "C", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", COREPACK_ENABLE_PROJECT_SPEC: "0" };
 }
 
 export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "core", hostPlatform: host = process.platform }) {
@@ -265,7 +254,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
         : artifact.archive === "tar.bz2"
           ? ["-xjf", verifiedArchive, "-C", staged]
           : ["-xzf", verifiedArchive, "-C", staged];
-      execFileSync("/usr/bin/tar", args, { stdio: "pipe", env: minimalSubprocessEnv() });
+      execFileSync("/usr/bin/tar", ["--no-same-owner", ...args], { stdio: "pipe", env: minimalSubprocessEnv() });
     }
     const entries = readdirSync(staged);
     const source = entries.length === 1 && statSync(join(staged, entries[0])).isDirectory()
@@ -283,7 +272,7 @@ function atomicInstall({ name, tool, artifact, archive, destination, platform, t
       executePnpmVersionCheck({
         root: source,
         node: pinnedNode(lock, toolsRoot, platform),
-        pnpmHash: files["bin/pnpm.cjs"],
+        pnpmHash: sha256(containedPath(source, "dist/pnpm.mjs")),
         tool,
       });
     } else {
@@ -326,24 +315,16 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
   } catch {
     return { ok: false, code: "provenance-invalid", actualVersion: "unknown" };
   }
-  const provenanceKeys = ["artifactSha256", "files", "platform", "schemaVersion", "tool", "version"];
-  const fileKeys = typeof provenance.files === "object" && provenance.files !== null
-    ? Object.keys(provenance.files).sort()
-    : [];
-  if (
-    JSON.stringify(Object.keys(provenance).sort()) !== JSON.stringify(provenanceKeys)
-    || JSON.stringify(fileKeys) !== JSON.stringify([...artifact.expectedFiles].sort())
-    || fileKeys.some((key) => !/^[a-f0-9]{64}$/.test(provenance.files[key]))
-    || provenance.schemaVersion !== 1
-    || provenance.tool !== name
-    || provenance.version !== tool.version
-    || provenance.platform !== platform
-    || provenance.artifactSha256 !== artifact.sha256
-  ) {
+  if (!validProvenance({ provenance, artifact, name, platform, version: tool.version })) {
     return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
   }
+  const fileKeys = Object.keys(provenance.files).toSorted();
   let canonicalFiles;
-  try { canonicalFiles = canonicalArchiveFileHashes({ artifact, archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName) }); }
+  try { canonicalFiles = canonicalArchiveFileHashes({
+    artifact,
+    archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName),
+    paths: name === "pnpm" ? [...artifact.expectedFiles, "dist/pnpm.mjs"] : artifact.expectedFiles,
+  }); }
   catch { return { ok: false, code: "archive-provenance-unavailable", actualVersion: "unknown" }; }
   if (fileKeys.some((path) => provenance.files[path] !== canonicalFiles[path])) {
     return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
@@ -360,7 +341,7 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
       ? executePnpmVersionCheck({
           root: destination,
           node: pinnedNode(lock, toolsRoot, platform),
-          pnpmHash: canonicalFiles["bin/pnpm.cjs"],
+          pnpmHash: canonicalFiles["dist/pnpm.mjs"],
           tool,
         })
       : executeVersionChecks(destination, artifact, canonicalFiles);
@@ -374,6 +355,21 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
     }
   }
   return { ok: true, code: "ok", actualVersion: singleLine(actualVersion) };
+}
+
+function validProvenance({ provenance, artifact, name, platform, version }) {
+  if (typeof provenance !== "object" || provenance === null
+    || typeof provenance.files !== "object" || provenance.files === null) {return false;}
+  const provenanceKeys = ["artifactSha256", "files", "platform", "schemaVersion", "tool", "version"];
+  const fileKeys = Object.keys(provenance.files).toSorted();
+  return JSON.stringify(Object.keys(provenance).toSorted()) === JSON.stringify(provenanceKeys)
+    && JSON.stringify(fileKeys) === JSON.stringify(artifact.expectedFiles.toSorted())
+    && fileKeys.every((key) => /^[a-f0-9]{64}$/.test(provenance.files[key]))
+    && provenance.schemaVersion === 1
+    && provenance.tool === name
+    && provenance.version === version
+    && provenance.platform === platform
+    && provenance.artifactSha256 === artifact.sha256;
 }
 
 function inspectStableExpectedFile({ artifact, path, target, exists }) {
@@ -391,15 +387,15 @@ function inspectStableExpectedFile({ artifact, path, target, exists }) {
   } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) {closeSync(fd);} }
 }
 
-function canonicalArchiveFileHashes({ artifact, archive }) {
+function canonicalArchiveFileHashes({ artifact, archive, paths = artifact.expectedFiles }) {
   const bytes = verifyArchive({ name: "canonical", platform: "canonical", artifact, archive, missingCode: "TOOLCHAIN_ARCHIVE_MISSING" });
   if (artifact.archive === "executable") {return { [artifact.expectedFiles[0]]: createHash("sha256").update(bytes).digest("hex") };}
   const root = mkdtempSync(join(dirname(archive), ".inspect-archive-")); const snapshot = join(root, "archive");
   try {
     writeFileSync(snapshot, bytes, { mode: 0o600 });
-    execFileSync("/usr/bin/tar", [artifact.archive === "tar.xz" ? "-xJf" : artifact.archive === "tar.bz2" ? "-xjf" : "-xzf", snapshot, "-C", root], { stdio: "pipe", env: minimalSubprocessEnv() });
+    execFileSync("/usr/bin/tar", ["--no-same-owner", artifact.archive === "tar.xz" ? "-xJf" : artifact.archive === "tar.bz2" ? "-xjf" : "-xzf", snapshot, "-C", root], { stdio: "pipe", env: minimalSubprocessEnv() });
     const entries = readdirSync(root).filter((entry) => entry !== "archive"); const source = entries.length === 1 && statSync(join(root, entries[0])).isDirectory() ? join(root, entries[0]) : root;
-    return Object.fromEntries(artifact.expectedFiles.map((path) => [path, sha256(join(source, path))]));
+    return Object.fromEntries(paths.map((path) => [path, sha256(join(source, path))]));
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
@@ -414,104 +410,10 @@ function executePnpmVersionCheck({ root, node, pnpmHash, tool }) {
   if (packageJson.name !== "pnpm" || packageJson.version !== tool.version) {
     throw new Error(`pnpm-package-mismatch:actual=${packageJson.name}@${packageJson.version}`);
   }
-  const script = { path: containedPath(root, "bin/pnpm.cjs"), sha256: pnpmHash };
+  const script = { path: containedPath(root, "dist/pnpm.mjs"), sha256: pnpmHash };
   const actual = executeOpenedNode({ node, script, args: ["--version"] });
   if (actual !== tool.version) { throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`); }
   return `pnpm=${actual}`;
-}
-
-function pnpmWrapper() {
-  return "#!/usr/bin/env bash\n"
-    + "set -euo pipefail\n"
-    + "token_pnpm_tools_root=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE[0]}\")/..\" && pwd)\n"
-    + "token_pnpm_repo_root=$(CDPATH= cd -- \"$token_pnpm_tools_root/..\" && pwd)\n"
-    + "exec \"$token_pnpm_repo_root/scripts/bootstrap.sh\" run-pnpm \"$@\"\n";
-}
-
-function writePnpmWrapper({ toolsRoot, hostPlatform: host = process.platform }) {
-  toolsRoot = canonicalizeTrustedPath(toolsRoot, { platform: host });
-  const bin = containedPath(toolsRoot, "bin");
-  mkdirSync(bin, { recursive: true, mode: 0o700 });
-  assertOwnedDirectoryChain(bin, { platform: host });
-  const target = containedPath(bin, "pnpm"); const part = `${target}.part`;
-  if (existsSync(part)) {
-    const stale = lstatSync(part);
-    if (!stale.isFile() || stale.nlink !== 1) { throw new Error("TOOLCHAIN_PNPM_WRAPPER_PART_UNSAFE"); }
-    rmSync(part);
-  }
-  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
-  const fd = openSync(part, flags, 0o700);
-  try {
-    writeSync(fd, pnpmWrapper());
-    const identity = checkedRegularDescriptor(fd);
-    const check = lstatSync(part);
-    if (!sameIdentity(identity, check) || check.nlink !== 1) {
-      throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
-    }
-    renameSync(part, target);
-    const published = lstatSync(target);
-    if (!sameIdentity(identity, published) || published.nlink !== 1) {
-      throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
-    }
-  } finally {
-    closeSync(fd);
-  }
-  if (readVerifiedBytes(target).bytes.toString("utf8") !== pnpmWrapper()) {
-    throw new Error("TOOLCHAIN_PNPM_WRAPPER_IDENTITY_INVALID");
-  }
-}
-
-export function descriptorRoot(platform = process.platform) {
-  if (platform === "linux") { return "/proc/self/fd"; }
-  if (platform === "darwin") { return "/dev/fd"; }
-  throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED platform=${platform}`);
-}
-
-function openExpectedFile(path, expectedHash) {
-  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-  try {
-    const identity = checkedRegularDescriptor(fd); const actual = hashDescriptor(fd);
-    if (actual !== expectedHash) { throw new Error(`TOOLCHAIN_EXECUTABLE_CHECKSUM expected=${expectedHash} actual=${actual}`); }
-    return { fd, identity, path };
-  } catch (error) { closeSync(fd); throw error; }
-}
-
-function assertPathStillIdentifies(opened) {
-  const current = lstatSync(opened.path);
-  if (current.nlink !== 1 || !sameIdentity(opened.identity, current)) { throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED"); }
-}
-
-function checkedSpawn(result) {
-  if (result.error) { throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED cause=${result.error.code ?? "unknown"}`); }
-  if (result.status !== 0) { throw new Error(`TOOLCHAIN_VERSION_COMMAND_FAILED status=${result.status} stderr=${singleLine(result.stderr)}`); }
-  return String(result.stdout).trim();
-}
-
-export function executeVerifiedFile({ path, expectedSha256, args = [], beforeSpawn }) {
-  const opened = openExpectedFile(path, expectedSha256);
-  try {
-    beforeSpawn?.(); assertPathStillIdentifies(opened);
-    return checkedSpawn(spawnSync(`${descriptorRoot()}/3`, args, {
-      encoding: "utf8", env: minimalSubprocessEnv(), stdio: ["ignore", "pipe", "pipe", opened.fd], timeout: 15_000,
-    }));
-  } finally { closeSync(opened.fd); }
-}
-
-function executeOpenedNode({ node, script, args, stdio = "pipe" }) {
-  const openedNode = openExpectedFile(node.path, node.sha256); const openedScript = openExpectedFile(script.path, script.sha256);
-  try {
-    assertPathStillIdentifies(openedNode); assertPathStillIdentifies(openedScript);
-    const root = descriptorRoot(); const inherited = stdio === "inherit" ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"];
-    const result = spawnSync(`${root}/3`, [`${root}/4`, ...args], {
-      encoding: stdio === "inherit" ? undefined : "utf8", env: minimalSubprocessEnv(), stdio: [...inherited, openedNode.fd, openedScript.fd],
-      timeout: stdio === "inherit" ? undefined : 15_000,
-    });
-    if (stdio === "inherit") {
-      if (result.error) { throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED cause=${result.error.code ?? "unknown"}`); }
-      return result.status ?? 1;
-    }
-    return checkedSpawn(result);
-  } finally { closeSync(openedScript.fd); closeSync(openedNode.fd); }
 }
 
 function executeVersionChecks(root, artifact, hashes) {
@@ -571,12 +473,14 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
   const pnpmHashes = canonicalArchiveFileHashes({
     artifact: pnpmTool,
     archive: containedPath(join(toolsRoot, "downloads"), pnpmTool.archiveName),
+    paths: [...pnpmTool.expectedFiles, "dist/pnpm.mjs"],
   });
   return executeOpenedNode({
     node: pinnedNode(lock, toolsRoot, platform),
-    script: { path: containedPath(containedPath(toolsRoot, pnpmTool.installDirectory), "bin/pnpm.cjs"), sha256: pnpmHashes["bin/pnpm.cjs"] },
+    script: { path: containedPath(containedPath(toolsRoot, pnpmTool.installDirectory), "dist/pnpm.mjs"), sha256: pnpmHashes["dist/pnpm.mjs"] },
     args,
     stdio: "inherit",
+    subprocessPath: [containedPath(toolsRoot, "bin")],
   });
 }
 
