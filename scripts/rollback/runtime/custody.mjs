@@ -29,6 +29,22 @@ export const CUSTODY_IDENTITY_FIELDS = Object.freeze([
 
 const descriptorRecords = new Map();
 const custodyRecords = new WeakMap();
+let directoryAcquisitionBoundary = () => {};
+
+export function setCustodyDirectoryAcquisitionBoundaryForTest(implementation) {
+  if (typeof implementation !== "function") {
+    throw new Error("ROLLBACK_CUSTODY_ACQUISITION_BOUNDARY_INVALID");
+  }
+  const previous = directoryAcquisitionBoundary;
+  directoryAcquisitionBoundary = implementation;
+  let restored = false;
+  return () => {
+    if (!restored) {
+      restored = true;
+      directoryAcquisitionBoundary = previous;
+    }
+  };
+}
 
 export function custodyKind(stat) {
   if (stat.isDirectory() && !stat.isSymbolicLink()) {
@@ -139,15 +155,19 @@ function flags(kind, write = false) {
     | (kind === "directory" ? constants.O_DIRECTORY : 0);
 }
 
-function openDirectoryRecord(path) {
+function openDirectoryRecord(path, options = {}) {
   const identity = custodyIdentity(lstatSync(path, { bigint: true }));
   let descriptor = openSync(path, flags("directory"));
   try {
+    directoryAcquisitionBoundary({ descriptor, path });
     if (identity.kind !== "directory") {
       throw new Error("ROLLBACK_CUSTODY_NOT_DIRECTORY");
     }
-    assertCustodyIdentity(identity, fstatSync(descriptor, { bigint: true }));
-    assertCustodyIdentity(identity, lstatSync(path, { bigint: true }));
+    const assertIdentity = options.ancestor === true
+      ? assertCustodyStableObject
+      : assertCustodyIdentity;
+    assertIdentity(identity, fstatSync(descriptor, { bigint: true }));
+    assertIdentity(identity, lstatSync(path, { bigint: true }));
     const result = { canonicalPath: path, descriptor, identity };
     descriptor = undefined;
     return result;
@@ -169,7 +189,7 @@ function ancestorsOf(path) {
   const records = [];
   try {
     for (const ancestorPath of paths.toReversed()) {
-      records.push(openDirectoryRecord(ancestorPath));
+      records.push(openDirectoryRecord(ancestorPath, { ancestor: true }));
     }
     return records;
   } catch (error) {

@@ -5,6 +5,8 @@ import {
   fstatSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -20,7 +22,9 @@ import {
   preflightCleanupTree,
 } from "../rollback/runtime/cleanup-tree.mjs";
 import {
+  closeDirectoryCustody,
   createDirectoryCustody,
+  setCustodyDirectoryAcquisitionBoundaryForTest,
 } from "../rollback/runtime/custody.mjs";
 import {
   closeRollbackRemovalQuarantine,
@@ -239,11 +243,93 @@ test("cleanup recursion attempts its remaining descriptor after close EINTR", ()
   }
 });
 
+test("custody acquisition accepts ordinary sibling churn on an unchanged ancestor", () => {
+  const boundary = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-custody-ancestor-churn-")));
+  chmodSync(boundary, 0o700);
+  const target = join(boundary, "owned");
+  const sibling = join(boundary, "ordinary-sibling");
+  mkdirSync(target, { mode: 0o700 });
+  const restoreBoundary = setCustodyDirectoryAcquisitionBoundaryForTest(({ path }) => {
+    if (path === boundary) {
+      mkdirSync(sibling);
+    }
+  });
+  let custody;
+  try {
+    custody = createDirectoryCustody(target, {
+      allowDarwinTemporaryAlias: true,
+      owned: true,
+    });
+    assert.equal(custody.canonicalPath, target);
+  } finally {
+    restoreBoundary();
+    closeDirectoryCustody(custody);
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
+
+test("custody acquisition rejects ancestor replacement after opening it", () => {
+  const boundary = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-custody-ancestor-replacement-")));
+  const displaced = boundary + "-displaced";
+  chmodSync(boundary, 0o700);
+  const target = join(boundary, "owned");
+  mkdirSync(target, { mode: 0o700 });
+  const restoreBoundary = setCustodyDirectoryAcquisitionBoundaryForTest(({ path }) => {
+    if (path === boundary) {
+      renameSync(boundary, displaced);
+      mkdirSync(boundary, { mode: 0o700 });
+    }
+  });
+  try {
+    assert.throws(
+      () => createDirectoryCustody(target, {
+        allowDarwinTemporaryAlias: true,
+        owned: true,
+      }),
+      { message: "ROLLBACK_CUSTODY_SUBSTITUTED" },
+    );
+  } finally {
+    restoreBoundary();
+    rmSync(boundary, { recursive: true, force: true });
+    rmSync(displaced, { recursive: true, force: true });
+  }
+});
+
+test("custody acquisition retains the owned target's full metadata snapshot", () => {
+  const boundary = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-custody-target-churn-")));
+  chmodSync(boundary, 0o700);
+  const target = join(boundary, "owned");
+  mkdirSync(target, { mode: 0o700 });
+  const restoreBoundary = setCustodyDirectoryAcquisitionBoundaryForTest(({ path }) => {
+    if (path === target) {
+      mkdirSync(join(target, "ordinary-child"));
+    }
+  });
+  try {
+    assert.throws(
+      () => createDirectoryCustody(target, {
+        allowDarwinTemporaryAlias: true,
+        owned: true,
+      }),
+      { message: "ROLLBACK_CUSTODY_SUBSTITUTED" },
+    );
+  } finally {
+    restoreBoundary();
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
+
 test("custody acquisition attempts target and every ancestor after middle close EINTR", () => {
-  const boundary = mkdtempSync(join(tmpdir(), "agtmai-custody-acquisition-"));
+  const boundary = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-custody-acquisition-")));
   chmodSync(boundary, 0o700);
   const target = join(boundary, "not-private");
+  const sibling = join(boundary, "ordinary-sibling");
   mkdirSync(target, { mode: 0o755 });
+  const restoreBoundary = setCustodyDirectoryAcquisitionBoundaryForTest(({ path }) => {
+    if (path === boundary) {
+      mkdirSync(sibling);
+    }
+  });
   const injection = injectedUncertainClose(1);
   try {
     assert.throws(
@@ -259,6 +345,7 @@ test("custody acquisition attempts target and every ancestor after middle close 
     );
   } finally {
     injection.restore();
+    restoreBoundary();
   }
   const reusedDescriptor = injection.reusedDescriptor();
   try {
