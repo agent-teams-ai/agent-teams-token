@@ -7,7 +7,7 @@ import { canonicalJson, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
-import { checkedCommand, command, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
+import { checkedCommand, command, CommandExitError, CommandSpawnError, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
 import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
 import { atomicWrite, ensurePrivateDirectory, ensurePrivateDirectoryPath, readRegularFile } from "./safe-fs.ts";
@@ -99,11 +99,11 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     await options.solcLifecycleHook?.("before-forge", solc);
     solc.assertReady();
     try {
-      await checkedSolcExecution("forge", [
+      await checkedForgeBuild("forge", [
         "build", "--out", forgeOutput,
         "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", forgeCache,
         "--use", solc.path,
-      ], { cwd: contractsRoot, code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: commandAbort.signal, timeoutMs: 60_000 });
+      ], solc.path, { cwd: contractsRoot, code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: commandAbort.signal, timeoutMs: 60_000 });
     } finally {solc.assertReady();}
     const artifactPath = join(forgeOutput, "AGTMAIToken.sol", "AGTMAIToken.json");
     const artifactBytes = await readRegularFile(artifactPath, "CONTRACT_ARTIFACT");
@@ -215,13 +215,45 @@ export async function checkedSolcExecution(
   try {
     return await checkedCommand(executable, arguments_, options);
   } catch (cause) {
-    const code = (cause as NodeJS.ErrnoException).code;
-    const message = cause instanceof Error ? cause.message : "";
-    if (code === "EACCES" || code === "EPERM" || /(?:permission denied|operation not permitted|os error (?:1|13))/iu.test(message)) {
-      throw new LocalEvmError("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE", "authenticated solc custody does not permit executable mappings");
+    if (isSolcSpawnPermissionFailure(cause)) {
+      throw new LocalEvmError("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE", "authenticated solc custody does not permit executable mappings", {cause});
     }
     throw cause;
   }
+}
+
+export function isSolcSpawnPermissionFailure(cause: unknown): boolean {
+  return cause instanceof CommandSpawnError && (cause.errnoCode === "EACCES" || cause.errnoCode === "EPERM");
+}
+
+export async function checkedForgeBuild(
+  executable: string,
+  arguments_: readonly string[],
+  solcPath: string,
+  options: {readonly cwd?: string; readonly code: string; readonly signal: AbortSignal; readonly timeoutMs?: number},
+): ReturnType<typeof checkedCommand> {
+  try {
+    return await checkedCommand(executable, arguments_, options);
+  } catch (cause) {
+    if (isExactForgeSolcLaunchFailure(cause, executable, solcPath)) {
+      throw new LocalEvmError("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE", "authenticated solc custody does not permit executable mappings", {cause});
+    }
+    if (cause instanceof CommandExitError) {throw cause;}
+    if (cause instanceof CommandSpawnError) {
+      throw new LocalEvmError(options.code, "Forge build process could not be executed", {cause});
+    }
+    throw cause;
+  }
+}
+
+function isExactForgeSolcLaunchFailure(cause: unknown, forgeExecutable: string, solcPath: string): boolean {
+  if (!(cause instanceof CommandExitError) || cause.executable !== forgeExecutable) {return false;}
+  const quotedPath = JSON.stringify(solcPath);
+  const expected = new Set([
+    `Error: ${quotedPath}: Permission denied (os error 13)`,
+    `Error: ${quotedPath}: Operation not permitted (os error 1)`,
+  ]);
+  return cause.stderr.split(/\r?\n/u).some((line) => expected.has(line));
 }
 
 function parseWallet(output: string): { address: `0x${string}`; privateKey: `0x${string}` } {

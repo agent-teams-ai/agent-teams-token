@@ -8,8 +8,8 @@ export const APPROVED_SOURCE_SHA256 = "0xeae1b3bbeeb2d31168592805970abe03baa2775
 export class LocalEvmError extends Error {
   readonly code: string;
 
-  constructor(code: string, message: string) {
-    super(message);
+  constructor(code: string, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "LocalEvmError";
     this.code = code;
   }

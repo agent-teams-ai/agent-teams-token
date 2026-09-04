@@ -82,10 +82,11 @@ function heldPinnedSolc(path: string, fd: number, identity: Stats, expectedBytes
         || !sameSnapshotMetadata(held, fstatSync(fd))) {snapshotInvalid();}
       let currentFd: number | undefined;
       try {
+        const current = lstatSync(path);
+        assertSnapshotPathMetadata(current);
         currentFd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         const before = fstatSync(currentFd);
-        const current = lstatSync(path);
-        if (!sameSnapshotMetadata(identity, before) || !sameSnapshotMetadata(identity, current) || current.isSymbolicLink()) {snapshotInvalid();}
+        if (!sameSnapshotMetadata(identity, before) || !sameSnapshotMetadata(identity, current)) {snapshotInvalid();}
         const currentBytes = readDescriptor(currentFd, before.size);
         const after = fstatSync(currentFd);
         if (!sameSnapshotMetadata(before, after) || !currentBytes.equals(expectedBytes)
@@ -123,6 +124,16 @@ function sameSnapshotMetadata(expected: Stats, actual: Stats): boolean {
   return expected.isFile() && actual.isFile() && expected.dev === actual.dev && expected.ino === actual.ino
     && expected.uid === actual.uid && expected.size === actual.size && expected.nlink === 1 && actual.nlink === 1 && expected.mtimeMs === actual.mtimeMs && expected.ctimeMs === actual.ctimeMs
     && (expected.mode & 0o777) === 0o500 && (actual.mode & 0o777) === 0o500;
+}
+
+export function isSecureSolcSnapshotMetadata(snapshot: Stats): boolean {
+  return snapshot.isFile() && !snapshot.isSymbolicLink() && (snapshot.mode & 0o777) === 0o500 && snapshot.nlink === 1;
+}
+
+function assertSnapshotPathMetadata(snapshot: Stats): void {
+  if (!isSecureSolcSnapshotMetadata(snapshot)) {
+    snapshotInvalid();
+  }
 }
 
 export function assertPinnedSolcSha256(bytes: Uint8Array, expectedSha256: string): void {

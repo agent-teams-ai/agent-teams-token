@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { test } from "node:test";
-import { checkedSolcExecution } from "../runner.ts";
+import { CommandExitError, CommandSpawnError } from "../process.ts";
+import { checkedForgeBuild, checkedSolcExecution, isSolcSpawnPermissionFailure } from "../runner.ts";
 import {
   assertPinnedSolcSha256,
   assertPinnedSolcVersionOutput,
   containsAsciiControlCharacter,
+  isSecureSolcSnapshotMetadata,
   pinnedSolc,
 } from "../toolchain.ts";
 
@@ -28,7 +30,15 @@ test("local EVM build selects an authenticated snapshot inside caller-owned cust
   assert.equal(isAbsolute(path), true);
   assert.equal(path.startsWith(`${custody}/authenticated-solc-`), true);
   assert.equal(path.endsWith("/solc"), true);
+  const snapshot = lstatSync(path);
+  assert.equal(snapshot.isFile(), true);
+  assert.equal(snapshot.isSymbolicLink(), false);
+  assert.equal(snapshot.mode & 0o777, 0o500);
+  assert.equal(snapshot.nlink, 1);
   assert.deepEqual(readdirSync(join(repositoryRoot, ".tools", `solc-v0.8.36-${platform}`)), installEntries);
+  solc.close();
+  solc.close();
+  assert.throws(() => solc.assertReady(), hasCode("LOCAL_EVM_SOLC_SNAPSHOT_INVALID"));
 });
 
 test("same-version solc substitution is rejected by the exact platform SHA-256", (context) => {
@@ -70,6 +80,23 @@ test("unsafe and symlink solc snapshot custody are rejected before use", (contex
   }
 });
 
+test("snapshot metadata requires a regular exact-0500 single-link file", (context) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-solc-snapshot-metadata-")));
+  context.after(() => rmSync(root, {recursive: true, force: true}));
+  const snapshot = join(root, "snapshot");
+  const link = join(root, "snapshot-link");
+  writeFileSync(snapshot, "authenticated bytes", {mode: 0o500});
+  assert.equal(isSecureSolcSnapshotMetadata(lstatSync(snapshot)), true);
+  chmodSync(snapshot, 0o700);
+  assert.equal(isSecureSolcSnapshotMetadata(lstatSync(snapshot)), false);
+  chmodSync(snapshot, 0o500);
+  linkSync(snapshot, link);
+  assert.equal(isSecureSolcSnapshotMetadata(lstatSync(snapshot)), false);
+  rmSync(link);
+  symlinkSync(snapshot, link);
+  assert.equal(isSecureSolcSnapshotMetadata(lstatSync(link)), false);
+});
+
 test("canonical private custody rejects aliases, public modes, and physical .tools descendants", {
   skip: existsSync(installed) ? false : "pinned solc is not installed",
 }, (context) => {
@@ -97,39 +124,88 @@ test("canonical private custody rejects aliases, public modes, and physical .too
   assert.equal(before.some((entry) => entry.includes("authenticated-solc-")), false);
 });
 
-test("held path execution rejects injected replacement while retaining the explicit same-UID final-exec boundary", {
+test("held path execution rejects the complete replacement matrix while retaining the explicit same-UID final-exec boundary", {
   skip: existsSync(installed) ? false : "pinned solc is not installed",
 }, (context) => {
   const custody = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-solc-replacement-")));
   const marker = join(custody, "decoy-called");
   context.after(() => rmSync(custody, {recursive: true, force: true}));
-  const exercise = (phase: string, authenticateFirst: boolean): void => {
+  const exercise = (phase: string, authenticateFirst: boolean, attack: "symlink" | "hardlink" | "replacement"): void => {
     const solc = pinnedSolc(repositoryRoot, custody);
     try {
       if (authenticateFirst) {solc.assertReady();}
       const original = `${solc.path}.${phase}.held`;
-      const injectedHook = (): void => {
+      const decoy = `${solc.path}.${phase}.${attack}.decoy`;
+      writeFileSync(decoy, `#!/bin/sh\nprintf x >> "${marker}"\n`, {mode: 0o500});
+      if (attack === "hardlink") {
+        linkSync(solc.path, `${solc.path}.${phase}.link`);
+        assert.equal(isSecureSolcSnapshotMetadata(lstatSync(solc.path)), false);
+      } else {
         renameSync(solc.path, original);
-        writeFileSync(solc.path, `#!/bin/sh\nprintf x >> "${marker}"\n`, {mode: 0o500});
-      };
-      injectedHook();
+        if (attack === "symlink") {symlinkSync(decoy, solc.path);}
+        else {writeFileSync(solc.path, readFileSync(decoy), {mode: 0o500});}
+      }
       assert.throws(() => solc.assertReady(), hasCode("LOCAL_EVM_SOLC_SNAPSHOT_INVALID"));
       assert.equal(existsSync(marker), false, "the marker decoy received zero calls");
     } finally {solc.close();}
   };
-  exercise("before-version", false);
-  exercise("before-forge", true);
+  for (const [phase, authenticateFirst] of [["before-version", false], ["before-forge", true]] as const) {
+    for (const attack of ["symlink", "hardlink", "replacement"] as const) {exercise(phase, authenticateFirst, attack);}
+  }
 });
 
-test("unexecutable solc reports one stable custody diagnostic", async (context) => {
+test("direct solc maps only raw EACCES and EPERM spawn errors", async (context) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-solc-noexec-")));
   context.after(() => rmSync(root, {recursive: true, force: true}));
   const executable = join(root, "solc");
   writeFileSync(executable, "#!/bin/sh\nexit 0\n", {mode: 0o400});
   await assert.rejects(checkedSolcExecution(executable, ["--version"], {
     code: "IGNORED", signal: new AbortController().signal,
-  }), hasCode("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE"));
+  }), hasCodeWithCauseKind("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE", "spawn"));
+  const eperm = Object.assign(new Error("synthetic raw spawn failure"), {code: "EPERM"});
+  assert.equal(isSolcSpawnPermissionFailure(new CommandSpawnError(executable, eperm)), true);
+  assert.equal(isSolcSpawnPermissionFailure(Object.assign(new Error("permission denied (os error 13)"), {code: "OTHER"})), false);
 });
+
+test("Forge maps only the exact selected child-solc launch failure", async (context) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-forge-classification-")));
+  context.after(() => rmSync(root, {recursive: true, force: true}));
+  const forge = join(root, "forge");
+  const selectedSolc = join(root, "selected-solc");
+  const signal = new AbortController().signal;
+  const run = async (stderr: string): Promise<unknown> => {
+    writeFileSync(forge, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stderr)} >&2\nexit 1\n`, {mode: 0o700});
+    return await checkedForgeBuild(forge, [], selectedSolc, {code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal});
+  };
+  for (const message of ["Permission denied (os error 13)", "Operation not permitted (os error 1)"]) {
+    await assert.rejects(run(`Error: "${selectedSolc}": ${message}`), hasCodeWithCauseKind("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE", "exit"));
+  }
+  for (const stderr of [
+    "unrelated Forge error: permission denied",
+    "unrelated Forge error: operation not permitted",
+    "unrelated Forge error: os error 1",
+    "unrelated Forge error: os error 13",
+    `Error: "${join(root, "other-solc")}": Permission denied (os error 13)`,
+  ]) {
+    await assert.rejects(run(stderr), (cause: unknown) => cause instanceof CommandExitError
+      && cause.kind === "exit" && cause.code === "LOCAL_EVM_FORGE_BUILD_FAILED");
+  }
+});
+
+test("an unexecutable Forge remains a Forge build failure", async (context) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-forge-noexec-")));
+  context.after(() => rmSync(root, {recursive: true, force: true}));
+  const forge = join(root, "forge");
+  writeFileSync(forge, "#!/bin/sh\nexit 0\n", {mode: 0o400});
+  await assert.rejects(checkedForgeBuild(forge, [], join(root, "selected-solc"), {
+    code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: new AbortController().signal,
+  }), hasCodeWithCauseKind("LOCAL_EVM_FORGE_BUILD_FAILED", "spawn"));
+});
+
+function hasCodeWithCauseKind(code: string, kind: "spawn" | "exit"): (cause: unknown) => boolean {
+  return (cause: unknown) => cause instanceof Error && "code" in cause && cause.code === code
+    && cause.cause instanceof Error && "kind" in cause.cause && cause.cause.kind === kind;
+}
 
 function hasCode(code: string): (cause: unknown) => boolean {
   return (cause: unknown) => cause instanceof Error && "code" in cause && cause.code === code;

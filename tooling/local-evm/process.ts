@@ -10,6 +10,36 @@ export interface CommandResult {
   readonly exitCode: number;
 }
 
+export class CommandSpawnError extends Error {
+  readonly kind = "spawn";
+  readonly executable: string;
+  readonly errnoCode: string | undefined;
+
+  constructor(executable: string, cause: Error & { readonly code?: string }) {
+    super(`failed to spawn ${executable}: ${cause.message}`, {cause});
+    this.name = "CommandSpawnError";
+    this.executable = executable;
+    this.errnoCode = cause.code;
+  }
+}
+
+export class CommandExitError extends LocalEvmError {
+  readonly kind = "exit";
+  readonly executable: string;
+  readonly exitCode: number;
+  readonly #stderr: string;
+
+  constructor(executable: string, result: CommandResult, code: string) {
+    super(code, `${executable} exited ${result.exitCode}: ${redact(result.stderr)}`);
+    this.name = "CommandExitError";
+    this.executable = executable;
+    this.exitCode = result.exitCode;
+    this.#stderr = result.stderr;
+  }
+
+  get stderr(): string {return this.#stderr;}
+}
+
 interface CommandOptions {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
@@ -61,7 +91,7 @@ export async function command(
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });
     child.stderr.on("data", (chunk: string) => { stderr += chunk; });
     child.stdin.on("error", () => {});
-    child.once("error", (cause) => { cleanup(); reject(cause); });
+    child.once("error", (cause) => { cleanup(); reject(new CommandSpawnError(executable, cause)); });
     child.once("close", (code) => {
       if (terminating) {return;}
       cleanup();
@@ -80,7 +110,7 @@ export async function checkedCommand(
 ): Promise<CommandResult> {
   const result = await command(executable, arguments_, options);
   if (result.exitCode !== 0) {
-    throw new LocalEvmError(options.code ?? "LOCAL_EVM_COMMAND_FAILED", `${executable} exited ${result.exitCode}: ${redact(result.stderr)}`);
+    throw new CommandExitError(executable, result, options.code ?? "LOCAL_EVM_COMMAND_FAILED");
   }
   return result;
 }

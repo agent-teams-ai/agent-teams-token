@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { after, test } from "node:test";
 import type { Readable } from "node:stream";
 import { privateRunRoot, runLocalEvm } from "../runner.ts";
-import { existsSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { authenticateProcess, processStartIdentity } from "../process.ts";
 
 const repositoryRoot = realpathSync(resolvePath(import.meta.dirname, "../../.."));
@@ -21,22 +21,30 @@ after(async () => {
   for (const path of generatedReports) {await rm(path, { recursive: true, force: true });}
 });
 
-test("runner rejects injected solc identity replacement before each execution", {timeout: 90_000}, async (context) => {
+test("runner rejects every solc replacement class before each execution", {timeout: 90_000}, async (context) => {
   for (const phase of ["after-authentication", "before-forge"] as const) {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), `agtmai-runner-solc-${phase}-`)));
-    context.after(() => rmSync(root, {recursive: true, force: true}));
-    const marker = join(root, "decoy-called");
-    await assert.rejects(runLocalEvm({
-      repositoryRoot,
-      solcLifecycleHook(point, solc): void {
-        if (point !== phase) {return;}
-        renameSync(solc.path, `${solc.path}.held`);
-        writeFileSync(solc.path, `#!/bin/sh\nprintf x >> "${marker}"\n`, {mode: 0o500});
-      },
-    }), (cause: unknown) => cause instanceof Error && "code" in cause
-      && cause.code === "LOCAL_EVM_SOLC_SNAPSHOT_INVALID");
-    assert.equal(existsSync(marker), false, `${phase} marker decoy received zero calls`);
-    await assertNoPrivateRunDirectories();
+    for (const attack of ["symlink", "hardlink", "replacement"] as const) {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), `agtmai-runner-solc-${phase}-${attack}-`)));
+      context.after(() => rmSync(root, {recursive: true, force: true}));
+      const marker = join(root, "decoy-called");
+      await assert.rejects(runLocalEvm({
+        repositoryRoot,
+        solcLifecycleHook(point, solc): void {
+          if (point !== phase) {return;}
+          const decoy = join(root, "decoy-solc");
+          writeFileSync(decoy, `#!/bin/sh\nprintf x >> "${marker}"\n`, {mode: 0o500});
+          if (attack === "hardlink") {linkSync(solc.path, join(root, "snapshot-hardlink"));}
+          else {
+            renameSync(solc.path, `${solc.path}.held`);
+            if (attack === "symlink") {symlinkSync(decoy, solc.path);}
+            else {writeFileSync(solc.path, `#!/bin/sh\nprintf x >> "${marker}"\n`, {mode: 0o500});}
+          }
+        },
+      }), (cause: unknown) => cause instanceof Error && "code" in cause
+        && cause.code === "LOCAL_EVM_SOLC_SNAPSHOT_INVALID");
+      assert.equal(existsSync(marker), false, `${phase} ${attack} marker decoy received zero calls`);
+      await assertNoPrivateRunDirectories();
+    }
   }
 });
 
