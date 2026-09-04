@@ -151,7 +151,7 @@ async function readCanonicalInputs(directory: string, schemaDirectory: string): 
   const targets = uniqueStrings(manifest.expectedContracts, "manifest.expectedContracts");
   const sourcePaths = uniqueStrings(array(manifest.sources, "manifest.sources").map((entry) => object(entry, "source").path), "manifest source paths");
   const sources = sourcePaths.map((path) => path.replace(/^contracts\/evm\//u, ""));
-  const manifestTargets = array(manifest.targets, "manifest.targets").map((entry) => {const target=object(entry, "manifest target"); assertExactKeys(target,["path","contract"],"manifest target"); assertStrictRelativePath(stringValue(target.path)); if(!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(stringValue(target.contract))) throw invalid("manifest contract is unsafe"); return target;});
+  const manifestTargets = array(manifest.targets, "manifest.targets").map((entry) => {const target=object(entry, "manifest target"); assertExactKeys(target,["path","contract"],"manifest target"); assertStrictRelativePath(stringValue(target.path)); if(!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(stringValue(target.contract))) {throw invalid("manifest contract is unsafe");} return target;});
   if (manifestTargets.length === 0 || manifestTargets.some((entry) => !targets.includes(stringValue(entry.contract))
     || !sourcePaths.includes(stringValue(entry.path)))) {throw invalid("canonical target manifest is malformed");}
   const closure = [
@@ -170,7 +170,7 @@ async function readCanonicalInputs(directory: string, schemaDirectory: string): 
   }
   const vulnerable = object(manifest.vulnerableFixture, "vulnerable fixture"); assertExactKeys(vulnerable,["source","creationBytecodeSha256"],"vulnerable fixture");
   const fixtureSource=object(vulnerable.source,"vulnerable fixture source"); assertExactKeys(fixtureSource,["path","sha256"],"vulnerable fixture source"); assertStrictRelativePath(stringValue(fixtureSource.path));
-  const fixtureBytes=await readStableCanonicalFile(join(canonicalBase,stringValue(fixtureSource.path)),"vulnerable fixture source"); if(hex(fixtureBytes)!==fixtureSource.sha256) throw invalid("vulnerable fixture source pin differs");
+  const fixtureBytes=await readStableCanonicalFile(join(canonicalBase,stringValue(fixtureSource.path)),"vulnerable fixture source"); if(hex(fixtureBytes)!==fixtureSource.sha256) {throw invalid("vulnerable fixture source pin differs");}
   const detectorEntry = object(manifest.detectorInventory, "manifest.detectorInventory");
   const acceptedDetectorBytes = await readStableCanonicalFile(join(canonicalBase, stringValue(detectorEntry.path)), "detector inventory");
   if (hex(acceptedDetectorBytes) !== detectorEntry.sha256) {throw invalid("canonical detector inventory hash differs from manifest");}
@@ -303,21 +303,21 @@ async function deriveCompiler(output: string, manifest: JsonObject): Promise<{co
   if (compiler.creationBytecodeSha256 !== `sha256:${manifest.creationBytecodeSha256}` || fixtureBuild.creationBytecodeSha256 !== `sha256:${vulnerable.creationBytecodeSha256}` || !array(fixtureBuild.sourceHashes,"fixture source hashes").some((item)=>{const entry=object(item,"fixture source hash");return entry.path==="src/Vulnerable.sol"&&entry.sha256===`sha256:${fixtureSource.sha256}`;})) {throw invalid("compiler creation bytecode differs from manifest pins");}
   const expectedSources=new Map(array(manifest.sources,"manifest sources").map((item)=>{const entry=object(item,"source"); return [stringValue(entry.path).replace(/^contracts\/evm\//u,""),`sha256:${entry.sha256}`] as const;}));
   const observed=array(compiler.sourceHashes,"compiler source hashes").map((item)=>object(item,"source hash"));
-  if(observed.length!==expectedSources.size || observed.some((entry)=>expectedSources.get(stringValue(entry.path))!==entry.sha256)) throw invalid("compiler per-source hashes differ from the pinned closure");
+  if(observed.length!==expectedSources.size || observed.some((entry)=>expectedSources.get(stringValue(entry.path))!==entry.sha256)) {throw invalid("compiler per-source hashes differ from the pinned closure");}
   return {compiler,fixture:{sourceSha256:`sha256:${fixtureSource.sha256}`,buildInfoSha256:fixtureBuild.buildInfoSha256,artifactSha256:fixtureBuild.artifactSha256,abiSha256:fixtureBuild.abiSha256,creationBytecodeSha256:fixtureBuild.creationBytecodeSha256}};
 }
 async function deriveOneBuild(output:string,buildName:string,artifactName:string,sourceName:string,contractName:string):Promise<JsonObject>{
   const buildBytes=await readStableOutputFile(join(output,buildName)); const artifactBytes=await readStableOutputFile(join(output,artifactName));
   const build=object(parseJsonWithoutDuplicateKeys(buildBytes.toString("utf8")),buildName); const input=object(build.input,"compiler input"); const settings=object(input.settings,"compiler settings");
   const optimizer=object(settings.optimizer,"optimizer"); const metadata=object(settings.metadata,"metadata"); const libraries=object(settings.libraries,"libraries"); const remappings=array(settings.remappings,"remappings").map(stringValue).toSorted();
-  if(build.solcVersion!=="0.8.36+commit.8a079791"||settings.evmVersion!=="paris"||optimizer.enabled!==true||optimizer.runs!==200||metadata.bytecodeHash!=="ipfs"||metadata.appendCBOR!==true||metadata.useLiteralContent!==false||settings.viaIR!==false||settings.experimental!==false||Object.keys(libraries).length!==0||JSON.stringify(remappings)!==JSON.stringify(["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])) throw invalid("raw compiler settings differ from the pinned profile");
+  if(build.solcVersion!=="0.8.36+commit.8a079791"||settings.evmVersion!=="paris"||optimizer.enabled!==true||optimizer.runs!==200||metadata.bytecodeHash!=="ipfs"||metadata.appendCBOR!==true||metadata.useLiteralContent!==false||settings.viaIR!==false||settings.experimental!==false||Object.keys(libraries).length!==0||JSON.stringify(remappings)!==JSON.stringify(["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])) {throw invalid("raw compiler settings differ from the pinned profile");}
   const sources=object(input.sources,"compiler sources"); const sourceHashes=Object.entries(sources).map(([path,value])=>{assertStrictRelativePath(path); const source=object(value,"compiler source"); const content=stringValue(source.content); return {path,sha256:`sha256:${hex(content)}`};}).toSorted((a,b)=>a.path.localeCompare(b.path));
   const artifact=object(parseJsonWithoutDuplicateKeys(artifactBytes.toString("utf8")),artifactName); const abi=array(artifact.abi,"artifact ABI"); const bytecode=stringValue(object(artifact.bytecode,"artifact bytecode").object); const normalized=bytecode.startsWith("0x")?bytecode:`0x${bytecode}`;
-  if(!/^0x(?:[0-9a-fA-F]{2})+$/u.test(normalized)) throw invalid("artifact creation bytecode is malformed");
+  if(!/^0x(?:[0-9a-fA-F]{2})+$/u.test(normalized)) {throw invalid("artifact creation bytecode is malformed");}
   const contracts=object(object(build.output,"compiler output").contracts,"compiler contracts");
   const sourceOutput=object(contracts[sourceName],"source output"); const contractOutput=object(sourceOutput[contractName],"contract output");
   const evm=object(contractOutput.evm,"evm"); const fromBuild=stringValue(object(evm.bytecode,"build bytecode").object);
-  if(Buffer.from(fromBuild.replace(/^0x/u,""),"hex").compare(Buffer.from(normalized.slice(2),"hex"))!==0) throw invalid("artifact and build-info bytecode differ");
+  if(Buffer.from(fromBuild.replace(/^0x/u,""),"hex").compare(Buffer.from(normalized.slice(2),"hex"))!==0) {throw invalid("artifact and build-info bytecode differ");}
   return {buildInfoSha256:`sha256:${hex(buildBytes)}`,compilerInputSha256:`sha256:${hex(JSON.stringify(input))}`,compilerSettingsSha256:`sha256:${hex(JSON.stringify(settings))}`,compilerInput:input,compilerSettings:settings,sourceHashes,artifactSha256:`sha256:${hex(artifactBytes)}`,abiSha256:`sha256:${hex(JSON.stringify(abi))}`,creationBytecode:normalized,creationBytecodeSha256:`sha256:${hex(Buffer.from(normalized.slice(2),"hex"))}`};
 }
 

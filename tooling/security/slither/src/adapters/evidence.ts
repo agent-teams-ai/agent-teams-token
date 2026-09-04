@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import { chmod, constants, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { AnalysisInput, GateErrorCode, GateManifest, PolicyDecision } from "../domain/model.ts";
@@ -73,7 +74,7 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
     execution: executionIdentity(),
     tools: { image: IMAGE, indexDigest: "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8", imageRevision: IMAGE_REVISION, slither: "0.11.6", cryticCompile: "0.4.2", forge: "1.8.0", forgeBinarySha256: `sha256:${input.forgeBinarySha256}`, solc: "0.8.36+commit.8a079791", solcBinarySha256: `sha256:${input.solcBinarySha256}` },
     inputs: { closureHash: `sha256:${sha256(JSON.stringify([...manifest.sources, ...manifest.config, manifest.detectorInventory]))}`, configHash: `sha256:${hashes.config}`, policyHash: `sha256:${hashes.policy}`, triageHash: `sha256:${request.triageHash}` },
-    analysis: { compiler: { buildInfoSha256: `sha256:${input.compilerEvidence.buildInfoSha256}`, compilerInputSha256: `sha256:${input.compilerEvidence.compilerInputSha256}`, compilerSettingsSha256: `sha256:${input.compilerEvidence.compilerSettingsSha256}`, compilerInput: input.compilerEvidence.compilerInput, compilerSettings: input.compilerEvidence.compilerSettings, sourceHashes: input.compilerEvidence.sourceHashes.map(({path, sha256}) => ({path, sha256: `sha256:${sha256}`})), artifactSha256: `sha256:${input.compilerEvidence.artifactSha256}`, abiSha256: `sha256:${input.compilerEvidence.abiSha256}`, creationBytecode: input.compilerEvidence.creationBytecode, creationBytecodeSha256: `sha256:${input.compilerEvidence.creationBytecodeSha256}` }, fixture: { sourceSha256: `sha256:${input.fixtureProof.sourceSha256}`, buildInfoSha256: `sha256:${input.fixtureProof.buildInfoSha256}`, artifactSha256: `sha256:${input.fixtureProof.artifactSha256}`, abiSha256: `sha256:${input.fixtureProof.abiSha256}`, creationBytecodeSha256: `sha256:${input.fixtureProof.creationBytecodeSha256}` }, expectedTargets: manifest.expectedContracts, observedTargets: input.analyzedContracts, expectedSources: manifest.sources.map(({ path }) => path.replace(/^contracts\/evm\//u, "")), observedSources: input.analyzedSources, creationBytecodeSha256: `sha256:${input.creationBytecodeSha256}`, detectors: input.detectorInventory, findingCount: input.findings.length, perImpact, findings, suppressions: decision.suppressed.length, triaged: request.triageHash.length > 0 ? decision.visible.filter(({ impact }) => impact === "Low" || impact === "Informational" || impact === "Optimization").length : 0 },
+    analysis: { compiler: { buildInfoSha256: `sha256:${input.compilerEvidence.buildInfoSha256}`, compilerInputSha256: `sha256:${input.compilerEvidence.compilerInputSha256}`, compilerSettingsSha256: `sha256:${input.compilerEvidence.compilerSettingsSha256}`, compilerInput: input.compilerEvidence.compilerInput, compilerSettings: input.compilerEvidence.compilerSettings, sourceHashes: input.compilerEvidence.sourceHashes.map(({path, sha256: sourceSha256}) => ({path, sha256: `sha256:${sourceSha256}`})), artifactSha256: `sha256:${input.compilerEvidence.artifactSha256}`, abiSha256: `sha256:${input.compilerEvidence.abiSha256}`, creationBytecode: input.compilerEvidence.creationBytecode, creationBytecodeSha256: `sha256:${input.compilerEvidence.creationBytecodeSha256}` }, fixture: { sourceSha256: `sha256:${input.fixtureProof.sourceSha256}`, buildInfoSha256: `sha256:${input.fixtureProof.buildInfoSha256}`, artifactSha256: `sha256:${input.fixtureProof.artifactSha256}`, abiSha256: `sha256:${input.fixtureProof.abiSha256}`, creationBytecodeSha256: `sha256:${input.fixtureProof.creationBytecodeSha256}` }, expectedTargets: manifest.expectedContracts, observedTargets: input.analyzedContracts, expectedSources: manifest.sources.map(({ path }) => path.replace(/^contracts\/evm\//u, "")), observedSources: input.analyzedSources, creationBytecodeSha256: `sha256:${input.creationBytecodeSha256}`, detectors: input.detectorInventory, findingCount: input.findings.length, perImpact, findings, suppressions: decision.suppressed.length, triaged: request.triageHash.length > 0 ? decision.visible.filter(({ impact }) => impact === "Low" || impact === "Informational" || impact === "Optimization").length : 0 },
     policy: { blocking: decision.blocking.length, visible: decision.visible.length, suppressed: decision.suppressed.length, errors: decision.errors },
     result: { category: decision.category, exitCode: decision.exitCode }, sanitised: true,
   };
@@ -146,24 +147,22 @@ export class ExclusiveDirectoryPublication implements PublicationCapability {
     if (new Set(expected).size !== expected.length || JSON.stringify(entries) !== JSON.stringify(expected) || !entries.includes("READY")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging contains missing or foreign entries");}
     await mkdir(output, {mode: 0o700});
     const published = await directoryIdentity(output, "publication output");
-    try {
-      await assertSameDirectory(parent, before, "publication parent");
-      for (const name of entries.filter((name) => name !== "READY")) {await copyStableExclusive(join(staging, name), join(output, name));}
-      await assertSameDirectory(staging, staged, "publication staging");
-      const publishedEntries=(await readdir(output)).toSorted(); const expectedPublished=entries.filter((name)=>name!=="READY").toSorted();
-      if(JSON.stringify(publishedEntries)!==JSON.stringify(expectedPublished)) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication output contains foreign entries");
-      for(const name of publishedEntries){const info=await lstat(join(output,name),{bigint:true});if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1n||info.uid!==published.uid||(info.mode&0o777n)!==0o600n) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry identity is unsafe");}
-      await assertSameDirectory(parent, before, "publication parent");
-      await assertAncestorIdentities(ancestors);
-      await writeFile(join(output, "READY"), "", {mode: 0o600, flag: "wx"});
-      await assertSameDirectory(output, published, "publication output");
-    } catch (error) {throw error;}
+    await assertSameDirectory(parent, before, "publication parent");
+    for (const entryName of entries.filter((entry) => entry !== "READY")) {await copyStableExclusive(join(staging, entryName), join(output, entryName));}
+    await assertSameDirectory(staging, staged, "publication staging");
+    const publishedEntries=(await readdir(output)).toSorted(); const expectedPublished=entries.filter((entry)=>entry!=="READY").toSorted();
+    if(JSON.stringify(publishedEntries)!==JSON.stringify(expectedPublished)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication output contains foreign entries");}
+    for(const entryName of publishedEntries){const info=await lstat(join(output,entryName),{bigint:true});if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1n||info.uid!==published.uid||(info.mode&0o777n)!==0o600n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry identity is unsafe");}}
+    await assertSameDirectory(parent, before, "publication parent");
+    await assertAncestorIdentities(ancestors);
+    await writeFile(join(output, "READY"), "", {mode: 0o600, flag: "wx"});
+    await assertSameDirectory(output, published, "publication output");
   }
 }
 
 interface AncestorIdentity {readonly path:string;readonly identity:DirectoryIdentity}
-async function ancestorIdentities(path:string):Promise<AncestorIdentity[]>{const values:AncestorIdentity[]=[];let current=path;while(true){values.push({path:current,identity:await directoryIdentity(current,"publication ancestor")});const next=dirname(current);if(next===current) return values;current=next;}}
-async function assertAncestorIdentities(values:readonly AncestorIdentity[]):Promise<void>{for(const value of values) await assertSameDirectory(value.path,value.identity,"publication ancestor");}
+async function ancestorIdentities(path:string):Promise<AncestorIdentity[]>{const values:AncestorIdentity[]=[];let current=path;while(true){values.push({path:current,identity:await directoryIdentity(current,"publication ancestor")});const next=dirname(current);if(next===current) {return values;}current=next;}}
+async function assertAncestorIdentities(values:readonly AncestorIdentity[]):Promise<void>{for(const value of values) {await assertSameDirectory(value.path,value.identity,"publication ancestor");}}
 interface DirectoryIdentity {readonly dev: bigint; readonly ino: bigint; readonly uid: bigint; readonly mode: bigint}
 async function directoryIdentity(path: string, label: string): Promise<DirectoryIdentity> {
   const info = await lstat(path, {bigint: true});
@@ -176,41 +175,50 @@ export async function copyStableExclusive(source: string, destination: string): 
   const handle=await open(source,constants.O_RDONLY|constants.O_NOFOLLOW);
   try {
     const opened=await handle.stat({bigint:true});
-    if(!sameSourceIdentity(before,opened)) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");
+    if(!sameSourceIdentity(before,opened)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");}
     const destinationHandle=await open(destination,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
     try {
       await destinationHandle.chmod(0o600);
       const created=await destinationHandle.stat({bigint:true});
-      if(!created.isFile()||created.isSymbolicLink()||created.nlink!==1n||created.uid!==BigInt(process.getuid?.()??-1)||(created.mode&0o777n)!==0o600n) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry identity is unsafe");
+      assertSafePublicationEntry(created, BigInt(process.getuid?.()??-1));
       const copiedDigest=await transferAndDigest(handle,destinationHandle);
       await destinationHandle.sync();
       const afterTransfer=await handle.stat({bigint:true});
-      if(!sameSourceIdentity(opened,afterTransfer)) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");
+      if(!sameSourceIdentity(opened,afterTransfer)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");}
       const stableDigest=await digestDescriptor(handle);
       const afterDigest=await handle.stat({bigint:true});
-      if(!sameSourceIdentity(opened,afterDigest)||copiedDigest!==stableDigest) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");
+      if(!sameSourceIdentity(opened,afterDigest)||copiedDigest!==stableDigest) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");}
       const retained=await destinationHandle.stat({bigint:true});
       const retainedPath=await lstat(destination,{bigint:true});
-      if(!sameFileIdentity(created,retained)||!sameFileIdentity(created,retainedPath)||!retainedPath.isFile()||retainedPath.isSymbolicLink()||retainedPath.nlink!==1n||retainedPath.uid!==created.uid||(retainedPath.mode&0o777n)!==0o600n||retained.size!==opened.size) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry changed");
+      assertRetainedPublicationEntry(created, retained, retainedPath, opened.size);
     } finally {await destinationHandle.close();}
   } finally {await handle.close();}
+}
+
+function assertSafePublicationEntry(entry: BigIntStats, expectedUid: bigint): void {
+  if(!entry.isFile()||entry.isSymbolicLink()||entry.nlink!==1n||entry.uid!==expectedUid||(entry.mode&0o777n)!==0o600n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry identity is unsafe");}
+}
+
+function assertRetainedPublicationEntry(created: BigIntStats, retained: BigIntStats, retainedPath: BigIntStats, expectedSize: bigint): void {
+  if(!sameFileIdentity(created,retained)||!sameFileIdentity(created,retainedPath)||retainedPath.size!==expectedSize) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry changed");}
+  assertSafePublicationEntry(retainedPath, created.uid);
 }
 
 function sameFileIdentity(left:{dev:bigint;ino:bigint},right:{dev:bigint;ino:bigint}):boolean{return left.dev===right.dev&&left.ino===right.ino;}
 function sameSourceIdentity(left:{dev:bigint;ino:bigint;mode:bigint;nlink:bigint;uid:bigint;gid:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint},right:{dev:bigint;ino:bigint;mode:bigint;nlink:bigint;uid:bigint;gid:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint}):boolean{return sameFileIdentity(left,right)&&left.mode===right.mode&&left.nlink===right.nlink&&left.uid===right.uid&&left.gid===right.gid&&left.size===right.size&&left.mtimeNs===right.mtimeNs&&left.ctimeNs===right.ctimeNs;}
 async function transferAndDigest(source:Awaited<ReturnType<typeof open>>,destination:Awaited<ReturnType<typeof open>>):Promise<string>{
   const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;
-  while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) break;hash.update(buffer.subarray(0,bytesRead));let written=0;while(written<bytesRead){const result=await destination.write(buffer,written,bytesRead-written);if(result.bytesWritten===0) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication write made no progress");written+=result.bytesWritten;}position+=bytesRead;}
+  while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) {break;}hash.update(buffer.subarray(0,bytesRead));let written=0;while(written<bytesRead){const result=await destination.write(buffer,written,bytesRead-written);if(result.bytesWritten===0) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication write made no progress");}written+=result.bytesWritten;}position+=bytesRead;}
   return hash.digest("hex");
 }
-async function digestDescriptor(source:Awaited<ReturnType<typeof open>>):Promise<string>{const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) break;hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;}return hash.digest("hex");}
+async function digestDescriptor(source:Awaited<ReturnType<typeof open>>):Promise<string>{const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) {break;}hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;}return hash.digest("hex");}
 async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>, expectedEntries: readonly string[], publication: PublicationCapability): Promise<void> {
   if (!publication || !output.startsWith("/") || output.includes("\0") || output.endsWith("/") || output.split("/").includes("..")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "fresh absolute output and publication capability are required");}
   const leaf=basename(output);
-  if(leaf.length===0||leaf==="."||leaf===".."||leaf.includes("/")||leaf.includes("\\")) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output basename is unsafe");
+  if(leaf.length===0||leaf==="."||leaf===".."||leaf.includes("/")||leaf.includes("\\")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output basename is unsafe");}
   const parent=await realpath(dirname(output)).catch(() => {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output parent is unavailable");});
   const canonicalOutput=join(parent,leaf);
-  if((await lstat(canonicalOutput).catch(()=>null))!==null) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","fresh absolute output and publication capability are required");
+  if((await lstat(canonicalOutput).catch(()=>null))!==null) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","fresh absolute output and publication capability are required");}
   const staging=await mkdtemp(join(parent, `.${leaf}.staging-`)); await chmod(staging,0o700);
-  try {await build(staging); await writeFile(join(staging,"READY"),"",{mode:0o600,flag:"wx"}); await finalize(staging); await publication.publishNoReplace(staging,canonicalOutput,expectedEntries);} finally {const info=await lstat(staging).catch(()=>null); if(info?.isDirectory()&&!info.isSymbolicLink()) await rm(staging,{recursive:true,force:true});}
+  try {await build(staging); await writeFile(join(staging,"READY"),"",{mode:0o600,flag:"wx"}); await finalize(staging); await publication.publishNoReplace(staging,canonicalOutput,expectedEntries);} finally {const info=await lstat(staging).catch(()=>null); if(info?.isDirectory()&&!info.isSymbolicLink()) {await rm(staging,{recursive:true,force:true});}}
 }
