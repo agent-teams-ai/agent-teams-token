@@ -3,7 +3,24 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 14:22 UTC
+## Latest reconciliation: 14:27 UTC
+
+Custody101 complete inline patch was applied locally. Only overlapping diff
+context was corrected to apply it; no source fix was necessary. Exact candidate
+598b578807b8a9e5fb2cf20216e7ed6984b7829c in /tmp/agtmai-custody-76c-mac,
+parent4c93,11files+860/-282. Actual Mac focused14/14 and expanded41/41,
+0skips,11.6seconds; scoped lint/diffcheck pass. The expanded run includes
+acquisition, teardown, production-finalization, cleanup-safety, proof-custody
+and proof-replay suites. Worker-side tests were NOT RUN due to bwrap; these
+are main's independent local measurements. Full recovery remains unaccepted.
+Result JSON SHA256758a0954d2785a603a9ebb13837ae35de23c776a10b400fff0d27580e1ba759c.
+Bundle /tmp/agtmai-custody101-candidate.bundle, prerequisite4c93,
+SHA25689cbc85f16f0022cd6fe3ecf98e73bc677ef622f183d332bb4d8e73507124626.
+Independent read-only xhigh/priority105 is being launched on exact598b.
+Disk fell4.3GiB then recovered6.1GiB without further deletion by this agent;
+no cleanup beyond the11 Node copies below was performed. Preserve admission.
+
+### Previous observation at14:22
 
 Fresh observation:101 is completed, output awaiting local consumption;
 102/103/104 are running/alive/productive, not merely launcher PIDs. Old-host

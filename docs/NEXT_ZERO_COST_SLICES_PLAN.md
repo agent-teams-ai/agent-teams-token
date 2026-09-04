@@ -2,7 +2,8 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
-Latest14:22: Slitherfb416 passes130/130Mac; EVM1f4f realMac7/7, both TS7/lint
+Latest14:27: custody598b passes41/41Mac and lint, awaits independent105.
+Slitherfb416 passes130/130Mac; EVM1f4f realMac7/7, both TS7/lint
 green but independent reviews103/104 pending. Solanaa226 has21pass1Linux-only
 skip;102 closes confirmed publication/READY identity gaps. Review99 AMEND
 requires full production cleanup-call corrections in101. Disk admission is

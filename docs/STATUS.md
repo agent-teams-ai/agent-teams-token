@@ -5,13 +5,13 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
-14:22 UTC supersedes the snapshots below: isolated Slither fb416ec1 passes
+14:27 UTC supersedes the snapshots below: isolated Slither fb416ec1 passes
 130/130Mac tests and TS7/lint. EVM1f4fc8d8 passes actualMac runner7/7 and TS7/lint;
 focused37cases are covered across36pass+1focused timeout retry. New cleanup
 tests still need root command registration at integration. Solanaa2261b36 has
 21pass1Linux-onlyskip; confirmed held-file/READY publication gaps belong to102.
-Custody99 returned AMEND on production cleanup callers;101 is completed and
-awaits local consumption.102/103/104 are running/alive after verified removal
+Custody101 is applied as598b5788: actualMac14/14focused and41/41expanded,
+lint pass; independent105 is being launched.102/103/104 are running/alive after verified removal
 of11 inactive duplicate Node copies. No source or evidence was deleted.
 No new checkpoint is accepted or integrated.
 
