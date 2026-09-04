@@ -76,7 +76,8 @@ function openExpectedFile(path, expectedHash) {
 }
 
 function assertPathStillIdentifies(opened) {
-  const current = lstatSync(opened.path);
+  let current;
+  try {current = lstatSync(opened.path);} catch {throw typedError("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
   if (!sameFileMetadata(opened.identity, current)) {throw typedError("TOOLCHAIN_FILE_IDENTITY_CHANGED");}
 }
 
@@ -120,12 +121,12 @@ function createControlledFile(path, contents = "") {
   }
 }
 
-function writeExecutableSnapshot(root, opened, leaf) {
+function writeAuthenticatedSnapshot(root, opened, leaf) {
   const path = join(root, leaf);
   const fd = openSync(
     path,
     fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
-    0o500,
+    0o400,
   );
   try {
     const chunk = Buffer.alloc(64 * 1024);
@@ -137,7 +138,7 @@ function writeExecutableSnapshot(root, opened, leaf) {
       while (written < count) {written += writeSync(fd, chunk, written, count - written, offset + written);}
       offset += count;
     }
-    fchmodSync(fd, 0o500);
+    fchmodSync(fd, 0o400);
     checkedRegularDescriptor(fd);
     if (hashDescriptor(fd) !== opened.expectedHash) {throw typedError("TOOLCHAIN_SNAPSHOT_FILE_INVALID");}
   } catch (error) {
@@ -170,13 +171,16 @@ function createInvocation(entries, platform) {
     const status = createControlledFile(join(root, "supervisor-status"));
     files.push(npmrc, npmGlobalrc, status);
     const snapshots = platform === "darwin"
-      ? entries.map((entry) => writeExecutableSnapshot(root, entry.opened, entry.leaf))
+      ? entries.map((entry) => entry.snapshotOnDarwin
+        ? writeAuthenticatedSnapshot(root, entry.opened, entry.leaf)
+        : undefined)
       : [];
-    files.push(...snapshots);
+    files.push(...snapshots.filter(Boolean));
     for (const [index, snapshot] of snapshots.entries()) {
+      if (!snapshot) {continue;}
       if (snapshot.expectedHash !== entries[index].expectedHash
         || !sameIdentity(snapshot.identity, fstatSync(snapshot.fd))
-        || (snapshot.identity.mode & 0o777) !== 0o500) {
+        || (snapshot.identity.mode & 0o777) !== 0o400) {
         throw typedError("TOOLCHAIN_SNAPSHOT_FILE_INVALID");
       }
     }
@@ -524,19 +528,26 @@ function withInvocation(entries, platform, execute) {
   let quiescent = false;
   let outcome;
   let failure;
-  try {
-    const targets = platform === "darwin"
-      ? invocation.snapshots.map(({ path }) => path)
-      : entries.map((_, index) => `${descriptorRoot(platform)}/${index + 3}`);
-    assertPrivateDirectory(invocation.root, invocation.rootIdentity);
-    for (const snapshot of invocation.snapshots) {
+  const validateTargets = () => {
+    for (const entry of entries) {
+      assertOpenedFileStillMatches(entry.opened, entry.expectedHash, "TOOLCHAIN_FILE_IDENTITY_CHANGED");
+    }
+    for (const snapshot of invocation.snapshots.filter(Boolean)) {
       assertOpenedFileStillMatches(snapshot, snapshot.expectedHash, "TOOLCHAIN_SNAPSHOT_FILE_INVALID");
     }
+  };
+  try {
+    const targets = platform === "darwin"
+      ? entries.map((entry, index) => invocation.snapshots[index]?.path ?? entry.opened.path)
+      : entries.map((_, index) => `${descriptorRoot(platform)}/${index + 3}`);
+    assertPrivateDirectory(invocation.root, invocation.rootIdentity);
+    validateTargets();
     outcome = execute({ invocation, targets });
     quiescent = outcome.targetStatus.quiescent;
   } catch (error) {
     failure = error;
   }
+  try {validateTargets();} catch (error) {failure = error;}
   const removed = removeInvocation(invocation, quiescent);
   for (const file of invocation.files) {try {closeSync(file.fd);} catch {}}
   if (quiescent && !removed) {
@@ -586,7 +597,7 @@ export function executeOpenedNode({ node, script, args, stdio = "pipe", platform
     const inherited = stdio === "inherit" ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"];
     const result = withInvocation([
       { opened: openedNode, expectedHash: node.sha256, leaf: "node" },
-      { opened: openedScript, expectedHash: script.sha256, leaf: "pnpm.mjs" },
+      { opened: openedScript, expectedHash: script.sha256, leaf: "pnpm.mjs", snapshotOnDarwin: true },
     ], platform, ({ invocation, targets }) => supervisedSpawn({
       args: [targets[1], ...args],
       command: targets[0],

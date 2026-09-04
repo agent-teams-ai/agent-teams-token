@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmdirSync, rmSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -342,9 +342,8 @@ export function assertDarwinDescriptorEntrypointIsSemanticallyWrong() {
 export function assertDarwinMjsSnapshotEntrypointWorks() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-pnpm-snapshot-"));
   try {
-    // Snapshot a relocatable fixture, not the test runner's potentially
-    // layout-dependent executable. The wrapper delegates only after its own
-    // authenticated pathname and the pnpm.mjs pathname have been established.
+    // The executable retains its verified original pathname while the
+    // pathname-sensitive pnpm data entrypoint receives an authenticated copy.
     const node = writeCurrentNodeWrapper(root);
     const script = writePathSemanticPnpmFixture(root);
     assert.equal(executeOpenedNode({
@@ -357,28 +356,17 @@ export function assertDarwinMjsSnapshotEntrypointWorks() {
   }
 }
 
-export function assertDarwinSnapshotBehavior() {
+export function assertDarwinOriginalPathBehavior() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-execution-"));
-  const preserved = [];
-  const expectPreserved = (run, code = /TOOLCHAIN_INVOCATION_CLEANUP_UNCERTAIN/) => {
-    let failure;
-    try {run();} catch (error) {failure = error;}
-    assert.match(failure?.message ?? "", code);
-    const invocation = failure.message.match(/invocation=(\S+)/)?.[1];
-    assert.ok(invocation);
-    preserved.push(invocation);
-    return invocation;
-  };
   try {
     const executable = join(root, "tool");
     writeExecutable(executable, "#!/bin/sh\nprintf '%s\\n' \"$0\"\n");
     const genericTarget = executeVerifiedFile({
       path: executable, expectedSha256: digest(executable), platform: "darwin",
     });
-    assert.equal(genericTarget.startsWith(`${tmpdir()}/agtmai-toolchain-exec-`), true);
-    assert.equal(basename(genericTarget), "executable");
+    assert.equal(genericTarget, executable);
     assert.equal(genericTarget.startsWith("/dev/fd/"), false);
-    assert.equal(existsSync(genericTarget), false);
+    assert.equal(existsSync(genericTarget), true);
 
     const node = join(root, "node");
     const script = join(root, "script.mjs");
@@ -389,66 +377,38 @@ export function assertDarwinSnapshotBehavior() {
       script: { path: script, sha256: digest(script) },
       args: [], platform: "darwin",
     }).split("|");
-    assert.equal(nodeTarget.startsWith(`${tmpdir()}/agtmai-toolchain-exec-`), true);
-    assert.equal(basename(nodeTarget), "node");
+    assert.equal(nodeTarget, node);
     assert.equal(nodeTarget.startsWith("/dev/fd/"), false);
     assert.equal(scriptTarget.startsWith(`${tmpdir()}/agtmai-toolchain-exec-`), true);
-    assert.equal(dirname(scriptTarget), dirname(nodeTarget));
     assert.equal(basename(scriptTarget), "pnpm.mjs");
     assert.equal(scriptTarget.startsWith("/dev/fd/"), false);
-    assert.equal(existsSync(nodeTarget), false);
+    assert.notEqual(scriptTarget, script);
+    assert.equal(existsSync(nodeTarget), true);
     assert.equal(existsSync(scriptTarget), false);
+    assert.equal(existsSync(script), true);
     assert.equal(descriptorRoot("darwin"), "/dev/fd");
 
-    writeExecutable(node, ["#!/bin/sh", "printf 'foreign evidence\\n' > \"${0%/*}/foreign\"", ""].join("\n"));
-    const foreignRoot = expectPreserved(() => executeOpenedNode({
-      node: { path: node, sha256: digest(node) }, script: { path: script, sha256: digest(script) },
-      args: [], platform: "darwin",
-    }));
-    assert.equal(readFileSync(join(foreignRoot, "foreign"), "utf8"), "foreign evidence\n");
-    assert.equal(existsSync(join(foreignRoot, "node")), true);
-    assert.equal(existsSync(join(foreignRoot, "pnpm.mjs")), true);
+    const marker = join(root, "attacker-ran");
+    const expectedSha256 = digest(executable);
+    assert.throws(() => executeVerifiedFile({
+      path: executable, expectedSha256, platform: "darwin",
+      beforeSpawn: () => {
+        renameSync(executable, `${executable}.verified`);
+        writeExecutable(executable, `#!/bin/sh\nprintf attacker > ${shellQuote(marker)}\n`);
+      },
+    }), /TOOLCHAIN_FILE_IDENTITY_CHANGED/);
+    assert.equal(existsSync(marker), false);
 
-    writeExecutable(executable, ["#!/bin/sh", "/bin/mv \"$0\" \"$0.original\"", "/bin/mkdir \"$0\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
-    const substitutedRoot = expectPreserved(() => executeVerifiedFile({
+    writeExecutable(executable, [
+      "#!/bin/sh",
+      "/bin/mv \"$0\" \"$0.started\"",
+      "/bin/cp \"$0.started\" \"$0\"",
+      "",
+    ].join("\n"));
+    assert.throws(() => executeVerifiedFile({
       path: executable, expectedSha256: digest(executable), platform: "darwin",
-    }));
-    assert.equal(lstatSync(substitutedRoot).mode & 0o777, 0o700);
-    assert.equal(lstatSync(join(substitutedRoot, "executable")).isDirectory(), true);
-    assert.equal(lstatSync(join(substitutedRoot, "executable.original")).isFile(), true);
-    assert.equal(lstatSync(join(substitutedRoot, "executable.original")).mode & 0o777, 0o500);
-
-    writeExecutable(executable, ["#!/bin/sh", "root=${0%/*}", "/bin/mv \"$root\" \"$root.original\"", "/bin/mkdir -m 700 \"$root\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
-    const replacedRoot = expectPreserved(() => executeVerifiedFile({
-      path: executable, expectedSha256: digest(executable), platform: "darwin",
-    }));
-    preserved.push(`${replacedRoot}.original`);
-    assert.equal(lstatSync(replacedRoot).isDirectory(), true);
-    assert.equal(lstatSync(join(`${replacedRoot}.original`, "executable")).isFile(), true);
-
-    writeExecutable(executable, ["#!/bin/sh", "printf 'foreign evidence\\n' > \"${0%/*}/foreign\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
-    const secondForeignRoot = expectPreserved(() => executeVerifiedFile({
-      path: executable, expectedSha256: digest(executable), platform: "darwin",
-    }));
-    assert.equal(existsSync(join(secondForeignRoot, "executable")), true);
-    assert.equal(lstatSync(join(secondForeignRoot, "executable")).mode & 0o777, 0o500);
-    assert.equal(readFileSync(join(secondForeignRoot, "foreign"), "utf8"), "foreign evidence\n");
-
-    const externalHardlink = join(root, "external-hardlink");
-    writeExecutable(executable, ["#!/bin/sh", `/bin/ln "$0" ${shellQuote(externalHardlink)}`, ""].join("\n"));
-    const hardlinkRoot = expectPreserved(() => executeVerifiedFile({
-      path: executable, expectedSha256: digest(executable), platform: "darwin",
-    }));
-    assert.equal(lstatSync(join(hardlinkRoot, "executable")).nlink, 2);
-    assert.equal(lstatSync(externalHardlink).ino, lstatSync(join(hardlinkRoot, "executable")).ino);
-
-    writeExecutable(executable, ["#!/bin/sh", "/bin/chmod 700 \"$0\"", "printf '# late mutation\\n' >> \"$0\"", ""].join("\n"));
-    const mutatedRoot = expectPreserved(() => executeVerifiedFile({
-      path: executable, expectedSha256: digest(executable), platform: "darwin",
-    }));
-    assert.match(readFileSync(join(mutatedRoot, "executable"), "utf8"), /late mutation/);
+    }), /TOOLCHAIN_FILE_IDENTITY_CHANGED/);
   } finally {
-    for (const path of preserved) {rmSync(path, { recursive: true, force: true });}
     rmSync(root, { recursive: true, force: true });
   }
 }

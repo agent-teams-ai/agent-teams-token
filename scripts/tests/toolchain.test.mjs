@@ -20,7 +20,7 @@ import { runDoctor } from "../doctor.mjs";
 import {
   assertDarwinDescriptorEntrypointIsSemanticallyWrong,
   assertDarwinMjsSnapshotEntrypointWorks,
-  assertDarwinSnapshotBehavior,
+  assertDarwinOriginalPathBehavior,
   assertPrivateInvocationRejectsAmbientConfig,
   assertProtectedPnpmResolvesAuthenticatedTools,
   assertTimedOutProcessGroupCannotWriteLate,
@@ -328,7 +328,7 @@ test("descriptor execution rejects unsupported hosts", () => {
   assert.throws(() => descriptorRoot("win32"), /TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED/);
 });
 
-test("Darwin execution uses private snapshots and preserves uncertain cleanup evidence", assertDarwinSnapshotBehavior);
+test("Darwin executes native targets at verified original paths and snapshots pnpm data", assertDarwinOriginalPathBehavior);
 
 test("Darwin dev-fd entrypoint loses pathname-sensitive pnpm output", {
   skip: process.platform === "darwin" ? false : `Darwin-only semantic check (host=${process.platform})`,
@@ -344,13 +344,13 @@ test("Linux verified execution retains proc descriptor execution", (context) => 
   const root = mkdtempSync(join(tmpdir(), "agtmai-linux-exec-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const executable = join(root, "tool");
-  writeExecutable(executable, "#!/bin/sh\necho linux-descriptor\n");
+  writeExecutable(executable, "#!/bin/sh\nprintf '%s\\n' \"$0\"\n");
   if (process.platform !== "linux") {return;}
   assert.equal(executeVerifiedFile({
     path: executable,
     expectedSha256: digest(executable),
     platform: "linux",
-  }), "linux-descriptor");
+  }), "/proc/self/fd/3");
   assert.equal(descriptorRoot("linux"), "/proc/self/fd");
 });
 
