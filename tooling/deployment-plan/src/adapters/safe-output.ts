@@ -116,7 +116,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   private readonly stagingIdentity: DirectoryIdentity; private readonly target: string;
   private readonly faultInjection: OutputFaultInjection;
   private readonly leaves = new Map<string, HeldLeaf>();
-  private published = false;
+  private published = false; private finalizationState: "pending" | "durable" | "uncertain" = "pending";
   private stagingDisposed = false;
   private publishedTargetIdentity?: DirectoryIdentity;
   private closePromise?: Promise<void>;
@@ -284,9 +284,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.faultInjection.beforeFinalMarkerDirectorySync?.();
       await (this.faultInjection.finalMarkerDirectorySync?.() ?? this.stagingHandle.sync());
       await this.faultInjection.afterFinalMarkerDirectorySync?.();
-      await this.assertPublishedReady(bytes, readyIdentity);
+      await this.assertPublishedReady(bytes, readyIdentity); this.finalizationState = "durable";
     } catch (error) {
-      if (!retained) { await file.close(); }
+      if (markerMayBePublished) { this.finalizationState = "uncertain"; } if (!retained) { await file.close(); }
       if (markerMayBePublished) {
         fail("OUTPUT_PUBLICATION_UNCERTAIN",
           "READY durability is uncertain; target and READY preserved: " + errorMessage(error));
@@ -388,9 +388,8 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   }
 
   private assertFinalized(): void {
-    if (!this.published || !this.leaves.has("READY")) {
-      fail("OUTPUT_NOT_FINALIZED", "published output is not READY-finalized");
-    }
+    if (this.finalizationState === "uncertain") { fail("OUTPUT_PUBLICATION_UNCERTAIN", "READY finalization is permanently uncertain"); }
+    if (!this.published || this.finalizationState !== "durable") { fail("OUTPUT_NOT_FINALIZED", "published output is not READY-finalized"); }
   }
 
   private async assertPublishedTreeUnchanged(

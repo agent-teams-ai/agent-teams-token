@@ -355,31 +355,12 @@ test("READY is committed only after durable publication", async () => {
   }
 });
 
-test("post-rename READY sync uncertainty preserves target and READY", async () => {
-  const parent = await canonicalTemporaryDirectory();
-  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
-    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
-    async finalMarkerDirectorySync() { throw new Error("injected READY directory fsync failure"); },
-  });
-  try {
-    await claim.writeExclusive("payload", Buffer.from("payload"));
-    await claim.publish();
-    await assert.rejects(
-      claim.finalizeReady("READY", Buffer.from("ready")),
-      (error: unknown) => error instanceof Error
-        && "code" in error
-        && error.code === "OUTPUT_PUBLICATION_UNCERTAIN",
-    );
-    assert.equal(await readFile(join(parent, "bundle", "payload"), "utf8"), "payload");
-    assert.equal(await readFile(join(parent, "bundle", "READY"), "utf8"), "ready");
-  } finally {
-    await claim.close();
-  }
-  assert.deepEqual(
-    (await readdir(join(parent, "bundle"))).toSorted(),
-    ["payload", "READY"].toSorted(),
-  );
-});
+for (const [stage, hook] of [
+  ["before", "beforeFinalMarkerDirectorySync"], ["during", "finalMarkerDirectorySync"],
+  ["after", "afterFinalMarkerDirectorySync"],
+] as const) {
+  test(`failure ${stage} final READY directory sync permanently poisons committed access`, async () => assertPostRenameFinalizationFailurePoisons(hook));
+}
 
 test("READY replacement before final directory sync is uncertain and preserved", async () => {
   await assertReadyReplacementPreserved("beforeFinalMarkerDirectorySync", "foreign-before-sync"); });
@@ -509,18 +490,40 @@ async function assertReadyReplacementPreserved(
   try {
     await claim.writeExclusive("payload", Buffer.from("payload"));
     await claim.publish();
-    await assert.rejects(
-      claim.finalizeReady("READY", Buffer.from("ready")),
-      (error: unknown) => error instanceof Error
-        && "code" in error
-        && error.code === "OUTPUT_PUBLICATION_UNCERTAIN",
-    );
+    await assert.rejects(claim.finalizeReady("READY", Buffer.from("ready")), isPublicationUncertain);
+    await assertCommittedAccessPoisoned(claim);
     assert.equal(await readFile(ready, "utf8"), foreign);
     assert.equal(await readFile(join(parent, "bundle", "payload"), "utf8"), "payload");
   } finally {
-    await claim.close();
+    await claim.close(); await claim.close();
   }
 }
+
+async function assertPostRenameFinalizationFailurePoisons(hook: "beforeFinalMarkerDirectorySync" | "finalMarkerDirectorySync" | "afterFinalMarkerDirectorySync"): Promise<void> {
+  const parent = await canonicalTemporaryDirectory(); const target = join(parent, "bundle");
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename, [hook]: async () => { throw new Error(`injected ${hook} failure`); },
+  });
+  try {
+    await claim.writeExclusive("payload", Buffer.from("payload")); await claim.publish();
+    await assert.rejects(claim.finalizeReady("READY", Buffer.from("ready")), isPublicationUncertain);
+    await assertCommittedAccessPoisoned(claim);
+  } finally { await claim.close(); await claim.close(); }
+  assert.equal(await readFile(join(target, "payload"), "utf8"), "payload");
+  assert.equal(await readFile(join(target, "READY"), "utf8"), "ready");
+  assert.deepEqual((await readdir(target)).toSorted(), ["payload", "READY"].toSorted());
+}
+
+async function assertCommittedAccessPoisoned(claim: Awaited<ReturnType<typeof claimOwnedOutputDirectory>>): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assert.rejects(claim.assertCommitted(), isPublicationUncertain);
+    await assert.rejects(claim.readCommitted("payload"), isPublicationUncertain);
+    assert.throws(() => claim.publicationIdentity(), isPublicationUncertain);
+  }
+}
+
+function isPublicationUncertain(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "OUTPUT_PUBLICATION_UNCERTAIN"; }
 
 function assertQuarantineOnly(names: readonly string[]): void {
   assert.equal(names.length, 1); assert.match(names[0] ?? "", /^\.[0-9a-f]{32}\.cleanup$/u); }
