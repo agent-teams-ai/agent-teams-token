@@ -5,6 +5,13 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+Latest update at12:51 UTC: deployment review76 returned ACCEPT with no findings;
+the fix is integrated as7d07a10c. Combined root lint, root TS build, deployment
+TS and full Foundation checks pass. Solc redaction77 and recovery custody75
+remain active; independent archive single-link writer78 has started in fast.
+Spike74 completed the offline store comparison; package authority itself is
+not implemented/accepted. Earlier snapshots below are historical.
+
 Latest update at 12:42 UTC supersedes the earlier snapshots below:
 toolchain checkpoint has independent ACCEPT and is integrated as `caedc5d6`.
 Solc checkpoint `7926ace` passes all 7 actual Mac runner integration tests;
@@ -30,7 +37,7 @@ inspected partial changes after an intentional guidance interruption. A fifth
 read-only xhigh planner is comparing minimal authenticated dependency-cache
 designs for the next recovery checkpoint. Main is unchanged at `370c3aac`.
 
-- Code candidate: `caedc5d6c055a769a686385ec1e61c93e44b1cfb`, in the isolated
+- Code candidate: `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6`, in the isolated
   `/tmp/agtmai-r212-integration2` worktree. The user's original worktree is untouched.
 - Native provenance remediation is integrated, but Foundation, TypeScript and
   lint are not green. Its remaining defects must be fixed before acceptance.

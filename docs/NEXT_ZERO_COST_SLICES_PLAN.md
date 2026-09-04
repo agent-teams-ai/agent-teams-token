@@ -2,11 +2,12 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
-Current code candidate `caedc5d6c055a769a686385ec1e61c93e44b1cfb` includes the
-reviewed toolchain lint fix. Separate completed deployment and local-EVM fixes
-pass actual Mac Anvil (125 tests, 3 Linux skips) and runner integration (7/7)
-respectively, but await independent reviews before integration. They address
-Foundation/TS/lint, real Forge JSON bounds and the two local-EVM P2 findings.
+Current code candidate `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6` includes
+independently accepted toolchain and deployment fixes. Combined lint, root TS
+build, deployment TS and Foundation pass; the actual Mac Anvil source checkpoint
+has125pass/3Linux skips. Separate local-EVM source passes7/7 runner integration
+cases, but review retained one introduced error-cause redaction P2; a bounded
+writer is fixing it. The two earlier local-EVM P2s are closed.
 The recovery checkpoint remains unaccepted, including actual Darwin failures;
 its failed partial writer was replaced with a fresh isolated filesystem lane.
 See [the current reconciliation ledger](research/E2E-RECONCILIATION-2026-09-04.md).

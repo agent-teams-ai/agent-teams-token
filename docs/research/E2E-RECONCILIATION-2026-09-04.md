@@ -3,7 +3,56 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 12:42 UTC
+## Latest reconciliation: 12:51 UTC
+
+Current integration code HEAD is `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6`.
+Owned documentation checkpoint5bf3d1c8 is committed; the original user worktree
+is untouched. This section supersedes all earlier job and gate snapshots.
+
+- Deployment review76 returned independent ACCEPT on d1bd4d95, no P0-P3.
+  Source is integrated as7d07a10c. Actual Mac source:125pass/3Linux-only skips,
+  including enabled real Anvil. Combined candidate root lint, root TS build,
+  deployment TS and Foundation0.20.0 full check pass, seven capabilities and
+  zero diagnostics. This is not the complete final local/CI gate.
+- Toolchain68/review72 are accepted and integrated ascaedc5d6.
+- Solc69's7926ace remains outside the candidate: review73 closed its original
+  two P2s but found one introduced raw-stderr cause metadata P2. Writer77 is
+  actively implementing the bounded redaction/regression fix.
+- Recovery75 remains active on filesystem custody/early capture/staging.
+  Recovery70's failed partial remains preserved and unaccepted.
+- New archive78, basef2d7ab9, PID1377305, provider.task.started12:50:05,
+  medium/priority/account-m, owns only scripts/toolchain-archive.mjs and its
+  authority tests. It addresses the known omitted named-archive nlink1 check
+  with preexisting/during-callback hardlink regressions; no custody-file overlap
+  with75 and no new trust framework/dependency/CI changes.
+- All new workers use fast/priority, medium implementation and xhigh review,
+  on the old host. Latest resources:11GiB available RAM,3.7GiB free swap,
+  23GiB free disk; expected machine identity matched. No service/limit changes.
+
+Spike74 completed in about14m37s. An authenticated complete quiescent pnpm11.24.0
+store (`v11/index.db` and every referenced payload) produced by exact-lock fetch
+supports frozen/offline/copy install with no new request, lifecycle execution,
+escaping link or shared installed/store inode. Local-tarball `store add` cannot
+populate registry lock identities. Missing required content fails; missing
+optional content can return success while omitting the package. Thus exit0 is
+not proof of required platform coverage. Do not build a custom CAFS/SQLite writer.
+`--ignore-workspace` was only synthetic fixture isolation, not the real monorepo
+command. Real Darwin/native addon coverage and the authenticated producer/
+expected-bundle-hash channel remain implementation obligations. Both fake
+registries and disposable state were removed; only the report remains.
+
+Copied ignored development evidence in `.tools/hosted-evidence/2026-09-04/`:
+review72.json SHA256`4f88030fcdf736ab53e13abe4d0ee713582eb15c54c5d20275829ba881aff47d`;
+review73.json SHA256`e14968cbdd1ec4e30397b243264699a93846e52e83b50016736b16e57885bfe9`;
+review76.json SHA256`a34012eca7e2847befdbfcab5ad317a188c6ae83e4df12bc2fc2b4a0d7c61d7a`;
+spike74.md SHA256`6023a659e56316ecf9049bebe0ddc0e264a14020a37ed55e231f38743fb9f4a3`.
+These reports are not package-byte trust roots or final production approvals.
+
+Next: finish77/75/78 with scoped review; implement package/bootstrap/preflight
+authority without overlapping custody ownership; then reconcile main and
+execute the plan's full exact-head local/CI and final independent reviews.
+
+## Earlier reconciliation: 12:42 UTC
 
 This section supersedes earlier pending/running statements below. Current
 integration code HEAD is `caedc5d6c055a769a686385ec1e61c93e44b1cfb`.
