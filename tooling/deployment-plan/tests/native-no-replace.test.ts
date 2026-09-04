@@ -12,6 +12,7 @@ import {
   assertNativeNoReplacePlatform,
   createNativeNoReplaceCapability,
   isExecutableCustodySafe,
+  nativeCompilerExecutionStrategy,
 } from "../src/adapters/native-no-replace.ts";
 import type { NoReplaceRenameRequest } from "../src/adapters/safe-output.ts";
 
@@ -39,7 +40,12 @@ test("unsupported platforms fail closed", () => {
   assert.throws(() => assertNativeNoReplacePlatform("win32"), /only Linux and macOS/u);
 });
 
-test("compiler path must resolve beneath a root-owned non-writable ancestor chain", async () => {
+test("platform strategy snapshots only Linux compilers and keeps Darwin on verified paths", () => {
+  assert.equal(nativeCompilerExecutionStrategy("linux"), "snapshot-fd");
+  assert.equal(nativeCompilerExecutionStrategy("darwin"), "verified-path");
+});
+
+test("verified-path compiler fallback rejects a user-owned original path", async () => {
   const compiler = join(await canonicalTemporaryDirectory(), "cc");
   const previous = process.env.AGTMAI_CC_BINARY;
   await writeFile(compiler, "#!/bin/sh\nexit 0\n", { mode: 0o500 });

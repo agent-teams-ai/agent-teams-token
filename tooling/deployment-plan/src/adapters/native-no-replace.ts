@@ -63,6 +63,11 @@ export function assertNativeNoReplacePlatform(platform: string): void {
   }
 }
 
+export function nativeCompilerExecutionStrategy(platform: string): "snapshot-fd" | "verified-path" {
+  assertNativeNoReplacePlatform(platform);
+  return platform === "linux" ? "snapshot-fd" : "verified-path";
+}
+
 /**
  * Builds a descriptor-bound no-replace capability. This hardens ordinary
  * filesystem races; malicious concurrent code running as the same UID remains
@@ -74,7 +79,7 @@ export async function createNativeNoReplaceCapability(
   assertNativeNoReplacePlatform(process.platform);
   const source = await open(SOURCE, constants.O_RDONLY | constants.O_NOFOLLOW);
   let compilerOriginal: FileHandle | undefined;
-  let compilerSnapshot: HeldExecutable | undefined;
+  let compilerExecutable: HeldExecutable | undefined;
   let helper: HeldExecutable | undefined;
   let custodyHandle: FileHandle | undefined;
   let custody = "";
@@ -94,13 +99,13 @@ export async function createNativeNoReplaceCapability(
     if (!isAbsolute(configuredCompiler)) {
       fail("NO_REPLACE_COMPILER_UNSAFE", "AGTMAI_CC_BINARY must be an absolute path");
     }
+    const strategy = nativeCompilerExecutionStrategy(process.platform);
     const compilerPath = await realpath(configuredCompiler);
     await assertTrustedCompilerPath(compilerPath);
     compilerOriginal = await open(compilerPath, constants.O_RDONLY | constants.O_NOFOLLOW);
     const compilerIdentity = await heldExecutableIdentity(
       compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", true,
     );
-
     custody = await realpath(await mkdtemp(join(tmpdir(), "agtmai-no-replace-")));
     await chmod(custody, 0o700);
     const custodyMetadata = await lstat(custody);
@@ -108,13 +113,19 @@ export async function createNativeNoReplaceCapability(
     custodyHandle = await open(custody,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
 
-    compilerSnapshot = await snapshotExecutable(
-      compilerOriginal, compilerIdentity, custody, "compiler", "NO_REPLACE_COMPILER_UNSAFE",
-    );
-    await faultInjection.afterCompilerSnapshot?.(compilerSnapshot.path, compilerPath);
-    await faultInjection.beforeCompilerSpawn?.(compilerSnapshot.path);
+    if (strategy === "snapshot-fd") {
+      compilerExecutable = await snapshotExecutable(
+        compilerOriginal, compilerIdentity, custody, "compiler", "NO_REPLACE_COMPILER_UNSAFE",
+      );
+    } else {
+      compilerExecutable = { path: compilerPath, handle: compilerOriginal, identity: compilerIdentity };
+      compilerOriginal = undefined;
+    }
+    await faultInjection.afterCompilerSnapshot?.(compilerExecutable.path, compilerPath);
+    await faultInjection.beforeCompilerSpawn?.(compilerExecutable.path);
     await runBoundChild({
-      executable: compilerSnapshot,
+      executable: compilerExecutable,
+      executeThroughHeldDescriptor: strategy === "snapshot-fd",
       argv0: compilerPath,
       arguments: ["-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
         "-o", join(custody, "no-replace"), "-"],
@@ -126,7 +137,9 @@ export async function createNativeNoReplaceCapability(
       code: "NO_REPLACE_BUILD_FAILED",
     });
     assertSameExecutableObject(
-      await heldExecutableIdentity(compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", true),
+      await heldExecutableIdentity(
+        compilerOriginal ?? compilerExecutable.handle, "NO_REPLACE_COMPILER_UNSAFE", true,
+      ),
       compilerIdentity,
       "NO_REPLACE_COMPILER_SUBSTITUTED",
     );
@@ -171,7 +184,7 @@ export async function createNativeNoReplaceCapability(
         closed = true;
         await closePreservingEvidence(
           () => faultInjection.beforeCleanup?.(custody),
-          [heldHelper.handle, compilerSnapshot, compilerOriginal, source, heldCustody],
+          [heldHelper.handle, compilerExecutable, compilerOriginal, source, heldCustody],
         );
         // Deliberately preserve the private custody directory and every leaf.
       },
@@ -180,7 +193,7 @@ export async function createNativeNoReplaceCapability(
     try {
       await closePreservingEvidence(
         () => custody === "" ? undefined : faultInjection.afterBuildFailureBeforeCleanup?.(custody),
-        [helper, compilerSnapshot, compilerOriginal, source, custodyHandle],
+        [helper, compilerExecutable, compilerOriginal, source, custodyHandle],
       );
     } catch (closeError) {
       throw new AggregateError(
@@ -262,6 +275,7 @@ async function assertTrustedCompilerPath(path: string): Promise<void> {
 
 interface ChildRequest {
   readonly executable: HeldExecutable;
+  readonly executeThroughHeldDescriptor?: boolean;
   readonly argv0?: string;
   readonly arguments: readonly string[];
   readonly stdin?: Uint8Array;
@@ -274,7 +288,7 @@ interface ChildRequest {
 
 async function runBoundChild(request: ChildRequest): Promise<void> {
   const executableFd = 3 + request.inherited.length;
-  const executablePath = process.platform === "linux"
+  const executablePath = (request.executeThroughHeldDescriptor ?? process.platform === "linux")
     ? `/proc/self/fd/${String(executableFd)}` : request.executable.path;
   await assertExecutableReady(request.executable);
   await new Promise<void>((resolve, reject) => {
@@ -316,11 +330,17 @@ async function runBoundChild(request: ChildRequest): Promise<void> {
       killTimer.unref();
     }, request.timeoutMs);
     timeout.unref();
-    const postSpawnCheck = process.platform === "darwin"
-      ? assertExecutableReady(request.executable).catch((error: unknown) => {
-        spawnError = error instanceof Error ? error : new Error(String(error));
-        signalGroup(child.pid, "SIGKILL");
-      }) : Promise.resolve();
+    const postSpawnCheck = new Promise<void>((_resolve) => {
+      if (process.platform !== "darwin") { _resolve(); return; }
+      child.once("spawn", () => {
+        void assertExecutableReady(request.executable).catch((error: unknown) => {
+          spawnError = error instanceof Error ? error : new Error(String(error));
+          try { signalGroup(child.pid, "SIGKILL"); }
+          catch (signalError) { terminationError = asError(signalError); }
+        }).finally(_resolve);
+      });
+      child.once("error", () => { _resolve(); });
+    });
     child.once("close", (exitCode, signal) => {
       clearTimeout(timeout);
       if (killTimer !== undefined) { clearTimeout(killTimer); }
@@ -337,6 +357,9 @@ async function runBoundChild(request: ChildRequest): Promise<void> {
         } else if (timedOut) {
           reject(new ChildExitError(exitCode, `${request.code}: process group timed out and was reaped`));
         } else if (exitCode === 0 && signal === null) {
+          if (process.platform === "darwin") {
+            await assertExecutableReady(request.executable);
+          }
           resolve();
         } else {
           reject(new ChildExitError(exitCode,
