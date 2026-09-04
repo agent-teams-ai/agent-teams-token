@@ -16,6 +16,7 @@ test("actual pinned Linux Node preserves failures and finalizes every runtime ow
     for (const scenario of [
       "root-close", "binary-close", "proof-root-close", "proof-binary-close",
       "archive-read-close", "provenance-read-close", "loaded-stat-close",
+      "prepared-archive-close",
     ]) {
       const result = invokePinnedRuntime(fixture, {
         setup: `

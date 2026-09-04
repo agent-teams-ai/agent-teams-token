@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
-  closeSync,
   constants,
   existsSync,
   fstatSync,
@@ -19,12 +18,18 @@ import {
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { assertExpectedFileHashes } from "./toolchain-policy.mjs";
 import {
+  abandonCleanupHandle,
   assertCapturedCleanupTreeSnapshot,
   captureCleanupTreeSnapshot,
   cleanupIdentityBoundDirectory,
   createCleanupHandle,
   updateCleanupTreeSnapshot,
 } from "./rollback/runtime/cleanup.mjs";
+import {
+  collectCustodyDescriptorCloseFailure,
+  useCustodyDescriptor,
+} from "./rollback/runtime/custody.mjs";
+import { throwDescriptorCloseFailures } from "./rollback/runtime/descriptor-close.mjs";
 import { allowlistedChildEnvironment } from "./toolchain-environment.mjs";
 import { toolchainProvenanceFile } from "./toolchain-provenance.mjs";
 
@@ -69,8 +74,11 @@ function openVerifiedArchive({ name, platform, artifact, archive, missingCode })
     }
     return { descriptor, identity };
   } catch (error) {
-    if (descriptor !== undefined) {closeSync(descriptor);}
-    throw error;
+    const closing = descriptor;
+    descriptor = undefined;
+    const failures = [];
+    collectCustodyDescriptorCloseFailure(closing, failures);
+    throwDescriptorCloseFailures(failures, "TOOLCHAIN_ARCHIVE_CLOSE_FAILED", error);
   }
 }
 
@@ -100,9 +108,9 @@ function assertArchiveStable({ name, platform, artifact, archive, verified }) {
 
 function copyDescriptor(descriptor, size, target) {
   const targetDescriptor = openSync(target, "wx", 0o700);
-  const chunk = Buffer.allocUnsafe(1024 * 1024);
-  let position = 0n;
-  try {
+  useCustodyDescriptor(targetDescriptor, "TOOLCHAIN_ARCHIVE_COPY_CLOSE_FAILED", () => {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let position = 0n;
     while (position < size) {
       const remaining = size - position;
       const length = Number(remaining > BigInt(chunk.length) ? BigInt(chunk.length) : remaining);
@@ -111,9 +119,7 @@ function copyDescriptor(descriptor, size, target) {
       writeFileSync(targetDescriptor, chunk.subarray(0, read));
       position += BigInt(read);
     }
-  } finally {
-    closeSync(targetDescriptor);
-  }
+  });
 }
 
 function extractDescriptor(descriptor, artifact, staged) {
@@ -230,13 +236,11 @@ export function prepareVerifiedPayload({
   onCleanupBoundary,
 }) {
   const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
-  const cleanupHandle = createCleanupHandle(stageRoot, {
-    temporaryRoot: toolsRoot,
-    targetPrefix: ".install-part-",
-    allowedEntries: ["payload"],
-  });
+  const cleanupHandle = createPreparationCleanupHandle(stageRoot, toolsRoot);
   const staged = join(stageRoot, "payload");
   let verified;
+  let prepared;
+  let primaryFailure;
   let internalTreeUpdateAllowed = false;
   try {
     mkdirSync(staged);
@@ -270,7 +274,7 @@ export function prepareVerifiedPayload({
     assertExpectedFileHashes({ name, platform, artifact, files });
     updateCleanupTreeSnapshot(cleanupHandle);
     internalTreeUpdateAllowed = false;
-    return {
+    prepared = {
       artifact,
       artifactAuthoritySha256: artifactAuthoritySha256(name, platform, artifact),
       cleanupHandle,
@@ -281,21 +285,52 @@ export function prepareVerifiedPayload({
       stageRoot,
     };
   } catch (error) {
-    try {
-      if (internalTreeUpdateAllowed) {
-        updateCleanupTreeSnapshot(cleanupHandle);
-      }
-      cleanupPreparedPayload({ cleanupHandle, stageRoot }, { onBoundary: onCleanupBoundary });
-    } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        `${error instanceof Error ? error.message : String(error)}; cleanup=${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
-        { cause: cleanupError },
-      );
+    primaryFailure = error;
+  }
+  // Transfer prepared ownership only after the archive close succeeds. Disarm
+  // first: an uncertain close may have freed this number for another resource.
+  const closingArchive = verified?.descriptor;
+  verified = undefined;
+  const failures = [];
+  collectCustodyDescriptorCloseFailure(closingArchive, failures);
+  if (primaryFailure !== undefined || failures.length > 0) {
+    discardFailedPreparation(
+      { cleanupHandle, stageRoot }, { internalTreeUpdateAllowed, onCleanupBoundary }, failures,
+    );
+  }
+  throwDescriptorCloseFailures(failures, "TOOLCHAIN_PREPARATION_FAILED", primaryFailure);
+  return prepared;
+}
+
+function createPreparationCleanupHandle(stageRoot, toolsRoot) {
+  try {
+    return createCleanupHandle(stageRoot, {
+      temporaryRoot: toolsRoot,
+      targetPrefix: ".install-part-",
+      allowedEntries: ["payload"],
+    });
+  } catch (error) {
+    // Custody was not established, so adopting this pathname for recursive
+    // deletion would be unsafe. Report the exact residue for manual recovery.
+    throw new Error(`TOOLCHAIN_PREPARATION_CUSTODY_FAILED preservedStage=${stageRoot}`, { cause: error });
+  }
+}
+
+function discardFailedPreparation(prepared, options, failures) {
+  try {
+    if (options.internalTreeUpdateAllowed) {
+      updateCleanupTreeSnapshot(prepared.cleanupHandle);
     }
-    throw error;
+    cleanupPreparedPayload(prepared, { onBoundary: options.onCleanupBoundary });
+  } catch (error) {
+    failures.push(error);
   } finally {
-    if (verified !== undefined) {closeSync(verified.descriptor);}
+    // Snapshot refresh can itself fail before cleanup assumes the handle.
+    // Preserve the uncertain tree, but release every already-held descriptor.
+    if (!prepared.cleanupHandle.closed) {
+      try { abandonCleanupHandle(prepared.cleanupHandle); }
+      catch (error) { failures.push(error); }
+    }
   }
 }
 

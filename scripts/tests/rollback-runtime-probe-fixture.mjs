@@ -21,6 +21,9 @@ export function installRuntimeFinalizationProbe(fixture, scenario) {
       }
     },
     closeTarget(record) {
+      if (scenario === "prepared-archive-close") {
+        return record.path === fixture.archive && record.occurrence === 2;
+      }
       if (scenario.endsWith("root-close")) { return record.path === fixture.root && record.occurrence === 1; }
       if (scenario === "loaded-stat-close") { return record.requestedPath === "/proc/self/exe"; }
       return record.path === readPath && record.occurrence === 1;
