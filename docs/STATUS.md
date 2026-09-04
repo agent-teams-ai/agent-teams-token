@@ -5,6 +5,30 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+13:33 UTC: wrapper87 is independently ACCEPTed, Linux11/11 and actualMac
+portability evidence. Solana wire374a7d49 passes34focused cases, TS7/lint and
+is under independent89 review plus realMac integration. Custodye2b67d4a passes
+22focused cases but expanded26cases exposes3failures from one Darwin
+post-rename path-registry defect; bounded fast writer90 is correcting it.
+Planner88 continues on Slither deadlines. None of these statuses is full E2E
+acceptance, and no unaccepted recovery base entered the main candidate.
+
+13:28 UTC supersedes earlier snapshots: complete original-plan audit80 is
+preserved in research/ORIGINAL-PLAN-INVARIANT-AUDIT-2026-09-04.md. Integration
+code remains b95c66be. Portability88d5daab passes actual Mac18/18focused and lint,
+but review82 left four other custody findings, now owned by fast writer85.
+Fast writer86 independently implements Solana raw-wire checks. Both are running
+on the old host. Wrapper430b0b52 has a passing actual Mac Bash3.2 behavior test;
+the diagnostic composition also passes10authority and16cleanup tests. It is
+not accepted/integrated recovery. Actual Mac Solana integration passed4/4,
+0skips, including real lifecycle and three parallel-process stress rounds.
+Writers85/86 are terminal and their outputs await verification. Independent
+review87 and Slither deadline planner88 are running, both xhigh/priority.
+Hosted editor failures were not bypassed: complete writer patches were recovered
+and applied locally; new jobs include exact source packets as a drafting fallback.
+
+### Earlier checkpoints
+
 13:04 UTC: independent review79 accepted solc redaction with no findings;
 both source fixes are integrated in `b95c66be`. The combined actual Mac EVM
 integration suite passed7/7, no skips. Custody75 completed a clean checkpoint

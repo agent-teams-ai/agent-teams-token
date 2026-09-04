@@ -3,7 +3,127 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 13:04 UTC
+## Latest reconciliation: 13:33 UTC
+
+Accepted integration code remains b95c66be. Original worktree212b278f and its
+dirty files are unchanged. Historical entries below are source-bound evidence.
+
+- Writer85 returned a complete patch after one bwrap editor failure, no retries
+  or source commit. Main applied it and added missing gid binding in stable
+  shared ancestor identity. Isolated e2b67d4aa2fd0e86093fee43384a5e6c0c398e5e,
+  parent88d5daab:22/22 focused actual Mac tests pass, lint passes. Expanded26case
+  run has23pass/3fail: after a verified directory rename into quarantine,
+  the Darwin descriptor registry still holds the old canonical source path.
+  This is one uncovered transition defect, not three separate defects. No
+  acceptance or full-recovery claim. Writer90 owns only removal-quarantine
+  transition and targeted tests; PID3551164, basee2b67d4a, medium/priority.
+- Writer86 likewise returned a source packet patch after one editor failure;
+  main applied it as isolated374a7d49c6d6fc493ec39d9d09568d426a436edc,
+  parentb95. Fourfiles+66/-6 independently verify exact Some/None raw bytes,
+  reject malformed/trailing/foreign-key encodings and add literal transaction
+  goldens. ActualMac13/13wire/verifier plus21/21CLI/RPC/runner cases, TS7 and
+  scoped lint pass. Real local current-source integration is running: lifecycle
+  passed; parallel-process rounds pending. Reviewer89 PID3544506 independently
+  checks exact374a7d49, xhigh/priority/read-only. Not integrated until review.
+- Reviewer87 ACCEPT for the Bash3.2 wrapper delta on b8d05aa7, no severity
+  findings. Pinned Linux Node:11/11wrapper+authority tests, no skips. Existing
+  actual Mac1/1wrapper and10/10authority evidence covers stockBash3.2; scoped
+  acceptance only. Literal allowlisted metacharacters and nonzero exit code
+  were statically inspected, not separate dynamic regressions. Do not create
+  another architecture task for those informational test gaps.
+- Planner88 remains running on the minimal Slither deadline/process/finalizer
+  design. Do not duplicate it. All subsequent jobs remain fast/priority with
+  medium implementation and xhigh independent review/planning.
+
+Writer85/86 first deliverables took about78/71seconds. Solana's first local
+focused run passed13/13; custody passed new targeted tests but expanded actual
+Mac coverage exposed the transition defect above. Model speed is not acceptance.
+
+Evidence writer85.json SHA256
+b3fdd4fdf5806ab3bab417c13d289382e5b91648120a22643bfe553335f96bc0;
+writer86.json SHA256
+eb54bf8ad7b09d2ace42ac71767087eda1474bae88170aaf03d23cc3a9e077d1.
+Portability/remediation bundle /tmp/agtmai-custody85-followup.bundle SHA256
+13ea39d7bcdf2f97662caf3c177b115e0c8954a3939fe0180be66171538f0e7b;
+Solana /tmp/agtmai-solana-wire86.bundle SHA256
+63a18b998d9462489bac0105a10b2e2ea0b22c0fb2bfa9ea3c7c8d381b4fcdc2.
+Standalone hosted clones verified exact bases and Git lock creation before job
+dispatch. Node archives were SHA256 verified. About10.2GiB RAM available,
+3.4GiB swap free,19GiB disk remained on the verified old host at dispatch.
+
+## Earlier reconciliation: 13:28 UTC
+
+Accepted integration code remains b95c66be5d19367f85e864fc72b3b41d4826e906;
+the original dirty user worktree is untouched. This section supersedes all
+running/pending claims below; historical results retain their exact source.
+
+- Audit80 completed. The full deduplicated original-plan matrix is preserved in
+  ORIGINAL-PLAN-INVARIANT-AUDIT-2026-09-04.md. It audited9e428793/code7d07:
+  its then-open solc integration is now closed by b95 and actual Mac7/7.
+  Slither at-use authority, bounded process/finalization, Git/evidence authority,
+  Solana raw-wire/legacy-v3 recovery, initial size/publication bounds, recovery
+  package/bootstrap authority, real platform qualification and final CI/reviews
+  remain open. Do not reduce scope to recovery only.
+- Review82 on76c9205 returned AMEND: P1 authority-root refresh discards policy;
+  P1 replay fixture uses source instead of required checkout leaf; P2 retained
+  sibling nlink increase is falsely rejected; P2 first close failure leaks later
+  descriptors. Linux33/34focused,5/5evidence,16/16cleanup,88/89aggregate;
+  the replay failure is real and not the external /tmp/.git issue.
+- Writers83/84 ended with no source changes after bwrap UID-map editor failures.
+  Their complete earlier final-answer patches were recovered from task-specific
+  final-answer records only; no reasoning/auth/key files were read. Main applied
+  them locally using apply_patch. No runtime or sandbox bypass was attempted.
+- Portability checkpoint88d5daab15f0f013d94de5247480db54cb9c07c7, parent76c:
+  original/canonical Darwin root revalidation, explicit fixture alias policy,
+  module-size/lint fixes and a new typed descriptor registration correction.
+  Shared-path registration previously stored serialized string fields, then
+  compared them to BigInt fstat identity on Darwin. Now raw stats are registered
+  only after identity checks and malformed serialized records are rejected.
+  Actual Mac18/18focused,0skips; scoped lint/diff check pass. NOT accepted pending
+  review82 remediation and independent re-review.
+- Wrapper checkpoint430b0b52, parent49924acf: Bash3.2-compatible unset/empty/value
+  detection, isolated behavior test registered by the existing toolchain suite.
+  Test-only composition /tmp/agtmai-recovery-composed-88d is b8d05aa76854fdaa9ef28372998cade5217ede3b
+  (88d+accepted archive delta+wrapper). Actual Mac10/10archive/authority and
+  16/16cleanup cases pass. A no-isolation multi-file run reported27, but the
+  wrapper file was only discovered, not its named test: the wrapper was rerun
+  alone and its1/1behavior case passed. No inflated coverage claim. Scoped lint
+  passes. Synthetic linux-x64 fixture bytes were executed under real Mac Bash;
+  this is shell portability evidence, not a Linux runtime qualification.
+- New hosted writer85 owns only review82 custody/shared-path/fixture findings;
+  writer86 owns only independent Solana Some/None raw-wire verification/goldens.
+  Both are actually running on the old host/account-m, medium/priority, separate
+  clean standalone clones synchronized through verified exact-base Git bundles.
+  IDs: agtmai-r212-custody-fixes85-20260904 (PID3115253,base88d5daab) and
+  agtmai-r212-solana-wire86-20260904 (PID3122653,baseb95c66be).
+  Complete source packets permit useful patch drafting if tools fail; tests
+  must then be marked not run. No repeated broken-editor retries or host changes.
+- Latest resource admission: machinebe0aad971ea647fab370acd110b469b7,
+  about10.6GiB available RAM,3.5GiB free swap,21GiB free disk. Priority means
+  fast mode; implementation medium, independent review/planning xhigh.
+- Actual Mac current-source Solana integration completed:4/4,0fail,0skip,
+  132.7seconds. Required-binary mode was enabled. Real mint/burn/negative-authority
+  lifecycle and three rounds of separately spawned parallel fixture pairs pass.
+  This closes the current-source Mac lifecycle gap, not Linux/CI or forthcoming
+  wire/lease changes. No public network or paid asset was used.
+- Independent fast review87 (PID3297240) checks only the Bash3.2 wrapper delta
+  on diagnosticb8d05aa7; planner88 (PID3303816) designs the minimal Slither
+  process/finalizer deadline correction onb95. Separate read-only xhigh jobs.
+  Writers85/86 became terminal at13:28; outputs are being collected, not accepted.
+
+Review82 raw final evidence: .tools/hosted-evidence/2026-09-04/review82-full.md.
+Verified portability bundle /tmp/agtmai-custody-portable-85.bundle SHA256
+040b6d0eac9ce6e06f994414c91ab3d76c1a928a1518e0d15da9ca822c194f67.
+Diagnostic composition bundle /tmp/agtmai-wrapper-composed-b8.bundle SHA256
+1b46bfceb4c1f88ddbf83fc853c07659f20e337ab85933f60180f247f1430dbb.
+
+The original latest addendum explicitly retains the POSIX same-UID concurrent
+mutation limitation. Audit80's stronger earlier cleanup wording is flagged,
+not silently adopted or used to resurrect rejected native designs. Supported
+lifecycle/substitution safety remains required; a stronger isolation boundary
+would need a separate decision. No public network/tokenomics/vesting scope.
+
+## Earlier reconciliation: 13:04 UTC
 
 Current accepted integration code HEAD is
 `b95c66be5d19367f85e864fc72b3b41d4826e906`. This section supersedes earlier
@@ -78,7 +198,26 @@ provisioned for these confirmed compatibility/lint issues. Both preserve the
 known same-UID final-pathname-syscall limitation and the separate unsupported
 Darwin loaded-Node-image proof. No recovery acceptance yet.
 
-Next: collect80/81/82/83; accept only independently reviewed exact checkpoints;
+### 13:11 UTC: archive checkpoint accepted; additional Mac toolchain finding
+
+Independent review81 ACCEPT on49924acf, P0/P1/P2/P3 all zero, clean tracked state.
+Direct pinned Linux Node:10authority+2archive-cleanup+1descriptor-source+
+1bootstrap-snapshot cases passed, no skips. Its in-memory mutation removed the
+pre-consumption assertion while retaining post-consumption:9pass/1intentional
+failure, observing `['solc']` instead of empty payload. No source was modified.
+Accept the delta only; do NOT cherry-pick the unaccepted f2d base into the main
+candidate. Candidate has no toolchain-archive.mjs yet; compose this accepted
+checkpoint into the isolated recovery series when that series is ready.
+
+Actual Mac exact76c9205 additional check:16/16 cleanup-safety cases pass, and
+2/7 toolchain-authority cases pass; the remaining5 fail during fixture install
+because generated bin/node uses Bash `[[ -v name ]]`, unsupported by stock
+macOS /bin/bash3.2. This is inherited fromf2d's toolchain-installation.mjs,
+not the archive delta or newly added custody code. Total23:18pass/5fail/0skip.
+The pnpm archive used was hash-verified development setup. Do not relabel this
+as five distinct security defects; it is one concrete portability blocker.
+
+Next: collect80/82/83; accept only independently reviewed exact checkpoints;
 restore the full invariant ledger; close remaining confirmed code gaps and
 package/bootstrap/Git authority; reconcile main; full exact-SHA local/CI then
 four specialists and a sequential frozen-ledger holistic review.

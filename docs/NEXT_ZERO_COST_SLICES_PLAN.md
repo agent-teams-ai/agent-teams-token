@@ -12,8 +12,11 @@ cases are covered. The two earlier local-EVM P2s are closed.
 The recovery checkpoint remains unaccepted, including actual Darwin failures;
 its failed partial writer was replaced with a fresh isolated filesystem lane.
 The original user-path plan contains1,416lines, including remediation addenda
-absent from this648line candidate copy. Independent audit80 is reconciling every
-required invariant against current code. Those requirements are not discarded
+absent from this648line candidate copy. Independent audit80 completed the
+deduplicated matrix in research/ORIGINAL-PLAN-INVARIANT-AUDIT-2026-09-04.md.
+Slither authority/deadlines, Solana raw-wire and current-lineage legacy recovery,
+initial publication bounds, recovery package/bootstrap/Git authority and final
+platform/CI qualification remain open. Those requirements are not discarded
 and old rejected branches are not automatically accepted. See the ledger for
 exact original SHA256 and the review scope. Full remaining work is not yet
 reduced to recovery alone.
