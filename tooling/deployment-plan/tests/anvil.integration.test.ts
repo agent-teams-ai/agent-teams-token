@@ -16,7 +16,7 @@ const noOperation = (): void => {};
 
 test(
   "real loopback Anvil estimates freshly built exact AGTMAIToken initcode within tolerance",
-  { skip: !anyE2eConfiguration, timeout: 30_000 },
+  { skip: !anyE2eConfiguration, timeout: 90_000 },
   async () => {
     const binaries = requireCompleteConfiguration();
     let build: FreshBuild | undefined;
@@ -51,19 +51,29 @@ test(
         rawBuildInfoSha256: string;
         canonicalBuildInfoSha256: string;
         creationInputHash: string;
-        senderNonce: string;
-        expectedCreateAddress: string;
       } };
       const quote = JSON.parse(
         await readFile(join(result.directory, "fee-quote.v2.json"), "utf8"),
-      ) as { creationInputHash: string; observation: { gasEstimate: string } };
+      ) as {
+        planId: string;
+        creationInputHash: string;
+        observation: {
+          senderNonce: string;
+          expectedCreateAddress: string;
+          gasEstimate: string;
+        };
+      };
       assert.equal(plan.identity.buildInfoSolcVersion, "0.8.36");
       assert.notEqual(
         plan.identity.rawBuildInfoSha256,
         plan.identity.canonicalBuildInfoSha256,
       );
-      assert.equal(plan.identity.senderNonce, "0");
-      assert.equal(plan.identity.expectedCreateAddress, "0x522b3294e6d06aa25ad0f1b8891242e335d3b459");
+      assert.equal(quote.observation.senderNonce, "0");
+      assert.equal(
+        quote.observation.expectedCreateAddress,
+        "0x522b3294e6d06aa25ad0f1b8891242e335d3b459",
+      );
+      assert.equal(quote.planId, plan.planId);
       assert.equal(quote.creationInputHash, plan.identity.creationInputHash);
       assertWithinFoundryTolerance(BigInt(quote.observation.gasEstimate));
 
@@ -84,13 +94,25 @@ test(
       });
       const nonceOnePlan = JSON.parse(
         await readFile(join(nonceOneResult.directory, "deployment-plan.v2.json"), "utf8"),
-      ) as { planId: string; identity: { senderNonce: string; expectedCreateAddress: string } };
-      assert.equal(nonceOnePlan.identity.senderNonce, "1");
+      ) as { planId: string; identity: { creationInputHash: string } };
+      const nonceOneQuote = JSON.parse(
+        await readFile(join(nonceOneResult.directory, "fee-quote.v2.json"), "utf8"),
+      ) as typeof quote;
+      assert.equal(nonceOneQuote.observation.senderNonce, "1");
       assert.equal(
-        nonceOnePlan.identity.expectedCreateAddress,
+        nonceOneQuote.observation.expectedCreateAddress,
         "0x535b3d7a252fa034ed71f0c53ec0c6f784cb64e1",
       );
-      assert.notEqual(nonceOnePlan.planId, plan.planId);
+      assert.equal(nonceOnePlan.planId, plan.planId);
+      assert.equal(nonceOneQuote.planId, nonceOnePlan.planId);
+      assert.equal(nonceOnePlan.identity.creationInputHash, plan.identity.creationInputHash);
+      assert.equal(nonceOneQuote.creationInputHash, quote.creationInputHash);
+      assert.notDeepEqual(nonceOneQuote, quote);
+      assert.notEqual(nonceOneQuote.observation.senderNonce, quote.observation.senderNonce);
+      assert.notEqual(
+        nonceOneQuote.observation.expectedCreateAddress,
+        quote.observation.expectedCreateAddress,
+      );
     } catch (error) {
       testFailure = error;
     }
@@ -159,7 +181,7 @@ async function freshForgeBuild(forge: string, solc: string): Promise<FreshBuild>
       buildInfo,
       "--no-lint",
       "src/features/token-genesis/AGTMAIToken.sol",
-    ]);
+    ], 60_000);
     const buildInfoFiles = (await readdir(buildInfo)).filter((name) => name.endsWith(".json"));
     assert.equal(
       buildInfoFiles.length,
