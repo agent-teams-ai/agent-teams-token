@@ -136,7 +136,7 @@ async function assertDirectory(path: string, code: string): Promise<void> {
 }
 
 function contained(root: string, value: string, code: string): string {
-  if (value.length === 0 || /[\u0000-\u001f\u007f]/u.test(value) || value.includes("\\") || isAbsolute(value)
+  if (value.length === 0 || hasAsciiControlCharacter(value) || value.includes("\\") || isAbsolute(value)
     || value.split("/").some((part) => part === "" || part === "." || part === ".." || part.startsWith("-"))) {
     throw new LocalSolanaError(code, "toolchain path is not a safe relative path");
   }
@@ -146,6 +146,14 @@ function contained(root: string, value: string, code: string): string {
     throw new LocalSolanaError(code, "toolchain path escapes its trusted root");
   }
   return target;
+}
+
+export function hasAsciiControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) { return true; }
+  }
+  return false;
 }
 
 async function verifyVersions(paths: ToolPaths, commands: CommandPort): Promise<void> {

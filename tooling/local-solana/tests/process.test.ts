@@ -4,7 +4,7 @@ import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { assertValidatorRpcListener, captureValidatorIdentity, parseDarwinLsofListener } from "../src/adapters/process-identity.ts";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeCommandAdapter, OwnedValidatorAdapter, redact } from "../src/adapters/process.ts";
@@ -87,18 +87,21 @@ test("aborting a running validator terminates the authenticated child", { skip: 
   } finally { controller.abort(); if (validatorPid !== undefined && processAlive(validatorPid)) { process.kill(validatorPid, "SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
 });
 
-test("identity-capture failure reaps both the direct child and its supervisor", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "native process identity unsupported", timeout: 10_000 }, async () => {
+test("registration failure reaps both the observed direct child and its supervisor", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "native process identity unsupported", timeout: 10_000 }, async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-validator-capture-failure-")); await chmod(boundary, 0o700);
-  const executable = join(boundary, "validator-shim"); const pidPath = join(boundary, "child.pid"); const ledger = join(boundary, "ledger"); const config = join(boundary, "config.yml"); await mkdir(ledger); await writeFile(config, "fixture");
-  await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' "$$" > ${JSON.stringify(pidPath)}\nwhile :; do sleep 1; done\n`, { mode: 0o700 });
+  const executable = await buildValidator(boundary); const ledger = join(boundary, "ledger"); const config = join(boundary, "config.yml"); await mkdir(ledger); await writeFile(config, "fixture");
+  let childPid: number | undefined;
   try {
     await assert.rejects(new OwnedValidatorAdapter().start({
       executable, ledger, config, genesisMint: "5".repeat(32), tokenProgram: executable, associatedTokenProgram: executable,
       rpcPort: 30_103, faucetPort: 30_105, gossipPort: 30_113, dynamicPortRange: "30113-30240", env: { PATH: "/usr/bin:/bin" },
-      signal: new AbortController().signal, leaseToken: "9".repeat(64), registerIdentity: async () => { throw new Error("invalid validator must not register"); },
-    }), /SOLANA_VALIDATOR_EARLY_EXIT/u);
-    const childPid = Number((await readFile(pidPath, "utf8")).trim()); assert.ok(Number.isSafeInteger(childPid)); assert.equal(processAlive(childPid), false);
-  } finally { await rm(boundary, { recursive: true, force: true }); }
+      signal: new AbortController().signal, leaseToken: "9".repeat(64), registerIdentity: async (identity) => {
+        childPid = identity.pid; assert.equal(processAlive(identity.pid), true); throw new Error("forced registration failure");
+      },
+    }), /forced registration failure/u);
+    assert.ok(childPid); assert.equal(processAlive(childPid), false);
+    await assertNoProcessUsesBoundary(boundary, 3_000);
+  } finally { if (childPid !== undefined && processAlive(childPid)) { process.kill(childPid, "SIGKILL"); } await rm(boundary, { recursive: true, force: true }); }
 });
 
 test("abort bounds a registration callback that never settles and reaps the validator", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "native process identity unsupported", timeout: 10_000 }, async () => {
@@ -194,3 +197,21 @@ async function availableTestPort(): Promise<number> {
 async function buildValidator(directory: string): Promise<string> { const source = join(directory, "validator.c"); const executable = join(directory, "validator"); await writeFile(source, "#include <unistd.h>\nint main(void){for(;;) pause();}\n"); await new Promise<void>((resolve, reject) => { execFile("/usr/bin/cc", [source, "-o", executable], (cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); return executable; }
 
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
+
+async function assertNoProcessUsesBoundary(boundary: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let matches: readonly string[] = [];
+  do {
+    matches = await processesUsingBoundary(boundary);
+    if (matches.length === 0) { return; }
+    await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(20, Math.max(1, deadline - Date.now()))); });
+  } while (Date.now() < deadline);
+  assert.fail("processes retained the unique validator boundary: " + matches.join(" | "));
+}
+
+async function processesUsingBoundary(boundary: string): Promise<readonly string[]> {
+  const output = await new Promise<string>((resolve, reject) => {
+    execFile("/bin/ps", ["-axo", "pid=,command="], { maxBuffer: 1024 * 1024 }, (cause, stdout) => cause ? reject(cause) : resolve(stdout));
+  });
+  return output.split("\n").filter((line) => line.includes(boundary));
+}

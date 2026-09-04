@@ -73,3 +73,23 @@ test("verifier rejects zero, extra, duplicate, sparse, reordered and semanticall
   ];
   for (const attack of attacks) { assert.throws(() => verifyObservations(attack), /SOLANA_/u); }
 });
+
+test("verifier accepts only raw or parsed Create bound to discriminant zero", () => {
+  const parsedCreate = mutateAta((transaction) => ({
+    ...transaction,
+    instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, kind: "create" } : item),
+  }));
+  assert.equal(verifyObservations(observationFixture()).transactions[2]?.instructions[0]?.kind, "raw");
+  assert.equal(verifyObservations(parsedCreate).transactions[2]?.instructions[0]?.kind, "create");
+
+  const attacks = [
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, dataHex: "01" } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, kind: "create", dataHex: "01" } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, kind: "createIdempotent" } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, kind: "create", accounts: [payer, ata, mintAddress, owner, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM] } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, kind: "create", programId: CLASSIC_TOKEN_PROGRAM } : item) })),
+    mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.map((item, index) => index === 0 ? { ...item, kind: "create" } : item), innerInstructionGroups: [{ groupIndex: 0, outerInstructionIndex: 1 }] })),
+    mutateAta((transaction) => ({ ...transaction, instructions: [transaction.instructions[0]!, transaction.instructions[2]!, transaction.instructions[1]!, ...transaction.instructions.slice(3)].map((item, index) => index === 0 ? { ...item, kind: "create" } : item) })),
+  ];
+  for (const attack of attacks) { assert.throws(() => verifyObservations(attack), /SOLANA_/u); }
+});

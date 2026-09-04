@@ -149,7 +149,7 @@ function verifyAtaOuter(fact: TransactionFact, relevant: InstructionFact, value:
   const outer = fact.instructions.filter((item) => item.innerInstructionIndex === null);
   assertCondition(outer.length === 1 && outer[0] === relevant && relevant.instructionIndex === 0 && relevant.innerGroupIndex === null,
     "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction at index 0");
-  assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && relevant.kind === "raw" && relevant.dataHex === "00",
+  assertCondition(relevant.programId === ASSOCIATED_TOKEN_PROGRAM && (relevant.kind === "raw" || relevant.kind === "create") && relevant.dataHex === "00",
     "SOLANA_ATA_DISCRIMINANT", "ATA creation must use the pinned Create discriminant");
   const expectedOuterAccounts = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM];
   assertCondition(sameAddresses(relevant.accounts, expectedOuterAccounts), "SOLANA_ATA_ACCOUNTS", "ATA Create outer metas are not exact");

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { PinnedToolResolver } from "../src/adapters/toolchain.ts";
+import { hasAsciiControlCharacter, PinnedToolResolver } from "../src/adapters/toolchain.ts";
 import type { CommandPort, CommandResult } from "../src/application/ports.ts";
 
 interface MutableToolchainLock {
@@ -90,4 +90,9 @@ test("mutated Agave install and SPL program paths fail before command execution"
       assert.deepEqual(value.command.calls, []);
     } finally { await rm(value.root, { recursive: true, force: true }); }
   }
+});
+
+test("ASCII control validation covers control and printable boundaries", () => {
+  for (const code of [0, 31, 127]) { assert.equal(hasAsciiControlCharacter(String.fromCharCode(code)), true); }
+  for (const code of [32, 126, 128]) { assert.equal(hasAsciiControlCharacter(String.fromCharCode(code)), false); }
 });
