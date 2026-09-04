@@ -5,6 +5,11 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+12:53 UTC: redaction writer77 completed cleanae60e200 (two files). All25
+focused actual Mac cases are covered after correcting two Anvil PATH setup
+failures; local-EVM TS and scoped lint pass. Independent fast review79 is
+running before integration. Active jobs are custody75, archive78 and review79.
+
 Latest update at12:51 UTC: deployment review76 returned ACCEPT with no findings;
 the fix is integrated as7d07a10c. Combined root lint, root TS build, deployment
 TS and full Foundation checks pass. Solc redaction77 and recovery custody75

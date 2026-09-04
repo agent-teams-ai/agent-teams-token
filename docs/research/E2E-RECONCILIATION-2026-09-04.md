@@ -3,7 +3,7 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 12:51 UTC
+## Latest reconciliation: 12:53 UTC
 
 Current integration code HEAD is `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6`.
 Owned documentation checkpoint5bf3d1c8 is committed; the original user worktree
@@ -16,8 +16,9 @@ is untouched. This section supersedes all earlier job and gate snapshots.
   zero diagnostics. This is not the complete final local/CI gate.
 - Toolchain68/review72 are accepted and integrated ascaedc5d6.
 - Solc69's7926ace remains outside the candidate: review73 closed its original
-  two P2s but found one introduced raw-stderr cause metadata P2. Writer77 is
-  actively implementing the bounded redaction/regression fix.
+  two P2s but found one introduced raw-stderr cause metadata P2. Writer77 has
+  completed cleanae60e2004f379bbc6511061e6efc7f37a674682c (parent7926ace),
+  twofiles+57/-1, and independent fast review79 is running.
 - Recovery75 remains active on filesystem custody/early capture/staging.
   Recovery70's failed partial remains preserved and unaccepted.
 - New archive78, basef2d7ab9, PID1377305, provider.task.started12:50:05,
@@ -51,6 +52,27 @@ These reports are not package-byte trust roots or final production approvals.
 Next: finish77/75/78 with scoped review; implement package/bootstrap/preflight
 authority without overlapping custody ownership; then reconcile main and
 execute the plan's full exact-head local/CI and final independent reviews.
+
+Writer77 terminal evidence:25focusedtests22pass/3native-solc skips, zero fail;
+first material patch12:47:05, two iterations, elapsed7m6s. It violated the
+no-pnpm-execution guidance by attempting a check that implicitly installed;
+it terminated that attempt, removed its generated node_modules and reported
+no downloads. No tracked dependency or pin change exists. Its apply_patch
+runtime could not initialize bubblewrap UID mappings, so it used the system
+patch utility; final clean two-file Git diff was independently inspected.
+Do not treat either operational issue as a source acceptance claim.
+
+Verified bundle `/tmp/agtmai-solc-ae60e200.bundle`, SHA256
+`ef4379fb330f1d6d3ac232084f97f93235bdeef0339a21c6239cbb37e2030b4e`.
+Mac `/tmp/agtmai-solc-7926-mac` is now exactae60e200, not7926ace. First new
+focused run:23pass/2setup failures because the orchestrator omitted Foundry
+from PATH (Anvil ENOENT), not assertion failures. The two cases alone were
+rerun with complete pinned Node/Foundry/pnpm PATH:2pass/0fail/0skip. All25
+focused cases are covered on exactae60e200, with the initial setup failures
+retained in this record. Local-EVM TS and scoped lint also passed afterward.
+Review79 PID1489394 reached
+provider.task.started12:53:00, xhigh/priority/read-only/account-m; its prompt
+expressly prohibits even pinned pnpm/corepack/dev or gate-wrapper execution.
 
 ## Earlier reconciliation: 12:42 UTC
 

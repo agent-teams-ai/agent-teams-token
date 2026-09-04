@@ -6,8 +6,9 @@ Current code candidate `7d07a10c70fd5c898152eadccae8e3e4e5bd0ba6` includes
 independently accepted toolchain and deployment fixes. Combined lint, root TS
 build, deployment TS and Foundation pass; the actual Mac Anvil source checkpoint
 has125pass/3Linux skips. Separate local-EVM source passes7/7 runner integration
-cases, but review retained one introduced error-cause redaction P2; a bounded
-writer is fixing it. The two earlier local-EVM P2s are closed.
+cases, but review retained one introduced error-cause redaction P2. Its bounded
+fixae60e200 now covers25focused Mac cases and awaits independent review79.
+The two earlier local-EVM P2s are closed.
 The recovery checkpoint remains unaccepted, including actual Darwin failures;
 its failed partial writer was replaced with a fresh isolated filesystem lane.
 See [the current reconciliation ledger](research/E2E-RECONCILIATION-2026-09-04.md).
