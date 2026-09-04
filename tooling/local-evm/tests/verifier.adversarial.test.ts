@@ -11,11 +11,11 @@ import { encodeAllocationCommitment, readApprovedManifest } from "../manifest.ts
 import { APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type DeploymentReport, type LocalManifest, type VerificationInput } from "../model.ts";
 import type { RpcClient } from "../rpc.ts";
 import { reconstructRuntime, verifyLocalDeployment, writeEvidence } from "../verifier.ts";
-import { pinnedSolcPath } from "../toolchain.ts";
+import { pinnedSolc } from "../toolchain.ts";
 import { deriveCreateAddress, encodeCreateAddressPreimage, parseTransactionNonce } from "../create-address.ts";
 
 const execute = promisify(execFile);
-const repositoryRoot = resolve(import.meta.dirname, "../../..");
+const repositoryRoot = await realpath(resolve(import.meta.dirname, "../../.."));
 const targetAddress = "0x18b25cf46bcf833a5b6155cc9ece3875c75703db" as const;
 const deployerAddress = "0x9000000000000000000000000000000000000008" as const;
 const transactionHash = `0x${"12".repeat(32)}` as const;
@@ -37,9 +37,14 @@ before(async () => {
   const forgeBuildInfo = join(suiteRoot, "forge-build-info");
   const solcCustody = join(suiteRoot, "solc-custody");
   await mkdir(solcCustody, { mode: 0o700 });
-  await execute("forge", ["build", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", pinnedSolcPath(repositoryRoot, solcCustody)], {
-    cwd: join(repositoryRoot, "contracts/evm"), timeout: 120_000, killSignal: "SIGKILL",
-  });
+  const solc = pinnedSolc(repositoryRoot, await realpath(solcCustody));
+  try {
+    solc.assertReady();
+    await execute("forge", ["build", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", solc.path], {
+      cwd: join(repositoryRoot, "contracts/evm"), timeout: 120_000, killSignal: "SIGKILL",
+    });
+    solc.assertReady();
+  } finally {solc.close();}
   artifactSource = join(forgeOut, "AGTMAIToken.sol", "AGTMAIToken.json");
   const names = (await import("node:fs/promises")).readdir(forgeBuildInfo);
   const buildNames = (await names).filter((name) => name.endsWith(".json"));

@@ -8,7 +8,10 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
+  realpathSync,
   writeSync,
+  type Stats,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { LocalEvmError } from "./model.ts";
@@ -18,18 +21,26 @@ const PLATFORM_SHA256 = {
   "linux-x64": "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6",
 } as const;
 
-export function pinnedSolcPath(repositoryRoot: string, custodyDirectory: string): string {
-  const root = resolve(repositoryRoot);
-  const custody = resolve(custodyDirectory);
+export interface PinnedSolc {
+  readonly path: string;
+  assertReady(): void;
+  close(): void;
+}
+
+export function pinnedSolc(repositoryRoot: string, custodyDirectory: string): PinnedSolc {
+  const root = canonicalCallerPath(repositoryRoot, "LOCAL_EVM_REPOSITORY_PATH", "repository root");
+  const custody = canonicalCallerPath(custodyDirectory, "LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody");
+  assertPrivateCustodyPreflight(custody);
   const platform = supportedPlatform();
-  const toolsRoot = contained(root, ".tools", "LOCAL_EVM_TOOLS_PATH");
+  const lexicalToolsRoot = contained(root, ".tools", "LOCAL_EVM_TOOLS_PATH");
+  assertDirectory(lexicalToolsRoot, "LOCAL_EVM_TOOLS_PATH");
+  const toolsRoot = canonicalExistingPath(lexicalToolsRoot, "LOCAL_EVM_TOOLS_PATH", "persistent tool installation");
   if (custody === toolsRoot || custody.startsWith(`${toolsRoot}${sep}`)) {
-    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody cannot use the persistent tool installation");
+    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody cannot physically use the persistent tool installation");
   }
   const custodyFd = openSnapshotCustody(custody);
   try {
     const lock = parseLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
-    assertDirectory(toolsRoot, "LOCAL_EVM_TOOLS_PATH");
     const install = contained(toolsRoot, lock.installDirectory, "LOCAL_EVM_SOLC_LOCK");
     assertDirectory(install, "LOCAL_EVM_SOLC_INSTALL");
     const installed = contained(install, "solc", "LOCAL_EVM_SOLC_LOCK");
@@ -39,21 +50,79 @@ export function pinnedSolcPath(repositoryRoot: string, custodyDirectory: string)
     const snapshotRoot = mkdtempSync(join(custody, "authenticated-solc-"));
     chmodSync(snapshotRoot, 0o700);
     const snapshot = join(snapshotRoot, "solc");
-    const fd = openSync(snapshot, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o700);
+    const writeFd = openSync(snapshot, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o700);
     try {
       let offset = 0;
-      while (offset < bytes.length) { offset += writeSync(fd, bytes, offset); }
-    } finally { closeSync(fd); }
+      while (offset < bytes.length) { offset += writeSync(writeFd, bytes, offset); }
+    } finally { closeSync(writeFd); }
     chmodSync(snapshot, 0o500);
-    const snapshotHash = createHash("sha256").update(stableRead(snapshot)).digest("hex");
-    assertSnapshotCustodyIdentity(custody, custodyFd);
-    if (snapshotHash !== lock.sha256) {
-      throw new LocalEvmError("LOCAL_EVM_SOLC_SNAPSHOT_INVALID", "authenticated private solc snapshot changed before use");
+    const heldFd = openSync(snapshot, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const capability = heldPinnedSolc(snapshot, heldFd, fstatSync(heldFd), bytes, lock.sha256);
+      capability.assertReady();
+      assertSnapshotCustodyIdentity(custody, custodyFd);
+      return capability;
+    } catch (cause) {
+      closeSync(heldFd);
+      throw cause;
     }
-    return snapshot;
   } finally {
     closeSync(custodyFd);
   }
+}
+
+function heldPinnedSolc(path: string, fd: number, identity: Stats, expectedBytes: Buffer, expectedSha256: string): PinnedSolc {
+  let closed = false;
+  return {
+    path,
+    assertReady(): void {
+      if (closed) {snapshotInvalid("authenticated private solc snapshot capability is closed");}
+      const held = fstatSync(fd);
+      if (!sameSnapshotMetadata(identity, held) || !readDescriptor(fd, held.size).equals(expectedBytes)
+        || !sameSnapshotMetadata(held, fstatSync(fd))) {snapshotInvalid();}
+      let currentFd: number | undefined;
+      try {
+        currentFd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const before = fstatSync(currentFd);
+        const current = lstatSync(path);
+        if (!sameSnapshotMetadata(identity, before) || !sameSnapshotMetadata(identity, current) || current.isSymbolicLink()) {snapshotInvalid();}
+        const currentBytes = readDescriptor(currentFd, before.size);
+        const after = fstatSync(currentFd);
+        if (!sameSnapshotMetadata(before, after) || !currentBytes.equals(expectedBytes)
+          || createHash("sha256").update(currentBytes).digest("hex") !== expectedSha256) {snapshotInvalid();}
+      } catch (cause) {
+        if (cause instanceof LocalEvmError) {throw cause;}
+        snapshotInvalid();
+      } finally {
+        if (currentFd !== undefined) {closeSync(currentFd);}
+      }
+    },
+    close(): void {
+      if (!closed) {closed = true; closeSync(fd);}
+    },
+  };
+}
+
+function snapshotInvalid(message = "authenticated private solc snapshot identity or bytes changed before use"): never {
+  throw new LocalEvmError("LOCAL_EVM_SOLC_SNAPSHOT_INVALID", message);
+}
+
+function readDescriptor(fd: number, size: number): Buffer {
+  if (!Number.isSafeInteger(size) || size < 0) {snapshotInvalid();}
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+    if (count === 0) {snapshotInvalid();}
+    offset += count;
+  }
+  return bytes;
+}
+
+function sameSnapshotMetadata(expected: Stats, actual: Stats): boolean {
+  return expected.isFile() && actual.isFile() && expected.dev === actual.dev && expected.ino === actual.ino
+    && expected.uid === actual.uid && expected.size === actual.size && expected.nlink === 1 && actual.nlink === 1 && expected.mtimeMs === actual.mtimeMs && expected.ctimeMs === actual.ctimeMs
+    && (expected.mode & 0o777) === 0o500 && (actual.mode & 0o777) === 0o500;
 }
 
 export function assertPinnedSolcSha256(bytes: Uint8Array, expectedSha256: string): void {
@@ -124,6 +193,15 @@ function assertDirectory(path: string, code: string): void {
   if (!value.isDirectory() || value.isSymbolicLink()) { throw new LocalEvmError(code, "toolchain directory is absent or substituted"); }
 }
 
+function assertPrivateCustodyPreflight(path: string): void {
+  const value = lstatSync(path);
+  const expectedOwner = process.getuid?.();
+  if (!value.isDirectory() || value.isSymbolicLink()
+    || (expectedOwner !== undefined && value.uid !== expectedOwner) || (value.mode & 0o777) !== 0o700) {
+    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody must be caller-owned, canonical, real, stable, and mode 0700");
+  }
+}
+
 function openSnapshotCustody(path: string): number {
   let fd: number | undefined;
   try {
@@ -143,10 +221,22 @@ function assertSnapshotCustodyIdentity(path: string, fd: number): void {
   const expectedOwner = process.getuid?.();
   if (!held.isDirectory() || !current.isDirectory() || current.isSymbolicLink()
     || held.dev !== current.dev || held.ino !== current.ino
-    || (expectedOwner !== undefined && held.uid !== expectedOwner)
-    || (held.mode & 0o022) !== 0) {
-    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody must be owned, real, stable, and not group/other writable");
+    || (expectedOwner !== undefined && (held.uid !== expectedOwner || current.uid !== expectedOwner))
+    || (held.mode & 0o777) !== 0o700 || (current.mode & 0o777) !== 0o700) {
+    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody must be caller-owned, canonical, real, stable, and mode 0700");
   }
+}
+
+function canonicalCallerPath(path: string, code: string, label: string): string {
+  const lexical = resolve(path);
+  const canonical = canonicalExistingPath(lexical, code, label);
+  if (lexical !== canonical) {throw new LocalEvmError(code, `${label} must be supplied as its canonical real path`);}
+  return canonical;
+}
+
+function canonicalExistingPath(path: string, code: string, label: string): string {
+  try {return realpathSync(path);}
+  catch {throw new LocalEvmError(code, `${label} must already exist as a real path`);}
 }
 
 function contained(root: string, value: string, code: string): string {

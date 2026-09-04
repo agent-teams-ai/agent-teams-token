@@ -11,12 +11,18 @@ import { checkedCommand, command, startOwnedAnvil, type OwnedAnvil } from "./pro
 import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
 import { atomicWrite, ensurePrivateDirectory, ensurePrivateDirectoryPath, readRegularFile } from "./safe-fs.ts";
-import { assertPinnedSolcVersionOutput, pinnedSolcPath } from "./toolchain.ts";
+import { assertPinnedSolcVersionOutput, pinnedSolc, type PinnedSolc } from "./toolchain.ts";
 
-interface RunnerOptions { readonly repositoryRoot: string; readonly reportsRoot?: string }
+export interface RunnerOptions {
+  readonly repositoryRoot: string;
+  readonly reportsRoot?: string;
+  readonly solcLifecycleHook?: (point: "after-authentication" | "before-forge", solc: PinnedSolc) => void | Promise<void>;
+}
 
 export async function runLocalEvm(options: RunnerOptions): Promise<Record<string, unknown>> {
-  const root = resolvePath(options.repositoryRoot);
+  const suppliedRoot = resolvePath(options.repositoryRoot);
+  const root = realpathSync(suppliedRoot);
+  if (root !== suppliedRoot) {throw new LocalEvmError("LOCAL_EVM_REPOSITORY_PATH", "repository root must be supplied as its canonical real path");}
   const privateRoot = privateRunRoot(root);
   const reportsRoot = resolvePath(options.reportsRoot ?? join(root, ".local", "local-evm", "reports"));
   const canonicalTemporaryRoot = realpathSync(tmpdir());
@@ -30,6 +36,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   await createRunLease(runDirectory);
   await atomicWrite(join(runDirectory, "runner.pid"), Buffer.from(`${process.pid}\n`, "ascii"));
   let anvil: OwnedAnvil | undefined;
+  let solc: PinnedSolc | undefined;
   let interruptedSignal: NodeJS.Signals | undefined;
   const commandAbort = new AbortController();
   const interrupt = (signal: NodeJS.Signals): void => {
@@ -42,7 +49,11 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   try {
     const solcCustody = join(runDirectory, "solc-custody");
     await ensurePrivateDirectory(solcCustody);
-    const solc = pinnedSolcPath(root, solcCustody);
+    solc = pinnedSolc(root, realpathSync(solcCustody));
+    await options.solcLifecycleHook?.("after-authentication", solc);
+    // macOS cannot execute through /dev/fd. Held-FD checks guard the canonical private path;
+    // malicious same-UID mutation between the final check and exec remains outside the
+    // native-no-replace process boundary and is not represented as race-free.
     const tools = await toolVersions(solc, commandAbort.signal);
     const walletResult = await checkedCommand("cast", ["wallet", "new", "--json"], { code: "LOCAL_EVM_WALLET_GENERATION_FAILED", signal: commandAbort.signal });
     const wallet = parseWallet(walletResult.stdout);
@@ -85,11 +96,15 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     const forgeOutput = join(runDirectory, "forge-out");
     const forgeBuildInfo = join(runDirectory, "forge-build-info");
     const forgeCache = join(runDirectory, "forge-cache");
-    await checkedCommand("forge", [
-      "build", "--out", forgeOutput,
-      "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", forgeCache,
-      "--use", solc,
-    ], { cwd: contractsRoot, code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: commandAbort.signal, timeoutMs: 60_000 });
+    await options.solcLifecycleHook?.("before-forge", solc);
+    solc.assertReady();
+    try {
+      await checkedSolcExecution("forge", [
+        "build", "--out", forgeOutput,
+        "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", forgeCache,
+        "--use", solc.path,
+      ], { cwd: contractsRoot, code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: commandAbort.signal, timeoutMs: 60_000 });
+    } finally {solc.assertReady();}
     const artifactPath = join(forgeOutput, "AGTMAIToken.sol", "AGTMAIToken.json");
     const artifactBytes = await readRegularFile(artifactPath, "CONTRACT_ARTIFACT");
     const artifact = parseObject(artifactBytes.toString("utf8"), "LOCAL_EVM_CONTRACT_ARTIFACT_INVALID");
@@ -148,6 +163,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
+    solc?.close();
     await anvil?.stop();
     await removeOwnedRunDirectory(runDirectory);
     if (interruptedSignal) {process.exitCode = interruptedSignal === "SIGINT" ? 130 : 143;}
@@ -174,17 +190,38 @@ function assertApprovedBuild(artifact: string, abi: string, profile: string): vo
     && profile === "0x1efe84db9573a50e5b465e69c4d95dda74f6ca303bbf52cbb0de2a21ffb998f8";
   if (!approved) {throw new LocalEvmError("LOCAL_EVM_BUILD_NOT_APPROVED", "token artifact, ABI, or build approval differs from the committed test-only pins");}
 }
-async function toolVersions(solc: string, signal: AbortSignal): Promise<Record<string, string>> {
+async function toolVersions(solc: PinnedSolc, signal: AbortSignal): Promise<Record<string, string>> {
   const commands: Record<string, readonly string[]> = { node: ["--version"], pnpm: ["--version"], forge: ["--version"], cast: ["--version"], anvil: ["--version"] };
   const versions: Record<string, string> = {};
   for (const [name, arguments_] of Object.entries(commands)) {
     const result = await checkedCommand(name === "node" ? process.execPath : name, arguments_, { code: "LOCAL_EVM_TOOL_VERSION_FAILED", signal });
     versions[name] = result.stdout.trim().split(/\r?\n/u)[0];
   }
-  const solcVersion = await checkedCommand(solc, ["--version"], { code: "LOCAL_EVM_SOLC_VERSION_FAILED", signal });
+  solc.assertReady();
+  let solcVersion;
+  try {
+    solcVersion = await checkedSolcExecution(solc.path, ["--version"], { code: "LOCAL_EVM_SOLC_VERSION_FAILED", signal });
+  } finally {solc.assertReady();}
   versions.solc = assertPinnedSolcVersionOutput(solcVersion.stdout);
   if (!versions.forge.includes("1.8.0") || !versions.cast.includes("1.8.0") || !versions.anvil.includes("1.8.0")) {throw new LocalEvmError("LOCAL_EVM_FOUNDRY_VERSION_MISMATCH", "forge, cast and anvil must all be pinned Foundry 1.8.0");}
   return versions;
+}
+
+export async function checkedSolcExecution(
+  executable: string,
+  arguments_: readonly string[],
+  options: {readonly cwd?: string; readonly code: string; readonly signal: AbortSignal; readonly timeoutMs?: number},
+): ReturnType<typeof checkedCommand> {
+  try {
+    return await checkedCommand(executable, arguments_, options);
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    const message = cause instanceof Error ? cause.message : "";
+    if (code === "EACCES" || code === "EPERM" || /(?:permission denied|operation not permitted|os error (?:1|13))/iu.test(message)) {
+      throw new LocalEvmError("LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE", "authenticated solc custody does not permit executable mappings");
+    }
+    throw cause;
+  }
 }
 
 function parseWallet(output: string): { address: `0x${string}`; privateKey: `0x${string}` } {

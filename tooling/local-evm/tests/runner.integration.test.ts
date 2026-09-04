@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
+import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { after, test } from "node:test";
 import type { Readable } from "node:stream";
-import { privateRunRoot } from "../runner.ts";
+import { privateRunRoot, runLocalEvm } from "../runner.ts";
+import { existsSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { authenticateProcess, processStartIdentity } from "../process.ts";
 
-const repositoryRoot = resolvePath(import.meta.dirname, "../../..");
+const repositoryRoot = realpathSync(resolvePath(import.meta.dirname, "../../.."));
 const runnerPath = join(repositoryRoot, "scripts/genesis/local-evm.ts");
 const privateRoot = privateRunRoot(repositoryRoot);
 const generatedReports = new Set<string>();
@@ -17,6 +19,25 @@ const activeChildren = new Set<ChildProcessByStdio<null, Readable, Readable>>();
 after(async () => {
   await Promise.all([...activeChildren].map(stopChild));
   for (const path of generatedReports) {await rm(path, { recursive: true, force: true });}
+});
+
+test("runner rejects injected solc identity replacement before each execution", {timeout: 90_000}, async (context) => {
+  for (const phase of ["after-authentication", "before-forge"] as const) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), `agtmai-runner-solc-${phase}-`)));
+    context.after(() => rmSync(root, {recursive: true, force: true}));
+    const marker = join(root, "decoy-called");
+    await assert.rejects(runLocalEvm({
+      repositoryRoot,
+      solcLifecycleHook(point, solc): void {
+        if (point !== phase) {return;}
+        renameSync(solc.path, `${solc.path}.held`);
+        writeFileSync(solc.path, `#!/bin/sh\nprintf x >> "${marker}"\n`, {mode: 0o500});
+      },
+    }), (cause: unknown) => cause instanceof Error && "code" in cause
+      && cause.code === "LOCAL_EVM_SOLC_SNAPSHOT_INVALID");
+    assert.equal(existsSync(marker), false, `${phase} marker decoy received zero calls`);
+    await assertNoPrivateRunDirectories();
+  }
 });
 
 test("two repeated clean chains prove stable normalized evidence", { timeout: 120_000 }, async () => {
