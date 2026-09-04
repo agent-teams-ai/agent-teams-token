@@ -148,6 +148,16 @@ function writePathSemanticPnpmFixture(root) {
   return script;
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function writeCurrentNodeWrapper(root) {
+  const wrapper = join(root, "node-wrapper");
+  writeExecutable(wrapper, `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`);
+  return wrapper;
+}
+
 export function assertDarwinDescriptorEntrypointIsSemanticallyWrong() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-pnpm-fd-"));
   try {
@@ -171,9 +181,13 @@ export function assertDarwinDescriptorEntrypointIsSemanticallyWrong() {
 export function assertDarwinMjsSnapshotEntrypointWorks() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-pnpm-snapshot-"));
   try {
+    // Snapshot a relocatable fixture, not the test runner's potentially
+    // layout-dependent executable. The wrapper delegates only after its own
+    // authenticated pathname and the pnpm.mjs pathname have been established.
+    const node = writeCurrentNodeWrapper(root);
     const script = writePathSemanticPnpmFixture(root);
     assert.equal(executeOpenedNode({
-      node: { path: process.execPath, sha256: digest(process.execPath) },
+      node: { path: node, sha256: digest(node) },
       script: { path: script, sha256: digest(script) },
       args: ["--version"], platform: "darwin",
     }), "11.24.0");
