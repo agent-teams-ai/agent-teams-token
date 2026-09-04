@@ -17,7 +17,12 @@ import {
   canonicalizeTrustedPath,
 } from "../toolchain.mjs";
 import { runDoctor } from "../doctor.mjs";
-import { assertDarwinSnapshotBehavior, makeFixture } from "../toolchain-test-fixture.mjs";
+import {
+  assertDarwinDescriptorEntrypointIsSemanticallyWrong,
+  assertDarwinMjsSnapshotEntrypointWorks,
+  assertDarwinSnapshotBehavior,
+  makeFixture,
+} from "../toolchain-test-fixture.mjs";
 import { digest, writeExecutable } from "./toolchain-fixtures.mjs";
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
@@ -319,6 +324,10 @@ test("descriptor execution rejects unsupported hosts", () => {
 });
 
 test("Darwin execution uses private snapshots and preserves uncertain cleanup evidence", assertDarwinSnapshotBehavior);
+
+test("Darwin dev-fd entrypoint loses pathname-sensitive pnpm output", assertDarwinDescriptorEntrypointIsSemanticallyWrong);
+
+test("Darwin authenticated mjs snapshot preserves pathname-sensitive pnpm output", assertDarwinMjsSnapshotEntrypointWorks);
 
 test("Linux verified execution retains proc descriptor execution", (context) => {
   const root = mkdtempSync(join(tmpdir(), "agtmai-linux-exec-"));

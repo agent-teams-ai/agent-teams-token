@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolchain-execution.mjs";
@@ -138,6 +138,50 @@ export function makeFixture() {
   };
 }
 
+function writePathSemanticPnpmFixture(root) {
+  const script = join(root, "pnpm-runtime.mjs");
+  writeFileSync(script, [
+    "import { basename } from 'node:path';",
+    "if (basename(import.meta.filename) === 'pnpm.mjs') process.stdout.write('11.24.0\\n');",
+    "",
+  ].join("\n"));
+  return script;
+}
+
+export function assertDarwinDescriptorEntrypointIsSemanticallyWrong() {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-pnpm-fd-"));
+  try {
+    const script = writePathSemanticPnpmFixture(root);
+    const fd = openSync(script, "r");
+    try {
+      const result = spawnSync(process.execPath, ["/dev/fd/3", "--version"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe", fd],
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, "");
+    } finally {
+      closeSync(fd);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+export function assertDarwinMjsSnapshotEntrypointWorks() {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-pnpm-snapshot-"));
+  try {
+    const script = writePathSemanticPnpmFixture(root);
+    assert.equal(executeOpenedNode({
+      node: { path: process.execPath, sha256: digest(process.execPath) },
+      script: { path: script, sha256: digest(script) },
+      args: ["--version"], platform: "darwin",
+    }), "11.24.0");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 export function assertDarwinSnapshotBehavior() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-execution-"));
   const preserved = [];
@@ -164,9 +208,25 @@ export function assertDarwinSnapshotBehavior() {
     assert.equal(nodeTarget.startsWith(`${tmpdir()}/agtmai-toolchain-exec-`), true);
     assert.equal(basename(nodeTarget), "node");
     assert.equal(nodeTarget.startsWith("/dev/fd/"), false);
-    assert.equal(scriptTarget, "/dev/fd/3");
+    assert.equal(scriptTarget.startsWith(`${tmpdir()}/agtmai-toolchain-exec-`), true);
+    assert.equal(dirname(scriptTarget), dirname(nodeTarget));
+    assert.equal(basename(scriptTarget), "pnpm.mjs");
+    assert.equal(scriptTarget.startsWith("/dev/fd/"), false);
     assert.equal(existsSync(nodeTarget), false);
+    assert.equal(existsSync(scriptTarget), false);
     assert.equal(descriptorRoot("darwin"), "/dev/fd");
+
+    writeExecutable(node, ["#!/bin/sh", "printf 'foreign evidence\\n' > \"${0%/*}/foreign\"", "printf '%s|%s\\n' \"$0\" \"$1\"", ""].join("\n"));
+    const [preservedNode, preservedScript] = executeOpenedNode({
+      node: { path: node, sha256: digest(node) },
+      script: { path: script, sha256: digest(script) },
+      args: [], platform: "darwin",
+    }).split("|");
+    preserved.push(dirname(preservedNode));
+    assert.equal(dirname(preservedScript), dirname(preservedNode));
+    assert.equal(existsSync(preservedNode), true);
+    assert.equal(existsSync(preservedScript), true);
+    assert.equal(readFileSync(join(dirname(preservedNode), "foreign"), "utf8"), "foreign evidence\n");
 
     writeExecutable(executable, ["#!/bin/sh", "/bin/mv \"$0\" \"$0.original\"", "/bin/mkdir \"$0\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
     const substituted = executeVerifiedFile({
@@ -191,7 +251,8 @@ export function assertDarwinSnapshotBehavior() {
       path: executable, expectedSha256: digest(executable), platform: "darwin",
     });
     preserved.push(dirname(foreign));
-    assert.equal(existsSync(foreign), false);
+    assert.equal(existsSync(foreign), true);
+    assert.equal(lstatSync(foreign).mode & 0o777, 0o500);
     assert.equal(readFileSync(join(dirname(foreign), "foreign"), "utf8"), "foreign evidence\n");
   } finally {
     for (const path of preserved) {rmSync(path, { recursive: true, force: true });}

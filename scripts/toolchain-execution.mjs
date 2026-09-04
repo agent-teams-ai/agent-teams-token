@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   openSync,
   readSync,
+  readdirSync,
   rmdirSync,
   unlinkSync,
   writeSync,
@@ -65,6 +66,11 @@ function assertPathStillIdentifies(opened) {
   if (current.nlink !== 1 || !sameIdentity(opened.identity, current)) {
     throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
   }
+}
+
+function assertOpenedFileStillMatches(opened, expectedHash, errorCode) {
+  if (hashDescriptor(opened.fd) !== expectedHash) {throw new Error(errorCode);}
+  assertPathStillIdentifies(opened);
 }
 
 function minimalSubprocessEnv(executableDirectories = []) {
@@ -130,12 +136,19 @@ function writeExecutableSnapshot(root, opened, leaf) {
   }
 }
 
-function removeExecutableSnapshot(root, rootIdentity, snapshot) {
+function removeExecutableSnapshots(root, rootIdentity, snapshots) {
   const currentRoot = inspect(root);
   if (!currentRoot) {return;}
   if (!sameDirectoryIdentity(rootIdentity, currentRoot)) {return;}
-  const currentLeaf = snapshot && inspect(snapshot.path);
-  if (currentLeaf && sameIdentity(snapshot.identity, currentLeaf)) {unlinkSync(snapshot.path);}
+  const expectedLeaves = snapshots.map((snapshot) => snapshot.path.slice(root.length + 1)).toSorted();
+  if (JSON.stringify(readdirSync(root).toSorted()) !== JSON.stringify(expectedLeaves)) {return;}
+  for (const snapshot of snapshots) {
+    const currentLeaf = inspect(snapshot.path);
+    if (!currentLeaf || !sameIdentity(snapshot.identity, currentLeaf)) {return;}
+  }
+  for (const snapshot of snapshots) {
+    unlinkSync(snapshot.path);
+  }
   const finalRoot = inspect(root);
   if (!finalRoot || !sameDirectoryIdentity(rootIdentity, finalRoot)) {return;}
   try {
@@ -145,34 +158,43 @@ function removeExecutableSnapshot(root, rootIdentity, snapshot) {
   }
 }
 
-function withExecutableSnapshot(opened, expectedHash, leaf, execute) {
+function withExecutableSnapshots(entries, execute) {
   const root = mkdtempSync(join(tmpdir(), "agtmai-toolchain-exec-"));
   chmodSync(root, 0o700);
   const rootIdentity = lstatSync(root);
-  let writtenSnapshot;
-  let openedSnapshot;
+  const writtenSnapshots = [];
+  const openedSnapshots = [];
   try {
     assertPrivateDirectory(root, rootIdentity);
-    writtenSnapshot = writeExecutableSnapshot(root, opened, leaf);
-    if (hashDescriptor(opened.fd) !== expectedHash) {
-      throw new Error("TOOLCHAIN_FILE_IDENTITY_CHANGED");
+    for (const entry of entries) {
+      writtenSnapshots.push(writeExecutableSnapshot(root, entry.opened, entry.leaf));
     }
-    assertPathStillIdentifies(opened);
-    openedSnapshot = openExpectedFile(writtenSnapshot.path, expectedHash);
-    if (!sameIdentity(writtenSnapshot.identity, openedSnapshot.identity)) {
-      throw new Error("TOOLCHAIN_SNAPSHOT_FILE_INVALID");
+    for (const [index, entry] of entries.entries()) {
+      const written = writtenSnapshots[index];
+      const openedSnapshot = openExpectedFile(written.path, entry.expectedHash);
+      openedSnapshots.push(openedSnapshot);
+      if (!sameIdentity(written.identity, openedSnapshot.identity)) {
+        throw new Error("TOOLCHAIN_SNAPSHOT_FILE_INVALID");
+      }
+      if ((openedSnapshot.identity.mode & 0o777) !== 0o500) {
+        throw new Error("TOOLCHAIN_SNAPSHOT_FILE_INVALID");
+      }
     }
-    if ((openedSnapshot.identity.mode & 0o777) !== 0o500) {
-      throw new Error("TOOLCHAIN_SNAPSHOT_FILE_INVALID");
+    for (const entry of entries) {
+      assertOpenedFileStillMatches(entry.opened, entry.expectedHash, "TOOLCHAIN_FILE_IDENTITY_CHANGED");
     }
     assertPrivateDirectory(root, rootIdentity);
-    assertPathStillIdentifies(openedSnapshot);
-    return execute(openedSnapshot.path);
-  } finally {
-    if (openedSnapshot) {
-      closeSync(openedSnapshot.fd);
+    for (const [index, snapshot] of openedSnapshots.entries()) {
+      assertOpenedFileStillMatches(snapshot, entries[index].expectedHash, "TOOLCHAIN_SNAPSHOT_FILE_INVALID");
     }
-    removeExecutableSnapshot(root, rootIdentity, openedSnapshot ?? writtenSnapshot);
+    return execute(openedSnapshots.map((snapshot) => snapshot.path));
+  } finally {
+    for (const snapshot of openedSnapshots) {closeSync(snapshot.fd);}
+    removeExecutableSnapshots(
+      root,
+      rootIdentity,
+      openedSnapshots.length === entries.length ? openedSnapshots : writtenSnapshots,
+    );
   }
 }
 
@@ -202,13 +224,16 @@ export function executeVerifiedFile({ path, expectedSha256, args = [], beforeSpa
     beforeSpawn?.();
     assertPathStillIdentifies(opened);
     if (platform === "darwin") {
-      return withExecutableSnapshot(opened, expectedSha256, "executable", (snapshotPath) =>
-        checkedSpawn(spawnSync(snapshotPath, args, {
-          encoding: "utf8",
-          env: minimalSubprocessEnv(),
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 15_000,
-        })));
+      return withExecutableSnapshots(
+        [{ opened, expectedHash: expectedSha256, leaf: "executable" }],
+        ([snapshotPath]) =>
+          checkedSpawn(spawnSync(snapshotPath, args, {
+            encoding: "utf8",
+            env: minimalSubprocessEnv(),
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 15_000,
+          })),
+      );
     }
     return checkedSpawn(spawnSync(`${descriptorRoot(platform)}/3`, args, {
       encoding: "utf8",
@@ -231,20 +256,27 @@ export function executeOpenedNode({ node, script, args, stdio = "pipe", platform
     const inherited = stdio === "inherit"
       ? ["inherit", "inherit", "inherit"]
       : ["ignore", "pipe", "pipe"];
-    const descriptorDirectory = descriptorRoot(platform);
-    const result = withExecutableSnapshot(openedNode, node.sha256, "node", (snapshotPath) => {
-      const nodeTarget = platform === "darwin" ? snapshotPath : `${descriptorDirectory}/3`;
-      const scriptTarget = platform === "darwin" ? `${descriptorDirectory}/3` : `${descriptorDirectory}/4`;
-      const descriptors = platform === "darwin"
-        ? [...inherited, openedScript.fd]
-        : [...inherited, openedNode.fd, openedScript.fd];
-      return spawnSync(nodeTarget, [scriptTarget, ...args], {
+    const result = platform === "darwin"
+      ? withExecutableSnapshots([
+        { opened: openedNode, expectedHash: node.sha256, leaf: "node" },
+        { opened: openedScript, expectedHash: script.sha256, leaf: "pnpm.mjs" },
+      ], ([nodeTarget, scriptTarget]) => spawnSync(nodeTarget, [scriptTarget, ...args], {
+        encoding: stdio === "inherit" ? undefined : "utf8",
+        env: minimalSubprocessEnv([dirname(nodeTarget), ...subprocessPath]),
+        stdio: inherited,
+        timeout: stdio === "inherit" ? 1_200_000 : 15_000,
+      }))
+      : (() => {
+        const descriptorDirectory = descriptorRoot(platform);
+        assertOpenedFileStillMatches(openedNode, node.sha256, "TOOLCHAIN_FILE_IDENTITY_CHANGED");
+        assertOpenedFileStillMatches(openedScript, script.sha256, "TOOLCHAIN_FILE_IDENTITY_CHANGED");
+        return spawnSync(`${descriptorDirectory}/3`, [`${descriptorDirectory}/4`, ...args], {
           encoding: stdio === "inherit" ? undefined : "utf8",
-          env: minimalSubprocessEnv([dirname(snapshotPath), ...subprocessPath]),
-          stdio: descriptors,
+          env: minimalSubprocessEnv(subprocessPath),
+          stdio: [...inherited, openedNode.fd, openedScript.fd],
           timeout: stdio === "inherit" ? 1_200_000 : 15_000,
-      });
-    });
+        });
+      })();
     if (stdio === "inherit") {
       if (result.error) {
         throw new Error(`TOOLCHAIN_DESCRIPTOR_EXECUTION_UNSUPPORTED cause=${result.error.code ?? "unknown"}`);
