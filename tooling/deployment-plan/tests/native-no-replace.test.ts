@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { acceptedCustodyCanonicalPath } from "../src/adapters/native-custody.ts";
 import {
   assertNativeNoReplacePlatform,
   createNativeNoReplaceCapability,
@@ -22,6 +23,10 @@ const SAFE_EXECUTABLE = {
   isFile: true, uid: 501, nlink: 1, mode: 0o100755,
 } as const;
 const NATIVE_SOURCE = fileURLToPath(new URL("../native/no-replace.c", import.meta.url));
+const TRUSTED_VAR_ALIAS = {
+  aliasPath: "/var", aliasCanonicalPath: "/private/var", aliasIsSymbolicLink: true,
+  aliasUid: 0, targetIsDirectory: true, targetIsSymbolicLink: false, targetUid: 0,
+} as const;
 
 test("compiler custody permits only policy-approved executable identities", () => {
   assert.equal(isExecutableCustodySafe(
@@ -60,6 +65,34 @@ test("temporary ancestry policy rejects cross-UID control and unsafe modes", () 
   assert.equal(isCustodyAncestorSafe({ ...directory, isSymbolicLink: true }, 501), false);
   assert.equal(isCustodyAncestorSafe({ ...directory, isDirectory: false }, 501), false);
   assert.equal(isCustodyAncestorSafe(directory), false);
+});
+
+test("custody canonical path policy accepts only exact trusted Darwin root aliases", () => {
+  const canonical = { platform: "linux", configuredPath: "/canonical", canonicalPath: "/canonical" };
+  assert.equal(acceptedCustodyCanonicalPath(canonical), "/canonical");
+  const trusted = { platform: "darwin", configuredPath: "/var/folders/ab/T",
+    canonicalPath: "/private/var/folders/ab/T", darwinAlias: TRUSTED_VAR_ALIAS };
+  assert.equal(acceptedCustodyCanonicalPath(trusted), trusted.canonicalPath);
+  const trustedTmp = { platform: "darwin", configuredPath: "/tmp/session",
+    canonicalPath: "/private/tmp/session", darwinAlias: { ...TRUSTED_VAR_ALIAS,
+      aliasPath: "/tmp", aliasCanonicalPath: "/private/tmp" } };
+  assert.equal(acceptedCustodyCanonicalPath(trustedTmp), trustedTmp.canonicalPath);
+  for (const override of [
+    { platform: "linux" },
+    { canonicalPath: "/private/var/folders/other/T" },
+    { configuredPath: "/var/folders/alias/T", canonicalPath: "/private/var/folders/target/T" },
+    { configuredPath: "/var/folders/../tmp", canonicalPath: "/private/tmp" },
+    { configuredPath: "/various/folders/ab/T" },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, aliasPath: "/var/folders" } },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, aliasCanonicalPath: "/private/tmp" } },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, aliasIsSymbolicLink: false } },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, aliasUid: 501 } },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, targetIsDirectory: false } },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, targetIsSymbolicLink: true } },
+    { darwinAlias: { ...TRUSTED_VAR_ALIAS, targetUid: 501 } },
+  ] as const) {
+    assert.equal(acceptedCustodyCanonicalPath({ ...trusted, ...override }), undefined);
+  }
 });
 
 test("hostile TMPDIR modes and symlink aliases fail closed", async () => {
