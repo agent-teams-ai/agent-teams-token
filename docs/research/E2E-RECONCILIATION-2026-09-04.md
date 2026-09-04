@@ -3,7 +3,58 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 17:10 UTC
+## Latest reconciliation: 17:35 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+Recovery candidate now `d9b237fc3d54b37392c1653fc6c1c8ac5e84a489`, parent04d0e640,
+in `/tmp/agtmai-custody-76c-mac`; tracked clean, known node_modules symlink only.
+No full-base acceptance or integration follows from this checkpoint alone.
+
+- Main addressed120/P1-4 Node runtime acquisition, file transfer and terminal
+  finalization. Runtime proof/file authority split into309/214-line modules;
+  moved bodies were verified byte-identical before behavioral correction.
+  Every remaining Node consumer uses terminal ownership/primary preservation;
+  result-file transfer waits for parent close, and top-level finalization still
+  attempts prepared-payload cleanup after executable/root close failure.
+  No platform/hash/mode/size/provenance guard removed; Darwin stays fail-closed.
+  Eight files,+486/-243 including movement;217 new runtime test/probe lines.
+- Portable baseline0/11 after mechanical extraction; fixed11/11. Mac broader
+  **120/120**, zero skips,8.89s; Darwin rejection regression**1/1**,zero skips.
+  Syntax/scoped lint/diff checks pass; Git lock probe passed without history
+  mutation. No local test process remains running.
+- Ordinary Linux verifier132 completed, NOT a model worker. Root
+  `/var/data/agtmai-custody132-linux.hjsmqp`, exact source d9b237;
+  validation passed; **175/175** structural tests, zero failures/skips,286.33s,
+  exit0, source clean. All seven actual pinned-runtime fault scenarios passed
+  inside the new integration test. Local session70533 is finished; do not rerun
+  this unchanged checkpoint. Existing pinned Node reused; verified bundle
+  requires04d0e640, SHA256
+  ee858dd4296a40b5f6bf8cca6eea45cfa8a764934c6f74e0f7949f48f8c052d0.
+  Correct oldhost machine,12087MiB RAM available,4169MiB swap free,5.6GiB disk
+  and IO avg10 some1.71/full1.45 checked before launch.5GB guard unchanged;
+  only one heavy verifier, no new installation or duplicate Node cache.
+- Report `RECOVERY-RUNTIME-FINALIZATION-2026-09-04.md` has exact Mac/Linux
+  evidence/hashes and follow-up scope. Post-run disk5.4GiB; no active test process.
+  Read-only inspection identified another
+  return-before-finally risk in `prepareVerifiedPayload` plus its pre-try cleanup
+  acquisition; reproduce before fixing. It is NOT closed by this Node patch.
+  Review120group2 evidence custody, group5 partial proof construction, remaining
+  architecture/R3-R8, live Slither/Solana, upstream merge and final gates remain.
+- Fresh17:22 read-only run-watch:0running/alive,57completed,2capacity-blocked.
+ 125/126 still quota blocked onaccount-m(tv goog five), reset11Sep11:19:36UTC;
+  no new model job, auth/capacity/sandbox change or account cycle. Future hosted
+  writers/reviewers remain sol medium/xhigh fast/priority; registry127 is free.
+  Original user checkout dirt preserved and plan hash unchanged. Slithere9292
+  and Solanaabf837 remain unchanged. No public chain, keys, spending,
+  tokenomics/vesting, browser or material source/evidence deletion.
+
+Next: reproduce the prepared-archive return/finalization risk and continue
+120group2/group5 plus remaining architecture work. Independent review of the
+bounded runtime checkpoint/full unaccepted base is still pending capacity.
+Then finish every remaining original-matrix requirement. Full cached rollback,
+root/CI/E2E acceptance is still suspended;175 tests do not replace those gates.
+
+## Earlier reconciliation: 17:10 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
 Recovery candidate is now `04d0e6400cac74789ba8cd5a02f088133cb3521e`, parenta7add,
