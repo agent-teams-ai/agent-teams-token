@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
 import {
-  link, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm,
+  chmod, link, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm,
   symlink, writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,8 +11,10 @@ import test from "node:test";
 import {
   assertNativeNoReplacePlatform,
   createNativeNoReplaceCapability,
+  isCustodyAncestorSafe,
   isExecutableCustodySafe,
   nativeCompilerExecutionStrategy,
+  processGroupHasLiveMembersFromPs,
 } from "../src/adapters/native-no-replace.ts";
 import type { NoReplaceRenameRequest } from "../src/adapters/safe-output.ts";
 
@@ -40,6 +42,61 @@ test("compiler custody permits only policy-approved executable identities", () =
   ), false);
 });
 
+test("temporary ancestry policy rejects cross-UID control and unsafe modes", () => {
+  const directory = {
+    isDirectory: true, isSymbolicLink: false, uid: 501, mode: 0o40700,
+  } as const;
+  assert.equal(isCustodyAncestorSafe(directory, 501), true);
+  assert.equal(isCustodyAncestorSafe({ ...directory, uid: 0, mode: 0o41777 }, 501), true);
+  assert.equal(isCustodyAncestorSafe({ ...directory, uid: 0, mode: 0o40755 }, 501), true);
+  assert.equal(isCustodyAncestorSafe({ ...directory, uid: 502 }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40770 }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, isSymbolicLink: true }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, isDirectory: false }, 501), false);
+  assert.equal(isCustodyAncestorSafe(directory), false);
+});
+
+test("hostile TMPDIR modes and symlink aliases fail closed", async () => {
+  const root = await canonicalTemporaryDirectory();
+  const unsafe = join(root, "unsafe");
+  const alias = join(root, "alias");
+  await mkdir(unsafe, { mode: 0o700 });
+  await chmod(unsafe, 0o777);
+  await symlink(unsafe, alias);
+  try {
+    await assert.rejects(
+      createNativeNoReplaceCapability({ temporaryDirectory: unsafe }),
+      /temporary ancestry permits cross-UID replacement/u,
+    );
+    await assert.rejects(
+      createNativeNoReplaceCapability({ temporaryDirectory: alias }),
+      /temporary directory must be canonical/u,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("custody remains bound to the acquired temporary parent identity", async () => {
+  const root = await canonicalTemporaryDirectory();
+  const parent = join(root, "custody-parent");
+  const displaced = `${parent}.displaced`;
+  await mkdir(parent, { mode: 0o700 });
+  try {
+    await assert.rejects(createNativeNoReplaceCapability({
+      temporaryDirectory: parent,
+      async afterCompilerSnapshot() {
+        await rename(parent, displaced);
+        await mkdir(parent, { mode: 0o700 });
+      },
+    }), /custody parent identity changed/u);
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+    await rm(displaced, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("unsupported platforms fail closed", () => {
   assert.throws(() => assertNativeNoReplacePlatform("win32"), /only Linux and macOS/u);
 });
@@ -47,6 +104,12 @@ test("unsupported platforms fail closed", () => {
 test("platform strategy snapshots only Linux compilers and keeps Darwin on verified paths", () => {
   assert.equal(nativeCompilerExecutionStrategy("linux"), "snapshot-fd");
   assert.equal(nativeCompilerExecutionStrategy("darwin"), "verified-path");
+});
+
+test("process-group inspection ignores Darwin zombies but detects live members", () => {
+  assert.equal(processGroupHasLiveMembersFromPs(" 42 Z\n 42 Z+\n 7 Ss\n", 42), false);
+  assert.equal(processGroupHasLiveMembersFromPs(" 42 Z\n 42 S+\n", 42), true);
+  assert.equal(processGroupHasLiveMembersFromPs(" 420 S\n", 42), false);
 });
 
 test("verified-path compiler fallback rejects a user-owned original path", async () => {
@@ -143,24 +206,31 @@ test("native ABI rejects malformed leaves, symlinks, and regular-file hardlinks"
   }
 });
 
-test("compiler consumes pinned source bytes from stdin after pathname replacement", async () => {
-  const displaced = `${NATIVE_SOURCE}.held-test`;
+test("compiler consumes pinned private source bytes from stdin after pathname replacement", async () => {
+  const trackedBefore = await readFile(NATIVE_SOURCE);
+  const root = await canonicalTemporaryDirectory();
+  const privateSource = join(root, "no-replace.c");
+  const displaced = `${privateSource}.held-test`;
+  await writeFile(privateSource, trackedBefore, { mode: 0o600 });
   let capability: Awaited<ReturnType<typeof createNativeNoReplaceCapability>> | undefined;
   try {
     capability = await createNativeNoReplaceCapability({
+      sourcePath: privateSource,
       async afterSourceRead(source) {
+        assert.equal(source, privateSource);
         await rename(source, displaced);
         await writeFile(source, "this is not valid C\n", { mode: 0o600 });
       },
     });
     assert.match(capability.executableSha256, /^0x[0-9a-f]{64}$/u);
+    assert.deepEqual(await readFile(NATIVE_SOURCE), trackedBefore);
   } finally {
     if (capability !== undefined) {
       await capability.close();
       await rm(capability.custodyPath, { recursive: true, force: true });
     }
-    await rm(NATIVE_SOURCE, { force: true });
-    await rename(displaced, NATIVE_SOURCE);
+    assert.deepEqual(await readFile(NATIVE_SOURCE), trackedBefore);
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -283,6 +353,48 @@ printf '%s\\n' '#!/bin/sh' 'kid=""' \
   'trap on_term TERM' \
   '(trap "" TERM; echo descendant >&2; while :; do :; done) &' \
   'kid=$!' 'while :; do wait "$kid"; done' > "$out"
+chmod 500 "$out"
+`, { mode: 0o500 });
+  process.env.AGTMAI_CC_BINARY = compiler;
+  let capability: Awaited<ReturnType<typeof createNativeNoReplaceCapability>> | undefined;
+  const parent = await canonicalTemporaryDirectory();
+  await mkdir(join(parent, "source"), { mode: 0o700 });
+  const parentHandle = await openDirectory(parent);
+  const sourceHandle = await openDirectory(join(parent, "source"));
+  try {
+    capability = await createNativeNoReplaceCapability({
+      helperTimeoutMs: 100, termGraceMs: 100, groupReapMs: 2_000,
+    });
+    await assert.rejects(
+      capability.rename(renameRequest(parentHandle, sourceHandle, "source", "target")),
+      /process group timed out and was reaped/u,
+    );
+  } finally {
+    if (previous === undefined) { delete process.env.AGTMAI_CC_BINARY; }
+    else { process.env.AGTMAI_CC_BINARY = previous; }
+    await Promise.allSettled([parentHandle.close(), sourceHandle.close(), capability?.close()]);
+    if (capability !== undefined) { await rm(capability.custodyPath, { recursive: true, force: true }); }
+    await rm(compiler, { force: true });
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("timeout escalation survives leader close until a descriptor-retaining descendant is killed", {
+  skip: process.platform !== "linux" || process.getuid?.() !== 0,
+}, async () => {
+  const compiler = join(dirname(NATIVE_SOURCE), `.leader-close-cc-${String(process.pid)}`);
+  const previous = process.env.AGTMAI_CC_BINARY;
+  await writeFile(compiler, `#!/bin/sh
+out=""
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then out="$argument"; break; fi
+  previous="$argument"
+done
+cat >/dev/null
+printf '%s\\n' '#!/bin/sh' \
+  '(exec 0<&- 1>&- 2>&-; trap "" TERM; while :; do :; done) &' \
+  'trap "exit 0" TERM' 'while :; do :; done' > "$out"
 chmod 500 "$out"
 `, { mode: 0o500 });
   process.env.AGTMAI_CC_BINARY = compiler;
