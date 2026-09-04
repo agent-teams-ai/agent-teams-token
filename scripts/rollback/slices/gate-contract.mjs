@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -20,8 +19,10 @@ import {
 } from "../runtime/candidate.mjs";
 import {
   assertCustodyIdentity,
+  closeCustodyDescriptors,
   custodyIdentity,
 } from "../runtime/custody.mjs";
+import { closeDescriptorOnce, throwDescriptorCloseFailures } from "../runtime/descriptor-close.mjs";
 import { toolPath } from "../runtime/offline-environment.mjs";
 import { repositoryRoot } from "./config.mjs";
 import { validateExactPath } from "./manifests.mjs";
@@ -349,7 +350,7 @@ function captureStagingEntry(root, logicalPath) {
     if (before.nlink !== 1n) {
       throw new Error(`ROLLBACK_STAGE_NLINK_UNSAFE path=${logicalPath}`);
     }
-    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
       assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
@@ -362,12 +363,17 @@ function captureStagingEntry(root, logicalPath) {
           assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
         },
         bytes,
-        close() { closeSync(descriptor); },
+        close() {
+          const closing = descriptor;
+          descriptor = undefined;
+          if (Number.isInteger(closing)) { closeDescriptorOnce(closing); }
+        },
         mode: (before.mode & 0o111n) === 0n ? "100644" : "100755",
       };
     } catch (error) {
-      closeSync(descriptor);
-      throw error;
+      const closing = descriptor;
+      descriptor = undefined;
+      closeCustodyDescriptors([closing], "ROLLBACK_STAGE_CLOSE_FAILED", error);
     }
   }
   if (before.kind === "symlink") {
@@ -404,6 +410,7 @@ export function stageExactWorktreePaths(root, paths, recorder, group, label) {
       ], { cwd: root, timeout: 60_000 });
       continue;
     }
+    let primaryFailure;
     try {
       staged.assertCurrent();
       const oid = recorder.run(group, `${label}-hash-${index}`, git, [
@@ -418,9 +425,12 @@ export function stageExactWorktreePaths(root, paths, recorder, group, label) {
         "update-index", "--add", "--cacheinfo", staged.mode, oid, path,
       ], { cwd: root, timeout: 60_000 });
       staged.assertCurrent();
-    } finally {
-      staged.close();
+    } catch (error) {
+      primaryFailure = error;
     }
+    const failures = [];
+    try { staged.close(); } catch (error) { failures.push(error); }
+    throwDescriptorCloseFailures(failures, "ROLLBACK_STAGE_CLOSE_FAILED", primaryFailure);
   }
 }
 

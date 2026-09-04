@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -18,7 +17,15 @@ import {
   sha256,
   validateTrackedPath,
 } from "./common.mjs";
-import { custodyDescriptorDirectory } from "./custody.mjs";
+import {
+  closeCustodyDescriptors,
+  custodyDescriptorDirectory,
+  retainCustodyDescriptor,
+  useCustodyDescriptor,
+} from "./custody.mjs";
+import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
+
+const SHAPE_CLOSE_FAILURE = "ROLLBACK_SHAPE_CLOSE_FAILED";
 
 export function assertPathsAbsent(root, paths, label = "rollback") {
   if (!Array.isArray(paths) || paths.length === 0
@@ -89,14 +96,8 @@ export function assertExactDirectoryShape(
   if (!rootBefore.isDirectory() || rootBefore.isSymbolicLink()) {
     throw new Error("ROLLBACK_OWNED_ROOT_UNSAFE label=" + label);
   }
-  const rootDescriptor = openDirectoryDescriptor(root);
-  let owned;
-  try {
+  return useCustodyDescriptor(openDirectoryDescriptor(root), SHAPE_CLOSE_FAILURE, (rootDescriptor) => {
     assertShapeIdentity(rootBefore, fstatSync(rootDescriptor, { bigint: true }), ".", label);
-    owned = openShapeDirectoryPath(rootDescriptor, ownedRoot, rootBefore, label);
-    const ownedIdentity = owned.identity;
-    const ownedDescriptor = owned.descriptor;
-    owned = undefined;
     const state = {
       discovered: 1,
       expectedFiles: new Set(exactFiles),
@@ -104,23 +105,21 @@ export function assertExactDirectoryShape(
       records: [],
       totalBytes: 0,
     };
-    try {
+    const owned = openShapeDirectoryPath(rootDescriptor, ownedRoot, rootBefore, label);
+    const ownedIdentity = owned.identity;
+    useCustodyDescriptor(owned.descriptor, SHAPE_CLOSE_FAILURE, (ownedDescriptor) => {
       visitShapeDirectory(ownedDescriptor, ownedIdentity, ownedRoot, ownedRoot.split("/").length, {
         allowedDirectories,
         rootIdentity: rootBefore,
         label,
         state,
       });
-    } finally {
-      closeSync(ownedDescriptor);
-    }
+    });
     assertShapeIdentity(rootBefore, lstatSync(root, { bigint: true }), ".", label);
     const finalOwned = openShapeDirectoryPath(rootDescriptor, ownedRoot, rootBefore, label);
-    try {
+    useCustodyDescriptor(finalOwned.descriptor, SHAPE_CLOSE_FAILURE, () => {
       assertShapeIdentity(ownedIdentity, finalOwned.identity, ownedRoot, label);
-    } finally {
-      closeSync(finalOwned.descriptor);
-    }
+    });
     if (JSON.stringify([...state.observedFiles].toSorted()) !== JSON.stringify(exactFiles)) {
       throw new Error("ROLLBACK_ALLOWED_SHAPE_MISSING label=" + label);
     }
@@ -139,12 +138,7 @@ export function assertExactDirectoryShape(
       },
       shapeSha256: sha256(Buffer.from(JSON.stringify(state.records), "utf8")),
     };
-  } finally {
-    if (owned !== undefined) {
-      closeSync(owned.descriptor);
-    }
-    closeSync(rootDescriptor);
-  }
+  });
 }
 
 const SHAPE_MAX_ENTRIES = 4_096;
@@ -155,31 +149,29 @@ const SHAPE_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 function openShapeDirectoryPath(rootDescriptor, logicalPath, rootIdentity, label) {
   let descriptor = openDirectoryDescriptor(custodyDescriptorDirectory(rootDescriptor));
-  let identity = fstatSync(descriptor, { bigint: true });
   try {
+    let identity = fstatSync(descriptor, { bigint: true });
     assertShapeIdentity(rootIdentity, identity, ".", label);
     for (const component of logicalPath.split("/")) {
       const candidate = descriptorChild(descriptor, component);
       const before = lstatSync(candidate, { bigint: true });
       assertShapeSafeNode(before, "directory", rootIdentity, logicalPath, label);
-      const next = openDirectoryDescriptor(candidate);
-      try {
-        assertShapeIdentity(before, fstatSync(next, { bigint: true }), logicalPath, label);
-      } catch (error) {
-        closeSync(next);
-        throw error;
-      }
-      closeSync(descriptor);
+      const next = retainCustodyDescriptor(openDirectoryDescriptor(candidate), SHAPE_CLOSE_FAILURE,
+        (opened) => assertShapeIdentity(before, fstatSync(opened, { bigint: true }), logicalPath, label));
+      const previous = descriptor;
       descriptor = next;
+      // Transfer the successor first. A rejected predecessor close may already
+      // have consumed its FD number; the catch must close only the successor.
+      closeCustodyDescriptors([previous], SHAPE_CLOSE_FAILURE);
       identity = before;
     }
     const result = { descriptor, identity };
     descriptor = undefined;
     return result;
-  } finally {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
+  } catch (error) {
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors([closing], SHAPE_CLOSE_FAILURE, error);
   }
 }
 
@@ -205,14 +197,11 @@ function visitShapeDirectory(
     const before = lstatSync(candidate, { bigint: true });
     if (before.isDirectory() && !before.isSymbolicLink()) {
       assertShapeSafeNode(before, "directory", rootIdentity, child, label);
-      const childDescriptor = openDirectoryDescriptor(candidate);
-      try {
+      useCustodyDescriptor(openDirectoryDescriptor(candidate), SHAPE_CLOSE_FAILURE, (childDescriptor) => {
         assertShapeIdentity(before, fstatSync(childDescriptor, { bigint: true }), child, label);
         visitShapeDirectory(childDescriptor, before, child, depth + 1, context);
         assertShapeIdentity(before, lstatSync(candidate, { bigint: true }), child, label);
-      } finally {
-        closeSync(childDescriptor);
-      }
+      });
       continue;
     }
     if (!before.isFile() || before.isSymbolicLink() || !state.expectedFiles.has(child)) {
@@ -220,9 +209,9 @@ function visitShapeDirectory(
     }
     assertShapeSafeNode(before, "file", rootIdentity, child, label);
     const fileDescriptor = openSync(candidate, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    try {
-      assertShapeIdentity(before, fstatSync(fileDescriptor, { bigint: true }), child, label);
-      const file = hashShapeFile(fileDescriptor, before, child, label, state);
+    useCustodyDescriptor(fileDescriptor, SHAPE_CLOSE_FAILURE, (opened) => {
+      assertShapeIdentity(before, fstatSync(opened, { bigint: true }), child, label);
+      const file = hashShapeFile(opened, before, child, label, state);
       const atPath = lstatSync(candidate, { bigint: true });
       assertShapeIdentity(before, atPath, child, label);
       if (atPath.size !== before.size || atPath.mtimeNs !== before.mtimeNs
@@ -237,9 +226,7 @@ function visitShapeDirectory(
         byteLength: file.byteLength,
         sha256: file.sha256,
       });
-    } finally {
-      closeSync(fileDescriptor);
-    }
+    });
   }
   const afterNames = readShapeDirectoryNames(descriptor, state, label, false);
   if (JSON.stringify(afterNames) !== JSON.stringify(names)) {
@@ -251,6 +238,7 @@ function visitShapeDirectory(
 function readShapeDirectoryNames(descriptor, state, label, countEntries) {
   const directory = opendirSync(custodyDescriptorDirectory(descriptor), { encoding: "buffer" });
   const names = [];
+  let primaryFailure;
   try {
     while (true) {
       const entry = directory.readSync();
@@ -274,9 +262,12 @@ function readShapeDirectoryNames(descriptor, state, label, countEntries) {
       }
       names.push(name);
     }
-  } finally {
-    directory.closeSync();
+  } catch (error) {
+    primaryFailure = error;
   }
+  const failures = [];
+  try { directory.closeSync(); } catch (error) { failures.push(error); }
+  throwDescriptorCloseFailures(failures, SHAPE_CLOSE_FAILURE, primaryFailure);
   return names.toSorted(compareUtf8);
 }
 
