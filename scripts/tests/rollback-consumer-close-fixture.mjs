@@ -18,6 +18,7 @@ export function observeConsumerDescriptors(options = {}) {
     const record = {
       descriptor,
       path: canonical,
+      requestedPath: String(path),
       occurrence: state.records.filter((entry) => entry.path === canonical).length + 1,
       identity: native.fstatSync(descriptor, { bigint: true }),
       statCalls: 0,

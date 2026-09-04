@@ -1,25 +1,29 @@
-import { createHash } from "node:crypto";
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
   openSync,
-  readSync,
   realpathSync,
 } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
 
-import { descriptorChild } from "./common.mjs";
 import {
+  collectCustodyDescriptorCloseFailure,
   custodyDescriptorDirectory,
-  registerCustodyDescriptor,
+  useCustodyDescriptor,
 } from "./custody.mjs";
+import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
   assertRuntimeExecutablePath,
   assertSupportedRuntimePlatform,
 } from "./node-runtime-authority.mjs";
 import { validateRuntimeNodeLock } from "./node-runtime-lock.mjs";
+import {
+  assertRuntimeIdentity,
+  openRuntimeRegularFile,
+  openRuntimeRoot,
+  readRuntimeFile,
+} from "./node-runtime-files.mjs";
 import { platformId } from "./offline-environment.mjs";
 import {
   cleanupPreparedPayload,
@@ -38,7 +42,7 @@ const RUNTIME_LOCK_MAX_BYTES = 2 * 1024 * 1024;
 const RUNTIME_PROVENANCE_MAX_BYTES = 64 * 1024;
 const RUNTIME_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
 const RUNTIME_EXECUTABLE_MAX_BYTES = 512 * 1024 * 1024;
-const RUNTIME_COMPONENT = /^[a-zA-Z0-9.+_-]+$/u;
+const RUNTIME_CLOSE_FAILURE = "ROLLBACK_RUNTIME_FINALIZATION_FAILED";
 
 export function assertPinnedNodeRuntime(root) {
   const platform = platformId();
@@ -46,6 +50,8 @@ export function assertPinnedNodeRuntime(root) {
   const runtimeRoot = openRuntimeRoot(root);
   let executable;
   let prepared;
+  let result;
+  let primaryFailure;
   try {
     const expected = loadRuntimeExpectations(root, runtimeRoot, platform);
     assertRuntimeArchive(runtimeRoot, expected.artifact);
@@ -77,22 +83,28 @@ export function assertPinnedNodeRuntime(root) {
       lstatSync(root, { bigint: true }),
       "ROLLBACK_RUNTIME_ROOT_IDENTITY_CHANGED",
     );
-    return {
+    result = {
       platform,
       version: process.version,
       executable: expected.executablePath,
       artifactSha256: expected.artifact.sha256,
       executableSha256: expected.executableSha256,
     };
-  } finally {
-    if (executable !== undefined) {
-      closeSync(executable.descriptor);
-    }
-    closeSync(runtimeRoot.descriptor);
-    if (prepared !== undefined) {
-      cleanupPreparedPayload(prepared);
-    }
+  } catch (error) {
+    primaryFailure = error;
   }
+  const descriptors = [executable?.descriptor, runtimeRoot.descriptor];
+  executable = undefined;
+  runtimeRoot.descriptor = undefined;
+  const failures = [];
+  for (const descriptor of descriptors) { collectCustodyDescriptorCloseFailure(descriptor, failures); }
+  const closingPayload = prepared;
+  prepared = undefined;
+  if (closingPayload !== undefined) {
+    try { cleanupPreparedPayload(closingPayload); } catch (error) { failures.push(error); }
+  }
+  throwDescriptorCloseFailures(failures, RUNTIME_CLOSE_FAILURE, primaryFailure);
+  return result;
 }
 
 function loadRuntimeExpectations(root, runtimeRoot, platform) {
@@ -102,16 +114,12 @@ function loadRuntimeExpectations(root, runtimeRoot, platform) {
     unsafeCode: "ROLLBACK_RUNTIME_LOCK_UNSAFE",
     maxBytes: RUNTIME_LOCK_MAX_BYTES,
   });
-  let lockBytes;
-  try {
-    lockBytes = readRuntimeFile(
+  const lockBytes = useCustodyDescriptor(lockFile.descriptor, RUNTIME_CLOSE_FAILURE,
+    () => readRuntimeFile(
       lockFile,
       "ROLLBACK_RUNTIME_LOCK_UNSAFE",
       { captureBytes: true },
-    ).bytes;
-  } finally {
-    closeSync(lockFile.descriptor);
-  }
+    ).bytes);
   const lock = parseRuntimeJson(lockBytes, "ROLLBACK_RUNTIME_LOCK_INVALID");
   const expected = validateRuntimeNodeLock(lock, platform);
   expected.executablePath = join(root, ".tools", expected.artifact.installDirectory, "bin", "node");
@@ -130,12 +138,8 @@ function assertRuntimeArchive(runtimeRoot, artifact) {
       maxBytes: RUNTIME_ARCHIVE_MAX_BYTES,
     },
   );
-  let archive;
-  try {
-    archive = readRuntimeFile(archiveFile, "ROLLBACK_RUNTIME_ARCHIVE_UNSAFE");
-  } finally {
-    closeSync(archiveFile.descriptor);
-  }
+  const archive = useCustodyDescriptor(archiveFile.descriptor, RUNTIME_CLOSE_FAILURE,
+    () => readRuntimeFile(archiveFile, "ROLLBACK_RUNTIME_ARCHIVE_UNSAFE"));
   if (archive.sha256 !== artifact.sha256) {
     throw new Error(
       "ROLLBACK_RUNTIME_ARCHIVE_HASH_MISMATCH expected=" + artifact.sha256
@@ -174,16 +178,12 @@ function assertRuntimeProvenance(runtimeRoot, platform, expected, prepared) {
       maxBytes: RUNTIME_PROVENANCE_MAX_BYTES,
     },
   );
-  let actualBytes;
-  try {
-    actualBytes = readRuntimeFile(
+  const actualBytes = useCustodyDescriptor(provenanceEntry.descriptor, RUNTIME_CLOSE_FAILURE,
+    () => readRuntimeFile(
       provenanceEntry,
       "ROLLBACK_RUNTIME_PROVENANCE_UNSAFE",
       { captureBytes: true },
-    ).bytes;
-  } finally {
-    closeSync(provenanceEntry.descriptor);
-  }
+    ).bytes);
   let provenance;
   try {
     provenance = parseToolchainProvenance(actualBytes, expectedFields);
@@ -226,8 +226,7 @@ function assertLoadedRuntimeImage(executable, executableSha256) {
   if (!procEntry.isSymbolicLink()) {
     throw new Error("ROLLBACK_RUNTIME_LOADED_IMAGE_UNSAFE path=/proc/self/exe");
   }
-  const loadedDescriptor = openProcExecutable();
-  try {
+  useCustodyDescriptor(openProcExecutable(), RUNTIME_CLOSE_FAILURE, (loadedDescriptor) => {
     const loadedIdentity = fstatSync(loadedDescriptor, { bigint: true });
     assertLoadedRuntimeIdentity(loadedIdentity);
     const loaded = readRuntimeFile(
@@ -245,9 +244,7 @@ function assertLoadedRuntimeImage(executable, executableSha256) {
       loadedIdentity,
       "ROLLBACK_RUNTIME_IMAGE_IDENTITY_MISMATCH",
     );
-  } finally {
-    closeSync(loadedDescriptor);
-  }
+  });
 }
 
 function readProcExecutableEntry() {
@@ -286,200 +283,13 @@ function assertFinalRuntimeExecutable(runtimeRoot, executable, artifact) {
       executable: true,
     },
   );
-  try {
+  useCustodyDescriptor(finalExecutable.descriptor, RUNTIME_CLOSE_FAILURE, () => {
     assertRuntimeIdentity(
       executable.identity,
       finalExecutable.identity,
       "ROLLBACK_RUNTIME_BINARY_IDENTITY_CHANGED",
     );
-  } finally {
-    closeSync(finalExecutable.descriptor);
-  }
-}
-
-function openRuntimeRoot(root) {
-  if (typeof root !== "string" || !isAbsolute(root) || resolve(root) !== root) {
-    throw new Error("ROLLBACK_RUNTIME_ROOT_UNSAFE path=" + String(root));
-  }
-  let canonical;
-  let identity;
-  try {
-    canonical = realpathSync(root);
-    identity = lstatSync(root, { bigint: true });
-  } catch (error) {
-    throw new Error("ROLLBACK_RUNTIME_ROOT_UNSAFE path=" + root, { cause: error });
-  }
-  if (canonical !== root || !identity.isDirectory() || identity.isSymbolicLink()) {
-    throw new Error("ROLLBACK_RUNTIME_ROOT_UNSAFE path=" + root);
-  }
-  let descriptor;
-  try {
-    descriptor = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    assertRuntimeIdentity(
-      identity,
-      fstatSync(descriptor, { bigint: true }),
-      "ROLLBACK_RUNTIME_ROOT_IDENTITY_CHANGED",
-    );
-    assertRuntimeIdentity(
-      identity,
-      lstatSync(root, { bigint: true }),
-      "ROLLBACK_RUNTIME_ROOT_IDENTITY_CHANGED",
-    );
-    registerCustodyDescriptor(descriptor, canonical, identity);
-  } catch (error) {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
-    if (error instanceof Error && error.message.startsWith("ROLLBACK_RUNTIME_")) {
-      throw error;
-    }
-    throw new Error("ROLLBACK_RUNTIME_ROOT_UNSAFE path=" + root, { cause: error });
-  }
-  return { canonicalPath: canonical, descriptor, identity };
-}
-
-function openRuntimeRegularFile(runtimeRoot, components, options) {
-  if (!Array.isArray(components) || components.length < 2
-    || components.some((component) => !RUNTIME_COMPONENT.test(component))) {
-    throw new Error(options.unsafeCode + " path=" + options.label);
-  }
-  let directory;
-  try {
-    directory = openSync(
-      custodyDescriptorDirectory(runtimeRoot.descriptor),
-      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-    );
-    assertRuntimeIdentity(
-      runtimeRoot.identity,
-      fstatSync(directory, { bigint: true }),
-      options.unsafeCode + " path=.",
-    );
-    registerCustodyDescriptor(directory, runtimeRoot.canonicalPath, runtimeRoot.identity);
-    for (const component of components.slice(0, -1)) {
-      const candidate = descriptorChild(directory, component);
-      const before = readRuntimePathEntry(candidate, options);
-      assertRuntimeOwnedDirectory(before, runtimeRoot.identity, options);
-      const next = openRuntimeDirectoryEntry(candidate, before, options);
-      closeSync(directory);
-      directory = next;
-    }
-    const candidate = descriptorChild(directory, components.at(-1));
-    const identity = readRuntimePathEntry(candidate, options);
-    assertRuntimeOwnedFile(identity, runtimeRoot.identity, options);
-    return openRuntimeFileEntry(candidate, identity, options);
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("ROLLBACK_RUNTIME_")) {
-      throw error;
-    }
-    throw new Error(options.unsafeCode + " path=" + options.label, { cause: error });
-  } finally {
-    if (directory !== undefined) {
-      closeSync(directory);
-    }
-  }
-}
-
-function readRuntimePathEntry(candidate, options) {
-  try {
-    return lstatSync(candidate, { bigint: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      throw new Error(options.missingCode + " path=" + options.label, { cause: error });
-    }
-    throw error;
-  }
-}
-
-function assertRuntimeOwnedDirectory(identity, rootIdentity, options) {
-  if (!identity.isDirectory() || identity.isSymbolicLink()
-    || identity.dev !== rootIdentity.dev || identity.uid !== rootIdentity.uid) {
-    throw new Error(options.unsafeCode + " path=" + options.label);
-  }
-}
-
-function openRuntimeDirectoryEntry(candidate, identity, options) {
-  const descriptor = openSync(
-    candidate,
-    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-  );
-  try {
-    assertRuntimeIdentity(
-      identity,
-      fstatSync(descriptor, { bigint: true }),
-      options.unsafeCode + " path=" + options.label,
-    );
-    assertRuntimeIdentity(
-      identity,
-      lstatSync(candidate, { bigint: true }),
-      options.unsafeCode + " path=" + options.label,
-    );
-    registerCustodyDescriptor(descriptor, realpathSync(candidate), identity);
-    return descriptor;
-  } catch (error) {
-    closeSync(descriptor);
-    throw error;
-  }
-}
-
-function assertRuntimeOwnedFile(identity, rootIdentity, options) {
-  const executableUnsafe = options.executable === true && (identity.mode & 0o111n) === 0n;
-  if (!identity.isFile() || identity.isSymbolicLink() || identity.nlink !== 1n
-    || identity.dev !== rootIdentity.dev || identity.uid !== rootIdentity.uid
-    || identity.size < 0n || identity.size > BigInt(options.maxBytes) || executableUnsafe) {
-    throw new Error(options.unsafeCode + " path=" + options.label);
-  }
-}
-
-function openRuntimeFileEntry(candidate, identity, options) {
-  const descriptor = openSync(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    assertRuntimeIdentity(
-      identity,
-      fstatSync(descriptor, { bigint: true }),
-      options.unsafeCode + " path=" + options.label,
-    );
-    return { descriptor, identity, maxBytes: options.maxBytes };
-  } catch (error) {
-    closeSync(descriptor);
-    throw error;
-  }
-}
-
-function readRuntimeFile(file, unsafeCode, { captureBytes = false } = {}) {
-  const length = Number(file.identity.size);
-  if (!Number.isSafeInteger(length) || length < 0 || length > file.maxBytes) {
-    throw new Error(unsafeCode + " size=" + String(file.identity.size));
-  }
-  const hash = createHash("sha256");
-  const chunks = captureBytes ? [] : undefined;
-  const buffer = Buffer.alloc(64 * 1024);
-  let offset = 0;
-  while (offset < length) {
-    const count = readSync(
-      file.descriptor,
-      buffer,
-      0,
-      Math.min(buffer.length, length - offset),
-      offset,
-    );
-    if (count === 0) {
-      throw new Error(unsafeCode + " reason=short-read");
-    }
-    const chunk = Buffer.from(buffer.subarray(0, count));
-    chunks?.push(chunk);
-    hash.update(chunk);
-    offset += count;
-  }
-  const after = fstatSync(file.descriptor, { bigint: true });
-  assertRuntimeIdentity(file.identity, after, unsafeCode + " reason=identity-changed");
-  if (after.size !== file.identity.size || after.mtimeNs !== file.identity.mtimeNs
-    || after.ctimeNs !== file.identity.ctimeNs) {
-    throw new Error(unsafeCode + " reason=content-changed");
-  }
-  return {
-    bytes: captureBytes ? Buffer.concat(chunks, length) : undefined,
-    sha256: hash.digest("hex"),
-  };
+  });
 }
 
 function parseRuntimeJson(bytes, code) {
@@ -495,15 +305,5 @@ function parseRuntimeJson(bytes, code) {
     return value;
   } catch (error) {
     throw new Error(code, { cause: error });
-  }
-}
-
-function assertRuntimeIdentity(expected, actual, code) {
-  if (expected.dev !== actual.dev || expected.ino !== actual.ino
-    || expected.mode !== actual.mode || expected.uid !== actual.uid || expected.gid !== actual.gid
-    || expected.isDirectory() !== actual.isDirectory()
-    || expected.isFile() !== actual.isFile()
-    || expected.isSymbolicLink() !== actual.isSymbolicLink()) {
-    throw new Error(code);
   }
 }
