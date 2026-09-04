@@ -36,6 +36,16 @@ import {
   rollbackWorkspaceState,
 } from "./workspace-handle.mjs";
 
+let rollbackRemovalParentRealpathSync = realpathSync;
+export function setRollbackRemovalParentRealpathForTest(implementation) {
+  if (typeof implementation !== "function") {
+    throw new Error("ROLLBACK_REMOVAL_REALPATH_INVALID");
+  }
+  const previous = rollbackRemovalParentRealpathSync;
+  rollbackRemovalParentRealpathSync = implementation;
+  return () => { rollbackRemovalParentRealpathSync = previous; };
+}
+
 export function orderedRemovableDirectories(manifest) {
   const retainedDirectories = new Set([manifest.ownedRoot]);
   for (const path of manifest.restoreFromBaseline) {
@@ -425,6 +435,9 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
           fstatSync(next, { bigint: true }),
           logicalPath,
         );
+        registerCustodyDescriptor(
+          next, rollbackRemovalParentRealpathSync(candidate), before,
+        );
       } catch (error) {
         const closing = next;
         next = undefined;
@@ -434,7 +447,6 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
           error,
         );
       }
-      registerCustodyDescriptor(next, realpathSync(candidate), before);
       const previous = descriptor;
       descriptor = next;
       next = undefined;

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  closeSync,
   fchmodSync,
   fstatSync,
   ftruncateSync,
@@ -12,7 +11,10 @@ import {
 } from "node:fs";
 
 import { descriptorChild as rollbackDescriptorChild } from "../runtime/common.mjs";
-import { registerCustodyDescriptor } from "../runtime/custody.mjs";
+import {
+  closeCustodyDescriptors,
+  registerCustodyDescriptor,
+} from "../runtime/custody.mjs";
 import { ROLLBACK_SHARED_PATH_MAX_BYTES } from "./config.mjs";
 import { validateExactPath } from "./manifests.mjs";
 import {
@@ -31,11 +33,34 @@ import { rollbackWorkspaceState } from "./workspace-handle.mjs";
 
 export function assertRollbackSharedPathAtCheckout(root, logicalPath, plan, workspaceHandle) {
   const parent = openRollbackSharedParent(root, logicalPath, plan, workspaceHandle);
+  let result;
+  let primaryFailure;
   try {
-    return assertRollbackSharedFinal(parent);
-  } finally {
-    closeSync(parent.descriptor);
+    result = assertRollbackSharedFinal(parent);
+  } catch (error) {
+    primaryFailure = error;
   }
+  closeRollbackSharedOwned(parent, primaryFailure);
+  return result;
+}
+
+function closeRollbackSharedOwned(owned, primaryFailure) {
+  const descriptors = [owned.descriptor, owned.parentDescriptor];
+  owned.descriptor = undefined;
+  owned.parentDescriptor = undefined;
+  closeCustodyDescriptors(descriptors, "ROLLBACK_SHARED_PATH_CLOSE_FAILED", primaryFailure);
+}
+
+function useRollbackSharedOpened(opened, action) {
+  let result;
+  let primaryFailure;
+  try {
+    result = action();
+  } catch (error) {
+    primaryFailure = error;
+  }
+  closeRollbackSharedOwned(opened, primaryFailure);
+  return result;
 }
 
 function openRollbackSharedFile(root, logicalPath, plan, workspaceHandle, { write = false } = {}) {
@@ -58,16 +83,23 @@ function openRollbackSharedFile(root, logicalPath, plan, workspaceHandle, { writ
       lstatSync(candidate, { bigint: true }),
       logicalPath,
     );
-    return { descriptor, entry: parent.entry, parentDescriptor: parent.descriptor };
+    const result = { descriptor, entry: parent.entry, parentDescriptor: parent.descriptor };
+    descriptor = undefined;
+    parent.descriptor = undefined;
+    return result;
   } catch (error) {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
-    closeSync(parent.descriptor);
-    if (error instanceof Error && error.message.includes("ROLLBACK_SHARED_PATH_")) {
-      throw error;
-    }
-    throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_FINAL_UNSAFE", logicalPath, error);
+    const primaryFailure = error instanceof Error
+      && error.message.includes("ROLLBACK_SHARED_PATH_")
+      ? error
+      : rollbackSharedPathError("ROLLBACK_SHARED_PATH_FINAL_UNSAFE", logicalPath, error);
+    const closing = [descriptor, parent.descriptor];
+    descriptor = undefined;
+    parent.descriptor = undefined;
+    closeCustodyDescriptors(
+      closing,
+      "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+      primaryFailure,
+    );
   }
 }
 
@@ -101,7 +133,7 @@ export function readRollbackSharedBytes(root, logicalPath, plan, workspaceHandle
     return;
   }
   const opened = openRollbackSharedFile(root, logicalPath, plan, workspaceHandle);
-  try {
+  return useRollbackSharedOpened(opened, () => {
     const bytes = readRollbackSharedDescriptor(
       opened.descriptor,
       opened.entry.final.identity,
@@ -109,10 +141,7 @@ export function readRollbackSharedBytes(root, logicalPath, plan, workspaceHandle
     );
     assertRollbackSharedPathAtCheckout(root, logicalPath, plan, workspaceHandle);
     return bytes;
-  } finally {
-    closeSync(opened.descriptor);
-    closeSync(opened.parentDescriptor);
-  }
+  });
 }
 
 function writeRollbackSharedDescriptor(root, logicalPath, plan, workspaceHandle, ...writeState) {
@@ -163,7 +192,7 @@ function writeRollbackSharedDescriptor(root, logicalPath, plan, workspaceHandle,
 
 export function editRollbackSharedText(root, logicalPath, plan, workspaceHandle, edit) {
   const opened = openRollbackSharedFile(root, logicalPath, plan, workspaceHandle, { write: true });
-  try {
+  useRollbackSharedOpened(opened, () => {
     const source = readRollbackSharedDescriptor(
       opened.descriptor,
       opened.entry.final.identity,
@@ -181,16 +210,14 @@ export function editRollbackSharedText(root, logicalPath, plan, workspaceHandle,
       opened,
       Buffer.from(result, "utf8"),
     );
-  } finally {
-    closeSync(opened.descriptor);
-    closeSync(opened.parentDescriptor);
-  }
+  });
 }
 
 export function createRollbackSharedFile(root, logicalPath, plan, workspaceHandle, content) {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
   const parent = openRollbackSharedParent(root, logicalPath, plan, workspaceHandle);
   let descriptor;
+  let primaryFailure;
   try {
     if (parent.entry.final.kind !== "absent" || assertRollbackSharedFinal(parent) !== undefined) {
       throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_EXPECTED_ABSENT", logicalPath);
@@ -220,12 +247,17 @@ export function createRollbackSharedFile(root, logicalPath, plan, workspaceHandl
       { descriptor, entry: parent.entry },
       bytes,
     );
-  } finally {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
-    closeSync(parent.descriptor);
+  } catch (error) {
+    primaryFailure = error;
   }
+  const closing = [descriptor, parent.descriptor];
+  descriptor = undefined;
+  parent.descriptor = undefined;
+  closeCustodyDescriptors(
+    closing,
+    "ROLLBACK_SHARED_PATH_CLOSE_FAILED",
+    primaryFailure,
+  );
 }
 
 export function restoreRollbackSharedFile(root, logicalPath, plan, workspaceHandle, content) {
@@ -242,7 +274,7 @@ export function restoreRollbackSharedFile(root, logicalPath, plan, workspaceHand
     workspaceHandle,
     { write: true },
   );
-  try {
+  useRollbackSharedOpened(opened, () => {
     writeRollbackSharedDescriptor(
       root,
       logicalPath,
@@ -251,10 +283,7 @@ export function restoreRollbackSharedFile(root, logicalPath, plan, workspaceHand
       opened,
       bytes,
     );
-  } finally {
-    closeSync(opened.descriptor);
-    closeSync(opened.parentDescriptor);
-  }
+  });
 }
 
 export function markRollbackSharedPathAbsent(plan, logicalPath) {
@@ -275,6 +304,7 @@ export function assertRollbackPathAbsentFromCheckout(root, logicalPath, workspac
   const workspace = rollbackWorkspaceState(workspaceHandle, root);
   const components = logicalPath.split("/");
   let descriptor = openRollbackSharedRoot(workspace, logicalPath);
+  let primaryFailure;
   try {
     for (const [index, component] of components.entries()) {
       const candidate = rollbackDescriptorChild(descriptor, component);
@@ -283,7 +313,7 @@ export function assertRollbackPathAbsentFromCheckout(root, logicalPath, workspac
         identity = lstatSync(candidate, { bigint: true });
       } catch (error) {
         if (error?.code === "ENOENT") {
-          return;
+          break;
         }
         throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_ABSENCE_UNSAFE", logicalPath, error);
       }
@@ -306,18 +336,38 @@ export function assertRollbackPathAbsentFromCheckout(root, logicalPath, workspac
         );
         registerCustodyDescriptor(next, realpathSync(candidate), identity);
       } catch (error) {
-        if (next !== undefined) {
-          closeSync(next);
-        }
-        if (error instanceof Error && error.message.includes("ROLLBACK_SHARED_PATH_")) {
-          throw error;
-        }
-        throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_ABSENCE_UNSAFE", logicalPath, error);
+        const acquisitionFailure = error instanceof Error
+          && error.message.includes("ROLLBACK_SHARED_PATH_")
+          ? error
+          : rollbackSharedPathError(
+            "ROLLBACK_SHARED_PATH_ABSENCE_UNSAFE",
+            logicalPath,
+            error,
+          );
+        const closing = next;
+        next = undefined;
+        closeCustodyDescriptors(
+          [closing],
+          "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+          acquisitionFailure,
+        );
       }
-      closeSync(descriptor);
+      const previous = descriptor;
       descriptor = next;
+      next = undefined;
+      closeCustodyDescriptors(
+        [previous],
+        "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED",
+      );
     }
-  } finally {
-    closeSync(descriptor);
+  } catch (error) {
+    primaryFailure = error;
   }
+  const closing = descriptor;
+  descriptor = undefined;
+  closeCustodyDescriptors(
+    [closing],
+    "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED",
+    primaryFailure,
+  );
 }

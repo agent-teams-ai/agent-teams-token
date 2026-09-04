@@ -25,6 +25,7 @@ import {
 import {
   closeRollbackRemovalQuarantine,
   createRollbackRemovalQuarantine,
+  setRollbackRemovalParentRealpathForTest,
   snapshotRollbackRemovalPlan,
 } from "../rollback/slices/removal-quarantine.mjs";
 import {
@@ -142,6 +143,49 @@ test("removal traversal closes its successor after first close EINTR", () => {
     );
   } finally {
     injection.restore();
+  }
+  const reusedDescriptor = injection.reusedDescriptor();
+  try {
+    assert.equal(injection.calls.length, 2);
+    assertOtherDescriptorsClosed(injection.calls, reusedDescriptor);
+    assert.doesNotThrow(() => fstatSync(reusedDescriptor));
+    assert.equal(quarantine.plannedIdentities, undefined);
+  } finally {
+    closeSync(reusedDescriptor);
+    closeRollbackRemovalQuarantine(quarantine);
+    closeRollbackWorkspaceHandle(fixture.workspace);
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("removal parent canonicalization failure closes its acquired successor", () => {
+  const fixture = createWorkspace("agtmai-removal-realpath-acquisition-");
+  mkdirSync(join(fixture.checkout, "slice/nested"), { recursive: true });
+  writeFileSync(join(fixture.checkout, "slice/nested/file.txt"), "held\n");
+  const quarantine = createRollbackRemovalQuarantine(
+    fixture.checkout,
+    { sliceId: "fixture-slice" },
+    { workspaceHandle: fixture.workspace },
+  );
+  const canonicalizationFailure = new Error("injected removal parent canonicalization failure");
+  const restoreRealpath = setRollbackRemovalParentRealpathForTest(() => {
+    throw canonicalizationFailure;
+  });
+  const injection = injectedUncertainClose(0);
+  try {
+    assert.throws(
+      () => snapshotRollbackRemovalPlan(quarantine, [
+        { kind: "file", path: "slice/nested/file.txt" },
+      ]),
+      (error) => error instanceof AggregateError
+        && error.message === "ROLLBACK_REMOVAL_ACQUISITION_CLOSE_FAILED"
+        && error.cause === canonicalizationFailure
+        && error.errors[0] === canonicalizationFailure
+        && error.errors[1]?.code === "EINTR",
+    );
+  } finally {
+    injection.restore();
+    restoreRealpath();
   }
   const reusedDescriptor = injection.reusedDescriptor();
   try {

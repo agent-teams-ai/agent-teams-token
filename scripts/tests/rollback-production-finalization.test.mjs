@@ -16,6 +16,17 @@ import {
   removeOwnedEmptyDirectories,
 } from "../rollback/slices/apply-manifest.mjs";
 import {
+  assertRollbackPathAbsentFromCheckout,
+  createRollbackSharedFile,
+  editRollbackSharedText,
+  readRollbackSharedBytes,
+  restoreRollbackSharedFile,
+} from "../rollback/slices/shared-file-operations.mjs";
+import {
+  closeRollbackSharedPlan,
+  snapshotRollbackSharedPaths,
+} from "../rollback/slices/shared-paths.mjs";
+import {
   closeRollbackWorkspaceHandle,
   createRollbackWorkspaceHandle,
 } from "../rollback/slices/workspace-handle.mjs";
@@ -44,6 +55,30 @@ function removalManifest(ownedPaths) {
     sharedPaths: [],
     sliceId: "slither",
   };
+}
+
+function assertInjectedSharedClose(action, validateError, expectedCalls) {
+  const injection = injectedUncertainClose(0);
+  try {
+    assert.throws(action, validateError);
+  } finally {
+    injection.restore();
+  }
+  const reusedDescriptor = injection.reusedDescriptor();
+  try {
+    assert.equal(injection.calls.length, expectedCalls);
+    assertOtherDescriptorsClosed(injection.calls, reusedDescriptor);
+    assert.doesNotThrow(() => fstatSync(reusedDescriptor));
+  } finally {
+    closeSync(reusedDescriptor);
+  }
+}
+
+function isSharedCloseFailure(error) {
+  return error instanceof AggregateError
+    && error.message === "ROLLBACK_SHARED_PATH_CLOSE_FAILED"
+    && error.errors.length === 1
+    && error.errors[0].code === "EINTR";
 }
 
 test("remove-owned success closes production quarantine ownership", () => {
@@ -80,6 +115,141 @@ test("invalid apply options fail before production descriptor acquisition", () =
   }
 });
 
+test("actual shared read closes file and parent after checkout close EINTR", () => {
+  const fixture = createWorkspace("agtmai-shared-read-close-");
+  writeFileSync(join(fixture.checkout, "shared.txt"), "original\n");
+  const plan = snapshotRollbackSharedPaths(
+    fixture.checkout,
+    ["shared.txt"],
+    fixture.workspace,
+  );
+  try {
+    assertInjectedSharedClose(
+      () => readRollbackSharedBytes(
+        fixture.checkout,
+        "shared.txt",
+        plan,
+        fixture.workspace,
+      ),
+      isSharedCloseFailure,
+      3,
+    );
+  } finally {
+    closeRollbackSharedPlan(plan);
+    closeRollbackWorkspaceHandle(fixture.workspace);
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("actual shared edit preserves callback failure and appends close EINTR", () => {
+  const fixture = createWorkspace("agtmai-shared-edit-close-");
+  writeFileSync(join(fixture.checkout, "shared.txt"), "original\n");
+  const plan = snapshotRollbackSharedPaths(
+    fixture.checkout,
+    ["shared.txt"],
+    fixture.workspace,
+  );
+  const callbackFailure = new Error("injected shared edit callback failure");
+  try {
+    assertInjectedSharedClose(
+      () => editRollbackSharedText(
+        fixture.checkout,
+        "shared.txt",
+        plan,
+        fixture.workspace,
+        () => {
+          throw callbackFailure;
+        },
+      ),
+      (error) => error instanceof AggregateError
+        && error.message === "ROLLBACK_SHARED_PATH_CLOSE_FAILED"
+        && error.cause === callbackFailure
+        && error.errors[0] === callbackFailure
+        && error.errors[1]?.code === "EINTR",
+      2,
+    );
+  } finally {
+    closeRollbackSharedPlan(plan);
+    closeRollbackWorkspaceHandle(fixture.workspace);
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("actual shared restore closes file and parent after checkout close EINTR", () => {
+  const fixture = createWorkspace("agtmai-shared-restore-close-");
+  writeFileSync(join(fixture.checkout, "shared.txt"), "original\n");
+  const plan = snapshotRollbackSharedPaths(
+    fixture.checkout,
+    ["shared.txt"],
+    fixture.workspace,
+  );
+  try {
+    assertInjectedSharedClose(
+      () => restoreRollbackSharedFile(
+        fixture.checkout,
+        "shared.txt",
+        plan,
+        fixture.workspace,
+        "restored\n",
+      ),
+      isSharedCloseFailure,
+      3,
+    );
+  } finally {
+    closeRollbackSharedPlan(plan);
+    closeRollbackWorkspaceHandle(fixture.workspace);
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("actual shared create closes created file and parent after checkout close EINTR", () => {
+  const fixture = createWorkspace("agtmai-shared-create-close-");
+  const plan = snapshotRollbackSharedPaths(
+    fixture.checkout,
+    ["created.txt"],
+    fixture.workspace,
+  );
+  try {
+    assertInjectedSharedClose(
+      () => createRollbackSharedFile(
+        fixture.checkout,
+        "created.txt",
+        plan,
+        fixture.workspace,
+        "created\n",
+      ),
+      isSharedCloseFailure,
+      3,
+    );
+  } finally {
+    closeRollbackSharedPlan(plan);
+    closeRollbackWorkspaceHandle(fixture.workspace);
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
+test("gate-contract absence traversal closes successor after predecessor EINTR", () => {
+  const fixture = createWorkspace("agtmai-shared-absence-close-");
+  mkdirSync(join(fixture.checkout, "slice/nested"), { recursive: true });
+  try {
+    assertInjectedSharedClose(
+      () => assertRollbackPathAbsentFromCheckout(
+        fixture.checkout,
+        "slice/nested/missing.txt",
+        fixture.workspace,
+      ),
+      (error) => error instanceof AggregateError
+        && error.message === "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED"
+        && error.errors.length === 1
+        && error.errors[0].code === "EINTR",
+      2,
+    );
+  } finally {
+    closeRollbackWorkspaceHandle(fixture.workspace);
+    rmSync(fixture.boundary, { recursive: true, force: true });
+  }
+});
+
 test("apply caller preserves application failure when shared finalization gets EINTR", () => {
   const fixture = createWorkspace("agtmai-apply-shared-finalization-");
   writeFileSync(join(fixture.checkout, "shared.txt"), "original\n");
@@ -92,7 +262,8 @@ test("apply caller preserves application failure when shared finalization gets E
     }],
     sharedPaths: ["shared.txt"],
   };
-  const injection = injectedUncertainClose(1);
+  // Snapshot traversal and the three read-owned closes precede plan teardown.
+  const injection = injectedUncertainClose(4);
   try {
     assert.throws(
       () => applyManifest(
@@ -111,7 +282,7 @@ test("apply caller preserves application failure when shared finalization gets E
   }
   const reusedDescriptor = injection.reusedDescriptor();
   try {
-    assert.equal(injection.calls.length, 2);
+    assert.equal(injection.calls.length, 5);
     assertOtherDescriptorsClosed(injection.calls, reusedDescriptor);
     assert.doesNotThrow(() => fstatSync(reusedDescriptor));
   } finally {
