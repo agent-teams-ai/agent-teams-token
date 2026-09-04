@@ -7,8 +7,8 @@ import test from "node:test";
 
 import { openDirectoryDescriptor } from "../rollback/runtime/common.mjs";
 import {
+  assertCustodyDescriptor,
   closeCustodyDescriptor,
-  custodyDescriptorDirectory,
 } from "../rollback/runtime/custody.mjs";
 import { injectedUncertainClose } from "./rollback-descriptor-close-fixture.mjs";
 
@@ -118,7 +118,9 @@ for (const boundary of ["fstat-before", "fstat-after", "realpath-before", "realp
         } else {
           assert.throws(() => fs.fstatSync(fault.descriptor()), { code: "EBADF" });
         }
-        assert.throws(() => custodyDescriptorDirectory(fault.descriptor()));
+        assert.throws(() => assertCustodyDescriptor(fault.descriptor()), {
+          message: "ROLLBACK_CUSTODY_DESCRIPTOR_UNREGISTERED",
+        });
       } finally {
         releaseDirectoryFixture(root, fault, injection);
       }
@@ -132,7 +134,7 @@ test("successful directory acquisition transfers a registered open descriptor", 
   try {
     descriptor = openDirectoryDescriptor(root);
     assert.equal(fs.fstatSync(descriptor).isDirectory(), true);
-    assert.doesNotThrow(() => custodyDescriptorDirectory(descriptor));
+    assert.doesNotThrow(() => assertCustodyDescriptor(descriptor));
   } finally {
     if (Number.isInteger(descriptor)) { closeCustodyDescriptor(descriptor); }
     fs.rmSync(root, { recursive: true, force: true });
