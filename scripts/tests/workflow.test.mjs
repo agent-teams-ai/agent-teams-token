@@ -273,7 +273,7 @@ test("actual workflow Node validation ignores inherited preload and proxy author
     timeout: 30_000,
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /one unambiguous exact candidate SHA is required/u);
+  assert.match(result.stderr, /CANDIDATE_SHA_INVALID/u);
   assert.equal(existsSync(marker), false);
 });
 

@@ -26,7 +26,7 @@ try {
       {beforePublish: async () => {
         const leasePath = join(target, "lease.v1.json");
         await rename(leasePath, displaced);
-        await execute("mkfifo", [leasePath]);
+        await execute("/usr/bin/mkfifo", [leasePath]);
       }},
     );
   } else {

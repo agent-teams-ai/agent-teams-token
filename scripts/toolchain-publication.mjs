@@ -1,9 +1,12 @@
 import {
-  chmodSync,
-  existsSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -21,13 +24,32 @@ import {
 } from "./rollback/runtime/cleanup.mjs";
 import {
   assertCustodyIdentity,
+  assertCustodyStableObject,
   custodyIdentity,
 } from "./rollback/runtime/custody.mjs";
 
+function entryExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") {return false;}
+    throw error;
+  }
+}
+
+function assertAbsent(path) {
+  // lstat also sees dangling symlinks. As in the custody runtime, Node's
+  // separate check/rename syscalls do not exclude a continuously racing peer.
+  if (entryExists(path)) {
+    throw new Error("TOOLCHAIN_PUBLICATION_TARGET_OCCUPIED path=" + path);
+  }
+}
+
 function createPublicationBackup({ destination, toolsRoot, wrapper }) {
   const entries = [
-    existsSync(destination) ? "payload" : undefined,
-    wrapper !== undefined && existsSync(wrapper.target) ? "wrapper" : undefined,
+    entryExists(destination) ? "payload" : undefined,
+    wrapper !== undefined && entryExists(wrapper.target) ? "wrapper" : undefined,
   ].filter(Boolean);
   if (entries.length === 0) {
     return;
@@ -63,6 +85,7 @@ function backupCurrentEntry(backup, name) {
   } catch (primaryFailure) {
     const failures = [];
     try {
+      assertAbsent(source);
       renameSync(target, source);
       backup.entries.delete(name);
       assertCapturedCleanupTreeSnapshot(backup.handle);
@@ -89,48 +112,61 @@ function preparedPayloadTransition(prepared, direction) {
     : { allowAddedEntries: ["payload"] };
 }
 
-function writePublishedWrapper(wrapper) {
+function writePublishedWrapper(transaction, onPublishBoundary) {
+  const { wrapper } = transaction;
   const bin = dirname(wrapper.target);
   const part = wrapper.target + ".part";
   mkdirSync(bin, { recursive: true });
-  if (existsSync(part)) {
-    throw new Error("TOOLCHAIN_WRAPPER_PART_EXISTS path=" + part);
-  }
+  let descriptor;
+  let identity;
+  let primaryFailure;
+  const failures = [];
   try {
-    writeFileSync(part, wrapper.contents, { mode: 0o755 });
-    chmodSync(part, 0o755);
+    descriptor = openSync(part, constants.O_WRONLY | constants.O_CREAT
+      | constants.O_EXCL | constants.O_NOFOLLOW, 0o755);
+    identity = custodyIdentity(fstatSync(descriptor, { bigint: true }));
+    writeFileSync(descriptor, wrapper.contents);
+    fchmodSync(descriptor, 0o755);
+    onPublishBoundary?.("before-wrapper-rename", { part, destination: wrapper.target });
+    assertCustodyIdentity(fstatSync(descriptor, { bigint: true }),
+      lstatSync(part, { bigint: true }), "TOOLCHAIN_WRAPPER_PART_SUBSTITUTED");
+    assertAbsent(wrapper.target);
+    transaction.wrapperIdentity = custodyIdentity(fstatSync(descriptor, { bigint: true }));
     renameSync(part, wrapper.target);
+    transaction.wrapperPublished = true;
+    onPublishBoundary?.("after-wrapper-rename", { destination: wrapper.target });
+    transaction.wrapperIdentity = custodyIdentity(fstatSync(descriptor, { bigint: true }));
+    transaction.wrapperIdentityCaptured = true;
+    validatePublishedWrapper(wrapper, transaction.wrapperIdentity);
   } catch (error) {
-    const failures = [];
-    if (existsSync(part)) {
+    primaryFailure = error;
+    if (identity !== undefined && !transaction.wrapperPublished) {
       try {
-        const entry = lstatSync(part, { bigint: true });
-        if (!entry.isFile() || entry.isSymbolicLink() || entry.uid !== BigInt(process.getuid())) {
-          throw new Error("TOOLCHAIN_WRAPPER_PART_UNSAFE path=" + part, { cause: error });
-        }
+        assertCustodyStableObject(identity, lstatSync(part, { bigint: true }),
+          "TOOLCHAIN_WRAPPER_PART_SUBSTITUTED");
         unlinkSync(part);
       } catch (cleanupError) {
         failures.push(cleanupError);
       }
     }
-    if (failures.length > 0) {
-      throw new AggregateError(
-        [error, ...failures],
-        "TOOLCHAIN_WRAPPER_PUBLICATION_FAILED",
-        { cause: error },
-      );
-    }
-    throw error;
   }
-  const identity = custodyIdentity(lstatSync(wrapper.target, { bigint: true }));
-  if (identity.kind !== "file" || !readFileSync(wrapper.target).equals(Buffer.from(wrapper.contents))) {
-    throw new Error("TOOLCHAIN_WRAPPER_PUBLICATION_MISMATCH path=" + wrapper.target);
+  if (descriptor !== undefined) {
+    try {closeSync(descriptor);} catch (error) {failures.push(error);}
   }
-  return identity;
+  if (failures.length > 0) {
+    throw new AggregateError(
+      [...(primaryFailure === undefined ? [] : [primaryFailure]), ...failures],
+      "TOOLCHAIN_WRAPPER_PUBLICATION_FAILED", { cause: primaryFailure ?? failures[0] },
+    );
+  }
+  if (primaryFailure !== undefined) {throw primaryFailure;}
 }
 
-function removePublishedWrapper(wrapper, identity) {
-  assertCustodyIdentity(
+function validatePublishedWrapper(wrapper, identity, pendingRenameCapture = false) {
+  // Rename changes ctime. Only the interrupted capture path may use the
+  // pre-rename stable identity; normal validation keeps every identity field.
+  const assertIdentity = pendingRenameCapture ? assertCustodyStableObject : assertCustodyIdentity;
+  assertIdentity(
     identity,
     lstatSync(wrapper.target, { bigint: true }),
     "TOOLCHAIN_WRAPPER_PUBLICATION_SUBSTITUTED",
@@ -138,13 +174,13 @@ function removePublishedWrapper(wrapper, identity) {
   if (!readFileSync(wrapper.target).equals(Buffer.from(wrapper.contents))) {
     throw new Error("TOOLCHAIN_WRAPPER_PUBLICATION_SUBSTITUTED");
   }
-  unlinkSync(wrapper.target);
 }
 
 function restoreBackupEntry(backup, name, target) {
   if (!backup?.entries.has(name)) {
     return;
   }
+  assertAbsent(target);
   renameSync(join(backup.root, name), target);
   updateCleanupTreeSnapshot(backup.handle, { allowRemovedEntries: [name] });
   backup.entries.delete(name);
@@ -152,18 +188,23 @@ function restoreBackupEntry(backup, name, target) {
 
 function rollbackPublication(transaction) {
   const { backup, destination, prepared, wrapper } = transaction;
-  if (backup?.handle.closed) {
+  if (transaction.committed || backup?.handle.closed) {
     return;
   }
   if (backup !== undefined) {
     assertCapturedCleanupTreeSnapshot(backup.handle);
   }
-  if (transaction.wrapperIdentity !== undefined) {
-    removePublishedWrapper(wrapper, transaction.wrapperIdentity);
+  if (transaction.wrapperPublished) {
+    validatePublishedWrapper(wrapper, transaction.wrapperIdentity,
+      !transaction.wrapperIdentityCaptured);
+    unlinkSync(wrapper.target);
   }
   restoreBackupEntry(backup, "wrapper", wrapper?.target);
   if (transaction.destinationPublished) {
+    assertCustodyStableObject(transaction.destinationIdentity,
+      lstatSync(destination, { bigint: true }), "TOOLCHAIN_DESTINATION_SUBSTITUTED");
     transaction.validateDestination();
+    assertAbsent(prepared.source);
     renameSync(destination, prepared.source);
     updateCleanupTreeSnapshot(
       prepared.cleanupHandle,
@@ -213,10 +254,14 @@ export function publishPreparedInstallation({
     backup: undefined,
     destination,
     destinationPublished: false,
+    committed: false,
+    destinationIdentity: custodyIdentity(lstatSync(prepared.source, { bigint: true })),
     prepared,
     validateDestination,
     wrapper,
     wrapperIdentity: undefined,
+    wrapperIdentityCaptured: false,
+    wrapperPublished: false,
   };
   try {
     transaction.backup = createPublicationBackup({ destination, toolsRoot, wrapper });
@@ -228,6 +273,7 @@ export function publishPreparedInstallation({
         destination,
       });
     }
+    assertAbsent(destination);
     renameSync(prepared.source, destination);
     transaction.destinationPublished = true;
     updateCleanupTreeSnapshot(
@@ -239,13 +285,24 @@ export function publishPreparedInstallation({
       destination,
     });
     if (wrapper !== undefined) {
-      transaction.wrapperIdentity = writePublishedWrapper(wrapper);
+      writePublishedWrapper(transaction, onPublishBoundary);
     }
     if (transaction.backup !== undefined) {
       onPublishBoundary?.("before-backup-cleanup", {
         backup: transaction.backup.root,
         destination,
       });
+    }
+    assertCustodyStableObject(transaction.destinationIdentity,
+      lstatSync(destination, { bigint: true }), "TOOLCHAIN_DESTINATION_SUBSTITUTED");
+    validateDestination();
+    if (transaction.wrapperPublished) {
+      validatePublishedWrapper(wrapper, transaction.wrapperIdentity);
+    }
+    // Backup deletion is irreversible: after this boundary failures preserve
+    // the validated new installation and any remaining backup evidence.
+    transaction.committed = true;
+    if (transaction.backup !== undefined) {
       cleanupIdentityBoundDirectory(transaction.backup.handle);
       transaction.backup = undefined;
     }

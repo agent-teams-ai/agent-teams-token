@@ -183,7 +183,7 @@ test("stale-run lease reads promptly reject and preserve a foreign FIFO", async 
   const runDirectory = join(root, "run-fifo-Z9");
   const leasePath = join(runDirectory, "lease.v1.json");
   await mkdir(runDirectory, {mode: 0o700});
-  await execute("mkfifo", [leasePath]);
+  await execute("/usr/bin/mkfifo", [leasePath]);
   try {
     assert.deepEqual(
       await runBoundedLeaseFixture(["reclaim", root]),
