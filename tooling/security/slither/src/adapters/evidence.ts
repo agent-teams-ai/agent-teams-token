@@ -1,4 +1,5 @@
-import { chmod, constants, copyFile, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, constants, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { AnalysisInput, GateErrorCode, GateManifest, PolicyDecision } from "../domain/model.ts";
 import { SlitherGateError } from "../domain/model.ts";
@@ -170,16 +171,46 @@ async function directoryIdentity(path: string, label: string): Promise<Directory
   return {dev: info.dev, ino: info.ino, uid: info.uid, mode: info.mode};
 }
 async function assertSameDirectory(path: string, expected: DirectoryIdentity, label: string): Promise<void> {const value=await directoryIdentity(path,label); if(value.dev!==expected.dev || value.ino!==expected.ino || value.uid!==expected.uid || value.mode!==expected.mode) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", `${label} changed`);}}
-async function copyStableExclusive(source: string, destination: string): Promise<void> {
+export async function copyStableExclusive(source: string, destination: string): Promise<void> {
   const before=await lstat(source,{bigint:true}); if(!before.isFile() || before.isSymbolicLink() || before.nlink!==1n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry is unsafe");}
   const handle=await open(source,constants.O_RDONLY|constants.O_NOFOLLOW);
-  try {const opened=await handle.stat({bigint:true}); if(opened.dev!==before.dev||opened.ino!==before.ino) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed"); await copyFile(`/proc/self/fd/${handle.fd}`,destination,constants.COPYFILE_EXCL); await chmod(destination,0o600); const after=await handle.stat({bigint:true}); if(after.dev!==opened.dev||after.ino!==opened.ino||after.size!==opened.size||after.mtimeNs!==opened.mtimeNs) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");} finally {await handle.close();}
+  try {
+    const opened=await handle.stat({bigint:true});
+    if(!sameSourceIdentity(before,opened)) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");
+    const destinationHandle=await open(destination,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
+    try {
+      await destinationHandle.chmod(0o600);
+      const created=await destinationHandle.stat({bigint:true});
+      if(!created.isFile()||created.isSymbolicLink()||created.nlink!==1n||created.uid!==BigInt(process.getuid?.()??-1)||(created.mode&0o777n)!==0o600n) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry identity is unsafe");
+      const copiedDigest=await transferAndDigest(handle,destinationHandle);
+      await destinationHandle.sync();
+      const afterTransfer=await handle.stat({bigint:true});
+      if(!sameSourceIdentity(opened,afterTransfer)) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");
+      const stableDigest=await digestDescriptor(handle);
+      const afterDigest=await handle.stat({bigint:true});
+      if(!sameSourceIdentity(opened,afterDigest)||copiedDigest!==stableDigest) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");
+      const retained=await destinationHandle.stat({bigint:true});
+      const retainedPath=await lstat(destination,{bigint:true});
+      if(!sameFileIdentity(created,retained)||!sameFileIdentity(created,retainedPath)||!retainedPath.isFile()||retainedPath.isSymbolicLink()||retainedPath.nlink!==1n||retainedPath.uid!==created.uid||(retainedPath.mode&0o777n)!==0o600n||retained.size!==opened.size) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry changed");
+    } finally {await destinationHandle.close();}
+  } finally {await handle.close();}
 }
 
+function sameFileIdentity(left:{dev:bigint;ino:bigint},right:{dev:bigint;ino:bigint}):boolean{return left.dev===right.dev&&left.ino===right.ino;}
+function sameSourceIdentity(left:{dev:bigint;ino:bigint;mode:bigint;nlink:bigint;uid:bigint;gid:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint},right:{dev:bigint;ino:bigint;mode:bigint;nlink:bigint;uid:bigint;gid:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint}):boolean{return sameFileIdentity(left,right)&&left.mode===right.mode&&left.nlink===right.nlink&&left.uid===right.uid&&left.gid===right.gid&&left.size===right.size&&left.mtimeNs===right.mtimeNs&&left.ctimeNs===right.ctimeNs;}
+async function transferAndDigest(source:Awaited<ReturnType<typeof open>>,destination:Awaited<ReturnType<typeof open>>):Promise<string>{
+  const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;
+  while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) break;hash.update(buffer.subarray(0,bytesRead));let written=0;while(written<bytesRead){const result=await destination.write(buffer,written,bytesRead-written);if(result.bytesWritten===0) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication write made no progress");written+=result.bytesWritten;}position+=bytesRead;}
+  return hash.digest("hex");
+}
+async function digestDescriptor(source:Awaited<ReturnType<typeof open>>):Promise<string>{const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) break;hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;}return hash.digest("hex");}
 async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>, expectedEntries: readonly string[], publication: PublicationCapability): Promise<void> {
-  if (!publication || !output.startsWith("/") || (await lstat(output).catch(() => null)) !== null) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "fresh absolute output and publication capability are required");}
-  const parent=dirname(output); const parentReal=await realpath(parent).catch(() => {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output parent is unavailable");});
-  if(parentReal!==parent || output.includes("/../") || output.includes("//")) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output parent is unsafe");
-  const staging=await mkdtemp(join(parent, `.${basename(output)}.staging-`)); await chmod(staging,0o700);
-  try {await build(staging); await writeFile(join(staging,"READY"),"",{mode:0o600,flag:"wx"}); await finalize(staging); await publication.publishNoReplace(staging,output,expectedEntries);} finally {const info=await lstat(staging).catch(()=>null); if(info?.isDirectory()&&!info.isSymbolicLink()) await rm(staging,{recursive:true,force:true});}
+  if (!publication || !output.startsWith("/") || output.includes("\0") || output.endsWith("/") || output.split("/").includes("..")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "fresh absolute output and publication capability are required");}
+  const leaf=basename(output);
+  if(leaf.length===0||leaf==="."||leaf===".."||leaf.includes("/")||leaf.includes("\\")) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output basename is unsafe");
+  const parent=await realpath(dirname(output)).catch(() => {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output parent is unavailable");});
+  const canonicalOutput=join(parent,leaf);
+  if((await lstat(canonicalOutput).catch(()=>null))!==null) throw new SlitherGateError("PUBLICATION_UNAVAILABLE","fresh absolute output and publication capability are required");
+  const staging=await mkdtemp(join(parent, `.${leaf}.staging-`)); await chmod(staging,0o700);
+  try {await build(staging); await writeFile(join(staging,"READY"),"",{mode:0o600,flag:"wx"}); await finalize(staging); await publication.publishNoReplace(staging,canonicalOutput,expectedEntries);} finally {const info=await lstat(staging).catch(()=>null); if(info?.isDirectory()&&!info.isSymbolicLink()) await rm(staging,{recursive:true,force:true});}
 }

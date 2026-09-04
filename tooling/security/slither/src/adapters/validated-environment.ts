@@ -1,5 +1,5 @@
 import { lstat, realpath } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { SlitherGateError } from "../domain/model.ts";
 
 export interface ValidatedEnvironment { readonly repositoryRoot: string; readonly candidateSha: string; readonly output: string }
@@ -11,18 +11,31 @@ export async function validateEnvironment(rootValue: string, shaValues: readonly
   const root = await realpath(rootValue).catch(() => {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "repository root is unavailable");});
   const rootInfo = await lstat(root, { bigint: true });
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "repository root is invalid");}
-  const output = outputValue ?? `/tmp/agtmai-slither-evidence-${candidates[0]!}`;
-  if (!output.startsWith("/") || output.includes("\0") || resolve(output) !== output) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence path is invalid");}
-  const parent = await realpath(dirname(output)).catch(() => {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence parent is unavailable");});
-  if (parent !== dirname(output) || isWithin(root, output)) {throw new SlitherGateError("EVIDENCE_INSIDE_REPOSITORY", "evidence path crosses the checkout boundary");}
+  const requestedOutput = outputValue ?? `/tmp/agtmai-slither-evidence-${candidates[0]!}`;
+  if (!requestedOutput.startsWith("/") || requestedOutput.includes("\0") || requestedOutput.endsWith("/") || requestedOutput.split("/").includes("..")) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence path is invalid");}
+  const leaf = validatedLeaf(requestedOutput);
+  const parent = await realpath(dirname(requestedOutput)).catch(() => {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence parent is unavailable");});
+  const output = join(parent, leaf);
+  if (isWithin(root, output)) {throw new SlitherGateError("EVIDENCE_INSIDE_REPOSITORY", "evidence path crosses the checkout boundary");}
+  if ((await lstat(output).catch(() => null)) !== null) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output already exists");}
   return {repositoryRoot: root, candidateSha: candidates[0]!, output};
 }
 
 export async function validateExternalTempRoot(repositoryRoot: string, tempRoot: string): Promise<string> {
+  const root = await realpath(repositoryRoot).catch(() => {throw new SlitherGateError("TEMP_ROOT_INVALID", "repository root is unavailable");});
   const canonical = await realpath(tempRoot).catch(() => {throw new SlitherGateError("TEMP_ROOT_INVALID", "temporary root is unavailable");});
   const info = await lstat(canonical, { bigint: true });
-  if (!info.isDirectory() || info.isSymbolicLink() || isWithin(repositoryRoot, canonical)) {throw new SlitherGateError("TEMP_ROOT_INVALID", "temporary root crosses the checkout boundary");}
+  if (!info.isDirectory() || info.isSymbolicLink() || isWithin(root, canonical)) {throw new SlitherGateError("TEMP_ROOT_INVALID", "temporary root crosses the checkout boundary");}
   return canonical;
+}
+
+
+function validatedLeaf(path: string): string {
+  const leaf = basename(path);
+  if (leaf.length === 0 || leaf === "." || leaf === ".." || leaf.includes("/") || leaf.includes("\\") || leaf.includes("\0")) {
+    throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output basename is invalid");
+  }
+  return leaf;
 }
 
 function isWithin(parent: string, child: string): boolean {const value = relative(parent, child); return value === "" || (value !== ".." && !value.startsWith("../") && !value.startsWith("/"));}
