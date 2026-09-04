@@ -3,6 +3,33 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
+## Latest reconciliation: 18:30 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+Recovery candidate remains unaccepted `a7ed090094776e15136b97f7b5bb61cc91012475`.
+
+- User supplied `tv goog six`, confirmed as `account-n`. Primary host209 remains
+  below the5GiB admission rule. Alternate isolated worker host188 has machine-id
+  `93732118417e46618cefafc022c8b1db`,13173MiB available RAM,2066MiB free swap,
+  9159MiB disk and was selected without modifying the primary host.
+- Runtime04ee on that host has the same CLI SHA256
+  `956695c364e08b474728c83d38622f7b225515313989da117f9d11d7f5c989dd`
+  as required runtime d063. Its account-n auth path is the exact existing shared
+  path; no auth content was read or changed.
+- Independent xhigh/fast reviewer127 launched under tmux with network disabled,
+  one account attempt and no source edits. Its2MiB source packet contains two
+  synthetic commits whose trees exactly equal canonical parent34f75ce1 and
+  candidate503ce5e4, plus the byte-exact original delta. This avoids treating
+  the unaccepted recovery history as integration authority. Git lock passed;
+  workspace is clean. At18:30 the supervisor is alive but provider-start is not
+  yet evidenced and the runtime still reports its prior account-n quota hint.
+  Do not duplicate or call this review complete until a terminal result exists.
+
+Next: observe reviewer127, consume its exact result, and remediate any accepted
+findings. Linux verifier133 remains prepared but unstarted until a qualified
+host/source packet is available. Continue group2 evidence custody and the full
+original matrix; no full recovery/root/CI/E2E acceptance yet.
+
 ## Latest reconciliation: 18:01 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
