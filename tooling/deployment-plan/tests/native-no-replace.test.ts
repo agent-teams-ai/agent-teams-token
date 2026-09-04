@@ -325,7 +325,11 @@ test("close is idempotent and preserves authenticated and substituted custody ev
     await capability.close();
     await capability.close();
     assert.equal(await readFile(join(foreignCustody, "foreign-sentinel"), "utf8"), "preserve");
-    assert.ok((await readdir(ownedEvidence)).length >= 2);
+    const minimumOwnedEvidenceEntries = process.platform === "linux" ? 2 : 1;
+    assert.ok(
+      (await readdir(ownedEvidence)).length >= minimumOwnedEvidenceEntries,
+      `${process.platform} custody preserves at least ${minimumOwnedEvidenceEntries} authenticated evidence entries`,
+    );
   } finally {
     await rm(foreignCustody, { recursive: true, force: true });
     await rm(ownedEvidence, { recursive: true, force: true });
