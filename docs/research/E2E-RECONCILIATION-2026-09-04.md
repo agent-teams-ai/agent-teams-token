@@ -3,7 +3,59 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 16:14 UTC
+## Latest reconciliation: 16:46 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+Two additional bounded recovery corrections are committed in the isolated
+candidate, NOT accepted or integrated into the full source yet.
+
+- Recovery candidate now `a7add0d9c546e91b8e1bc62e8857f0435852fd1e`,
+  worktree `/tmp/agtmai-custody-76c-mac`, tracked clean; only known node_modules
+  symlink untracked. Source checkpoints:644476bb closes command logs on partial
+  acquisition/invocation/finalization failures;9800ba91 closes failed common
+  directory acquisitions; a7add0d9 corrects only a portable registry assertion.
+  Combined sinceaeb721: six files,+526/-56, including411 new test lines.
+  Original failures remain ordered; every owned FD gets one close attempt,
+  never a retry after uncertain close. Existing Foundation limits preserved.
+- Linux ordinary verifier128 at exact644476: validation pass and full structural
+  **134/134**, zero skips,210.58s. Verifier129 at9800: validation pass but
+  **81pass/10fail**, all from the test incorrectly expecting the Linux
+  `/proc/self/fd` path constructor to validate registry membership. Failed
+  logs are retained. Test-onlya7add uses the actual registry validator;
+  verifier130 at exacta7add: validation pass, **91/91**, zero skips,0.99s.
+  Same focused set on actual Mac exacta7add: **91/91**, zero skips,7.53s.
+  Scoped lint/diff checks pass. All test sessions are finished; source clean.
+- Full source/failed-test/transport/hashes are recorded in
+  `RECOVERY-ACQUISITION-REGRESSION-2026-09-04.md`. The verifiers used fresh
+  standalone exact-SHA clones and verified bundles/Node, no dependencies
+  installed. Latest130 oldhost resource check: correct machine-id,9.2GiB
+  free disk,12190MiB available RAM,4009MiB swap free;5GB guard unchanged.
+  These are ordinary test processes, NOT subscription/model workers or registry
+  jobs. Next free registered model-job number is still127.
+- Read-only hosted observation at start of this continuation:120 completed,
+  125/126 quota blocked, none running. Account-m(tv goog five) recorded reset
+  remains2026-09-11T11:19:36Z. No model launch, auth/capacity/sandbox change,
+  paid reset, API-key fallback or account cycling. Next hosted workers remain
+  fast/priority, sol medium writers and xhigh reviewers when available.
+- Review120 group1 is candidate-fixed byaeb721; group3 candidate-fixed by644476;
+  group4 only common-directory acquisition fixed by9800. Group2 evidence
+  directory custody, remaining group4 node-runtime/directory-shape/gate-contract
+  raw-close sites, group5 partial construction and architecture findings stay
+  OPEN. Do not treat structural tests as independent whole-base acceptance.
+  Slithere9292/Solanaabf837 lanes unchanged;125 proposal stays NOTAPPLIED,
+  126 has no independent verdict. The whole original invariant matrix remains
+  in scope, including R3-R8 and the post-publication installation transaction.
+- Original user checkout rechecked at212b278f; all previously recorded dirty
+  files preserved. No browser/report opened, no public networks/keys/spending,
+  no tokenomics/vesting changes and no material deletion this turn.
+
+Next: continue bounded120 groups2/4/5; review a7add/full unaccepted recovery base
+when hosted capacity returns. Then Slither125 correction/runtime qualification,
+Solana independent review and actualAgave, complete store/bootstrap authority,
+upstream semantic merge, full exact-head root/CI and specialist/holistic reviews.
+Do not call134 structural or91 focused tests complete cached rollback or E2E.
+
+## Earlier reconciliation: 16:14 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
 Do not integrate the full recovery base on the strength of the following tests:
