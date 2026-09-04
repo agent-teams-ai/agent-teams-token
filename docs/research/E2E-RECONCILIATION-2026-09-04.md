@@ -3,6 +3,45 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
+## Latest reconciliation: 19:00 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+The isolated recovery candidate advanced to
+`755e1c1a4dda37aa4de6217ec6d1184d1650ac78`, tree `7a2733dd`, and remains
+unaccepted/unintegrated pending independent review of its full ancestry.
+
+- Candidate commits `c90af2ae` and `755e1c1a` close review120 P1 groups2 and5.
+  Evidence creation now retains parent/root custody through post-READY
+  validation, revalidates before each mutation, refuses a foreign successor and
+  terminally closes custody on success or failure. Proof workspace construction
+  now owns a single partial-state transaction shared by slice proof and reverse
+  hashes; every acquired cleanup/workspace owner is finalized after failures at
+  all six acquisition boundaries and after downstream context construction.
+- Pre-fix evidence reproduction was exact:
+  `heldStatus=running, successorStatus=passed`. Final focused Mac evidence is
+  **18/18** for evidence/command publication plus **30/30** for construction and
+  adjacent finalization, zero skips. A fresh complete-history bundle produced a
+  clean standalone Mac clone; **46/46** selected exact-head tests passed,
+  including early CLI machine-readable failure evidence. Scoped oxlint, syntax
+  and diff checks pass. No dependency was installed.
+- Bundle SHA256 is
+  `e6c5cc75dc5efdbe4ed7717da915b8e2e17539a64ae7ee52be364974f0f47538`.
+  The alternate oldhost verified the bundle, exact head/tree and clean source.
+  Linux selected structural evidence is **139/139** after rerunning only the one
+  phase initially blocked by the pre-existing foreign `/tmp/.git` under a new
+  private job TMPDIR; early CLI failure evidence is separately **1/1**. The
+  original environmental failure is retained in `broader-structural.log`.
+  Report: `RECOVERY-EVIDENCE-AND-PROOF-CONSTRUCTION-2026-09-04.md`.
+- Hosted reviewer127 on `account-n` (`tv goog six`) is still alive but has no
+  provider-start/result; runtime capacity remains `quota_exhausted` until
+  2026-09-05T23:06:53Z. It reviews only parent checkpoint `a7ed090`, so no newer
+  candidate acceptance is inferred. No duplicate, relogin or account switch.
+
+Next: obtain independent xhigh review for the complete recovery candidate when
+capacity exists, remediate any findings, then continue architecture P2 and
+original R3-R8/Solana/Slither/current-platform/full exact-head matrix. Current
+structural evidence is not the cached rollback proof or production acceptance.
+
 ## Latest reconciliation: 18:30 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
