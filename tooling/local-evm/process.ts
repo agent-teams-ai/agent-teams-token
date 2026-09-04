@@ -34,7 +34,7 @@ export class CommandExitError extends LocalEvmError {
     this.name = "CommandExitError";
     this.executable = executable;
     this.exitCode = result.exitCode;
-    this.#stderr = result.stderr;
+    this.#stderr = redact(result.stderr);
   }
 
   get stderr(): string {return this.#stderr;}

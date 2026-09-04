@@ -192,6 +192,33 @@ test("Forge maps only the exact selected child-solc launch failure", async (cont
   }
 });
 
+test("Forge failures never expose unredacted stderr through throwable metadata or reports", async (context) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-forge-redaction-")));
+  context.after(() => rmSync(root, {recursive: true, force: true}));
+  const forge = join(root, "forge");
+  const selectedSolc = join(root, "selected-solc");
+  const syntheticHex = `0x${"ab".repeat(32)}`;
+  const syntheticMnemonic = "synthetic alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo";
+  const sentinels = [syntheticHex, syntheticMnemonic];
+  const run = async (firstLine: string): Promise<unknown> => {
+    const lines = [firstLine, syntheticHex, syntheticMnemonic].map((line) => JSON.stringify(line)).join(" ");
+    writeFileSync(forge, `#!/bin/sh\nprintf '%s\\n' ${lines} >&2\nexit 1\n`, {mode: 0o700});
+    return await checkedForgeBuild(forge, [], selectedSolc, {
+      code: "LOCAL_EVM_FORGE_BUILD_FAILED", signal: new AbortController().signal,
+    });
+  };
+
+  const generic = await rejectedCause(run("generic Forge failure"));
+  assert.equal(generic instanceof CommandExitError, true);
+  assert.equal((generic as CommandExitError).code, "LOCAL_EVM_FORGE_BUILD_FAILED");
+  assertThrowableReportsRedacted(generic, sentinels);
+
+  const childSolc = await rejectedCause(run(`Error: ${JSON.stringify(selectedSolc)}: Permission denied (os error 13)`));
+  assert.equal(childSolc instanceof Error && "code" in childSolc && childSolc.code, "LOCAL_EVM_SOLC_EXECUTION_UNAVAILABLE");
+  assert.equal(childSolc instanceof Error && childSolc.cause instanceof CommandExitError, true);
+  assertThrowableReportsRedacted(childSolc, sentinels);
+});
+
 test("an unexecutable Forge remains a Forge build failure", async (context) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-forge-noexec-")));
   context.after(() => rmSync(root, {recursive: true, force: true}));
@@ -209,6 +236,35 @@ function hasCodeWithCauseKind(code: string, kind: "spawn" | "exit"): (cause: unk
 
 function hasCode(code: string): (cause: unknown) => boolean {
   return (cause: unknown) => cause instanceof Error && "code" in cause && cause.code === code;
+}
+
+async function rejectedCause(promise: Promise<unknown>): Promise<unknown> {
+  try {await promise;}
+  catch (cause) {return cause;}
+  assert.fail("expected promise to reject");
+}
+
+function assertThrowableReportsRedacted(cause: unknown, sentinels: readonly string[]): void {
+  const publicValues: string[] = [];
+  let current = cause;
+  while (current instanceof Error) {
+    publicValues.push(current.message, current.stack ?? "", JSON.stringify(current));
+    for (const key of Object.getOwnPropertyNames(current)) {
+      publicValues.push(String((current as unknown as Record<string, unknown>)[key]));
+    }
+    if (current instanceof CommandExitError) {publicValues.push(current.stderr);}
+    current = current.cause;
+  }
+  const error = cause as Error & {readonly code?: string};
+  publicValues.push(
+    JSON.stringify({status: "failed", diagnostic: error.code, message: error.message}),
+    `${error.name}: ${error.message}`,
+  );
+  for (const sentinel of sentinels) {
+    assert.equal(
+      publicValues.some((value) => value.includes(sentinel)), false, `exposed synthetic sentinel ${sentinel}`,
+    );
+  }
 }
 
 test("only the pinned long solc version is accepted for evidence", () => {
