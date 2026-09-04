@@ -6,7 +6,9 @@ import { createLocalRpc, observeFees } from "../adapters/rpc.ts";
 import { createNativeNoReplaceCapability } from "../adapters/native-no-replace.ts";
 import {
   claimOwnedOutputDirectory,
+  type ClaimedOutputDirectory,
   type OutputFaultInjection,
+  type PublishedOutputIdentity,
 } from "../adapters/safe-output.ts";
 import {
   parseFeeQuote,
@@ -49,7 +51,8 @@ export interface PublishRequest {
 }
 
 export interface VerifyBundleRequest {
-  readonly directory: string;
+  readonly publication: PublishedBundle;
+  readonly expectedQuoteSha256: `0x${string}`;
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
   readonly artifactInputs: RawArtifactInputs;
@@ -71,7 +74,62 @@ export interface PlannerInput {
   readonly maxFeePerGas: bigint;
 }
 
-export async function publishReadyLast(request: PublishRequest): Promise<string> {
+export interface PublishedBundleIdentity extends PublishedOutputIdentity {
+  readonly planSha256: `0x${string}`;
+  readonly quoteSha256: `0x${string}`;
+  readonly readySha256: `0x${string}`;
+}
+
+export interface PublishedBundle {
+  readonly directory: string;
+  readonly identity: PublishedBundleIdentity;
+  readonly quoteSha256: `0x${string}`;
+  readCommitted(name: string): Promise<Uint8Array>;
+  assertCurrent(): Promise<void>;
+  close(): Promise<void>;
+}
+
+class LocalPublishedBundle implements PublishedBundle {
+  readonly directory: string;
+  readonly identity: PublishedBundleIdentity;
+  readonly quoteSha256: `0x${string}`;
+  private readonly output: ClaimedOutputDirectory;
+  private closed = false;
+
+  constructor(
+    output: ClaimedOutputDirectory,
+    directory: string,
+    identity: PublishedBundleIdentity,
+  ) {
+    this.output = output;
+    this.directory = directory;
+    this.identity = identity;
+    this.quoteSha256 = identity.quoteSha256;
+  }
+
+  async readCommitted(name: string): Promise<Uint8Array> {
+    this.assertOpen();
+    return this.output.readCommitted(name);
+  }
+
+  async assertCurrent(): Promise<void> {
+    this.assertOpen();
+    await this.output.assertCommitted();
+  }
+
+  async close(): Promise<void> {
+    if (!this.closed) {
+      this.closed = true;
+      await this.output.close();
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.closed) { fail("OUTPUT_CAPABILITY_CLOSED", "published bundle capability is closed"); }
+  }
+}
+
+export async function publishReadyLast(request: PublishRequest): Promise<PublishedBundle> {
   if (!/^[a-zA-Z0-9._-]+$/u.test(request.bundleName)) {
     fail("BUNDLE_NAME_INVALID", "bundle name is invalid");
   }
@@ -80,13 +138,16 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
   }
   const planBytes = jsonBytes(request.plan);
   const quoteBytes = jsonBytes(request.quote);
+  const planSha256 = sha256Hex(planBytes);
+  const quoteSha256 = sha256Hex(quoteBytes);
   const ready: ReadyMarker = {
     schemaVersion: 2,
-    planSha256: sha256Hex(planBytes),
-    quoteSha256: sha256Hex(quoteBytes),
+    planSha256,
+    quoteSha256,
     planId: request.plan.planId,
     creationInputHash: request.quote.creationInputHash,
   };
+  const readyBytes = jsonBytes(ready);
   independentlyVerify({ ...request, ready, nowSeconds: trustedNowSeconds() });
   const output = await claimOwnedOutputDirectory(
     request.parent,
@@ -107,26 +168,41 @@ export async function publishReadyLast(request: PublishRequest): Promise<string>
       published, planBytes, quoteBytes, ready,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
-    await output.finalizeReady(READY, jsonBytes(ready));
-    return published;
-  } finally {
-    await output.close();
+    await output.finalizeReady(READY, readyBytes);
+    await output.assertCommitted();
+    return new LocalPublishedBundle(output, published, {
+      ...output.publicationIdentity(),
+      planSha256,
+      quoteSha256,
+      readySha256: sha256Hex(readyBytes),
+    });
+  } catch (error) {
+    try { await output.close(); }
+    catch (closeError) {
+      throw new AggregateError(
+        [error, closeError], "publication failed and evidence preservation also failed", { cause: closeError },
+      );
+    }
+    throw error;
   }
 }
 
 export async function verifyBundle(
   request: VerifyBundleRequest,
 ): Promise<{ plan: StablePlan; quote: FeeQuote }> {
-  await assertExactBundle(request.directory);
-  const markerBytes = await safeRead(join(request.directory, READY));
-  const planBytes = await safeRead(join(request.directory, PLAN));
-  const quoteBytes = await safeRead(join(request.directory, QUOTE));
+  if (request.expectedQuoteSha256 !== request.publication.quoteSha256) {
+    fail("EXPECTED_QUOTE_DIGEST_MISMATCH", "expected quote digest does not match publication capability");
+  }
+  const markerBytes = await request.publication.readCommitted(READY);
+  const planBytes = await request.publication.readCommitted(PLAN);
+  const quoteBytes = await request.publication.readCommitted(QUOTE);
+  if (sha256Hex(quoteBytes) !== request.expectedQuoteSha256) {
+    fail("EXPECTED_QUOTE_DIGEST_MISMATCH", "authenticated quote bytes do not match expected digest");
+  }
   const ready = parseReadyMarker(markerBytes);
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
   verifyReadyDigests(planBytes, quoteBytes, ready);
-  // Production verification always samples the trusted system clock here;
-  // caller-supplied timestamps are test-only and never control freshness.
   independentlyVerify({ ...request, plan, quote, ready, nowSeconds: trustedNowSeconds() });
   await independentlyVerifyRpc({
     rpc: request.rpc,
@@ -134,6 +210,7 @@ export async function verifyBundle(
     quote,
     creationInput: request.creationInput,
   });
+  await request.publication.assertCurrent();
   return { plan, quote };
 }
 
@@ -186,7 +263,12 @@ async function assertPreparedContent(
 
 export async function runUnsignedPlanner(
   input: PlannerInput,
-): Promise<{ directory: string; planId: string }> {
+): Promise<{
+  directory: string;
+  planId: string;
+  quoteSha256: `0x${string}`;
+  bundleIdentity: PublishedBundleIdentity;
+}> {
   const roots = parseTrustRoots(await safeRead(input.trustRootsPath));
   const fixtureBytes = await safeRead(input.fixturePath);
   const artifactInputs: ArtifactInputs = {
@@ -225,17 +307,27 @@ export async function runUnsignedPlanner(
       artifactInputs,
       outputFaultInjection: { noReplaceDirectoryRename: nativeNoReplace.rename },
     };
-    const directory = await publishReadyLast(publishRequest);
-    await verifyBundle({
-      directory,
-      roots,
-      expected: approved,
-      artifactInputs,
-      nowSeconds: trustedNowSeconds(),
-      rpc,
-      creationInput: approved.creationInput,
-    });
-    return { directory, planId: plan.planId };
+    const publication = await publishReadyLast(publishRequest);
+    try {
+      await verifyBundle({
+        publication,
+        expectedQuoteSha256: publication.quoteSha256,
+        roots,
+        expected: approved,
+        artifactInputs,
+        nowSeconds: trustedNowSeconds(),
+        rpc,
+        creationInput: approved.creationInput,
+      });
+      return {
+        directory: publication.directory,
+        planId: plan.planId,
+        quoteSha256: publication.quoteSha256,
+        bundleIdentity: publication.identity,
+      };
+    } finally {
+      await publication.close();
+    }
   } finally {
     await nativeNoReplace.close();
   }

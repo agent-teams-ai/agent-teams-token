@@ -1,16 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  symlink,
-  writeFile,
-  rm,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -97,7 +86,7 @@ test("publication fails closed when no-replace capability is unavailable", async
   }
 });
 
-test("owned staging creation failure is reclaimed and a retry can publish", async () => {
+test("owned staging creation failure is quarantined and a retry can publish", async () => {
   const parent = await canonicalTemporaryDirectory();
   await assert.rejects(
     claimOwnedOutputDirectory(parent, "bundle", {
@@ -105,7 +94,7 @@ test("owned staging creation failure is reclaimed and a retry can publish", asyn
     }),
     /injected creation failure/u,
   );
-  assert.deepEqual(await readdir(parent), []);
+  assertQuarantineOnly(await readdir(parent));
   const retry = await claimOwnedOutputDirectory(parent, "bundle", {
     noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
   });
@@ -310,7 +299,7 @@ test("staging sync failure prevents publication", async () => {
   } finally {
     await claim.close();
   }
-  assert.deepEqual(await readdir(parent), []);
+  assertQuarantineOnly(await readdir(parent));
 });
 
 test("post-rename parent sync uncertainty preserves target without READY", async () => {
@@ -393,12 +382,10 @@ test("post-rename READY sync uncertainty preserves target and READY", async () =
 });
 
 test("READY replacement before final directory sync is uncertain and preserved", async () => {
-  await assertReadyReplacementPreserved("beforeFinalMarkerDirectorySync", "foreign-before-sync");
-});
+  await assertReadyReplacementPreserved("beforeFinalMarkerDirectorySync", "foreign-before-sync"); });
 
 test("READY replacement after final directory sync is uncertain and preserved", async () => {
-  await assertReadyReplacementPreserved("afterFinalMarkerDirectorySync", "foreign-after-sync");
-});
+  await assertReadyReplacementPreserved("afterFinalMarkerDirectorySync", "foreign-after-sync"); });
 
 test("READY finalization cannot succeed before its post-rename directory sync", async () => {
   const parent = await canonicalTemporaryDirectory();
@@ -478,6 +465,33 @@ test("cleanup rejects and preserves a foreign staging entry", async () => {
   assert.equal(await readFile(join(claim.path, "foreign"), "utf8"), "preserve");
 });
 
+test("cleanup preserves a leaf successor after quarantine authentication", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  let quarantine = "";
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    async afterCleanupQuarantineAuthenticated(path) {
+      quarantine = path; const leaf = join(path, "payload"); await unlink(leaf);
+      await writeFile(leaf, "foreign-successor", { mode: 0o600 });
+    },
+  });
+  await claim.writeExclusive("payload", Buffer.from("owned")); await claim.close();
+  assert.equal(await readFile(join(quarantine, "payload"), "utf8"), "foreign-successor");
+});
+
+test("cleanup preserves a directory successor after quarantine authentication", async () => {
+  const parent = await canonicalTemporaryDirectory();
+  let quarantine = ""; let evidence = "";
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    async afterCleanupQuarantineAuthenticated(path) {
+      quarantine = path; evidence = join(parent, "owned-evidence"); await rename(path, evidence);
+      await mkdir(path, { mode: 0o700 });
+    },
+  });
+  await claim.writeExclusive("payload", Buffer.from("owned")); await claim.close();
+  assert.deepEqual(await readdir(quarantine), []);
+  assert.equal(await readFile(join(evidence, "payload"), "utf8"), "owned");
+});
+
 async function assertReadyReplacementPreserved(
   hook: "beforeFinalMarkerDirectorySync" | "afterFinalMarkerDirectorySync",
   foreign: string,
@@ -507,6 +521,9 @@ async function assertReadyReplacementPreserved(
     await claim.close();
   }
 }
+
+function assertQuarantineOnly(names: readonly string[]): void {
+  assert.equal(names.length, 1); assert.match(names[0] ?? "", /^\.[0-9a-f]{32}\.cleanup$/u); }
 
 async function canonicalTemporaryDirectory(): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), "deployment-output-")));

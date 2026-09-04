@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, realpath, rename, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ApprovedArtifact } from "../src/adapters/artifact.ts";
+import { parseFeeQuote } from "../src/adapters/strict-json.ts";
 import { artifactInputs, approvedArtifact, roots as fixtureRoots } from "./raw-artifact-fixture.ts";
 import type { DeploymentRpc, RpcMethod } from "../src/application/ports.ts";
 import { buildFeeQuote, buildStablePlan, type QuoteObservation } from "../src/application/builder.ts";
@@ -243,61 +244,163 @@ test("expiry at the final pre-publication check leaves no target or staging bund
   assert.deepEqual(await readdir(parent), []);
 });
 
-test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substitution", async (context) => {
+test("READY-last verifies held bytes and detects live estimate drift", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-test-")));
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const publish = {
+  const publication = await publishReadyLast({
     parent,
+    bundleName: "bundle",
     plan,
     quote,
     roots,
-    expected: artifact, artifactInputs,
+    expected: artifact,
+    artifactInputs,
     outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename },
-  };
-  const directory = await publishReadyLast({ ...publish, bundleName: "bundle" });
-  await verifyBundle({ directory, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
-  const changedRpc: DeploymentRpc = {
-    async request(method, params) {
-      return method === "eth_estimateGas" ? "0x65" : rpc.request(method, params);
-    },
-  };
-  await assert.rejects(
-    verifyBundle({ directory, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
-    /estimate changed/u,
-  );
-  assert.deepEqual((await readdir(directory)).toSorted(), [
-    "READY", "deployment-plan.v2.json", "fee-quote.v2.json",
-  ]);
+  });
+  try {
+    await verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
+    assert.match(publication.quoteSha256, /^0x[0-9a-f]{64}$/u);
+    assert.match(publication.identity.directoryDevice, /^[0-9]+$/u);
+    assert.match(publication.identity.directoryInode, /^[0-9]+$/u);
+    assert.deepEqual(await readdir(parent), ["bundle"]);
+    const changedRpc: DeploymentRpc = {
+      async request(method, params) {
+        return method === "eth_estimateGas" ? "0x65" : rpc.request(method, params);
+      },
+    };
+    await assert.rejects(
+      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
+      /estimate changed/u,
+    );
+    assert.deepEqual((await readdir(publication.directory)).toSorted(), [
+      "READY", "deployment-plan.v2.json", "fee-quote.v2.json",
+    ]);
+  } finally {
+    await publication.close();
+  }
+});
 
-  const legacyNames = await publishReadyLast({ ...publish, bundleName: "legacy-names" });
-  await rename(
-    join(legacyNames, "deployment-plan.v2.json"),
-    join(legacyNames, "deployment-plan.v1.json"),
-  );
-  await assert.rejects(
-    verifyBundle({ directory: legacyNames, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
-    /exactly plan, quote, and READY/u,
-  );
+test("same-plan quote substitution cannot replace the held approved quote", async (context) => {
+  context.mock.method(Date, "now", () => 120_000);
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-quote-swap-")));
+  const plan = buildStablePlan(artifact, roots);
+  const originalQuote = buildFeeQuote(plan, observation, roots);
+  const replacementQuote = buildFeeQuote(plan, { ...observation, gasEstimate: "150" }, roots);
+  assert.equal(originalQuote.worstCaseWei, "200");
+  assert.equal(replacementQuote.worstCaseWei, "300");
+  const options = { parent, plan, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } };
+  const original = await publishReadyLast({ ...options, bundleName: "bundle", quote: originalQuote });
+  const replacement = await publishReadyLast({ ...options, bundleName: "replacement", quote: replacementQuote });
+  const displaced = join(parent, "original-held");
+  try {
+    assert.notEqual(original.quoteSha256, replacement.quoteSha256);
+    await rename(original.directory, displaced);
+    await rename(replacement.directory, original.directory);
+    const heldQuote = parseFeeQuote(await original.readCommitted("fee-quote.v2.json"));
+    assert.equal(heldQuote.worstCaseWei, "200");
+    let rpcReads = 0;
+    const observedRpc: DeploymentRpc = {
+      async request(method, params) {
+        rpcReads += 1;
+        return rpc.request(method, params);
+      },
+    };
+    await assert.rejects(
+      verifyBundle({ publication: original, expectedQuoteSha256: original.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: observedRpc, creationInput: artifact.creationInput }),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "OUTPUT_PUBLISHED_SUBSTITUTED",
+    );
+    assert(rpcReads > 0, "live RPC verification must consume the held original quote before final path rejection");
+  } finally {
+    await original.close();
+    await replacement.close();
+  }
+});
 
-  const planPath = join(directory, "deployment-plan.v2.json");
-  await writeFile(planPath, Buffer.concat([await readFile(planPath), Buffer.from(" ")]));
-  await assert.rejects(
-    verifyBundle({ directory, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
-    /stale|substituted/u,
-  );
+test("final-directory replacement before verification fails closed", async (context) => {
+  context.mock.method(Date, "now", () => 120_000);
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-directory-swap-")));
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  try {
+    await rename(publication.directory, join(parent, "held-original"));
+    await mkdir(publication.directory, { mode: 0o700 });
+    await assert.rejects(
+      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      /identity changed/u,
+    );
+  } finally {
+    await publication.close();
+  }
+});
 
-  const fresh = await publishReadyLast({ ...publish, bundleName: "bundle2" });
-  const other = join(parent, "other");
-  await writeFile(other, "{}");
-  const quotePath = join(fresh, "fee-quote.v2.json");
-  await unlink(quotePath);
-  await symlink(other, quotePath);
-  await assert.rejects(
-    verifyBundle({ directory: fresh, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
-    /regular file/u,
-  );
+for (const substitutedName of ["READY", "deployment-plan.v2.json"] as const) {
+  test(`${substitutedName} substitution at the final verification boundary fails closed`, async (context) => {
+    context.mock.method(Date, "now", () => 120_000);
+    const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-final-leaf-")));
+    const plan = buildStablePlan(artifact, roots);
+    const quote = buildFeeQuote(plan, observation, roots);
+    const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+    let substituted = false;
+    const boundaryRpc: DeploymentRpc = {
+      async request(method, params) {
+        const result = await rpc.request(method, params);
+        if (method === "eth_estimateGas" && !substituted) {
+          substituted = true;
+          const leaf = join(publication.directory, substitutedName);
+          await unlink(leaf);
+          await writeFile(leaf, "foreign", { mode: 0o600 });
+        }
+        return result;
+      },
+    };
+    try {
+      await assert.rejects(
+        verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: boundaryRpc, creationInput: artifact.creationInput }),
+        /substituted|identity changed|regular file/u,
+      );
+      assert.equal(substituted, true);
+    } finally {
+      await publication.close();
+    }
+  });
+}
+
+test("verification rejects an expected quote digest mismatch", async (context) => {
+  context.mock.method(Date, "now", () => 120_000);
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-digest-")));
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  try {
+    await assert.rejects(
+      verifyBundle({ publication, expectedQuoteSha256: `0x${"f".repeat(64)}`, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      /expected quote digest/u,
+    );
+  } finally {
+    await publication.close();
+  }
+});
+
+test("legacy leaf names cannot be verified through a publication capability", async (context) => {
+  context.mock.method(Date, "now", () => 120_000);
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-legacy-")));
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  try {
+    await rename(join(publication.directory, "deployment-plan.v2.json"), join(publication.directory, "deployment-plan.v1.json"));
+    await assert.rejects(
+      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      /foreign entry|substituted|identity changed/u,
+    );
+  } finally {
+    await publication.close();
+  }
 });
 
 function readyFor(planId: `0x${string}`) {

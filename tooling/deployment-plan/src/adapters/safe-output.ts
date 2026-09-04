@@ -1,16 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import {
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  realpath,
-  rename,
-  rmdir,
-  unlink,
-  type FileHandle,
-} from "node:fs/promises";
+import { lstat, mkdir, open, readdir, realpath, rename, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fail } from "../domain/model.ts";
 
@@ -24,6 +14,10 @@ interface FileIdentity extends DirectoryIdentity {
   readonly size: number;
 }
 
+interface HeldLeaf { readonly handle: FileHandle; readonly identity: FileIdentity; readonly bytes: Uint8Array }
+
+export interface PublishedOutputIdentity { readonly directoryDevice: string; readonly directoryInode: string }
+
 export interface ClaimedOutputDirectory {
   /** The unguessable, unpublished staging directory. */
   readonly path: string;
@@ -32,24 +26,23 @@ export interface ClaimedOutputDirectory {
   publish(): Promise<string>;
   /** Commits READY only after the published directory is durably reachable. */
   finalizeReady(name: "READY", bytes: Uint8Array): Promise<void>;
-  close(): Promise<void>;
+  readCommitted(name: string): Promise<Uint8Array>; assertCommitted(): Promise<void>;
+  publicationIdentity(): PublishedOutputIdentity; close(): Promise<void>;
 }
 
 export type NoReplaceDirectoryRename = (source: string, target: string) => Promise<void>;
 
 export interface OutputFaultInjection {
-  readonly beforeStagingLeafOpen?: () => Promise<void>;
-  readonly afterStagingLeafOpen?: () => Promise<void>;
+  readonly beforeStagingLeafOpen?: () => Promise<void>; readonly afterStagingLeafOpen?: () => Promise<void>;
   readonly afterStagingDirectoryCreate?: () => Promise<void>;
-  readonly beforeStagingDirectorySync?: () => Promise<void>;
-  readonly afterStagingDirectorySync?: () => Promise<void>;
-  readonly beforePublishRename?: () => Promise<void>;
-  readonly afterPublishRename?: () => Promise<void>;
-  readonly beforeParentDirectorySync?: () => Promise<void>;
-  readonly afterParentDirectorySync?: () => Promise<void>;
+  readonly beforeStagingDirectorySync?: () => Promise<void>; readonly afterStagingDirectorySync?: () => Promise<void>;
+  readonly beforePublishRename?: () => Promise<void>; readonly afterPublishRename?: () => Promise<void>;
+  readonly beforeParentDirectorySync?: () => Promise<void>; readonly afterParentDirectorySync?: () => Promise<void>;
   readonly beforeFinalMarkerRename?: () => Promise<void>;
-  readonly beforeFinalMarkerDirectorySync?: () => Promise<void>;
-  readonly afterFinalMarkerDirectorySync?: () => Promise<void>;
+  readonly beforeFinalMarkerDirectorySync?: () => Promise<void>; readonly afterFinalMarkerDirectorySync?: () => Promise<void>;
+  readonly beforeFinalIdentityCheck?: () => Promise<void>;
+  readonly beforeCleanupQuarantineLeafCheck?: (path: string) => Promise<void>;
+  readonly afterCleanupQuarantineAuthenticated?: (path: string) => Promise<void>;
   /** Replaces the parent fsync operation for deterministic failure injection. */
   readonly parentDirectorySync?: () => Promise<void>;
   /** Replaces the post-READY-rename directory fsync for deterministic tests. */
@@ -83,6 +76,7 @@ export async function claimOwnedOutputDirectory(
   const target = join(parent, bundleName);
   const staging = join(parent, `.${bundleName}.staging-${randomBytes(16).toString("hex")}`);
   let stagingIdentity: DirectoryIdentity | undefined;
+  let stagingHandle: FileHandle | undefined;
   try {
     await assertMissing(target);
     await mkdir(staging, { mode: 0o700 });
@@ -90,56 +84,56 @@ export async function claimOwnedOutputDirectory(
     assertOwnedPrivateDirectory(stagingMetadata, "OUTPUT_TARGET_UNSAFE");
     stagingIdentity = identity(stagingMetadata);
     await faultInjection.afterStagingDirectoryCreate?.();
-    const stagingHandle = await openDirectory(staging);
+    stagingHandle = await openDirectory(staging);
     const openedStagingIdentity = identity(await stagingHandle.stat());
     assertSameIdentity(stagingMetadata, openedStagingIdentity, "OUTPUT_TARGET_SUBSTITUTED");
-    const claimed = new LocalClaimedOutputDirectory({
-      parent, parentHandle, parentIdentity, staging, stagingHandle,
-      stagingIdentity: openedStagingIdentity, target, faultInjection,
-    });
+    const claimed = new LocalClaimedOutputDirectory({ parent, parentHandle, parentIdentity, staging,
+      stagingHandle, stagingIdentity: openedStagingIdentity, target, faultInjection });
     await claimed.assertStagingStable();
     return claimed;
   } catch (error) {
+    const cleanupFailures: unknown[] = [];
     if (stagingIdentity !== undefined) {
-      await removeEmptyOwnedDirectory(parent, staging, stagingIdentity).catch(() => {});
+      try { await quarantineOwnedDirectory(parent, staging, stagingIdentity); }
+      catch (cleanupError) { cleanupFailures.push(cleanupError); }
     }
-    await parentHandle.close().catch(() => {});
+    if (stagingHandle !== undefined) {
+      try { await stagingHandle.close(); }
+      catch (closeError) { cleanupFailures.push(closeError); }
+    }
+    try { await parentHandle.close(); }
+    catch (closeError) { cleanupFailures.push(closeError); }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures], "output claim and evidence preservation failed", { cause: error },
+      );
+    }
     throw error;
   }
 }
 
 class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   readonly path: string;
-  private readonly parent: string;
-  private readonly parentHandle: FileHandle;
-  private readonly parentIdentity: DirectoryIdentity;
-  private readonly stagingHandle: FileHandle;
-  private readonly stagingIdentity: DirectoryIdentity;
-  private readonly target: string;
+  private readonly parent: string; private readonly parentHandle: FileHandle;
+  private readonly parentIdentity: DirectoryIdentity; private readonly stagingHandle: FileHandle;
+  private readonly stagingIdentity: DirectoryIdentity; private readonly target: string;
   private readonly faultInjection: OutputFaultInjection;
-  private readonly leaves = new Map<string, FileIdentity>();
+  private readonly leaves = new Map<string, HeldLeaf>();
   private published = false;
   private stagingDisposed = false;
   private publishedTargetIdentity?: DirectoryIdentity;
+  private closePromise?: Promise<void>;
 
   constructor(input: {
-    readonly parent: string;
-    readonly parentHandle: FileHandle;
-    readonly parentIdentity: DirectoryIdentity;
-    readonly staging: string;
-    readonly stagingHandle: FileHandle;
-    readonly stagingIdentity: DirectoryIdentity;
-    readonly target: string;
-    readonly faultInjection: OutputFaultInjection;
+    readonly parent: string; readonly parentHandle: FileHandle;
+    readonly parentIdentity: DirectoryIdentity; readonly staging: string;
+    readonly stagingHandle: FileHandle; readonly stagingIdentity: DirectoryIdentity;
+    readonly target: string; readonly faultInjection: OutputFaultInjection;
   }) {
-    this.parent = input.parent;
-    this.parentHandle = input.parentHandle;
-    this.parentIdentity = input.parentIdentity;
-    this.path = input.staging;
-    this.stagingHandle = input.stagingHandle;
-    this.stagingIdentity = input.stagingIdentity;
-    this.target = input.target;
-    this.faultInjection = input.faultInjection;
+    this.parent = input.parent; this.parentHandle = input.parentHandle;
+    this.parentIdentity = input.parentIdentity; this.path = input.staging;
+    this.stagingHandle = input.stagingHandle; this.stagingIdentity = input.stagingIdentity;
+    this.target = input.target; this.faultInjection = input.faultInjection;
   }
 
   async writeExclusive(name: string, bytes: Uint8Array): Promise<void> {
@@ -155,8 +149,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     await this.assertStagingStable();
     await this.faultInjection.beforeStagingLeafOpen?.();
     const file = await open(join(this.path, name),
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     let fileIdentity: FileIdentity;
+    let retained = false;
     try {
       fileIdentity = fileIdentityOf(await file.stat());
       await this.faultInjection.afterStagingLeafOpen?.();
@@ -168,9 +163,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
         fail("OUTPUT_FILE_UNSAFE", "output file is not an owned regular file");
       }
       fileIdentity = fileIdentityOf(metadata);
-      this.leaves.set(name, fileIdentity);
+      this.leaves.set(name, { handle: file, identity: fileIdentity, bytes: Buffer.from(bytes) });
+      retained = true;
     } finally {
-      await file.close();
+      if (!retained) { await file.close(); }
     }
     // A swap or ABA around the pathname open can only write elsewhere: the
     // held staging identity must still contain the complete bundle before it
@@ -217,7 +213,9 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.assertParentStable();
       const publishedMetadata = await lstat(this.target);
       assertOwnedPrivateDirectory(publishedMetadata, "OUTPUT_PUBLISHED_SUBSTITUTED");
-      if (this.publishedTargetIdentity !== undefined) {assertSameIdentity(publishedMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");}
+      if (this.publishedTargetIdentity !== undefined) {
+        assertSameIdentity(publishedMetadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+      }
       await this.faultInjection.beforeParentDirectorySync?.();
       await (this.faultInjection.parentDirectorySync?.() ?? this.parentHandle.sync());
       await this.faultInjection.afterParentDirectorySync?.();
@@ -248,26 +246,20 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     const pending = join(this.target, pendingName);
     const ready = join(this.target, name);
     const file = await open(pending,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     let pendingIdentity: FileIdentity;
+    let retained = false;
+    let markerMayBePublished = false;
     try {
       await file.chmod(0o600);
       await file.writeFile(bytes);
       await file.sync();
       pendingIdentity = fileIdentityOf(await file.stat());
-    } finally {
-      await file.close();
-    }
-    // The pending marker and its data are durable before the atomic name commit.
-    // The held directory is synced again after that rename so a successful
-    // return proves the final READY name is durable too.
-    await this.stagingHandle.sync();
-    await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
-    assertSameFileIdentity(await lstat(pending), pendingIdentity, "OUTPUT_READY_SUBSTITUTED");
-    await this.faultInjection.beforeFinalMarkerRename?.();
-    await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
-    let markerMayBePublished = false;
-    try {
+      await this.stagingHandle.sync();
+      await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
+      assertSameFileIdentity(await lstat(pending), pendingIdentity, "OUTPUT_READY_SUBSTITUTED");
+      await this.faultInjection.beforeFinalMarkerRename?.();
+      await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
       try {
         await noReplaceRename(pending, ready);
       } catch (error) {
@@ -289,13 +281,15 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
         fail("OUTPUT_READY_SUBSTITUTED", "READY size changed during commit");
       }
       const readyIdentity = fileIdentityOf(readyMetadata);
-      this.leaves.set(name, readyIdentity);
+      this.leaves.set(name, { handle: file, identity: readyIdentity, bytes: Buffer.from(bytes) });
+      retained = true;
       await this.assertPublishedReady(bytes, readyIdentity);
       await this.faultInjection.beforeFinalMarkerDirectorySync?.();
       await (this.faultInjection.finalMarkerDirectorySync?.() ?? this.stagingHandle.sync());
       await this.faultInjection.afterFinalMarkerDirectorySync?.();
       await this.assertPublishedReady(bytes, readyIdentity);
     } catch (error) {
+      if (!retained) { await file.close(); }
       if (markerMayBePublished) {
         fail("OUTPUT_PUBLICATION_UNCERTAIN",
           "READY durability is uncertain; target and READY preserved: " + errorMessage(error));
@@ -322,6 +316,11 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   }
 
   async close(): Promise<void> {
+    this.closePromise ??= this.closeOnce();
+    await this.closePromise;
+  }
+
+  private async closeOnce(): Promise<void> {
     let cleanupError: unknown;
     try {
       if (!this.published) {
@@ -330,11 +329,22 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     } catch (error) {
       cleanupError = error;
     }
-    const closed = await Promise.allSettled([this.stagingHandle.close(), this.parentHandle.close()]);
+    const closed = await Promise.allSettled([
+      ...[...this.leaves.values()].map(({ handle }) => handle.close()),
+      this.stagingHandle.close(), this.parentHandle.close(),
+    ]);
+    const closeFailures = closed
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (cleanupError !== undefined && closeFailures.length > 0) {
+      throw new AggregateError(
+        [cleanupError, ...closeFailures], "cleanup and handle closure failed", { cause: cleanupError },
+      );
+    }
     if (cleanupError !== undefined) { throw cleanupError; }
-    const closeFailure = closed.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected");
-    if (closeFailure !== undefined) { throw closeFailure.reason; }
+    if (closeFailures.length > 0) {
+      throw new AggregateError(closeFailures, "one or more output handles failed to close");
+    }
   }
 
   private async cleanupStaging(): Promise<void> {
@@ -345,34 +355,45 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     }
     await this.assertStagingStable();
     await this.assertCleanupLeaves(this.path);
-    const quarantine = join(
-      this.parent,
-      `.${randomBytes(16).toString("hex")}.cleanup`,
-    );
+    const quarantine = join(this.parent, `.${randomBytes(16).toString("hex")}.cleanup`);
     await rename(this.path, quarantine);
     await assertDirectoryIdentity(quarantine, this.stagingIdentity, "OUTPUT_CLEANUP_SUBSTITUTED");
+    await this.faultInjection.beforeCleanupQuarantineLeafCheck?.(quarantine);
     await this.assertCleanupLeaves(quarantine);
-    for (const [name, expected] of this.leaves) {
-      const leaf = join(quarantine, name);
-      const quarantinedLeaf = join(
-        quarantine,
-        `.${randomBytes(16).toString("hex")}.cleanup-leaf`,
-      );
-      const metadata = await lstat(leaf);
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
-        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted");
-      }
-      assertSameFileIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
-      await rename(leaf, quarantinedLeaf);
-      const moved = await lstat(quarantinedLeaf);
-      assertSameIdentity(moved, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
-      if (moved.size !== expected.size) {
-        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf size changed");
-      }
-      await unlink(quarantinedLeaf);
-    }
-    await rmdir(quarantine);
+    await this.faultInjection.afterCleanupQuarantineAuthenticated?.(quarantine);
+    // Node exposes no removal-at-a-held-directory-fd primitive. Preserve the
+    // authenticated quarantine rather than cross another pathname boundary.
     await this.parentHandle.sync();
+  }
+
+  async readCommitted(name: string): Promise<Uint8Array> {
+    this.assertFinalized();
+    const held = this.leaves.get(name);
+    if (held === undefined) { fail("OUTPUT_FILE_UNTRACKED", "output file is not tracked"); }
+    await this.assertHeldLeaf(name, held);
+    return Buffer.from(held.bytes);
+  }
+
+  async assertCommitted(): Promise<void> {
+    this.assertFinalized();
+    await this.faultInjection.beforeFinalIdentityCheck?.();
+    for (const [name, held] of this.leaves) { await this.assertHeldLeaf(name, held); }
+    await this.assertPublishedTreeUnchanged();
+  }
+
+  publicationIdentity(): PublishedOutputIdentity {
+    this.assertFinalized();
+    if (this.publishedTargetIdentity === undefined) { throw new Error("unreachable publication identity"); }
+    return {
+      directoryDevice: String(this.publishedTargetIdentity.dev),
+      directoryInode: String(this.publishedTargetIdentity.ino),
+    };
+  }
+
+  private assertFinalized(): void {
+    if (!this.published || !this.leaves.has("READY")) {
+      fail("OUTPUT_NOT_FINALIZED", "published output is not READY-finalized");
+    }
   }
 
   private async assertPublishedTreeUnchanged(
@@ -392,13 +413,14 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     if (names.length !== expectedNames.length || names.some((name, index) => name !== expectedNames[index])) {
       fail("OUTPUT_ROLLBACK_FOREIGN_ENTRY", "published output contains an untracked or foreign entry");
     }
-    for (const [name, expected] of this.leaves) {
+    for (const [name, { identity: expected }] of this.leaves) {
       const leaf = await lstat(join(this.target, name));
       if (!leaf.isFile() || leaf.isSymbolicLink() || leaf.nlink !== 1) {
         fail("OUTPUT_ROLLBACK_LEAF_SUBSTITUTED", "published output tracked leaf was substituted");
       }
       assertSameFileIdentity(leaf, expected, "OUTPUT_ROLLBACK_LEAF_SUBSTITUTED");
     }
+    assertSameIdentity(await lstat(this.target), this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
   }
 
   private async assertPublishedReady(bytes: Uint8Array, expected: FileIdentity): Promise<void> {
@@ -407,69 +429,68 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     try {
       const beforeRead = await ready.stat();
       if (!beforeRead.isFile() || beforeRead.nlink !== 1) {
-        fail("OUTPUT_READY_SUBSTITUTED", "READY is not the committed regular file");
-      }
+        fail("OUTPUT_READY_SUBSTITUTED", "READY is not the committed regular file"); }
       assertSameFileIdentity(beforeRead, expected, "OUTPUT_READY_SUBSTITUTED");
       const actual = await ready.readFile();
       assertSameFileIdentity(await ready.stat(), expected, "OUTPUT_READY_SUBSTITUTED");
       await this.assertPublishedTreeUnchanged();
       if (!actual.equals(Buffer.from(bytes))) {
-        fail("OUTPUT_READY_SUBSTITUTED", "READY bytes differ from the committed marker");
-      }
+        fail("OUTPUT_READY_SUBSTITUTED", "READY bytes differ from the committed marker"); }
     } finally {
       await ready.close();
     }
   }
 
+  private async assertHeldLeaf(name: string, held: HeldLeaf): Promise<void> {
+    const before = await held.handle.stat();
+    if (!before.isFile() || before.nlink !== 1) {
+      fail("OUTPUT_FILE_SUBSTITUTED", "held output leaf is not an owned regular file"); }
+    assertSameFileIdentity(before, held.identity, "OUTPUT_FILE_SUBSTITUTED");
+    const actual = Buffer.alloc(held.identity.size);
+    const { bytesRead } = await held.handle.read(actual, 0, actual.length, 0);
+    assertSameFileIdentity(await held.handle.stat(), held.identity, "OUTPUT_FILE_SUBSTITUTED");
+    if (bytesRead !== actual.length || !actual.equals(Buffer.from(held.bytes))) {
+      fail("OUTPUT_CONTENT_SUBSTITUTED", "held output bytes changed"); }
+  }
+
   private async assertCleanupLeaves(directory: string): Promise<void> {
     const names = (await readdir(directory)).toSorted();
     const expectedNames = [...this.leaves.keys()].toSorted();
-    if (
-      names.length !== expectedNames.length
-      || names.some((name, index) => name !== expectedNames[index])
-    ) {
+    if (names.length !== expectedNames.length
+      || names.some((name, index) => name !== expectedNames[index])) {
       fail("OUTPUT_CLEANUP_FOREIGN_ENTRY", "cleanup directory contains a foreign entry");
     }
-    for (const [name, expected] of this.leaves) {
+    for (const [name, { identity: expected }] of this.leaves) {
       const metadata = await lstat(join(directory, name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
-        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted");
-      }
+        fail("OUTPUT_CLEANUP_SUBSTITUTED", "cleanup leaf was substituted"); }
       assertSameFileIdentity(metadata, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
     }
   }
 }
 
-async function removeEmptyOwnedDirectory(
-  parent: string,
-  staging: string,
-  expected: DirectoryIdentity,
+async function quarantineOwnedDirectory(
+  parent: string, staging: string, expected: DirectoryIdentity,
 ): Promise<void> {
   const quarantine = join(parent, `.${randomBytes(16).toString("hex")}.cleanup`);
   await assertDirectoryIdentity(staging, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
   await rename(staging, quarantine);
   await assertDirectoryIdentity(quarantine, expected, "OUTPUT_CLEANUP_SUBSTITUTED");
-  await rmdir(quarantine);
 }
 
 async function assertDirectoryIdentity(
-  path: string,
-  expected: DirectoryIdentity,
-  code: string,
+  path: string, expected: DirectoryIdentity, code: string,
 ): Promise<void> {
   await assertNoSymlinkComponents(path);
   const metadata = await lstat(path);
   assertOwnedPrivateDirectory(metadata, code);
   assertSameIdentity(metadata, expected, code);
-  if (await realpath(path) !== path) {
-    fail(code, "output directory path changed");
-  }
+  if (await realpath(path) !== path) { fail(code, "output directory path changed"); }
 }
 
 function assertNormalizedAbsolute(path: string): void {
   if (!isAbsolute(path) || resolve(path) !== path) {
-    fail("OUTPUT_PATH_INVALID", "output parent must be a normalized absolute path");
-  }
+    fail("OUTPUT_PATH_INVALID", "output parent must be a normalized absolute path"); }
 }
 
 async function assertNoSymlinkComponents(path: string): Promise<void> {
@@ -479,16 +500,14 @@ async function assertNoSymlinkComponents(path: string): Promise<void> {
     current = join(current, segment);
     const metadata = await lstat(current);
     if (metadata.isSymbolicLink()) {
-      fail("OUTPUT_PATH_SYMLINK", "output path contains a symbolic link");
-    }
+      fail("OUTPUT_PATH_SYMLINK", "output path contains a symbolic link"); }
   }
 }
 
 function assertOwnedPrivateDirectory(metadata: Stats, code: string): void {
   const expectedUid = process.getuid?.();
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.nlink < 1
-    || expectedUid === undefined || metadata.uid !== expectedUid
-    || (metadata.mode & 0o777) !== 0o700) {
+    || expectedUid === undefined || metadata.uid !== expectedUid || (metadata.mode & 0o777) !== 0o700) {
     fail(code, "output directory must be owned by this user with mode 0700");
   }
 }
@@ -501,9 +520,7 @@ async function assertMissing(path: string): Promise<void> {
   try {
     await lstat(path);
   } catch (error) {
-    if (nodeErrorCode(error) === "ENOENT") {
-      return;
-    }
+    if (nodeErrorCode(error) === "ENOENT") { return; }
     throw error;
   }
   fail("OUTPUT_TARGET_EXISTS", "output target already exists");
@@ -513,15 +530,10 @@ function fileIdentityOf(metadata: Stats): FileIdentity {
   return { ...identity(metadata), ctimeMs: metadata.ctimeMs, size: metadata.size };
 }
 
-function assertSameFileIdentity(
-  actual: Stats,
-  expected: FileIdentity,
-  code: string,
-): void {
+function assertSameFileIdentity(actual: Stats, expected: FileIdentity, code: string): void {
   assertSameIdentity(actual, expected, code);
   if (actual.ctimeMs !== expected.ctimeMs || actual.size !== expected.size) {
-    fail(code, "filesystem file identity changed");
-  }
+    fail(code, "filesystem file identity changed"); }
 }
 
 function identity(metadata: Stats): DirectoryIdentity {
@@ -529,13 +541,10 @@ function identity(metadata: Stats): DirectoryIdentity {
 }
 
 function assertSameIdentity(
-  metadata: Pick<Stats, "dev" | "ino">,
-  expected: DirectoryIdentity,
-  code: string,
+  metadata: Pick<Stats, "dev" | "ino">, expected: DirectoryIdentity, code: string,
 ): void {
   if (metadata.dev !== expected.dev || metadata.ino !== expected.ino) {
-    fail(code, "output directory identity changed");
-  }
+    fail(code, "output directory identity changed"); }
 }
 
 function nodeErrorCode(error: unknown): string | undefined {
