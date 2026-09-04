@@ -90,18 +90,17 @@ function parseArtifactInputs(
   inputs: RawArtifactInputs,
   parser: JsonParserPort,
 ): ParsedArtifactInputs {
+  const build = parseObject(parser.parse(inputs.buildInfoBytes, "build-info"), "BUILD_INFO");
   return {
-    build: parseObject(parser.parse(inputs.buildInfoBytes), "BUILD_INFO"),
-    artifact: parseObject(parser.parse(inputs.artifactBytes), "ARTIFACT"),
-    abi: parseArray(parser.parse(inputs.abiBytes), "ABI"),
-    fixture: parseObject(parser.parse(inputs.fixtureBytes), "FIXTURE"),
+    build,
+    artifact: parseObject(parser.parse(inputs.artifactBytes, "artifact"), "ARTIFACT"),
+    abi: parseArray(parser.parse(inputs.abiBytes, "abi"), "ABI"),
+    fixture: parseObject(parser.parse(inputs.fixtureBytes, "fixture"), "FIXTURE"),
     artifactSha256: sha256Hex(inputs.artifactBytes),
     abiSha256: sha256Hex(inputs.abiBytes),
     fixtureSha256: sha256Hex(inputs.fixtureBytes),
     rawBuildInfoSha256: sha256Hex(inputs.buildInfoBytes),
-    canonicalBuildInfoSha256: canonicalBuildInfoSha256(
-      parseObject(parser.parse(inputs.buildInfoBytes), "BUILD_INFO"),
-    ),
+    canonicalBuildInfoSha256: canonicalBuildInfoSha256(build),
   };
 }
 

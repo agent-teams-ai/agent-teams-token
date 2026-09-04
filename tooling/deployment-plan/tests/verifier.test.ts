@@ -1,4 +1,4 @@
-import { nativeNoReplaceEvidence, nativeNoReplaceEvidenceBytes, nativeNoReplacePolicy, nativeVerification } from "./native-provenance-fixture.ts";
+import { nativeNoReplaceEvidence, nativeNoReplacePolicy, nativeVerification } from "./native-provenance-fixture.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { artifactInputs, approvedArtifact, roots as fixtureRoots } from "./raw-artifact-fixture.ts";
@@ -16,6 +16,7 @@ import {
 } from "../src/application/verifier.ts";
 import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
 import { UINT256_MAX } from "../src/domain/model.ts";
+import { parseRawArtifactJson } from "../src/adapters/strict-json.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
 const otherHash = `0x${"b".repeat(64)}` as const;
@@ -147,6 +148,25 @@ test("independent verification parses every raw input and ignores builder constr
     }),
     /duplicate JSON member/u,
   );
+});
+
+test("independent raw verification parses each input exactly once with its profile", () => {
+  const seen: string[] = [];
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  assert.doesNotThrow(() => independentlyVerify({
+    ...nativeVerification,
+    plan, quote, roots, expected: artifact, artifactInputs,
+    ready: readyFor(plan.planId),
+    nowSeconds: 110n,
+    jsonParser: {
+      parse(bytes, input) {
+        seen.push(input);
+        return parseRawArtifactJson(bytes, input);
+      },
+    },
+  }));
+  assert.deepEqual(seen, ["build-info", "artifact", "abi", "fixture"]);
 });
 
 test("independent raw parsing accepts AST negatives and rejects noncanonical numbers", () => {
@@ -313,7 +333,10 @@ function readyFor(planId: `0x${string}`) {
 
 
 test("native evidence rejects forged approval and atomic cross-tuples", () => {
-  const forged = { ...nativeNoReplaceEvidence, approvalSha256: `0x${"f".repeat(64)}` };
+  const forged = {
+    ...nativeNoReplaceEvidence,
+    approvalSha256: `0x${"f".repeat(64)}` as `0x${string}`,
+  };
   assert.throws(() => verifyNativeNoReplaceEvidence(forged, nativeNoReplacePolicy), /approval digest is forged/u);
   const crossed = JSON.parse(JSON.stringify(nativeNoReplacePolicy));
   const tuple = crossed.platforms["linux-x64"].tuples[0]!;

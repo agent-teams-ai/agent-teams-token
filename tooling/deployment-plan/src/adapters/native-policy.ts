@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { NativeNoReplacePolicy } from "../application/ports.ts";
 import { canonicalJson } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
-import { JSON_LIMITS, parseBoundedJson } from "./bounded-json.ts";
+import { POLICY_JSON_LIMITS, parseBoundedJson } from "./bounded-json.ts";
 
 const LOCK = resolvePath(dirname(fileURLToPath(import.meta.url)), "../../../toolchain.lock.json");
 const HASH = /^0x[0-9a-f]{64}$/u;
@@ -16,7 +16,7 @@ export async function loadCommittedNativeNoReplacePolicy(): Promise<NativeNoRepl
 }
 
 export function parseNativeNoReplacePolicyLock(bytes: Uint8Array): NativeNoReplacePolicy {
-  const lock = exactObject(parseBoundedJson(bytes), [
+  const lock = exactObject(parseBoundedJson(bytes, POLICY_JSON_LIMITS), [
     "schemaVersion", "retrievedAt", "platforms", "coreTools", "nativeBuilds",
     "fixtureTools", "policy", "tools", "securityImages",
   ]);
@@ -99,7 +99,7 @@ async function readPolicyBytes(): Promise<Uint8Array> {
   try {
     const before = await file.stat();
     if (!before.isFile() || before.nlink !== 1
-      || !Number.isSafeInteger(before.size) || before.size > JSON_LIMITS.bytes) {
+      || !Number.isSafeInteger(before.size) || before.size > POLICY_JSON_LIMITS.bytes) {
       fail("JSON_LIMIT_BYTES", "toolchain lock exceeds the byte limit");
     }
     const bytes = Buffer.alloc(before.size);

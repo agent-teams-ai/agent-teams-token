@@ -17,8 +17,10 @@ export interface RawArtifactInputs {
 }
 
 export interface JsonParserPort {
-  parse(bytes: Uint8Array): unknown;
+  parse(bytes: Uint8Array, input: RawArtifactJsonInput): unknown;
 }
+
+export type RawArtifactJsonInput = "build-info" | "artifact" | "abi" | "fixture";
 
 export interface ArtifactInputs extends RawArtifactInputs {
   readonly constructorValues: unknown;

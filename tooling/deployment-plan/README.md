@@ -70,8 +70,24 @@ rename, so substitution and ABA races fail before acceptable evidence exists.
 Bundles contain exactly `deployment-plan.v2.json`, `fee-quote.v2.json`,
 `native-no-replace-evidence.v1.json`, and then `READY`. READY V3 binds all
 three payload SHA-256 digests plus `planId` and `creationInputHash`.
+The bounded JSON parser applies immutable per-input profiles instead of a
+single enlarged ceiling. Policy, native evidence, READY, plans, quotes, trust
+roots, and constructor fixtures retain the 64 KiB document / 16 KiB string
+profile. The selected Forge artifact/ABI profile is capped at 512 KiB with
+128 KiB strings. Forge build-info alone is capped at 2 MiB, depth 32, 64
+members per object, 64 items per array, and 64 KiB strings. Those build-info
+limits are independently above the measured valid Forge 1.8.0 document
+(1,366,773 bytes, depth 26, 33,914-byte largest string, 19 members, and 31
+array items) while remaining finite. Every profile retains fatal UTF-8,
+duplicate-key rejection, canonical safe-integer syntax, and bounded domain
+errors. Exact-boundary and one-beyond tests cover every dimension of each
+profile, and a committed Forge-shaped regression exceeds the policy profile.
+
 The independent verifier reparses the raw build-info, artifact, ABI and
-constructor-fixture bytes with its own duplicate-key-rejecting parser. It
+constructor-fixture bytes with its own duplicate-key-rejecting parser. Each
+independent approval parses build-info once and reuses that authenticated object
+for canonical hashing; the builder and verifier intentionally still parse their
+own copies to preserve separate authority. It
 reconstructs bytecode, constructor ABI encoding, constructor arguments and the
 complete initcode without consuming the builder's parsed constructor values,
 then compares that result with both the stable plan and the builder result. It

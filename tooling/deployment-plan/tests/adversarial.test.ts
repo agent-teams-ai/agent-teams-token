@@ -382,8 +382,12 @@ for (const mutation of ["missing", "symlink", "hardlink"] as const) {
     const foreign = join(parent, "foreign-evidence");
     await writeFile(foreign, "foreign", { mode: 0o600 });
     await unlink(leaf);
-    if (mutation === "symlink") await symlink(foreign, leaf);
-    if (mutation === "hardlink") await link(foreign, leaf);
+    if (mutation === "symlink") {
+      await symlink(foreign, leaf);
+    }
+    if (mutation === "hardlink") {
+      await link(foreign, leaf);
+    }
     try {
       await assert.rejects(verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /missing|substituted|regular file|identity changed/u);
     } finally { await publication.close(); }

@@ -3,8 +3,10 @@ import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { approveForgeArtifact } from "../adapters/artifact.ts";
 import { createLocalRpc, observeFees } from "../adapters/rpc.ts";
-import { createNativeNoReplaceCapability } from "../adapters/native-no-replace.ts";
-import { loadCommittedNativeNoReplacePolicy } from "../adapters/native-policy.ts";
+import {
+  createNativeNoReplaceCapability,
+  loadCommittedNativeNoReplacePolicy,
+} from "../adapters/native-no-replace.ts";
 import {
   claimOwnedOutputDirectory,
   type ClaimedOutputDirectory,
@@ -15,6 +17,7 @@ import {
   parseFeeQuote,
   parseJsonWithoutDuplicates,
   parseNativeNoReplaceEvidence,
+  parseRawArtifactJson,
   parseReadyMarker,
   parseStablePlan,
   parseTrustRoots,
@@ -156,6 +159,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
     creationInputHash: request.quote.creationInputHash,
   };
   const readyBytes = jsonBytes(ready);
+  const prepared = { planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready };
   await verifyWithCommittedAuthority({
     ...request,
     ready,
@@ -173,13 +177,15 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
     await output.writeExclusive(NATIVE_EVIDENCE, nativeNoReplaceEvidenceBytes);
     await assertExactBundle(output.path, false, false);
     await assertPreparedContent(
-      output.path, planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready,
+      output.path,
+      prepared,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
     const published = await output.publish();
     await assertExactBundle(published, true, false);
     await assertPreparedContent(
-      published, planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready,
+      published,
+      prepared,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
     await output.finalizeReady(READY, readyBytes);
@@ -263,32 +269,36 @@ async function assertExactBundle(
   }
 }
 
+interface PreparedContent {
+  readonly planBytes: Uint8Array;
+  readonly quoteBytes: Uint8Array;
+  readonly nativeNoReplaceEvidenceBytes: Uint8Array;
+  readonly ready: ReadyMarker;
+}
+
 async function assertPreparedContent(
   directory: string,
-  expectedPlanBytes: Uint8Array,
-  expectedQuoteBytes: Uint8Array,
-  expectedNativeEvidenceBytes: Uint8Array,
-  expectedReady: ReadyMarker,
+  expected: PreparedContent,
   request: PublishRequest & Pick<VerificationRequest, "nowSeconds">,
 ): Promise<void> {
   const planBytes = await safeRead(join(directory, PLAN));
   const quoteBytes = await safeRead(join(directory, QUOTE));
   const nativeNoReplaceEvidenceBytes = await safeRead(join(directory, NATIVE_EVIDENCE));
   if (
-    !Buffer.from(planBytes).equals(expectedPlanBytes)
-    || !Buffer.from(quoteBytes).equals(expectedQuoteBytes)
-    || !Buffer.from(nativeNoReplaceEvidenceBytes).equals(expectedNativeEvidenceBytes)
+    !Buffer.from(planBytes).equals(expected.planBytes)
+    || !Buffer.from(quoteBytes).equals(expected.quoteBytes)
+    || !Buffer.from(nativeNoReplaceEvidenceBytes).equals(expected.nativeNoReplaceEvidenceBytes)
   ) {
     fail("OUTPUT_CONTENT_SUBSTITUTED", "published bundle differs from verified staging bytes");
   }
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
-  verifyReadyDigests(planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, expectedReady);
+  verifyReadyDigests(planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, expected.ready);
   await verifyWithCommittedAuthority({
     ...request,
     plan,
     quote,
-    ready: expectedReady,
+    ready: expected.ready,
     nativeNoReplaceEvidenceBytes,
   });
 }
@@ -308,7 +318,7 @@ async function verifyWithCommittedAuthority(
     ...request,
     nativeNoReplacePolicy,
     nativeNoReplaceEvidence,
-    jsonParser: { parse: parseJsonWithoutDuplicates },
+    jsonParser: { parse: parseRawArtifactJson },
   });
 }
 

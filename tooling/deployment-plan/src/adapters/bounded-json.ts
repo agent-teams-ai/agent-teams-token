@@ -1,15 +1,51 @@
 import { fail } from "../domain/model.ts";
 
-export const JSON_LIMITS = {
+export interface JsonLimits {
+  readonly bytes: number;
+  readonly depth: number;
+  readonly members: number;
+  readonly arrayItems: number;
+  readonly stringBytes: number;
+}
+
+function immutableLimits(limits: JsonLimits): Readonly<JsonLimits> {
+  return Object.freeze(limits);
+}
+
+export const POLICY_JSON_LIMITS = immutableLimits({
   bytes: 64 * 1024,
   depth: 32,
   members: 256,
   arrayItems: 1_024,
   stringBytes: 16 * 1024,
-} as const;
+});
 
-export function parseBoundedJson(bytes: Uint8Array): unknown {
-  if (bytes.byteLength > JSON_LIMITS.bytes) {
+// A genuine Forge 1.8.0 build-info was measured at 1,366,773 bytes, depth 26,
+// 33,914 string bytes, 19 object members, and 31 array items. These ceilings
+// provide finite format headroom without weakening policy/evidence parsing.
+export const FORGE_BUILD_INFO_JSON_LIMITS = immutableLimits({
+  bytes: 2 * 1024 * 1024,
+  depth: 32,
+  members: 64,
+  arrayItems: 64,
+  stringBytes: 64 * 1024,
+});
+
+// The selected contract artifact is smaller than complete build-info, while
+// its bytecode strings legitimately exceed the policy string ceiling.
+export const FORGE_ARTIFACT_JSON_LIMITS = immutableLimits({
+  bytes: 512 * 1024,
+  depth: 32,
+  members: 128,
+  arrayItems: 512,
+  stringBytes: 128 * 1024,
+});
+
+export function parseBoundedJson(
+  bytes: Uint8Array,
+  limits: Readonly<JsonLimits>,
+): unknown {
+  if (bytes.byteLength > limits.bytes) {
     fail("JSON_LIMIT_BYTES", "JSON exceeds the byte limit");
   }
   let source: string;
@@ -18,15 +54,17 @@ export function parseBoundedJson(bytes: Uint8Array): unknown {
   } catch {
     fail("JSON_INVALID", "JSON is not strict UTF-8");
   }
-  return new BoundedJsonParser(source).parse();
+  return new BoundedJsonParser(source, limits).parse();
 }
 
 class BoundedJsonParser {
   private index = 0;
+  private readonly limits: Readonly<JsonLimits>;
   private readonly source: string;
 
-  constructor(source: string) {
+  constructor(source: string, limits: Readonly<JsonLimits>) {
     this.source = source;
+    this.limits = limits;
   }
 
   parse(): unknown {
@@ -42,7 +80,7 @@ class BoundedJsonParser {
     this.space();
     const character = this.source[this.index];
     if (character === "{" || character === "[") {
-      if (depth >= JSON_LIMITS.depth) {
+      if (depth >= this.limits.depth) {
         fail("JSON_LIMIT_DEPTH", "JSON exceeds the nesting depth limit");
       }
       return character === "{" ? this.object(depth + 1) : this.array(depth + 1);
@@ -81,7 +119,7 @@ class BoundedJsonParser {
       return result;
     }
     for (;;) {
-      if (keys.size >= JSON_LIMITS.members) {
+      if (keys.size >= this.limits.members) {
         fail("JSON_LIMIT_MEMBERS", "JSON object exceeds the member limit");
       }
       this.space();
@@ -121,7 +159,7 @@ class BoundedJsonParser {
       return result;
     }
     for (;;) {
-      if (result.length >= JSON_LIMITS.arrayItems) {
+      if (result.length >= this.limits.arrayItems) {
         fail("JSON_LIMIT_ARRAY", "JSON array exceeds the item limit");
       }
       result.push(this.value(depth));
@@ -142,7 +180,7 @@ class BoundedJsonParser {
       const character = this.source[this.index++];
       if (character === '"') {
         const encoded = this.source.slice(start, this.index);
-        if (Buffer.byteLength(encoded) > JSON_LIMITS.stringBytes + 2) {
+        if (Buffer.byteLength(encoded) > this.limits.stringBytes + 2) {
           fail("JSON_LIMIT_STRING", "JSON string exceeds the byte limit");
         }
         try {

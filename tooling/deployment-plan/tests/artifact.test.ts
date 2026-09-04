@@ -9,6 +9,7 @@ import {
 } from "../src/adapters/artifact.ts";
 import { sha256Hex } from "../src/domain/identity.ts";
 import { UINT256_MAX } from "../src/domain/model.ts";
+import { POLICY_JSON_LIMITS } from "../src/adapters/bounded-json.ts";
 
 const source = "contract X {}";
 const settings = {
@@ -109,6 +110,31 @@ test("golden constructor vector binds build, ABI, bytecode and exact initcode", 
   assert.equal(approved.creationInputHash.length, 66);
   assert.equal(approved.buildInfoSolcVersion, "0.8.36");
   assert.equal(approved.compilerInputSha256, roots.compilerInputSha256);
+});
+
+test("artifact approval admits representative Forge build-info above policy bounds", () => {
+  const primarySource = source.padEnd(40_000, " ");
+  const dependencySource = "library Dependency {}".padEnd(40_000, " ");
+  const sources = {
+    "src/features/token-genesis/AGTMAIToken.sol": { content: primarySource },
+    "src/Dependency.sol": { content: dependencySource },
+  };
+  const input = { ...build.input, sources };
+  const representativeBuild = { ...build, input };
+  const buildInfoBytes = bytes(representativeBuild);
+  assert(buildInfoBytes.byteLength > POLICY_JSON_LIMITS.bytes);
+  assert.doesNotThrow(() => approveForgeArtifact(
+    { ...inputs, buildInfoBytes },
+    {
+      ...roots,
+      canonicalBuildInfoSha256: canonicalBuildInfoSha256(representativeBuild),
+      compilerInputSha256: portableCompilerInputSha256(input),
+      sourceDependencyClosure: {
+        "src/features/token-genesis/AGTMAIToken.sol": sha256Hex(primarySource),
+        "src/Dependency.sol": sha256Hex(dependencySource),
+      },
+    },
+  ));
 });
 
 test("byte-oriented SHA-256 uses the shared cross-tool vector", () => {

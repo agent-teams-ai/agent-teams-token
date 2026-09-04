@@ -129,8 +129,8 @@ function validateNativePolicy(value: unknown): NativeNoReplacePolicy {
   return policy as unknown as NativeNoReplacePolicy;
 }
 
-function validateNativePolicyPlatform(value: unknown, strategy: string): void {
-  const platform = exactNativePolicyObject(value, ["strategy", "tuples"]);
+function validateNativePolicyPlatform(candidate: unknown, strategy: string): void {
+  const platform = exactNativePolicyObject(candidate, ["strategy", "tuples"]);
   if (platform.strategy !== strategy || !Array.isArray(platform.tuples)
     || platform.tuples.length < 1 || platform.tuples.length > 2) {
     fail("NATIVE_EVIDENCE_POLICY_INVALID", "native evidence platform policy is invalid");

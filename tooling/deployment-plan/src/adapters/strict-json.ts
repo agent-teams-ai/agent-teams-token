@@ -1,8 +1,17 @@
 import type { FeeQuote, StablePlan } from "../application/builder.ts";
-import type { NativeNoReplaceEvidence, TrustRoots } from "../application/ports.ts";
+import type {
+  NativeNoReplaceEvidence,
+  RawArtifactJsonInput,
+  TrustRoots,
+} from "../application/ports.ts";
 import type { ReadyMarker } from "../application/verifier.ts";
 import { fail, parseUint } from "../domain/model.ts";
-import { parseBoundedJson } from "./bounded-json.ts";
+import {
+  FORGE_ARTIFACT_JSON_LIMITS,
+  FORGE_BUILD_INFO_JSON_LIMITS,
+  POLICY_JSON_LIMITS,
+  parseBoundedJson,
+} from "./bounded-json.ts";
 
 const HASH = /^0x[0-9a-f]{64}$/u;
 const ADDRESS = /^0x[0-9a-f]{40}$/u;
@@ -116,7 +125,9 @@ export function parseFeeQuote(bytes: Uint8Array): FeeQuote {
 
 export function parseReadyMarker(bytes: Uint8Array): ReadyMarker {
   const ready = object(parseJsonWithoutDuplicates(bytes), "READY_SCHEMA");
-  if (ready.schemaVersion !== 3) fail("READY_LEGACY_UNSUPPORTED", "READY must be regenerated as V3");
+  if (ready.schemaVersion !== 3) {
+    fail("READY_LEGACY_UNSUPPORTED", "READY must be regenerated as V3");
+  }
   exactKeys(ready, READY_KEYS, "READY_SCHEMA");
   hashes(ready, ["planSha256", "quoteSha256", "nativeNoReplaceEvidenceSha256", "planId", "creationInputHash"]);
   return ready as unknown as ReadyMarker;
@@ -126,9 +137,15 @@ export function parseNativeNoReplaceEvidence(bytes: Uint8Array): NativeNoReplace
   const evidence = object(parseJsonWithoutDuplicates(bytes), "NATIVE_EVIDENCE_SCHEMA");
   exactKeys(evidence, NATIVE_EVIDENCE_KEYS, "NATIVE_EVIDENCE_SCHEMA");
   constants(evidence, { schemaVersion: 1, kind: "native-no-replace-evidence" }, "NATIVE_EVIDENCE_SCHEMA");
-  if (evidence.platform !== "darwin-arm64" && evidence.platform !== "linux-x64") fail("NATIVE_EVIDENCE_SCHEMA", "platform is invalid");
-  if (evidence.sourcePath !== "tooling/deployment-plan/native/no-replace.c" || evidence.compileProfile !== "c11-o2-werror-stdin-v1") fail("NATIVE_EVIDENCE_SCHEMA", "source or compile profile is invalid");
-  if (evidence.compilerExecution !== "snapshot-fd" && evidence.compilerExecution !== "verified-path") fail("NATIVE_EVIDENCE_SCHEMA", "compiler execution is invalid");
+  if (evidence.platform !== "darwin-arm64" && evidence.platform !== "linux-x64") {
+    fail("NATIVE_EVIDENCE_SCHEMA", "platform is invalid");
+  }
+  if (evidence.sourcePath !== "tooling/deployment-plan/native/no-replace.c" || evidence.compileProfile !== "c11-o2-werror-stdin-v1") {
+    fail("NATIVE_EVIDENCE_SCHEMA", "source or compile profile is invalid");
+  }
+  if (evidence.compilerExecution !== "snapshot-fd" && evidence.compilerExecution !== "verified-path") {
+    fail("NATIVE_EVIDENCE_SCHEMA", "compiler execution is invalid");
+  }
   const compilerPath = evidence.platform === "darwin-arm64"
     ? "/usr/bin/cc" : "/usr/bin/x86_64-linux-gnu-gcc-13";
   if (evidence.compilerPath !== compilerPath) {
@@ -139,7 +156,20 @@ export function parseNativeNoReplaceEvidence(bytes: Uint8Array): NativeNoReplace
 }
 
 export function parseJsonWithoutDuplicates(bytes: Uint8Array): unknown {
-  return parseBoundedJson(bytes);
+  return parseBoundedJson(bytes, POLICY_JSON_LIMITS);
+}
+
+export function parseRawArtifactJson(
+  bytes: Uint8Array,
+  input: RawArtifactJsonInput,
+): unknown {
+  if (input === "build-info") {
+    return parseBoundedJson(bytes, FORGE_BUILD_INFO_JSON_LIMITS);
+  }
+  if (input === "artifact" || input === "abi") {
+    return parseBoundedJson(bytes, FORGE_ARTIFACT_JSON_LIMITS);
+  }
+  return parseBoundedJson(bytes, POLICY_JSON_LIMITS);
 }
 
 function object(value: unknown, code: string): Record<string, unknown> {

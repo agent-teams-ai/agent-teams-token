@@ -5,7 +5,13 @@ import type {
 } from "../application/ports.ts";
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
 import { fail, parseUint } from "../domain/model.ts";
-import { parseBoundedJson } from "./bounded-json.ts";
+import {
+  FORGE_ARTIFACT_JSON_LIMITS,
+  FORGE_BUILD_INFO_JSON_LIMITS,
+  POLICY_JSON_LIMITS,
+  parseBoundedJson,
+  type JsonLimits,
+} from "./bounded-json.ts";
 
 const SOURCE = "src/features/token-genesis/AGTMAIToken.sol";
 const CONTRACT = "AGTMAIToken";
@@ -88,18 +94,17 @@ export function approveForgeArtifact(
 }
 
 function parseArtifactInputs(inputs: ArtifactInputs): ParsedArtifactInputs {
+  const build = parseObject(inputs.buildInfoBytes, "BUILD_INFO", FORGE_BUILD_INFO_JSON_LIMITS);
   return {
-    build: parseObject(inputs.buildInfoBytes, "BUILD_INFO"),
-    artifact: parseObject(inputs.artifactBytes, "ARTIFACT"),
-    abi: parseArray(inputs.abiBytes, "ABI"),
-    fixture: parseObject(inputs.fixtureBytes, "FIXTURE"),
+    build,
+    artifact: parseObject(inputs.artifactBytes, "ARTIFACT", FORGE_ARTIFACT_JSON_LIMITS),
+    abi: parseArray(inputs.abiBytes, "ABI", FORGE_ARTIFACT_JSON_LIMITS),
+    fixture: parseObject(inputs.fixtureBytes, "FIXTURE", POLICY_JSON_LIMITS),
     artifactSha256: sha256Hex(inputs.artifactBytes),
     abiSha256: sha256Hex(inputs.abiBytes),
     fixtureSha256: sha256Hex(inputs.fixtureBytes),
     rawBuildInfoSha256: sha256Hex(inputs.buildInfoBytes),
-    canonicalBuildInfoSha256: canonicalBuildInfoSha256(
-      parseObject(inputs.buildInfoBytes, "BUILD_INFO"),
-    ),
+    canonicalBuildInfoSha256: canonicalBuildInfoSha256(build),
   };
 }
 
@@ -347,21 +352,25 @@ function word(value: string): string {
   }
 }
 
-function parseObject(bytes: Uint8Array, code: string): Record<string, unknown> {
-  return object(parseJson(bytes, code), `${code}_INVALID`);
+function parseObject(
+  bytes: Uint8Array,
+  code: string,
+  limits: Readonly<JsonLimits>,
+): Record<string, unknown> {
+  return object(parseJson(bytes, code, limits), `${code}_INVALID`);
 }
 
-function parseArray(bytes: Uint8Array, code: string): unknown[] {
-  const value = parseJson(bytes, code);
+function parseArray(bytes: Uint8Array, code: string, limits: Readonly<JsonLimits>): unknown[] {
+  const value = parseJson(bytes, code, limits);
   if (!Array.isArray(value)) {
     fail(`${code}_INVALID`, `${code} must be an array`);
   }
   return value;
 }
 
-function parseJson(bytes: Uint8Array, code: string): unknown {
+function parseJson(bytes: Uint8Array, code: string, limits: Readonly<JsonLimits>): unknown {
   try {
-    return parseBoundedJson(bytes);
+    return parseBoundedJson(bytes, limits);
   } catch {
     fail(`${code}_INVALID`, `${code} is not strict UTF-8 JSON`);
   }
