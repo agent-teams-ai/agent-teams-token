@@ -2,6 +2,10 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest15:28:118 ACCEPT47fe delta ->120 wholebase review; Slither e9292
+141/141Mac under122; Solana119UNAPPLIED unsafe close retry ->123.121 main
+reconciliation planner. Fourjobs alive/fast, source31e909 unchanged.
+Fullscope and exacthead E2E remainOPEN; currentstate is in latestledger.
 Latest15:12: custody47fe Mac50/50 under118; Slither114UNAPPLIED ->117 safer
 latecancelpublication; Solana116AMEND ->119 postREADYfinalization/reclaimP2s.
 No new fullacceptance. Read latest reconciliation for exactcurrentevidence.

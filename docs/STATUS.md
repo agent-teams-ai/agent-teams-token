@@ -5,6 +5,13 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+15:28 UTC: custody118 ACCEPT47fe delta;120 now reviews whole recovery base.
+Slither e9292 passes141/141Mac,0skips, TS7/lint;122 independently reviews.
+Solana119 UNAPPLIED because uncertain close is retried;123 corrects it on6b877.
+121 plans semantic main reconciliation. Allfour hosted jobs alive/fast.
+Disk4.6GiB blocks NEW provisioning only; no cleanup or source removal yet.
+Accepted integration31e909 unchanged; full original E2E remains OPEN.
+
 15:12 UTC: custody47fe passes50/50Mac,0skips+lint, reviewed by118. Slither114
 patch is deliberately UNAPPLIED: unsafe recursive cleanup/silent errors go to117.
 Solana116 confirms prior fixes but AMEND leaves twoP2s: postREADY close failure

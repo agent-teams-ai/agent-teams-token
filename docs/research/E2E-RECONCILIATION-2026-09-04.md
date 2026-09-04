@@ -3,7 +3,64 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 15:12 UTC
+## Latest reconciliation: 15:28 UTC
+
+Accepted integration source remains31e909f7, actualMac EVM86/86,0skips.
+No new Slither/Solana/recovery source is integrated.
+
+- Review118 ACCEPT exact47fe823a944292784868a3f80bb790cdbbd242f0 vs7437:
+  noP0-P3, independentLinux acquisition9/9 and acquisition+teardown14/14,
+  zero skips. MainMac expanded50/50 remains separate. This accepts ONLY
+  ancestor delta, not fullf2d base. Full-base reviewer120 is now live on47fe,
+  PID1766078, isolated /var/data/agtmai-r212-recovery-base120-workspace.
+ 118 result SHA2569d2413088b25ef4ade6eee33e7ed82ef7e60d95bef55f61ef3ce6ebfbfa9ff32.
+- Slither117 source patch applied in /tmp/agtmai-slither-91-mac and committed
+  e9292d1a0a1893da74ec362ac238b5a1b085bd8d, parentb74e. Sevenfiles+370/-26.
+  Clean READY gets a separate final commit cancellation check, including after
+  READY publication. Failure evidence is non-abortable. Failed destination
+  cleanup removes only captured entries and preserves foreign root/children;
+  primary plus secondary cleanup errors remain visible. No recursive
+  destination cleanup introduced. Existing generic latefault test retained.
+  InitialMac48total44pass4fail came from new /tmp symlink fixtures; main used
+  existing canonical makeTestDirectory for those4 tests. Correctedportable8/8;
+  completeSlither141/141,0skips,9.90s. TS7/scopedlint/diffcheck passed after
+  two mechanical lint corrections. First tsc attempt mistakenly invoked the
+  shell shim as JS and failed before typechecking; corrected pinnedPATH tsc
+  completed. No compiler or guard was replaced.
+  Independent122 PID1816902 reviews exact e9292 including cleanup/commit
+  interactions and possible inode reuse. It is NOT accepted on tests alone.
+  Bundle prerequisiteb74e SHA256
+  91dda454ce55745070602d4f0b73cd590f3ee9116678a98c9c46b5463c946e1d.
+ 117 result SHA256e86da2601bf4595d5657b013cffd2faf75722acb4d66e5dc7bfa076717e991c6.
+- Solana119 returned full source packet, NOTAPPLIED. Main found forbidden
+  retries of failed parent/READY handle.close and a test that throws before
+  real close then permits retry. This masks the case where actual close
+  consumes the descriptor before rejection. No uncertain descriptor may be
+  reused for close, stat, read or destructive withdrawal.
+  New writer123 PID1817425, exact unchanged6b877, owns both review116 issues
+  and these corrections. Full source packet supplied. Explicit committed
+  publication/failed finalization semantics must not be silently confused with
+  command success or relax READY/verifier safety. Dying validator waits must
+  keep initial/per-signal authentication and use bounded monotonic timing.
+ 119 result SHA2565c2d09d95b596c769e4c0894dc566e81378ac15acf16213c06beb1901479255d.
+- Read-only planner121 PID1767317 owns semantic reconciliation of6eaec1af
+  integration docs/source31e909 with upstream370c3aac via common3231e8a9.
+  Only upstream managed-docs6174b253 and ReviewRouter370c3aac are in scope;
+  no main changes applied yet, no dependencies installed and noGitHubwrites.
+  Bundle SHA256f32e1e6f5c88e67b2806c6751110c21f4e2e644bf1d9a040699b58bf41944966.
+- All120/121/122/123 observed running/alive on oldhost, account-m, priority.
+  Per-launch machine-id/RAM/swap/disk checks passed; latest launch had5.4GiB.
+  At15:27 free disk fell to4.6GiB despite no repeated tool unpacking. Further
+  provisioning remains behind5GB guard; main is investigating only owned
+  inactive disposable tools, not touching source/jobs/evidence/user data.
+  No deletion yet. AvailableRAM~11.4GiB, swap~4GiB. Original checkout preserved.
+
+Next: consume120-123; only reviewed exact packets become candidates, followed
+by actual platform tests. Whole recovery authority/store, actualAgave/Docker,
+main reconciliation and exacthead root/CI/specialist/holistic gates remain
+OPEN under ORIGINAL-PLAN-INVARIANT-AUDIT. No full goal acceptance.
+
+## Earlier reconciliation: 15:12 UTC
 
 Accepted integration source is still31e909f7, actualMac EVM86/86,0skips.
 No new isolated Slither/Solana/recovery source is integrated here.
