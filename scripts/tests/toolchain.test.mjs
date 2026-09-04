@@ -102,12 +102,15 @@ test("macOS canonical root accepts trusted root-owned temp ancestors", (context)
   fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", hostPlatform: "darwin", toolsRoot: macToolsRoot, downloader: fixture.downloader });
 });
 
-test("macOS /var/folders canonical hierarchy rejects descendant symlinks", (context) => {
+test("macOS trusted temp hierarchies reject descendant symlinks", (context) => {
   if (process.platform !== "darwin") {return;}
   const folders = canonicalizeTrustedPath("/var/folders", { platform: "darwin" });
   assert.equal(folders, "/private/var/folders");
   const macTemp = canonicalizeTrustedPath(tmpdir(), { platform: "darwin" });
-  assert.equal(macTemp.startsWith(`${folders}/`), true);
+  assert.equal(
+    [`${folders}/`, "/private/tmp/"].some((prefix) => macTemp.startsWith(prefix)),
+    true,
+  );
   const probe = mkdtempSync(join(macTemp, "agtmai-toolchain-probe-"));
   context.after(() => rmSync(probe, { recursive: true, force: true }));
   const real = join(probe, "real"); const link = join(probe, "link");
