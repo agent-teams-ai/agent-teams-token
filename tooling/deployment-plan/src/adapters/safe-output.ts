@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, type FileHandle } from "node:fs/promises";
-import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fail } from "../domain/model.ts";
 
 interface DirectoryIdentity {
@@ -19,7 +19,6 @@ interface HeldLeaf { readonly handle: FileHandle; readonly identity: FileIdentit
 export interface PublishedOutputIdentity { readonly directoryDevice: string; readonly directoryInode: string }
 
 export interface ClaimedOutputDirectory {
-  /** The unguessable, unpublished staging directory. */
   readonly path: string;
   writeExclusive(name: string, bytes: Uint8Array): Promise<void>;
   /** Atomically exposes and durably syncs the prepared directory without READY. */
@@ -30,7 +29,8 @@ export interface ClaimedOutputDirectory {
   publicationIdentity(): PublishedOutputIdentity; close(): Promise<void>;
 }
 
-export type NoReplaceDirectoryRename = (source: string, target: string) => Promise<void>;
+export interface NoReplaceRenameRequest { readonly sourceParent: FileHandle; readonly source: FileHandle; readonly destinationParent: FileHandle; readonly sourceLeaf: string; readonly destinationLeaf: string }
+export type NoReplaceDirectoryRename = (request: NoReplaceRenameRequest) => Promise<void>;
 
 export interface OutputFaultInjection {
   readonly beforeStagingLeafOpen?: () => Promise<void>; readonly afterStagingLeafOpen?: () => Promise<void>;
@@ -51,11 +51,8 @@ export interface OutputFaultInjection {
   readonly noReplaceDirectoryRename?: NoReplaceDirectoryRename;
 }
 
-export async function claimOwnedOutputDirectory(
-  parent: string,
-  bundleName: string,
-  faultInjection: OutputFaultInjection = {},
-): Promise<ClaimedOutputDirectory> {
+export async function claimOwnedOutputDirectory(parent: string, bundleName: string,
+  faultInjection: OutputFaultInjection = {}): Promise<ClaimedOutputDirectory> {
   assertNormalizedAbsolute(parent);
   if (!/^[a-zA-Z0-9._-]+$/u.test(bundleName)) {
     fail("OUTPUT_FILE_NAME_INVALID", "output bundle name is invalid");
@@ -197,7 +194,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.assertStagingStable();
       await assertMissing(this.target);
       try {
-        await noReplaceRename(this.path, this.target);
+        await noReplaceRename({ sourceParent: this.parentHandle, source: this.stagingHandle, destinationParent: this.parentHandle, sourceLeaf: basename(this.path), destinationLeaf: basename(this.target) });
       } catch (error) {
         if (nodeErrorCode(error) === "EEXIST") {fail("OUTPUT_TARGET_EXISTS", "output target already exists");}
         // A failed native invocation may have completed the atomic syscall
@@ -261,7 +258,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       await this.faultInjection.beforeFinalMarkerRename?.();
       await this.assertPublishedTreeUnchanged([...this.leaves.keys(), pendingName]);
       try {
-        await noReplaceRename(pending, ready);
+        await noReplaceRename({ sourceParent: this.stagingHandle, source: file, destinationParent: this.stagingHandle, sourceLeaf: pendingName, destinationLeaf: name });
       } catch (error) {
         if (nodeErrorCode(error) === "EEXIST") {
           fail("OUTPUT_READY_EXISTS", "READY was already created");

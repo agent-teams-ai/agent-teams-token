@@ -1,29 +1,20 @@
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 import { constants, type Stats } from "node:fs";
-import {
-  chmod,
-  lstat,
-  mkdtemp,
-  open,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  rmdir,
-  unlink,
-  type FileHandle,
-} from "node:fs/promises";
+import { chmod, lstat, mkdtemp, open, realpath, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, join, parse, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { NoReplaceDirectoryRename } from "./safe-output.ts";
+import type { NoReplaceDirectoryRename, NoReplaceRenameRequest } from "./safe-output.ts";
 import { sha256Hex } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
 
-const SOURCE_SHA256 = "0xdca72d3308cf66b7aed9fdc0a131777990845dd479a8a00d942a19c2ab43ee22";
+const SOURCE_SHA256 = "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09";
 const SOURCE = resolvePath(dirname(fileURLToPath(import.meta.url)), "../../native/no-replace.c");
-const CHILD_TIMEOUT_MS = 10_000;
+const COMPILER_TIMEOUT_MS = 30_000;
+const HELPER_TIMEOUT_MS = 5_000;
+const TERM_GRACE_MS = 1_000;
+const GROUP_REAP_MS = 2_000;
+const OUTPUT_LIMIT_BYTES = 64 * 1024;
 
 interface ExecutableIdentity {
   readonly dev: number;
@@ -33,14 +24,17 @@ interface ExecutableIdentity {
   readonly sha256: `0x${string}`;
 }
 
-interface DirectoryIdentity {
-  readonly dev: number;
-  readonly ino: number;
-}
-
 export interface NativeNoReplaceFaultInjection {
+  readonly afterSourceRead?: (source: string) => Promise<void>;
+  readonly afterCompilerSnapshot?: (snapshot: string, original: string) => Promise<void>;
+  readonly beforeCompilerSpawn?: (snapshot: string) => Promise<void>;
+  readonly beforeHelperSpawn?: (snapshot: string) => Promise<void>;
   readonly beforeCleanup?: (custody: string) => Promise<void>;
   readonly afterBuildFailureBeforeCleanup?: (custody: string) => Promise<void>;
+  readonly compilerTimeoutMs?: number;
+  readonly helperTimeoutMs?: number;
+  readonly termGraceMs?: number;
+  readonly groupReapMs?: number;
 }
 
 export interface ExecutableCustodyMetadata {
@@ -59,71 +53,110 @@ export interface NativeNoReplaceCapability {
   readonly rename: NoReplaceDirectoryRename;
   readonly executableSha256: `0x${string}`;
   readonly compilerSha256: `0x${string}`;
+  readonly custodyPath: string;
   close(): Promise<void>;
 }
 
-/** Builds the audited helper in private custody and binds its exact executable bytes. */
+export function assertNativeNoReplacePlatform(platform: string): void {
+  if (platform !== "linux" && platform !== "darwin") {
+    fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "native no-replace helper supports only Linux and macOS");
+  }
+}
+
+/**
+ * Builds a descriptor-bound no-replace capability. This hardens ordinary
+ * filesystem races; malicious concurrent code running as the same UID remains
+ * outside the trust boundary and can interfere with this process and its FDs.
+ */
 export async function createNativeNoReplaceCapability(
   faultInjection: NativeNoReplaceFaultInjection = {},
 ): Promise<NativeNoReplaceCapability> {
-  if (process.platform !== "linux" && process.platform !== "darwin") {
-    fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "native no-replace helper supports only Linux and macOS");
-  }
-  const sourceBytes = await readFile(SOURCE);
-  if (sha256Hex(sourceBytes) !== SOURCE_SHA256) {
-    fail("NO_REPLACE_SOURCE_MISMATCH", "native no-replace helper source differs from its pinned digest");
-  }
-  const configuredCompiler = process.env.AGTMAI_CC_BINARY ?? "/usr/bin/cc";
-  if (!isAbsolute(configuredCompiler)) {
-    fail("NO_REPLACE_COMPILER_UNSAFE", "AGTMAI_CC_BINARY must be an absolute path");
-  }
-  const compiler = await realpath(configuredCompiler);
-  const compilerIdentity = await executableIdentity(
-    compiler,
-    "NO_REPLACE_COMPILER_UNSAFE",
-    process.platform === "darwin",
-  );
-  const custody = await realpath(await mkdtemp(join(tmpdir(), "agtmai-no-replace-")));
-  await chmod(custody, 0o700);
-  const custodyMetadata = await lstat(custody);
-  assertPrivateCustodyDirectory(custodyMetadata, "NO_REPLACE_CUSTODY_UNSAFE");
-  const custodyIdentity = directoryIdentity(custodyMetadata);
-  const custodyHandle = await open(
-    custody,
-    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-  );
-  const executable = join(custody, "no-replace");
+  assertNativeNoReplacePlatform(process.platform);
+  const source = await open(SOURCE, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let compilerOriginal: FileHandle | undefined;
+  let compilerSnapshot: HeldExecutable | undefined;
+  let helper: HeldExecutable | undefined;
+  let custodyHandle: FileHandle | undefined;
+  let custody = "";
   try {
-    await runChild(compiler, [
-      "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-      "-o", executable, SOURCE,
-    ], "NO_REPLACE_BUILD_FAILED");
-    await chmod(executable, 0o500);
-    const builtIdentity = await executableIdentity(executable, "NO_REPLACE_EXECUTABLE_UNSAFE");
-    assertSameExecutable(
-      await executableIdentity(
-        compiler,
-        "NO_REPLACE_COMPILER_UNSAFE",
-        process.platform === "darwin",
-      ),
+    const sourceBefore = await source.stat();
+    if (!sourceBefore.isFile() || sourceBefore.nlink !== 1) {
+      fail("NO_REPLACE_SOURCE_MISMATCH", "native helper source is not a single-link regular file");
+    }
+    const sourceBytes = await readHeldBytes(source, sourceBefore.size);
+    assertStableMetadata(await source.stat(), sourceBefore, "NO_REPLACE_SOURCE_MISMATCH");
+    if (sha256Hex(sourceBytes) !== SOURCE_SHA256) {
+      fail("NO_REPLACE_SOURCE_MISMATCH", "native no-replace helper source differs from its pinned digest");
+    }
+    await faultInjection.afterSourceRead?.(SOURCE);
+
+    const configuredCompiler = process.env.AGTMAI_CC_BINARY ?? "/usr/bin/cc";
+    if (!isAbsolute(configuredCompiler)) {
+      fail("NO_REPLACE_COMPILER_UNSAFE", "AGTMAI_CC_BINARY must be an absolute path");
+    }
+    const compilerPath = await realpath(configuredCompiler);
+    await assertTrustedCompilerPath(compilerPath);
+    compilerOriginal = await open(compilerPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const compilerIdentity = await heldExecutableIdentity(
+      compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", true,
+    );
+
+    custody = await realpath(await mkdtemp(join(tmpdir(), "agtmai-no-replace-")));
+    await chmod(custody, 0o700);
+    const custodyMetadata = await lstat(custody);
+    assertPrivateCustodyDirectory(custodyMetadata, "NO_REPLACE_CUSTODY_UNSAFE");
+    custodyHandle = await open(custody,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+
+    compilerSnapshot = await snapshotExecutable(
+      compilerOriginal, compilerIdentity, custody, "compiler", "NO_REPLACE_COMPILER_UNSAFE",
+    );
+    await faultInjection.afterCompilerSnapshot?.(compilerSnapshot.path, compilerPath);
+    await faultInjection.beforeCompilerSpawn?.(compilerSnapshot.path);
+    await runBoundChild({
+      executable: compilerSnapshot,
+      argv0: compilerPath,
+      arguments: ["-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-o", join(custody, "no-replace"), "-"],
+      stdin: sourceBytes,
+      inherited: [],
+      timeoutMs: faultInjection.compilerTimeoutMs ?? COMPILER_TIMEOUT_MS,
+      termGraceMs: faultInjection.termGraceMs ?? TERM_GRACE_MS,
+      groupReapMs: faultInjection.groupReapMs ?? GROUP_REAP_MS,
+      code: "NO_REPLACE_BUILD_FAILED",
+    });
+    assertSameExecutableObject(
+      await heldExecutableIdentity(compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", true),
       compilerIdentity,
       "NO_REPLACE_COMPILER_SUBSTITUTED",
     );
+    await chmod(join(custody, "no-replace"), 0o500);
+    helper = await openHeldExecutable(join(custody, "no-replace"), "NO_REPLACE_EXECUTABLE_UNSAFE");
+
     let closed = false;
+    const heldHelper = helper;
+    const heldCustody = custodyHandle;
     return {
-      executableSha256: builtIdentity.sha256,
+      executableSha256: heldHelper.identity.sha256,
       compilerSha256: compilerIdentity.sha256,
-      async rename(source: string, target: string): Promise<void> {
+      custodyPath: custody,
+      async rename(request: NoReplaceRenameRequest): Promise<void> {
         if (closed) {
           fail("NO_REPLACE_CAPABILITY_CLOSED", "native no-replace capability is closed");
         }
-        assertSameExecutable(
-          await executableIdentity(executable, "NO_REPLACE_EXECUTABLE_UNSAFE"),
-          builtIdentity,
-          "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
-        );
+        assertLeaf(request.sourceLeaf);
+        assertLeaf(request.destinationLeaf);
+        await faultInjection.beforeHelperSpawn?.(heldHelper.path);
         try {
-          await runChild(executable, [source, target], "NO_REPLACE_FAILED");
+          await runBoundChild({
+            executable: heldHelper,
+            arguments: ["v1", request.sourceLeaf, request.destinationLeaf],
+            inherited: [request.sourceParent, request.source, request.destinationParent],
+            timeoutMs: faultInjection.helperTimeoutMs ?? HELPER_TIMEOUT_MS,
+            termGraceMs: faultInjection.termGraceMs ?? TERM_GRACE_MS,
+            groupReapMs: faultInjection.groupReapMs ?? GROUP_REAP_MS,
+            code: "NO_REPLACE_FAILED",
+          });
         } catch (error) {
           if (error instanceof ChildExitError && error.exitCode === 73) {
             const exists = new Error("target already exists") as NodeJS.ErrnoException;
@@ -134,135 +167,239 @@ export async function createNativeNoReplaceCapability(
         }
       },
       async close(): Promise<void> {
-        if (!closed) {
-          closed = true;
-          let cleanupError: unknown;
-          try {
-            await faultInjection.beforeCleanup?.(custody);
-            await cleanupCustody(
-              custody,
-              custodyIdentity,
-              custodyHandle,
-              new Map([["no-replace", builtIdentity]]),
-            );
-          } catch (error) {
-            cleanupError = error;
-          }
-          await custodyHandle.close();
-          if (cleanupError !== undefined) { throw cleanupError; }
-        }
+        if (closed) { return; }
+        closed = true;
+        await closePreservingEvidence(
+          () => faultInjection.beforeCleanup?.(custody),
+          [heldHelper.handle, compilerSnapshot, compilerOriginal, source, heldCustody],
+        );
+        // Deliberately preserve the private custody directory and every leaf.
       },
     };
   } catch (error) {
-    let cleanupError: unknown;
     try {
-      await faultInjection.afterBuildFailureBeforeCleanup?.(custody);
-      await cleanupCustody(custody, custodyIdentity, custodyHandle, new Map());
-    } catch (caught) {
-      cleanupError = caught;
+      await closePreservingEvidence(
+        () => custody === "" ? undefined : faultInjection.afterBuildFailureBeforeCleanup?.(custody),
+        [helper, compilerSnapshot, compilerOriginal, source, custodyHandle],
+      );
+    } catch (closeError) {
+      throw new AggregateError(
+        [error, closeError],
+        "native helper build failed; evidence was preserved but descriptor closure also failed",
+        { cause: closeError },
+      );
     }
-    await custodyHandle.close().catch(() => {});
-    if (cleanupError !== undefined) { throw cleanupError; }
+    // Failure evidence is preserved. A pathname cleanup could delete a successor.
     throw error;
   }
 }
 
-async function cleanupCustody(
+interface HeldExecutable {
+  readonly path: string;
+  readonly handle: FileHandle;
+  readonly identity: ExecutableIdentity;
+}
+
+async function snapshotExecutable(
+  original: FileHandle,
+  expected: ExecutableIdentity,
   custody: string,
-  expectedDirectory: DirectoryIdentity,
-  custodyHandle: FileHandle,
-  expectedLeaves: ReadonlyMap<string, ExecutableIdentity>,
-): Promise<void> {
+  name: string,
+  code: string,
+): Promise<HeldExecutable> {
+  const bytes = await readHeldBytes(original, expected.size);
+  assertSameExecutable(await heldExecutableIdentity(original, code, true), expected, code);
+  const path = join(custody, name);
+  const snapshot = await open(path,
+    constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o500);
   try {
-    await assertCustodyIdentity(custody, expectedDirectory, custodyHandle);
-    await assertCustodyLeaves(custody, expectedLeaves);
-    const quarantine = `${custody}.cleanup-${randomBytes(16).toString("hex")}`;
-    await rename(custody, quarantine);
-    await assertCustodyIdentity(quarantine, expectedDirectory, custodyHandle);
-    await assertCustodyLeaves(quarantine, expectedLeaves);
-    for (const [name, expected] of expectedLeaves) {
-      const leaf = join(quarantine, name);
-      const quarantinedLeaf = join(
-        quarantine,
-        `.${randomBytes(16).toString("hex")}.cleanup-leaf`,
-      );
-      assertSameExecutable(
-        await executableIdentity(leaf, "NO_REPLACE_CLEANUP_REJECTED"),
-        expected,
-        "NO_REPLACE_CLEANUP_REJECTED",
-      );
-      await rename(leaf, quarantinedLeaf);
-      assertSameExecutableObject(
-        await executableIdentity(quarantinedLeaf, "NO_REPLACE_CLEANUP_REJECTED"),
-        expected,
-        "NO_REPLACE_CLEANUP_REJECTED",
-      );
-      await unlink(quarantinedLeaf);
+    await snapshot.writeFile(bytes);
+    await snapshot.sync();
+    await snapshot.chmod(0o500);
+    const identity = await heldExecutableIdentity(snapshot, code);
+    if (identity.sha256 !== expected.sha256 || identity.size !== expected.size) {
+      fail(code, "native executable snapshot differs from held source bytes");
     }
-    await rmdir(quarantine);
+    assertSameExecutable(await executableIdentityAtPath(path, code), identity, code);
+    await snapshot.close();
+    return await openHeldExecutable(path, code);
   } catch (error) {
-    fail(
-      "NO_REPLACE_CLEANUP_REJECTED",
-      `native helper custody cleanup rejected; evidence preserved: ${errorMessage(error)}`,
-    );
+    await snapshot.close().catch(() => {});
+    throw error;
   }
 }
 
-async function assertCustodyIdentity(
-  path: string,
-  expected: DirectoryIdentity,
-  handle: FileHandle,
-): Promise<void> {
+async function openHeldExecutable(path: string, code: string): Promise<HeldExecutable> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const identity = await heldExecutableIdentity(handle, code);
+    assertSameExecutable(await executableIdentityAtPath(path, code), identity, code);
+    return { path, handle, identity };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function assertTrustedCompilerPath(path: string): Promise<void> {
+  let current = dirname(path);
+  const root = parse(path).root;
+  for (;;) {
+    const metadata = await lstat(current);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== 0
+      || (metadata.mode & 0o022) !== 0) {
+      fail("NO_REPLACE_COMPILER_UNSAFE", "compiler ancestor chain must be root-owned and non-writable");
+    }
+    if (current === root) { break; }
+    current = dirname(current);
+  }
   const metadata = await lstat(path);
-  assertPrivateCustodyDirectory(metadata, "NO_REPLACE_CLEANUP_REJECTED");
-  assertSameDirectory(metadata, expected, "NO_REPLACE_CLEANUP_REJECTED");
-  assertSameDirectory(await handle.stat(), expected, "NO_REPLACE_CLEANUP_REJECTED");
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== 0
+    || (metadata.mode & 0o022) !== 0 || (metadata.mode & 0o111) === 0) {
+    fail("NO_REPLACE_COMPILER_UNSAFE", "compiler must be a root-owned non-writable executable");
+  }
 }
 
-async function assertCustodyLeaves(
-  directory: string,
-  expectedLeaves: ReadonlyMap<string, ExecutableIdentity>,
-): Promise<void> {
-  const names = (await readdir(directory)).toSorted();
-  const expectedNames = [...expectedLeaves.keys()].toSorted();
-  if (names.length !== expectedNames.length
-    || names.some((name, index) => name !== expectedNames[index])) {
-    fail("NO_REPLACE_CLEANUP_REJECTED", "custody contains unauthenticated inventory");
+interface ChildRequest {
+  readonly executable: HeldExecutable;
+  readonly argv0?: string;
+  readonly arguments: readonly string[];
+  readonly stdin?: Uint8Array;
+  readonly inherited: readonly FileHandle[];
+  readonly timeoutMs: number;
+  readonly termGraceMs: number;
+  readonly groupReapMs: number;
+  readonly code: string;
+}
+
+async function runBoundChild(request: ChildRequest): Promise<void> {
+  const executableFd = 3 + request.inherited.length;
+  const executablePath = process.platform === "linux"
+    ? `/proc/self/fd/${String(executableFd)}` : request.executable.path;
+  await assertExecutableReady(request.executable);
+  await new Promise<void>((resolve, reject) => {
+    const stdio: StdioOptions = [request.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe",
+      ...request.inherited.map((handle) => handle.fd), request.executable.handle.fd];
+    const child: ChildProcess = spawn(executablePath, request.arguments, {
+      detached: true,
+      argv0: request.argv0,
+      shell: false,
+      stdio,
+      env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let timedOut = false;
+    let spawnError: Error | undefined;
+    let terminationError: Error | undefined;
+    const capture = (chunks: Buffer[], used: number, chunk: Buffer): number => {
+      const remaining = OUTPUT_LIMIT_BYTES - used;
+      if (remaining > 0) { chunks.push(chunk.subarray(0, remaining)); }
+      return used + Math.min(remaining, chunk.length);
+    };
+    child.stdout?.on("data", (chunk: Buffer) => { stdoutBytes = capture(stdout, stdoutBytes, chunk); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderrBytes = capture(stderr, stderrBytes, chunk); });
+    child.once("error", (error) => { spawnError = error; });
+    child.stdin?.once("error", (error) => { spawnError ??= error; });
+    if (request.stdin !== undefined) { child.stdin?.end(request.stdin); }
+    let killTimer: NodeJS.Timeout | undefined;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      try { signalGroup(child.pid, "SIGTERM"); }
+      catch (error) { terminationError = asError(error); }
+      killTimer = setTimeout(() => {
+        try { signalGroup(child.pid, "SIGKILL"); }
+        catch (error) { terminationError = asError(error); }
+      }, request.termGraceMs);
+      killTimer.unref();
+    }, request.timeoutMs);
+    timeout.unref();
+    const postSpawnCheck = process.platform === "darwin"
+      ? assertExecutableReady(request.executable).catch((error: unknown) => {
+        spawnError = error instanceof Error ? error : new Error(String(error));
+        signalGroup(child.pid, "SIGKILL");
+      }) : Promise.resolve();
+    child.once("close", (exitCode, signal) => {
+      clearTimeout(timeout);
+      if (killTimer !== undefined) { clearTimeout(killTimer); }
+      void (async () => {
+        await postSpawnCheck;
+        const quiet = await waitForGroupExit(child.pid, request.groupReapMs);
+        if (!quiet) {
+          fail("PROCESS_GROUP_NOT_QUIESCENT", `${request.code}: child process group ${String(child.pid)} survived termination`);
+        }
+        if (terminationError !== undefined) {
+          reject(new ChildExitError(exitCode, `${request.code}: ${terminationError.message}`));
+        } else if (spawnError !== undefined) {
+          reject(new ChildExitError(exitCode, `${request.code}: ${spawnError.message}`));
+        } else if (timedOut) {
+          reject(new ChildExitError(exitCode, `${request.code}: process group timed out and was reaped`));
+        } else if (exitCode === 0 && signal === null) {
+          resolve();
+        } else {
+          reject(new ChildExitError(exitCode,
+            `${request.code}: exit=${String(exitCode)} signal=${String(signal)}`
+            + ` stdout=${Buffer.concat(stdout).toString("utf8").trim()}`
+            + ` stderr=${Buffer.concat(stderr).toString("utf8").trim()}`));
+        }
+      })().catch(reject);
+    });
+  });
+}
+
+function signalGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (pid === undefined) { return; }
+  try { process.kill(-pid, signal); }
+  catch (error) { if (nodeErrorCode(error) !== "ESRCH") { throw error; } }
+}
+
+async function waitForGroupExit(pid: number | undefined, limitMs: number): Promise<boolean> {
+  if (pid === undefined) { return true; }
+  const deadline = Date.now() + limitMs;
+  while (Date.now() <= deadline) {
+    try { process.kill(-pid, 0); }
+    catch (error) {
+      if (nodeErrorCode(error) === "ESRCH") { return true; }
+      if (nodeErrorCode(error) !== "EPERM") { throw error; }
+    }
+    await new Promise<void>((resolve) => { setTimeout(resolve, 20); });
   }
-  for (const [name, expected] of expectedLeaves) {
+  return false;
+}
+
+async function assertExecutableReady(executable: HeldExecutable): Promise<void> {
+  assertSameExecutableObject(
+    await heldExecutableIdentity(executable.handle, "NO_REPLACE_EXECUTABLE_SUBSTITUTED"),
+    executable.identity,
+    "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
+  );
+  if (process.platform === "darwin") {
     assertSameExecutable(
-      await executableIdentity(join(directory, name), "NO_REPLACE_CLEANUP_REJECTED"),
-      expected,
-      "NO_REPLACE_CLEANUP_REJECTED",
+      await executableIdentityAtPath(executable.path, "NO_REPLACE_EXECUTABLE_SUBSTITUTED"),
+      executable.identity,
+      "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
     );
   }
 }
 
-function assertPrivateCustodyDirectory(metadata: Stats, code: string): void {
-  const expectedUid = process.getuid?.();
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()
-    || expectedUid === undefined || metadata.uid !== expectedUid
-    || (metadata.mode & 0o777) !== 0o700) {
-    fail(code, "native helper custody is not an owned private directory");
-  }
-}
-
-function directoryIdentity(metadata: Pick<Stats, "dev" | "ino">): DirectoryIdentity {
-  return { dev: metadata.dev, ino: metadata.ino };
-}
-
-function assertSameDirectory(
-  actual: Pick<Stats, "dev" | "ino">,
-  expected: DirectoryIdentity,
+function assertSameExecutableObject(
+  actual: ExecutableIdentity,
+  expected: ExecutableIdentity,
   code: string,
 ): void {
-  if (actual.dev !== expected.dev || actual.ino !== expected.ino) {
-    fail(code, "native helper custody identity changed");
+  if (actual.dev !== expected.dev || actual.ino !== expected.ino
+    || actual.size !== expected.size || actual.sha256 !== expected.sha256) {
+    fail(code, "held native executable object or bytes changed");
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function assertLeaf(leaf: string): void {
+  if (leaf === "" || leaf === "." || leaf === ".." || leaf.includes("/")
+    || leaf.includes("\0") || Buffer.byteLength(leaf) > 255) {
+    fail("NO_REPLACE_LEAF_INVALID", "no-replace ABI requires a valid single-component leaf");
+  }
 }
 
 export function isExecutableCustodySafe(
@@ -273,40 +410,53 @@ export function isExecutableCustodySafe(
   const rootOwned = metadata.uid === 0;
   const linkCountSafe = metadata.nlink === 1
     || (policy.allowRootOwnedMultipleLinks && rootOwned && metadata.nlink > 1);
-  return policy.expectedUid !== undefined
-    && metadata.isFile
-    && linkCountSafe
-    && (ownedByCaller || rootOwned)
-    && (metadata.mode & 0o022) === 0
+  return policy.expectedUid !== undefined && metadata.isFile && linkCountSafe
+    && (ownedByCaller || rootOwned) && (metadata.mode & 0o022) === 0
     && (metadata.mode & constants.S_IXUSR) !== 0;
 }
 
-async function executableIdentity(
-  path: string,
+async function executableIdentityAtPath(path: string, code: string): Promise<ExecutableIdentity> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { return await heldExecutableIdentity(file, code); }
+  finally { await file.close(); }
+}
+
+async function heldExecutableIdentity(
+  file: FileHandle,
   code: string,
   allowRootOwnedMultipleLinks = false,
 ): Promise<ExecutableIdentity> {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const metadata = await file.stat();
-    const expectedUid = process.getuid?.();
-    if (!isExecutableCustodySafe({
-      isFile: metadata.isFile(),
-      uid: metadata.uid,
-      nlink: metadata.nlink,
-      mode: metadata.mode,
-    }, { expectedUid, allowRootOwnedMultipleLinks })) {
-      fail(code, "native executable identity or custody is unsafe");
+  const before = await file.stat();
+  if (!isExecutableCustodySafe({ isFile: before.isFile(), uid: before.uid,
+    nlink: before.nlink, mode: before.mode }, {
+    expectedUid: process.getuid?.(), allowRootOwnedMultipleLinks,
+  })) {
+    fail(code, "native executable identity or custody is unsafe");
+  }
+  const bytes = await readHeldBytes(file, before.size);
+  const after = await file.stat();
+  assertStableMetadata(after, before, code);
+  return { dev: after.dev, ino: after.ino, ctimeMs: after.ctimeMs,
+    size: after.size, sha256: sha256Hex(bytes) };
+}
+
+async function readHeldBytes(file: FileHandle, size: number): Promise<Buffer> {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const read = await file.read(bytes, offset, size - offset, offset);
+    if (read.bytesRead === 0) {
+      fail("NO_REPLACE_EXECUTABLE_UNSAFE", "held file became shorter while it was read");
     }
-    return {
-      dev: metadata.dev,
-      ino: metadata.ino,
-      ctimeMs: metadata.ctimeMs,
-      size: metadata.size,
-      sha256: sha256Hex(await file.readFile()),
-    };
-  } finally {
-    await file.close();
+    offset += read.bytesRead;
+  }
+  return bytes;
+}
+
+function assertStableMetadata(actual: Stats, expected: Stats, code: string): void {
+  if (actual.dev !== expected.dev || actual.ino !== expected.ino
+    || actual.ctimeMs !== expected.ctimeMs || actual.size !== expected.size) {
+    fail(code, "held filesystem object changed while it was read");
   }
 }
 
@@ -315,70 +465,54 @@ function assertSameExecutable(
   expected: ExecutableIdentity,
   code: string,
 ): void {
-  if (
-    actual.dev !== expected.dev
-    || actual.ino !== expected.ino
-    || actual.ctimeMs !== expected.ctimeMs
-    || actual.size !== expected.size
-    || actual.sha256 !== expected.sha256
-  ) {
+  if (actual.dev !== expected.dev || actual.ino !== expected.ino
+    || actual.ctimeMs !== expected.ctimeMs || actual.size !== expected.size
+    || actual.sha256 !== expected.sha256) {
     fail(code, "native executable changed after identity verification");
   }
 }
 
-function assertSameExecutableObject(
-  actual: ExecutableIdentity,
-  expected: ExecutableIdentity,
-  code: string,
-): void {
-  if (
-    actual.dev !== expected.dev
-    || actual.ino !== expected.ino
-    || actual.size !== expected.size
-    || actual.sha256 !== expected.sha256
-  ) {
-    fail(code, "native executable object or bytes changed after verification");
+function assertPrivateCustodyDirectory(metadata: Stats, code: string): void {
+  const expectedUid = process.getuid?.();
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || expectedUid === undefined
+    || metadata.uid !== expectedUid || (metadata.mode & 0o777) !== 0o700) {
+    fail(code, "native helper custody is not an owned private directory");
   }
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error
+    ? String((error as NodeJS.ErrnoException).code) : undefined;
+}
+
+async function closePreservingEvidence(
+  preserve: () => Promise<void> | undefined,
+  handles: readonly (FileHandle | HeldExecutable | undefined)[],
+): Promise<void> {
+  let preservationError: unknown;
+  try { await preserve(); } catch (error) { preservationError = error; }
+  const closures = await Promise.allSettled(handles.map((item) =>
+    (item !== undefined && "handle" in item ? item.handle : item)?.close()));
+  const closeErrors = closures.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  ).map((result) => result.reason);
+  if (preservationError !== undefined || closeErrors.length > 0) {
+    throw new AggregateError(
+      [...(preservationError === undefined ? [] : [preservationError]), ...closeErrors],
+      "native helper evidence preservation and descriptor closure failed",
+      { cause: preservationError ?? closeErrors[0] },
+    );
+  }
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 class ChildExitError extends Error {
   readonly exitCode: number | null;
-
   constructor(exitCode: number | null, message: string) {
     super(message);
     this.exitCode = exitCode;
   }
-}
-
-async function runChild(executable: string, arguments_: readonly string[], code: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, arguments_, {
-      shell: false,
-      stdio: ["ignore", "ignore", "pipe"],
-      env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
-    });
-    let stderr = "";
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < 4096) {stderr += chunk.toString("utf8");}
-    });
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new ChildExitError(null, `${code}: native helper timed out`));
-    }, CHILD_TIMEOUT_MS);
-    child.once("error", (error) => {
-      clearTimeout(timeout);
-      reject(new ChildExitError(null, `${code}: ${error.message}`));
-    });
-    child.once("exit", (exitCode, signal) => {
-      clearTimeout(timeout);
-      if (exitCode === 0 && signal === null) {
-        resolve();
-      } else {
-        reject(new ChildExitError(
-          exitCode,
-          `${code}: exit=${String(exitCode)} signal=${String(signal)} stderr=${stderr.trim()}`,
-        ));
-      }
-    });
-  });
 }

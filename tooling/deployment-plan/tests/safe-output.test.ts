@@ -328,9 +328,9 @@ test("READY is committed only after durable publication", async () => {
   const parent = await canonicalTemporaryDirectory();
   const operations: string[] = [];
   const claim = await claimOwnedOutputDirectory(parent, "bundle", {
-    async noReplaceDirectoryRename(source, target) {
-      operations.push(target.endsWith("READY") ? "ready-rename" : "publish-rename");
-      await testOnlyNoReplaceDirectoryRename(source, target);
+    async noReplaceDirectoryRename(request) {
+      operations.push(request.destinationLeaf === "READY" ? "ready-rename" : "publish-rename");
+      await testOnlyNoReplaceDirectoryRename(request);
     },
     async afterParentDirectorySync() { operations.push("published-durable"); },
     async beforeFinalMarkerRename() { operations.push("ready-commit"); },
@@ -474,7 +474,7 @@ test("cleanup preserves a leaf successor after quarantine authentication", async
       await writeFile(leaf, "foreign-successor", { mode: 0o600 });
     },
   });
-  await claim.writeExclusive("payload", Buffer.from("owned")); await claim.close();
+  await claim.writeExclusive("payload", Buffer.from("owned")); await claim.close(); await claim.close();
   assert.equal(await readFile(join(quarantine, "payload"), "utf8"), "foreign-successor");
 });
 
@@ -487,7 +487,7 @@ test("cleanup preserves a directory successor after quarantine authentication", 
       await mkdir(path, { mode: 0o700 });
     },
   });
-  await claim.writeExclusive("payload", Buffer.from("owned")); await claim.close();
+  await claim.writeExclusive("payload", Buffer.from("owned")); await claim.close(); await claim.close();
   assert.deepEqual(await readdir(quarantine), []);
   assert.equal(await readFile(join(evidence, "payload"), "utf8"), "owned");
 });
