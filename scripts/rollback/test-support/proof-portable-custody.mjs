@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -27,6 +29,7 @@ import {
   custodyBackendDirectory,
   custodyIdentityJson,
   registerCustodyDescriptor,
+  refreshDirectoryCustody,
   validateCustodyComponent,
   verifyDirectoryCustody,
 } from "../runtime/custody.mjs";
@@ -127,6 +130,81 @@ test("ancestor sibling churn is harmless but a held leaf substitution fails clos
     assert.equal(lstatSync(held).isDirectory(), true);
     assert.equal(lstatSync(target).isDirectory(), true);
     assert.equal(existsSync(successor), true);
+  } finally {
+    closeDirectoryCustody(custody);
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("refresh preserves authority-root policy while accepting directory content churn", () => {
+  const parent = mkdtempSync(join(tmpdir(), "agtmai-custody-refresh-"));
+  chmodSync(parent, 0o700);
+  const target = join(parent, "authority");
+  mkdirSync(target, { mode: 0o755 });
+  chmodSync(target, 0o755);
+  const custody = createDirectoryCustody(target, {
+    allowDarwinTemporaryAlias: true,
+    authorityRoot: true,
+  });
+  try {
+    writeFileSync(join(target, "supported-content-change"), "content\n");
+    assert.equal(refreshDirectoryCustody(custody).status, "verified");
+    chmodSync(target, 0o777);
+    assert.throws(
+      () => refreshDirectoryCustody(custody),
+      /ROLLBACK_CUSTODY_DIRECTORY_TRANSITION_UNSAFE/u,
+    );
+  } finally {
+    closeDirectoryCustody(custody);
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("refresh rejects replacement and never adopts its identity", () => {
+  const parent = mkdtempSync(join(tmpdir(), "agtmai-custody-refresh-replace-"));
+  chmodSync(parent, 0o700);
+  const target = join(parent, "authority");
+  const held = join(parent, "authority.held");
+  mkdirSync(target, { mode: 0o700 });
+  const custody = createDirectoryCustody(target, {
+    allowDarwinTemporaryAlias: true,
+    owned: true,
+  });
+  try {
+    renameSync(target, held);
+    mkdirSync(target, { mode: 0o700 });
+    assert.throws(
+      () => refreshDirectoryCustody(custody),
+      /ROLLBACK_CUSTODY_(?:SUBSTITUTED|DIRECTORY_TRANSITION_UNSAFE)/u,
+    );
+  } finally {
+    closeDirectoryCustody(custody);
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("custody close attempts every descriptor and aggregates close failures", () => {
+  const parent = mkdtempSync(join(tmpdir(), "agtmai-custody-close-failure-"));
+  chmodSync(parent, 0o700);
+  const target = join(parent, "owned");
+  mkdirSync(target, { mode: 0o700 });
+  const custody = createDirectoryCustody(target, {
+    allowDarwinTemporaryAlias: true,
+    owned: true,
+  });
+  const descriptors = custody.ancestorChain.map(({ descriptor }) => descriptor);
+  try {
+    closeSync(custody.descriptor);
+    assert.throws(
+      () => closeDirectoryCustody(custody),
+      (error) => error instanceof AggregateError
+        && error.message === "ROLLBACK_CUSTODY_CLOSE_FAILED"
+        && error.errors.length === 1,
+    );
+    for (const descriptor of descriptors) {
+      assert.throws(() => fstatSync(descriptor), { code: "EBADF" });
+    }
+    assert.doesNotThrow(() => closeDirectoryCustody(custody));
   } finally {
     closeDirectoryCustody(custody);
     rmSync(parent, { recursive: true, force: true });

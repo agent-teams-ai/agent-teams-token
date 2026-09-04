@@ -1,7 +1,59 @@
+import { closeSync } from "node:fs";
+
 import * as proofSupport from "./proof-fixture.mjs";
+import {
+  assertRollbackSharedFinal,
+  assertRollbackSharedStableAncestorIdentity,
+  openRollbackSharedParent,
+  rollbackSharedIdentity,
+  snapshotRollbackSharedPaths,
+} from "../slices/shared-paths.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
 const { cloneRepository } = proofSupport;
+
+test("shared path ancestors tolerate an actually retained sibling", () => {
+  const boundary = temporaryDirectory("agtmai-rollback-shared-sibling-");
+  const checkout = join(boundary, "checkout");
+  const quarantineRoot = join(boundary, "gate-tmp");
+  const sharedDirectory = join(checkout, "shared");
+  let workspaceHandle;
+  let parent;
+  try {
+    mkdirSync(sharedDirectory, { recursive: true });
+    writeFileSync(join(sharedDirectory, "target.txt"), "target\n");
+    mkdirSync(quarantineRoot, { mode: 0o700 });
+    workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+    const plan = snapshotRollbackSharedPaths(
+      checkout,
+      ["shared/target.txt"],
+      workspaceHandle,
+    );
+    mkdirSync(join(sharedDirectory, "retained-sibling"));
+    const actual = lstatSync(sharedDirectory, { bigint: true });
+    const captured = rollbackSharedIdentity(actual);
+    assert.throws(
+      () => assertRollbackSharedStableAncestorIdentity(
+        { ...captured, gid: String(actual.gid + 1n) }, actual, "shared/target.txt",
+      ),
+      /ROLLBACK_SHARED_PATH_SUBSTITUTED/u,
+    );
+    parent = openRollbackSharedParent(
+      checkout,
+      "shared/target.txt",
+      plan,
+      workspaceHandle,
+    );
+    assert.doesNotThrow(() => assertRollbackSharedFinal(parent));
+    assert.equal(lstatSync(join(sharedDirectory, "retained-sibling")).isDirectory(), true);
+  } finally {
+    if (parent !== undefined) {
+      closeSync(parent.descriptor);
+    }
+    closeRollbackWorkspaceHandle(workspaceHandle);
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
 
 test("shared rollback edits reject an ancestor symlink swap and preserve composed evidence", () => {
   const temporaryRoot = temporaryDirectory("agtmai-rollback-shared-swap-root-");

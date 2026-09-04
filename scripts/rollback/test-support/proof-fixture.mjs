@@ -247,7 +247,7 @@ function git(root, arguments_) {
 
 function gitFixture() {
   const boundary = temporaryDirectory("agtmai-rollback-git-");
-  const root = join(boundary, "source");
+  const root = join(boundary, "checkout");
   mkdirSync(root);
   git(root, ["init", "--quiet"]);
   git(root, ["config", "user.name", "Rollback Test"]);

@@ -40,6 +40,7 @@ export function rollbackSharedIdentity(identity) {
   return Object.freeze({
     ctimeNs: String(identity.ctimeNs),
     dev: String(identity.dev),
+    gid: String(identity.gid),
     ino: String(identity.ino),
     kind: identity.isDirectory() && !identity.isSymbolicLink()
       ? "directory"
@@ -54,11 +55,18 @@ export function rollbackSharedIdentity(identity) {
 
 export function assertRollbackSharedStableIdentity(expected, actual, logicalPath) {
   const observed = rollbackSharedIdentity(actual);
-  const stableLinkCount = expected.nlink === observed.nlink
-    || (expected.kind === "directory" && BigInt(observed.nlink) < BigInt(expected.nlink));
   if (expected.dev !== observed.dev || expected.ino !== observed.ino
-    || expected.kind !== observed.kind || expected.uid !== observed.uid
-    || !stableLinkCount || expected.mode !== observed.mode) {
+    || expected.kind !== observed.kind || expected.uid !== observed.uid || expected.gid !== observed.gid
+    || expected.nlink !== observed.nlink || expected.mode !== observed.mode) {
+    throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_SUBSTITUTED", logicalPath);
+  }
+}
+
+export function assertRollbackSharedStableAncestorIdentity(expected, actual, logicalPath) {
+  const observed = rollbackSharedIdentity(actual);
+  if (expected.dev !== observed.dev || expected.ino !== observed.ino
+    || expected.kind !== observed.kind || expected.uid !== observed.uid || expected.gid !== observed.gid
+    || expected.mode !== observed.mode) {
     throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_SUBSTITUTED", logicalPath);
   }
 }
@@ -88,12 +96,12 @@ export function openRollbackSharedRoot(workspace, logicalPath) {
       custodyDescriptorDirectory(workspace.checkoutDescriptor),
       rollbackSharedOpenFlags({ directory: true }),
     );
-    assertRollbackSharedStableIdentity(
+    assertRollbackSharedStableAncestorIdentity(
       rollbackSharedIdentity(workspace.checkoutIdentity),
       fstatSync(descriptor, { bigint: true }),
       logicalPath,
     );
-    assertRollbackSharedStableIdentity(
+    assertRollbackSharedStableAncestorIdentity(
       rollbackSharedIdentity(workspace.checkoutIdentity),
       lstatSync(workspace.checkoutPath, { bigint: true }),
       logicalPath,
@@ -191,12 +199,16 @@ function snapshotRollbackSharedAncestor(descriptor, component, context) {
       logicalPath,
     );
     next = openSync(candidate, rollbackSharedOpenFlags({ directory: true }));
-    assertRollbackSharedStableIdentity(
+    assertRollbackSharedStableAncestorIdentity(
       identity,
       fstatSync(next, { bigint: true }),
       logicalPath,
     );
-    assertRollbackSharedStableIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
+    assertRollbackSharedStableAncestorIdentity(
+      identity,
+      lstatSync(candidate, { bigint: true }),
+      logicalPath,
+    );
     if (holdDescriptors) {
       held = openHeldSharedDescriptor(candidate, identity, logicalPath, true);
       heldDescriptors.push(held);
@@ -259,12 +271,11 @@ function openHeldSharedDescriptor(candidate, identity, logicalPath, directory) {
   const descriptor = openSync(candidate, rollbackSharedOpenFlags({ directory }));
   try {
     const captured = fstatSync(descriptor, { bigint: true });
-    assertRollbackSharedStableIdentity(
-      identity,
-      captured,
-      logicalPath,
-    );
-    assertRollbackSharedStableIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
+    const assertIdentity = directory
+      ? assertRollbackSharedStableAncestorIdentity
+      : assertRollbackSharedSnapshotUnchanged;
+    assertIdentity(identity, captured, logicalPath);
+    assertIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
     registerCustodyDescriptor(descriptor, realpathSync(candidate), captured);
     return descriptor;
   } catch (error) {
@@ -301,9 +312,9 @@ export function openRollbackSharedParent(root, logicalPath, plan, workspaceHandl
       try {
         const before = lstatSync(candidate, { bigint: true });
         assertRollbackSharedSafeNode(before, "directory", workspace, logicalPath);
-        assertRollbackSharedStableIdentity(expected.identity, before, logicalPath);
+        assertRollbackSharedStableAncestorIdentity(expected.identity, before, logicalPath);
         next = openSync(candidate, rollbackSharedOpenFlags({ directory: true }));
-        assertRollbackSharedStableIdentity(
+        assertRollbackSharedStableAncestorIdentity(
           expected.identity,
           fstatSync(next, { bigint: true }),
           logicalPath,

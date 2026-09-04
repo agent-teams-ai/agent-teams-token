@@ -218,7 +218,14 @@ export function createDirectoryCustody(requestedPath, options = {}) {
         identity: entry.identity,
       }))),
     });
-    const state = { ...target, ancestors, closed: false, owned: options.owned === true, platform };
+    const state = {
+      ...target,
+      ancestors,
+      authorityRoot: options.authorityRoot === true,
+      closed: false,
+      owned: options.owned === true,
+      platform,
+    };
     custodyRecords.set(handle, state);
     registerCustodyDescriptor(target.descriptor, canonicalPath, target.identity);
     for (const ancestor of ancestors) {
@@ -268,9 +275,19 @@ export function refreshDirectoryCustody(handle) {
     verifyStableRecord(ancestor, "ROLLBACK_CUSTODY_ANCESTOR_SUBSTITUTED");
   }
   const next = custodyIdentity(fstatSync(state.descriptor, { bigint: true }));
+  assertCustodyStableObject(
+    state.identity,
+    next,
+    "ROLLBACK_CUSTODY_DIRECTORY_TRANSITION_UNSAFE",
+  );
   assertCustodyIdentity(next, lstatSync(state.canonicalPath, { bigint: true }));
-  if (next.kind !== "directory" || (state.owned && (next.mode & 0o777n) !== 0o700n)) {
-    throw new Error("ROLLBACK_CUSTODY_DIRECTORY_TRANSITION_UNSAFE");
+  try {
+    assertDirectoryPolicy({ canonicalPath: state.canonicalPath, identity: next }, {
+      authorityRoot: state.authorityRoot,
+      owned: state.owned,
+    });
+  } catch (error) {
+    throw new Error("ROLLBACK_CUSTODY_DIRECTORY_TRANSITION_UNSAFE", { cause: error });
   }
   state.identity = next;
   registerCustodyDescriptor(state.descriptor, state.canonicalPath, next);
@@ -283,9 +300,22 @@ export function closeDirectoryCustody(handle) {
     return;
   }
   state.closed = true;
-  closeCustodyDescriptor(state.descriptor);
+  const failures = [];
+  const close = (descriptor) => {
+    try {
+      // close(2) may have released the descriptor even when it reports EINTR;
+      // never retry and risk closing a subsequently reused descriptor number.
+      closeCustodyDescriptor(descriptor);
+    } catch (error) {
+      failures.push(error);
+    }
+  };
+  close(state.descriptor);
   for (const ancestor of state.ancestors.toReversed()) {
-    closeCustodyDescriptor(ancestor.descriptor);
+    close(ancestor.descriptor);
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "ROLLBACK_CUSTODY_CLOSE_FAILED");
   }
 }
 
