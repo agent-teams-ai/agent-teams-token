@@ -7,10 +7,11 @@ it must not be read as a current exact-head full-gate pass.
 
 Current accepted code e723bc0d includes independently accepted Solana raw-wire
 verification. ActualMac source coverage:90total,87pass,3Linux-only skips,0fail;
-real integration4/4 has no skips. Filesystemff44c448 passes33/33actualMac
-expanded tests and is under independent92review, not integrated. Writer91 now
-implements the bounded Slither process/finalization correction. Both hosted
-jobs use fast/priority on the old server; read the latest reconciliation first.
+real integration4/4 has no skips. Review92 found another P1 in filesystem FD
+teardown despite earlier33/33actualMac tests; writer95 fixes it, not integrated.
+Slither91 is an unaccepted draft: TS7 passes, firstMac16/17 and9lint findings.
+Independent hosted93/94 cover legacy Solana provenance and initial publication
+bounds. All new jobs use fast/priority on the old server; read the ledger first.
 
 13:33 UTC: wrapper87 is independently ACCEPTed, Linux11/11 and actualMac
 portability evidence. Solana wire374a7d49 passes34focused cases, TS7/lint and

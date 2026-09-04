@@ -4,8 +4,10 @@ Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
 Latest accepted code is e723bc0d: review89 accepted canonical Some/None wire
 verification. ActualMac Solana90total/87pass/3Linux-only skips, including
-4/4required real integration. Filesystemff44 is under independent92review;
-writer91 implements S7 bounded execution. Earlier checkpoint details follow.
+4/4required real integration. Review92 found a further P1 in filesystem teardown;
+writer95 corrects it. Slither91 is a draft with focused16/17 and9lint findings,
+not acceptance. Hosted93/94 cover legacy Solana provenance and initial
+publication bounds in separate scopes. Earlier checkpoint details follow.
 Earlier code candidate `b95c66be5d19367f85e864fc72b3b41d4826e906` includes
 independently accepted toolchain and deployment fixes. Combined lint, root TS
 build, deployment TS and Foundation pass; the actual Mac Anvil source checkpoint

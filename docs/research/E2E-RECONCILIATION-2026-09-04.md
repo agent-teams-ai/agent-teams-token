@@ -3,7 +3,41 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 13:38 UTC
+## Latest reconciliation: 13:55 UTC
+
+Accepted integration code remains e723bc0df8efa867a78f8a4cd68e8862e95a18f2.
+Original user worktree212b278f and its dirty paths remain untouched.
+
+- Review92 returned AMEND P1: several teardown paths still stop after their
+  first close failure or retry an uncertain numeric FD. Its targeted probe
+  reproduced a nonterminal handle and an open root descriptor. Actual Linux
+  cleanup/evidence19/19 passed; broader33cases had28pass/5inherited Git-authority
+  failures. Earlier supplied Mac33/33 does not cover this newly found branch.
+- Writer95 owns only those close/error paths and focused regressions, exactff44,
+  medium/priority on old host, IDagtmai-r212-custody-teardown95-20260904,
+  PID353421. No recovery acceptance/integration until it is fixed and reviewed.
+- Writer91 supplied a complete Slither patch after one bwrap editor failure;
+  no hosted tests ran. Main applied it in isolated /tmp/agtmai-slither-91-mac,
+  correcting one stale context, pipe-child typing, portable test Node path and
+  the shared environment-failure schema. TS7 passes; first focused actualMac
+  run is16/17, with one wrong assertion about an already-exited leader's zero
+  status while its descendant times out. Scoped lint reports9structural/style
+  issues. This draft is NOT accepted or integrated; correction work continues.
+- Planner93 is active on exacte723, legacy-v3 Solana reclamation provenance and
+  initial no-replace/lease bounds. IDagtmai-r212-solana-filesystem93-20260904,
+  PID68831, xhigh/priority/read-only. Writer94 owns the independent EVM half of
+  initial no-replace/lease bounds, same base; IDagtmai-r212-evm-publication94-20260904,
+  PID203452, medium/priority. Both have isolated exact-bundle clones and full
+  source packets. Neither lane is accepted merely because a launcher completed.
+- Latest old-host admission: machinebe0aad971ea647fab370acd110b469b7,
+  about10.7GiB RAM available,3.6GiB swap free,16GiB disk. Priority/fast is active.
+  No sandbox/runtime/auth changes or editor retries were used. Source fallback
+  requires local application and actual tests plus independent review.
+
+Next: correct/verify drafts91/94/95, consume93 advisory without widening deletion
+or provenance authority, and continue the complete original-plan audit matrix.
+
+## Earlier reconciliation: 13:38 UTC
 
 Accepted integration code is now e723bc0df8efa867a78f8a4cd68e8862e95a18f2.
 Original user worktree212b278f and all original dirty paths remain untouched.
