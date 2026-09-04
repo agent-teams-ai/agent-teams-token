@@ -3,6 +3,36 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
+## Latest reconciliation: 18:04 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+Recovery candidate advanced to `a7ed090094776e15136b97f7b5bb61cc91012475`,
+parentd9b237, only in the isolated worktree; it is not accepted/integrated.
+
+- Reproduced the prepared-archive return-before-finally defect: initial1/7.
+  Archive close failure could strand the prepared tree, mask a primary failure
+  and leave ownership unavailable to the caller. The bounded fix closes before
+  transfer, aggregates primary/close/cleanup failures, releases all captured
+  owners, and preserves rather than adopts an uncertain or uncaptured tree.
+  Copy-target raw finalization was corrected with the existing custody helper.
+- Final focused**9/9** and broader**129/129**, zero skips; syntax, scoped lint
+  and diff checks pass. Two selected nearby toolchain regressions pass. One
+  macOS pnpm-version test fails identically on the exact parent and is recorded
+  as pre-existing environment behavior, not hidden or attributed to this diff.
+  Report: `RECOVERY-ARCHIVE-PREPARATION-FINALIZATION-2026-09-04.md`.
+- Conventional isolated checkpoint: +251/-29,175 focused test lines. Source
+  modules remain under Foundation limits. Original user checkout untouched.
+- Correct oldhost and bundle verified. Linux verifier133 did not start because
+  disk was3759MiB and IO avg10 some30.16/full26.43; the unchanged5GiB guard
+  correctly blocked it. No unrelated hosted data was removed. Hosted model
+  capacity also remains exhausted, so no writer/reviewer was launched. Future
+  jobs stay sol medium/xhigh in fast/priority mode as requested.
+
+Next: run exacta7ed Linux structural/runtime qualification once the oldhost is
+above the admission guard, then obtain independent xhigh review. Continue
+review120groups2/5 and the complete R3-R8/Solana/Slither/upstream/final matrix.
+Full rollback, root/CI and E2E acceptance remain suspended.
+
 ## Latest reconciliation: 17:35 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
