@@ -4,6 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { authenticateProcess, processStartIdentity, startOwnedAnvil } from "../process.ts";
@@ -177,6 +178,27 @@ test("initial lease publication preserves a preexisting foreign sentinel", async
   }
 });
 
+test("stale-run lease reads promptly reject and preserve a foreign FIFO", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-fifo-")));
+  const runDirectory = join(root, "run-fifo-Z9");
+  const leasePath = join(runDirectory, "lease.v1.json");
+  await mkdir(runDirectory, {mode: 0o700});
+  await execute("mkfifo", [leasePath]);
+  try {
+    assert.deepEqual(
+      await runBoundedLeaseFixture(["reclaim", root]),
+      {status: "rejected", code: "LOCAL_EVM_RUN_LEASE_NOT_REGULAR"},
+    );
+    assert.equal((await lstat(leasePath)).isFIFO(), true);
+    assert.deepEqual(
+      (await readdir(runDirectory)).filter((name) => name.endsWith(".tmp")),
+      [],
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
 test("two concurrent lease creators publish exactly one owned lease", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-lease-race-")));
   const runDirectory = await createProvisionalRunDirectory(root, "race-Z9");
@@ -239,6 +261,26 @@ test("authenticated lease update preserves a substituted foreign successor", asy
       && cause.code === "LOCAL_EVM_UPDATED_FILE_CHANGED");
     assert.equal(await readFile(leasePath, "utf8"), "foreign-successor");
     assert.equal(await readFile(displaced, "utf8"), predecessor);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test("authenticated lease update promptly rejects and preserves a substituted FIFO", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-update-fifo-")));
+  const runDirectory = await createProvisionalRunDirectory(root, "fifo-Z9");
+  const leasePath = join(runDirectory, "lease.v1.json");
+  const displaced = join(runDirectory, "authenticated-predecessor");
+  try {
+    assert.deepEqual(
+      await runBoundedLeaseFixture(["register", runDirectory, displaced]),
+      {status: "rejected", code: "LOCAL_EVM_UPDATED_FILE_CHANGED", predecessorPreserved: true},
+    );
+    assert.equal((await lstat(leasePath)).isFIFO(), true);
+    assert.deepEqual(
+      (await readdir(runDirectory)).filter((name) => name.endsWith(".tmp")),
+      [],
+    );
   } finally {
     await rm(root, {recursive: true, force: true});
   }
@@ -370,6 +412,23 @@ test("unauthenticated markerless directory is preserved fail-closed", async () =
 
 function processExists(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+interface LeaseFixtureResult {
+  readonly status: "fulfilled" | "rejected";
+  readonly code?: string;
+  readonly predecessorPreserved?: boolean;
+}
+
+async function runBoundedLeaseFixture(args: readonly string[]): Promise<LeaseFixtureResult> {
+  const fixture = fileURLToPath(new URL("./fixtures/fifo-lease-child.ts", import.meta.url));
+  const {stdout, stderr} = await execute(
+    process.execPath,
+    [fixture, ...args],
+    {timeout: 2_000, killSignal: "SIGKILL"},
+  );
+  assert.equal(stderr, "");
+  return JSON.parse(stdout) as LeaseFixtureResult;
 }
 
 async function chainId(url: string): Promise<string> {

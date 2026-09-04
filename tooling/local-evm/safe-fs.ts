@@ -57,7 +57,10 @@ async function readRegularFileObserved(
   let handle: FileHandle | undefined;
   let primary: unknown;
   try {
-    handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(
+      absolute,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
     const initial = await handle.stat({bigint: true});
     assertRegularFile(initial, label, ownedMode);
     assertWithinBounds(initial, label, bounds);
@@ -381,7 +384,7 @@ export async function replaceObservedFile(
     );
     predecessor = await open(
       absolute,
-      constants.O_RDONLY | constants.O_NOFOLLOW,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     await observeNamedHeldFile(
       absolute,
