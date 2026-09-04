@@ -35,7 +35,9 @@ before(async () => {
   manifest = JSON.parse(await readFile(manifestSource, "utf8")) as LocalManifest;
   const forgeOut = join(suiteRoot, "forge-out");
   const forgeBuildInfo = join(suiteRoot, "forge-build-info");
-  await execute("forge", ["build", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", pinnedSolcPath(repositoryRoot)], {
+  const solcCustody = join(suiteRoot, "solc-custody");
+  await mkdir(solcCustody, { mode: 0o700 });
+  await execute("forge", ["build", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", pinnedSolcPath(repositoryRoot, solcCustody)], {
     cwd: join(repositoryRoot, "contracts/evm"), timeout: 120_000, killSignal: "SIGKILL",
   });
   artifactSource = join(forgeOut, "AGTMAIToken.sol", "AGTMAIToken.json");

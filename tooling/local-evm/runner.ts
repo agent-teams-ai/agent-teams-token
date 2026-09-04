@@ -40,7 +40,9 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
   try {
-    const solc = pinnedSolcPath(root);
+    const solcCustody = join(runDirectory, "solc-custody");
+    await ensurePrivateDirectory(solcCustody);
+    const solc = pinnedSolcPath(root, solcCustody);
     const tools = await toolVersions(solc, commandAbort.signal);
     const walletResult = await checkedCommand("cast", ["wallet", "new", "--json"], { code: "LOCAL_EVM_WALLET_GENERATION_FAILED", signal: commandAbort.signal });
     const wallet = parseWallet(walletResult.stdout);

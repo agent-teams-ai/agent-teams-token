@@ -17,36 +17,43 @@ const PLATFORM_SHA256 = {
   "darwin-arm64": "d4abcf0b3e24b7948ddfd64c374d26c3214648717777790ecb936979054a129d",
   "linux-x64": "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6",
 } as const;
-const snapshots = new Map<string, string>();
 
-export function pinnedSolcPath(repositoryRoot: string): string {
+export function pinnedSolcPath(repositoryRoot: string, custodyDirectory: string): string {
   const root = resolve(repositoryRoot);
+  const custody = resolve(custodyDirectory);
   const platform = supportedPlatform();
-  const cached = snapshots.get(root);
-  if (cached !== undefined) {
-    assertPinnedSolcSha256(stableRead(cached), PLATFORM_SHA256[platform]);
-    return cached;
-  }
-  const lock = parseLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
   const toolsRoot = contained(root, ".tools", "LOCAL_EVM_TOOLS_PATH");
-  assertDirectory(toolsRoot, "LOCAL_EVM_TOOLS_PATH");
-  const install = contained(toolsRoot, lock.installDirectory, "LOCAL_EVM_SOLC_LOCK");
-  assertDirectory(install, "LOCAL_EVM_SOLC_INSTALL");
-  const installed = contained(install, "solc", "LOCAL_EVM_SOLC_LOCK");
-  const bytes = stableRead(installed);
-  assertPinnedSolcSha256(bytes, lock.sha256);
-  const snapshotRoot = mkdtempSync(join(install, ".authenticated-solc-"));
-  chmodSync(snapshotRoot, 0o700);
-  const snapshot = join(snapshotRoot, "solc");
-  const fd = openSync(snapshot, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o700);
-  try { writeSync(fd, bytes); } finally { closeSync(fd); }
-  chmodSync(snapshot, 0o500);
-  const snapshotHash = createHash("sha256").update(stableRead(snapshot)).digest("hex");
-  if (snapshotHash !== lock.sha256) {
-    throw new LocalEvmError("LOCAL_EVM_SOLC_SNAPSHOT_INVALID", "authenticated private solc snapshot changed before use");
+  if (custody === toolsRoot || custody.startsWith(`${toolsRoot}${sep}`)) {
+    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody cannot use the persistent tool installation");
   }
-  snapshots.set(root, snapshot);
-  return snapshot;
+  const custodyFd = openSnapshotCustody(custody);
+  try {
+    const lock = parseLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
+    assertDirectory(toolsRoot, "LOCAL_EVM_TOOLS_PATH");
+    const install = contained(toolsRoot, lock.installDirectory, "LOCAL_EVM_SOLC_LOCK");
+    assertDirectory(install, "LOCAL_EVM_SOLC_INSTALL");
+    const installed = contained(install, "solc", "LOCAL_EVM_SOLC_LOCK");
+    const bytes = stableRead(installed);
+    assertPinnedSolcSha256(bytes, lock.sha256);
+    assertSnapshotCustodyIdentity(custody, custodyFd);
+    const snapshotRoot = mkdtempSync(join(custody, "authenticated-solc-"));
+    chmodSync(snapshotRoot, 0o700);
+    const snapshot = join(snapshotRoot, "solc");
+    const fd = openSync(snapshot, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o700);
+    try {
+      let offset = 0;
+      while (offset < bytes.length) { offset += writeSync(fd, bytes, offset); }
+    } finally { closeSync(fd); }
+    chmodSync(snapshot, 0o500);
+    const snapshotHash = createHash("sha256").update(stableRead(snapshot)).digest("hex");
+    assertSnapshotCustodyIdentity(custody, custodyFd);
+    if (snapshotHash !== lock.sha256) {
+      throw new LocalEvmError("LOCAL_EVM_SOLC_SNAPSHOT_INVALID", "authenticated private solc snapshot changed before use");
+    }
+    return snapshot;
+  } finally {
+    closeSync(custodyFd);
+  }
 }
 
 export function assertPinnedSolcSha256(bytes: Uint8Array, expectedSha256: string): void {
@@ -115,6 +122,31 @@ function stableRead(path: string): Buffer {
 function assertDirectory(path: string, code: string): void {
   const value = lstatSync(path);
   if (!value.isDirectory() || value.isSymbolicLink()) { throw new LocalEvmError(code, "toolchain directory is absent or substituted"); }
+}
+
+function openSnapshotCustody(path: string): number {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    assertSnapshotCustodyIdentity(path, fd);
+    return fd;
+  } catch (cause) {
+    if (fd !== undefined) { closeSync(fd); }
+    if (cause instanceof LocalEvmError) { throw cause; }
+    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody must already exist as a safe real directory");
+  }
+}
+
+function assertSnapshotCustodyIdentity(path: string, fd: number): void {
+  const held = fstatSync(fd);
+  const current = lstatSync(path);
+  const expectedOwner = process.getuid?.();
+  if (!held.isDirectory() || !current.isDirectory() || current.isSymbolicLink()
+    || held.dev !== current.dev || held.ino !== current.ino
+    || (expectedOwner !== undefined && held.uid !== expectedOwner)
+    || (held.mode & 0o022) !== 0) {
+    throw new LocalEvmError("LOCAL_EVM_SOLC_CUSTODY_INVALID", "solc snapshot custody must be owned, real, stable, and not group/other writable");
+  }
 }
 
 function contained(root: string, value: string, code: string): string {
