@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { observationFixture } from "./helpers/observations.ts";
-import { runFixture, type FixtureDependencies } from "../src/application/runner.ts";
+import { runFixture, waitForOwnedRpcReady, type FixtureDependencies, type ReadinessTiming } from "../src/application/runner.ts";
 import { LocalSolanaError, type FailureEvidenceReport } from "../src/domain/model.ts";
 
 const unsupported = async (): Promise<never> => { throw new Error("unexpected test call"); };
@@ -21,14 +21,16 @@ test("a post-mutation exception publishes sanitized failure evidence after clean
   let stopped = false;
   let released = false;
   let cleaned = false;
+  let listenerChecks = 0;
+  let waitReadyTimeout: number | undefined;
   let failure: FailureEvidenceReport | undefined;
   const deps = {
     environment: { PATH: "/ambient/path-that-must-not-be-used" },
     tools: { async resolve() { return { solana: "/tools/solana", keygen: "/tools/keygen", validator: "/tools/validator", splToken: "/tools/spl-token", tokenProgram: "/tools/token.so", associatedTokenProgram: "/tools/ata.so" }; } },
     command: { run: unsupported },
-    validator: { async start() { return { pid: 123, async assertHealthy() {}, async assertRpcListener() {}, async stop() { stopped = true; } }; } },
+    validator: { async start() { return { pid: 123, async assertHealthy() {}, async assertRpcListener() { listenerChecks += 1; if (listenerChecks <= 2) { throw new LocalSolanaError("SOLANA_RPC_LISTENER_IDENTITY", "listener is not visible yet"); } return { scope: "ipv4-loopback" as const }; }, async stop() { stopped = true; } }; } },
     rpc: {
-      async waitReady() { return { version: "test", genesisHash: "11111111111111111111111111111111" }; },
+      async waitReady(_rpcUrl: string, timeoutMs: number) { assert.equal(listenerChecks, 3); waitReadyTimeout = timeoutMs; return { version: "test", genesisHash: "11111111111111111111111111111111" }; },
       async waitProgramsReady() {},
       genesisHash: unsupported, mintAccount: unsupported, tokenAccount: unsupported,
       tokenAccountAddress: unsupported, finalizedTransaction: unsupported,
@@ -40,7 +42,7 @@ test("a post-mutation exception publishes sanitized failure evidence after clean
         return { payer: "11111111111111111111111111111111", mint: "11111111111111111111111111111111", owner: "11111111111111111111111111111111" };
       },
       async verifyFunded() {},
-      async createMint() { throw new LocalSolanaError("SOLANA_INJECTED_FAILURE", "sensitive /tmp/key path"); },
+      async createMint() { assert.ok(listenerChecks >= 6, "no mutation may run before owned-listener readiness and program readiness checks"); throw new LocalSolanaError("SOLANA_INJECTED_FAILURE", "sensitive /tmp/key path"); },
       revokeFreeze: unsupported, createTokenAccount: unsupported, associatedAddress: unsupported,
       mint: unsupported, burn: unsupported,
     },
@@ -60,6 +62,7 @@ test("a post-mutation exception publishes sanitized failure evidence after clean
   assert.equal(stopped, true);
   assert.equal(released, true);
   assert.equal(cleaned, true);
+  assert.ok(waitReadyTimeout !== undefined && waitReadyTimeout > 0 && waitReadyTimeout < 30_000, "listener observation must consume the shared readiness budget");
   assert.deepEqual(failure, {
     schemaVersion: 1, status: "FAILED", failedPhase: "createMint",
     diagnosticCode: "SOLANA_INJECTED_FAILURE", mutationsMayHaveOccurred: true,
@@ -67,6 +70,44 @@ test("a post-mutation exception publishes sanitized failure evidence after clean
     secretsRetained: false, productionApproved: false,
   });
   assert.doesNotMatch(JSON.stringify(failure), /sensitive|\/tmp|key path/iu);
+});
+
+test("owned-listener readiness retries only listener visibility and preserves the remaining deadline", async () => {
+  let now = 1_000; let listenerChecks = 0; let actionCalls = 0;
+  const timing: ReadinessTiming = { now: () => now, async wait(milliseconds) { now += milliseconds; } };
+  const validator = {
+    pid: 7, async stop() {}, async assertHealthy() {},
+    async assertRpcListener() {
+      listenerChecks += 1;
+      if (listenerChecks <= 2) { throw new LocalSolanaError("SOLANA_RPC_LISTENER_IDENTITY", "not visible"); }
+      return { scope: "ipv4-loopback" as const };
+    },
+  };
+  const result = await waitForOwnedRpcReady(validator, 20_000, new AbortController().signal, async (remainingMs) => {
+    actionCalls += 1; assert.equal(listenerChecks, 3); assert.equal(remainingMs, 29_900); return "ready";
+  }, timing);
+  assert.equal(result, "ready"); assert.equal(actionCalls, 1); assert.equal(listenerChecks, 4);
+});
+
+test("owned-listener readiness fails closed on validator identity, deadline, and abort", async (t) => {
+  await t.test("wrong validator identity is never retried", async () => {
+    let waits = 0; let actionCalls = 0;
+    const validator = { pid: 7, async stop() {}, async assertHealthy() { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "replacement"); }, async assertRpcListener() { throw new Error("unreachable"); } };
+    await assert.rejects(waitForOwnedRpcReady(validator, 20_000, new AbortController().signal, async () => { actionCalls += 1; }, { now: () => 0, async wait() { waits += 1; } }), /SOLANA_VALIDATOR_IDENTITY/u);
+    assert.equal(waits, 0); assert.equal(actionCalls, 0);
+  });
+  await t.test("listener deadline expires without an RPC action", async () => {
+    let now = 0; let actionCalls = 0;
+    const validator = { pid: 7, async stop() {}, async assertHealthy() {}, async assertRpcListener() { throw new LocalSolanaError("SOLANA_RPC_LISTENER_IDENTITY", "not visible"); } };
+    await assert.rejects(waitForOwnedRpcReady(validator, 20_000, new AbortController().signal, async () => { actionCalls += 1; }, { now: () => now, async wait(milliseconds) { now += milliseconds; } }), /SOLANA_RPC_LISTENER_IDENTITY/u);
+    assert.equal(now, 30_000); assert.equal(actionCalls, 0);
+  });
+  await t.test("abort interrupts the listener wait promptly", async () => {
+    const controller = new AbortController(); let waits = 0; let actionCalls = 0;
+    const validator = { pid: 7, async stop() {}, async assertHealthy() {}, async assertRpcListener() { throw new LocalSolanaError("SOLANA_RPC_LISTENER_IDENTITY", "not visible"); } };
+    await assert.rejects(waitForOwnedRpcReady(validator, 20_000, controller.signal, async () => { actionCalls += 1; }, { now: () => 0, async wait() { waits += 1; controller.abort(); } }), /SOLANA_COMMAND_ABORTED/u);
+    assert.equal(waits, 1); assert.equal(actionCalls, 0);
+  });
 });
 
 type CleanupTarget = "validator" | "port" | "directory";

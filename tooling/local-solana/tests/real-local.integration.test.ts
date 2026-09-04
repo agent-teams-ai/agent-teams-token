@@ -49,13 +49,18 @@ test("two separately spawned real fixture processes hold distinct cross-process 
   finally { await rm(boundary, { recursive: true, force: true }); }
 });
 
-async function failureDiagnostic(output: string, bundles: readonly string[]): Promise<string> {
-  if (bundles.length !== 1 || !bundles[0]?.startsWith("failure-evidence-")) { return "SOLANA_FAILURE_EVIDENCE_MISSING"; }
+async function failureDiagnostic(output: string, bundles: readonly string[], fallback = "SOLANA_FAILURE_EVIDENCE_MISSING"): Promise<string> {
+  if (bundles.length !== 1 || !bundles[0]?.startsWith("failure-evidence-")) { return fallback; }
   try {
     const report = JSON.parse(await readFile(join(output, bundles[0], "failure-evidence-report.v1.json"), "utf8")) as { readonly diagnosticCode?: unknown };
     return typeof report.diagnosticCode === "string" && /^[A-Z][A-Z0-9_]{2,95}$/u.test(report.diagnosticCode) ? report.diagnosticCode : "SOLANA_FAILURE_EVIDENCE_INVALID";
   } catch { return "SOLANA_FAILURE_EVIDENCE_INVALID"; }
 }
+
+test("missing private failure evidence falls back to the sanitized public boundary diagnostic", async () => {
+  assert.equal(await failureDiagnostic("unused", [], "SOLANA_FIXTURE_FAILED"), "SOLANA_FIXTURE_FAILED");
+  assert.equal(publicFailureDiagnostic({ status: "FAILED", diagnosticCode: "SOLANA_RPC_LISTENER_IDENTITY" }), "SOLANA_CHILD_BOUNDARY_INVALID");
+});
 
 async function runFixturePair(script: string, firstOutput: string, secondOutput: string): Promise<void> {
   const results = await Promise.allSettled([runFixtureProcess(script, firstOutput), runFixtureProcess(script, secondOutput)]);
@@ -78,7 +83,8 @@ async function runFixtureProcess(script: string, output: string): Promise<void> 
       if (timedOut) { reject(new Error("fixture process exceeded bounded deadline")); return; }
       const result = publicBoundaryResult(stdout, stderr);
       if (code === 0 && result.status === "READY") { resolve(); return; }
-      void readdir(output).then(async (bundles) => await failureDiagnostic(output, bundles), () => "SOLANA_FAILURE_EVIDENCE_MISSING")
+      const fallback = publicFailureDiagnostic(result);
+      void readdir(output).then(async (bundles) => await failureDiagnostic(output, bundles, fallback), () => fallback)
         .then((diagnostic) => reject(new Error("fixture process failed with sanitized diagnostic " + diagnostic)));
     });
     child.once("error", () => { cleanup(); reject(new Error("fixture process spawn failed")); });
@@ -93,6 +99,11 @@ function publicBoundaryResult(stdout: string, stderr: string): { readonly status
     } catch {}
   }
   return {};
+}
+
+function publicFailureDiagnostic(value: { readonly status?: unknown; readonly diagnosticCode?: unknown }): string {
+  return value.status === "FAILED" && (value.diagnosticCode === "SOLANA_CLI_USAGE" || value.diagnosticCode === "SOLANA_FIXTURE_FAILED")
+    ? value.diagnosticCode : "SOLANA_CHILD_BOUNDARY_INVALID";
 }
 
 function bounded(previous: string, chunk: string): string { return (previous + chunk).slice(-4096); }

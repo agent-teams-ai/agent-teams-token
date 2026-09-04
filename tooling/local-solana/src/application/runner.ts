@@ -1,6 +1,6 @@
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, FIXTURE_AMOUNT_BASE_UNITS, LocalSolanaError, type FailurePhase, type FixtureObservations, type TransactionFact } from "../domain/model.ts";
 import { verifyObservations } from "./verifier.ts";
-import type { AuthorityTransactionPort, CliPort, CommandPort, PortAllocator, PortLease, RpcPort, RunStorePort, ToolResolverPort, ValidatorPort } from "./ports.ts";
+import type { AuthorityTransactionPort, CliPort, CommandPort, PortAllocator, PortLease, RpcPort, RunStorePort, ToolResolverPort, ValidatorHandle, ValidatorPort } from "./ports.ts";
 
 export interface FixtureDependencies {
   readonly tools: ToolResolverPort;
@@ -17,6 +17,26 @@ export interface FixtureDependencies {
 export interface FixtureResult { readonly jsonPath: string; readonly markdownPath: string; }
 
 const CLEANUP_ATTEMPTS = 2;
+const RPC_READINESS_TIMEOUT_MS = 30_000;
+const RPC_LISTENER_RETRY_MS = 50;
+
+export interface ReadinessTiming {
+  readonly now: () => number;
+  readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+}
+
+const systemReadinessTiming: ReadinessTiming = {
+  now: () => performance.now(),
+  wait: async (milliseconds, signal) => {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(finish, milliseconds);
+      const abort = (): void => finish();
+      function finish(): void { clearTimeout(timer); signal.removeEventListener("abort", abort); resolve(); }
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) { finish(); }
+    });
+  },
+};
 
 interface CleanupResources {
   validator: Awaited<ReturnType<ValidatorPort["start"]>> | undefined;
@@ -53,7 +73,7 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
     const keys = await deps.cli.createKeys(cliContext);
     ({ validator: resources.validator, portLease: resources.portLease } = await startValidatorWithPortRetry({ deps, paths, tools, env, signal, genesisMint: keys.payer, resources }));
     const rpcUrl = `http://127.0.0.1:${resources.portLease.rpcPort}/`;
-    const ready = await validatorRpc(resources.validator, resources.portLease.rpcPort, signal, async () => await deps.rpc.waitReady(rpcUrl, 30_000, signal));
+    const ready = await waitForOwnedRpcReady(resources.validator, resources.portLease.rpcPort, signal, async (remainingMs) => await deps.rpc.waitReady(rpcUrl, remainingMs, signal));
     await validatorRpc(resources.validator, resources.portLease.rpcPort, signal, async () => await deps.rpc.waitProgramsReady(rpcUrl, [CLASSIC_TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM], 30_000, signal));
     await deps.cli.verifyFunded(cliContext, { rpcUrl, payer: keys.payer }); ensureNotAborted(signal);
     await assertValidatorHealthy(resources.validator);
@@ -240,3 +260,34 @@ export function assertFixtureAmount(value: bigint): void {
 async function assertValidatorHealthy(value: CleanupResources["validator"]): Promise<void> { if (value === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "validator identity is absent"); } await value.assertHealthy(); }
 async function assertValidatorRpc(value: CleanupResources["validator"], port: number) { if (value === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "validator identity is absent"); } await assertValidatorHealthy(value); const fact = await value.assertRpcListener(port); await assertValidatorHealthy(value); return fact; }
 async function validatorRpc<T>(value: CleanupResources["validator"], port: number, signal: AbortSignal, action: () => Promise<T>): Promise<T> { ensureNotAborted(signal); await assertValidatorRpc(value, port); ensureNotAborted(signal); const result = await action(); ensureNotAborted(signal); await assertValidatorRpc(value, port); ensureNotAborted(signal); return result; }
+
+export async function waitForOwnedRpcReady<T>(
+  validator: ValidatorHandle,
+  port: number,
+  signal: AbortSignal,
+  action: (remainingMs: number) => Promise<T>,
+  timing: ReadinessTiming = systemReadinessTiming,
+): Promise<T> {
+  const deadline = timing.now() + RPC_READINESS_TIMEOUT_MS;
+  while (true) {
+    ensureNotAborted(signal);
+    try {
+      await assertValidatorRpc(validator, port);
+      break;
+    } catch (cause) {
+      ensureNotAborted(signal);
+      if (!(cause instanceof LocalSolanaError) || cause.code !== "SOLANA_RPC_LISTENER_IDENTITY") { throw cause; }
+      const remainingMs = deadline - timing.now();
+      if (remainingMs <= 0) { throw cause; }
+      await timing.wait(Math.min(RPC_LISTENER_RETRY_MS, remainingMs), signal);
+    }
+  }
+  ensureNotAborted(signal);
+  const remainingMs = Math.floor(deadline - timing.now());
+  if (remainingMs <= 0) { throw new LocalSolanaError("SOLANA_RPC_READY_TIMEOUT", "RPC readiness deadline was exhausted after listener ownership was proven"); }
+  const result = await action(remainingMs);
+  ensureNotAborted(signal);
+  await assertValidatorRpc(validator, port);
+  ensureNotAborted(signal);
+  return result;
+}
