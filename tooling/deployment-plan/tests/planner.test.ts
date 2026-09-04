@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readdir, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import { runUnsignedPlanner, type PlannerInput } from "../src/composition/index.
 import type { TrustRoots } from "../src/application/ports.ts";
 import { canonicalBuildInfoSha256, portableCompilerInputSha256 } from "../src/adapters/artifact.ts";
 import { sha256Hex } from "../src/domain/identity.ts";
+import { parseNativeNoReplaceEvidence, parseReadyMarker } from "../src/adapters/strict-json.ts";
 
 const source = "contract X {}";
 const settings = {
@@ -96,6 +97,30 @@ const roots: TrustRoots = {
     "src/features/token-genesis/AGTMAIToken.sol": sha256Hex(source),
   },
 };
+
+test("planner publishes canonical native evidence and READY V3 last", async (context) => {
+  context.mock.method(Date, "now", () => 110_000);
+  const rpc = await startRpc(() => "0x64");
+  try {
+    const prepared = await prepare(rpc.url, "complete");
+    const result = await runUnsignedPlanner(prepared.input);
+    assert.deepEqual((await readdir(result.directory)).toSorted(), ["READY", "deployment-plan.v2.json", "fee-quote.v2.json", "native-no-replace-evidence.v1.json"].toSorted());
+    const evidenceBytes = await readFile(join(result.directory, "native-no-replace-evidence.v1.json"));
+    const evidence = parseNativeNoReplaceEvidence(evidenceBytes);
+    const ready = parseReadyMarker(await readFile(join(result.directory, "READY")));
+    const expectedNative = process.platform === "darwin"
+      ? { platform: "darwin-arm64", compilerSha256: "0x7588ceab299393618d6f8861502ac0588d1594025f301d9a61a898215b5571d3", executableSha256: "0x333d90f849c3116bf477678e9439abce54bcf2eed1c724652e70172f69ae584e" }
+      : { platform: "linux-x64", compilerSha256: "0x1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26", executableSha256: "0x814aba8dfb8f176c252a3fc8f4aa8564723c0790613ee101a9a45fc41f629e9b" };
+    assert.equal(evidence.platform, expectedNative.platform);
+    assert.equal(evidence.compilerSha256, expectedNative.compilerSha256);
+    assert.equal(evidence.executableSha256, expectedNative.executableSha256);
+    if (process.platform === "linux") {
+      assert.equal(evidence.approvalSha256, "0xf1fa7618fcabf0f34c70eea49bf1786a62554b29d4b820c1221fa0c89c0a79bd");
+    }
+    assert.equal(result.nativeNoReplaceEvidenceSha256, sha256Hex(evidenceBytes));
+    assert.equal(ready.nativeNoReplaceEvidenceSha256, result.nativeNoReplaceEvidenceSha256);
+  } finally { await close(rpc.server); }
+});
 
 test("estimate N to N+1 during pre-publication verification leaves no output", async (context) => {
   context.mock.method(Date, "now", () => 110_000);

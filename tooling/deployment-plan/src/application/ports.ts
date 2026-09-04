@@ -65,3 +65,40 @@ export interface ApprovedArtifact {
   readonly creationInput: `0x${string}`;
   readonly creationInputHash: `0x${string}`;
 }
+
+export interface NativeNoReplaceTuple {
+  readonly compilerPath: string;
+  readonly compilerSha256: `0x${string}`;
+  readonly executableSha256: `0x${string}`;
+}
+
+export interface NativeNoReplacePlatformPolicy {
+  readonly strategy: "snapshot-fd" | "verified-path";
+  readonly tuples: readonly NativeNoReplaceTuple[];
+}
+
+export interface NativeNoReplacePolicy {
+  readonly schemaVersion: 1;
+  readonly kind: "native-no-replace-build-policy";
+  readonly sourcePath: "tooling/deployment-plan/native/no-replace.c";
+  readonly sourceSha256: `0x${string}`;
+  readonly compileProfile: "c11-o2-werror-stdin-v1";
+  readonly platforms: Readonly<Record<"darwin-arm64" | "linux-x64", NativeNoReplacePlatformPolicy>>;
+}
+
+export interface NativeNoReplaceEvidenceFields {
+  readonly platform: "darwin-arm64" | "linux-x64";
+  readonly sourcePath: "tooling/deployment-plan/native/no-replace.c";
+  readonly sourceSha256: `0x${string}`;
+  readonly compileProfile: "c11-o2-werror-stdin-v1";
+  readonly compilerExecution: "snapshot-fd" | "verified-path";
+  readonly compilerPath: string;
+  readonly compilerSha256: `0x${string}`;
+  readonly executableSha256: `0x${string}`;
+}
+
+export interface NativeNoReplaceEvidence extends NativeNoReplaceEvidenceFields {
+  readonly schemaVersion: 1;
+  readonly kind: "native-no-replace-evidence";
+  readonly approvalSha256: `0x${string}`;
+}

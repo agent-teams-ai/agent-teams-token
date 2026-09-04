@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   parseFeeQuote,
   parseJsonWithoutDuplicates,
+  parseNativeNoReplaceEvidence,
   parseReadyMarker,
   parseStablePlan,
   parseTrustRoots,
@@ -39,9 +40,18 @@ const quote = {
   estimatedWei: "2", worstCaseWei: "2", expiresAt: "2",
 };
 const ready = {
-  schemaVersion: 2, planSha256: hash, quoteSha256: hash, planId: hash,
+  schemaVersion: 3, planSha256: hash, quoteSha256: hash, nativeNoReplaceEvidenceSha256: hash, planId: hash,
   creationInputHash: hash,
 };
+
+test("schema V3 keeps plan and quote V2 while binding native evidence in READY", async () => {
+  const schema = JSON.parse(await readFile(new URL("../schema.v3.json", import.meta.url), "utf8")) as { $defs: Record<string, { properties: Record<string, unknown>; required: string[] }> };
+  assert.deepEqual(schema.$defs.plan.properties.schemaVersion, { const: 2 });
+  assert.deepEqual(schema.$defs.quote.properties.schemaVersion, { const: 2 });
+  assert.deepEqual(schema.$defs.nativeNoReplaceEvidence.properties.schemaVersion, { const: 1 });
+  assert.deepEqual(schema.$defs.ready.properties.schemaVersion, { const: 3 });
+  assert.deepEqual(schema.$defs.ready.required.toSorted(), ["schemaVersion", "planSha256", "quoteSha256", "nativeNoReplaceEvidenceSha256", "planId", "creationInputHash"].toSorted());
+});
 
 test("strict JSON accepts only RFC 8259 whitespace and canonical integer tokens", () => {
   const valid = parseJsonWithoutDuplicates(
@@ -128,7 +138,11 @@ test("plan, quote and READY parsers enforce exact keys and versions", () => {
   assert.doesNotThrow(() => parseReadyMarker(bytes(ready)));
   assert.throws(() => parseStablePlan(bytes({ ...plan, signedRawTransaction: "0xdeadbeef" })), /unknown/u);
   assert.throws(() => parseFeeQuote(bytes({ ...quote, broadcastAllowed: true })), /unknown/u);
-  assert.throws(() => parseReadyMarker(bytes({ ...ready, schemaVersion: 999 })), /schemaVersion/u);
+  assert.throws(() => parseReadyMarker(bytes({ ...ready, schemaVersion: 999 })), /V3/u);
+  assert.throws(() => parseReadyMarker(bytes({ ...ready, schemaVersion: 2 })), /V3/u);
+  const { nativeNoReplaceEvidenceSha256: omittedNative, ...missingNative } = ready;
+  assert.equal(omittedNative, hash);
+  assert.throws(() => parseReadyMarker(bytes(missingNative)), /missing/u);
   assert.throws(
     () => parseStablePlan(bytes({ ...plan, identity: { ...identity, sendMethod: "eth_sendRawTransaction" } })),
     /unknown/u,
@@ -152,6 +166,17 @@ test("plan, quote and READY parsers enforce exact keys and versions", () => {
   );
 });
 
+test("native evidence parser rejects missing, extra, malformed and duplicate members", () => {
+  const evidence = { schemaVersion: 1, kind: "native-no-replace-evidence", platform: "linux-x64", sourcePath: "tooling/deployment-plan/native/no-replace.c", sourceSha256: hash, compileProfile: "c11-o2-werror-stdin-v1", compilerExecution: "snapshot-fd", compilerPath: "/usr/bin/cc", compilerSha256: hash, executableSha256: hash, approvalSha256: hash };
+  assert.doesNotThrow(() => parseNativeNoReplaceEvidence(bytes(evidence)));
+  const { approvalSha256: omitted, ...missing } = evidence;
+  assert.equal(omitted, hash);
+  assert.throws(() => parseNativeNoReplaceEvidence(bytes(missing)), /missing/u);
+  assert.throws(() => parseNativeNoReplaceEvidence(bytes({ ...evidence, extra: true })), /unknown/u);
+  assert.throws(() => parseNativeNoReplaceEvidence(bytes({ ...evidence, compilerSha256: "bad" })), /malformed/u);
+  assert.throws(() => parseNativeNoReplaceEvidence(Buffer.from(JSON.stringify(evidence).replace('"platform":', '"platform":"linux-x64","platform":'))), /duplicate/u);
+});
+
 test("trust roots parser accepts only the committed exact local schema", async () => {
   const path = new URL("../trust-roots.v2.json", import.meta.url);
   const roots = await readFile(path);
@@ -165,10 +190,10 @@ test("legacy V1 bytes fail closed and cannot enter the V2 identity domain", asyn
   for (const [parse, value] of [
     [parseStablePlan, { ...plan, schemaVersion: 1 }],
     [parseFeeQuote, { ...quote, schemaVersion: 1 }],
-    [parseReadyMarker, { ...ready, schemaVersion: 1 }],
   ] as const) {
     assert.throws(() => parse(bytes(value)), /V1 uses legacy numeric semantics/u);
   }
+  assert.throws(() => parseReadyMarker(bytes({ ...ready, schemaVersion: 2 })), /V3/u);
   const legacyRoots = await readFile(new URL("../trust-roots.v1.json", import.meta.url));
   assert.throws(() => parseTrustRoots(legacyRoots), /V1 uses legacy numeric semantics/u);
 

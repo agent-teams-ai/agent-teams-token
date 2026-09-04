@@ -1,5 +1,5 @@
 import type { FeeQuote, StablePlan } from "../application/builder.ts";
-import type { TrustRoots } from "../application/ports.ts";
+import type { NativeNoReplaceEvidence, TrustRoots } from "../application/ports.ts";
 import type { ReadyMarker } from "../application/verifier.ts";
 import { fail, parseUint } from "../domain/model.ts";
 
@@ -41,7 +41,12 @@ const OBSERVATION_KEYS = [
   "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt",
 ] as const;
 const READY_KEYS = [
-  "schemaVersion", "planSha256", "quoteSha256", "planId", "creationInputHash",
+  "schemaVersion", "planSha256", "quoteSha256", "nativeNoReplaceEvidenceSha256", "planId", "creationInputHash",
+] as const;
+const NATIVE_EVIDENCE_KEYS = [
+  "schemaVersion", "kind", "platform", "sourcePath", "sourceSha256",
+  "compileProfile", "compilerExecution", "compilerPath", "compilerSha256",
+  "executableSha256", "approvalSha256",
 ] as const;
 
 export function parseTrustRoots(bytes: Uint8Array): TrustRoots {
@@ -110,11 +115,22 @@ export function parseFeeQuote(bytes: Uint8Array): FeeQuote {
 
 export function parseReadyMarker(bytes: Uint8Array): ReadyMarker {
   const ready = object(parseJsonWithoutDuplicates(bytes), "READY_SCHEMA");
-  requireV2(ready, "READY_SCHEMA");
+  if (ready.schemaVersion !== 3) fail("READY_LEGACY_UNSUPPORTED", "READY must be regenerated as V3");
   exactKeys(ready, READY_KEYS, "READY_SCHEMA");
-  constants(ready, { schemaVersion: 2 }, "READY_SCHEMA");
-  hashes(ready, ["planSha256", "quoteSha256", "planId", "creationInputHash"]);
+  hashes(ready, ["planSha256", "quoteSha256", "nativeNoReplaceEvidenceSha256", "planId", "creationInputHash"]);
   return ready as unknown as ReadyMarker;
+}
+
+export function parseNativeNoReplaceEvidence(bytes: Uint8Array): NativeNoReplaceEvidence {
+  const evidence = object(parseJsonWithoutDuplicates(bytes), "NATIVE_EVIDENCE_SCHEMA");
+  exactKeys(evidence, NATIVE_EVIDENCE_KEYS, "NATIVE_EVIDENCE_SCHEMA");
+  constants(evidence, { schemaVersion: 1, kind: "native-no-replace-evidence" }, "NATIVE_EVIDENCE_SCHEMA");
+  if (evidence.platform !== "darwin-arm64" && evidence.platform !== "linux-x64") fail("NATIVE_EVIDENCE_SCHEMA", "platform is invalid");
+  if (evidence.sourcePath !== "tooling/deployment-plan/native/no-replace.c" || evidence.compileProfile !== "c11-o2-werror-stdin-v1") fail("NATIVE_EVIDENCE_SCHEMA", "source or compile profile is invalid");
+  if (evidence.compilerExecution !== "snapshot-fd" && evidence.compilerExecution !== "verified-path") fail("NATIVE_EVIDENCE_SCHEMA", "compiler execution is invalid");
+  if (evidence.compilerPath !== "/usr/bin/cc") fail("NATIVE_EVIDENCE_SCHEMA", "compiler path is invalid");
+  hashes(evidence, ["sourceSha256", "compilerSha256", "executableSha256", "approvalSha256"]);
+  return evidence as unknown as NativeNoReplaceEvidence;
 }
 
 export function parseJsonWithoutDuplicates(bytes: Uint8Array): unknown {

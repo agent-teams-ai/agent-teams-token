@@ -6,13 +6,15 @@ import {
 } from "../domain/identity.ts";
 import { calculateCosts, checkedAdd, fail, parseUint } from "../domain/model.ts";
 import { validateTrustRootSafety, type FeeQuote, type StablePlan } from "./builder.ts";
-import type { ApprovedArtifact, DeploymentRpc, RawArtifactInputs, TrustRoots } from "./ports.ts";
+import type { ApprovedArtifact, DeploymentRpc, NativeNoReplaceEvidence, NativeNoReplaceEvidenceFields, NativeNoReplacePolicy, RawArtifactInputs, TrustRoots } from "./ports.ts";
+import { parseNativeNoReplaceEvidence } from "../adapters/strict-json.ts";
 import { independentlyApproveRawArtifact } from "./raw-artifact-verifier.ts";
 
 export interface ReadyMarker {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly planSha256: string;
   readonly quoteSha256: string;
+  readonly nativeNoReplaceEvidenceSha256: string;
   readonly planId: string;
   readonly creationInputHash: string;
 }
@@ -25,6 +27,8 @@ export interface VerificationRequest {
   readonly artifactInputs: RawArtifactInputs;
   readonly ready: ReadyMarker;
   readonly nowSeconds: bigint;
+  readonly nativeNoReplaceEvidenceBytes: Uint8Array;
+  readonly nativeNoReplacePolicy: NativeNoReplacePolicy;
 }
 
 export interface RpcVerificationRequest {
@@ -42,20 +46,121 @@ export function independentlyVerify(request: VerificationRequest): void {
   validateBuildBindings(request.plan, independentlyApproved);
   validateBuilderAgreement(request.expected, independentlyApproved);
   validateQuote(request);
+  verifyNativeNoReplaceEvidence(request.nativeNoReplaceEvidenceBytes, request.nativeNoReplacePolicy);
   validateReadyBinding(request.plan, request.quote, request.ready);
 }
 
 export function verifyReadyDigests(
   planBytes: Uint8Array,
   quoteBytes: Uint8Array,
+  nativeNoReplaceEvidenceBytes: Uint8Array,
   ready: ReadyMarker,
 ): void {
   if (
     sha256Hex(planBytes) !== ready.planSha256
     || sha256Hex(quoteBytes) !== ready.quoteSha256
+    || sha256Hex(nativeNoReplaceEvidenceBytes) !== ready.nativeNoReplaceEvidenceSha256
   ) {
     fail("READY_DIGEST_MISMATCH", "READY marker is stale or files were substituted");
   }
+}
+
+export function verifyNativeNoReplaceEvidence(
+  bytes: Uint8Array,
+  candidatePolicy: NativeNoReplacePolicy,
+): NativeNoReplaceEvidence {
+  const policy = validateNativePolicy(candidatePolicy);
+  const evidence = parseNativeNoReplaceEvidence(bytes);
+  const platformPolicy = policy.platforms[evidence.platform];
+  if (
+    evidence.sourcePath !== policy.sourcePath
+    || evidence.sourceSha256 !== policy.sourceSha256
+    || evidence.compileProfile !== policy.compileProfile
+    || evidence.compilerExecution !== platformPolicy.strategy
+  ) {
+    fail("NATIVE_EVIDENCE_POLICY_MISMATCH", "native evidence differs from build policy");
+  }
+  if (!platformPolicy.tuples.some((tuple) =>
+    tuple.compilerPath === evidence.compilerPath
+    && tuple.compilerSha256 === evidence.compilerSha256
+    && tuple.executableSha256 === evidence.executableSha256)) {
+    fail("NATIVE_EVIDENCE_TUPLE_UNAPPROVED", "native evidence tuple is not atomically approved");
+  }
+  const fields: NativeNoReplaceEvidenceFields = {
+    platform: evidence.platform,
+    sourcePath: evidence.sourcePath,
+    sourceSha256: evidence.sourceSha256,
+    compileProfile: evidence.compileProfile,
+    compilerExecution: evidence.compilerExecution,
+    compilerPath: evidence.compilerPath,
+    compilerSha256: evidence.compilerSha256,
+    executableSha256: evidence.executableSha256,
+  };
+  const approval = sha256Hex(Buffer.concat([
+    Buffer.from("AGTMAI_NATIVE_NO_REPLACE_APPROVAL_V1\0"),
+    Buffer.from(canonicalJson(fields)),
+  ]));
+  if (approval !== evidence.approvalSha256) {
+    fail("NATIVE_EVIDENCE_APPROVAL_FORGED", "native evidence approval digest is forged");
+  }
+  return evidence;
+}
+
+function validateNativePolicy(value: unknown): NativeNoReplacePolicy {
+  const policy = exactNativePolicyObject(value, [
+    "schemaVersion", "kind", "sourcePath", "sourceSha256", "compileProfile", "platforms",
+  ]);
+  if (
+    policy.schemaVersion !== 1
+    || policy.kind !== "native-no-replace-build-policy"
+    || policy.sourcePath !== "tooling/deployment-plan/native/no-replace.c"
+    || policy.sourceSha256 !== "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09"
+    || policy.compileProfile !== "c11-o2-werror-stdin-v1"
+  ) {
+    fail("NATIVE_EVIDENCE_POLICY_INVALID", "native evidence policy is invalid");
+  }
+  const platforms = exactNativePolicyObject(policy.platforms, ["darwin-arm64", "linux-x64"]);
+  validateNativePolicyPlatform(platforms["darwin-arm64"], "verified-path");
+  validateNativePolicyPlatform(platforms["linux-x64"], "snapshot-fd");
+  return policy as unknown as NativeNoReplacePolicy;
+}
+
+function validateNativePolicyPlatform(value: unknown, strategy: string): void {
+  const platform = exactNativePolicyObject(value, ["strategy", "tuples"]);
+  if (platform.strategy !== strategy || !Array.isArray(platform.tuples)
+    || platform.tuples.length < 1 || platform.tuples.length > 2) {
+    fail("NATIVE_EVIDENCE_POLICY_INVALID", "native evidence platform policy is invalid");
+  }
+  const tuples = platform.tuples.map((value) => exactNativePolicyObject(
+    value, ["compilerPath", "compilerSha256", "executableSha256"],
+  ));
+  const serialized = tuples.map((tuple) => canonicalJson(tuple));
+  const compilers = tuples.map((tuple) => `${String(tuple.compilerPath)}|${String(tuple.compilerSha256)}`);
+  if (tuples.some((tuple) => tuple.compilerPath !== "/usr/bin/cc"
+      || typeof tuple.compilerSha256 !== "string" || !/^0x[0-9a-f]{64}$/u.test(tuple.compilerSha256)
+      || typeof tuple.executableSha256 !== "string" || !/^0x[0-9a-f]{64}$/u.test(tuple.executableSha256))
+    || new Set(serialized).size !== serialized.length
+    || new Set(compilers).size !== compilers.length
+    || serialized.some((entry, index) => index > 0 && serialized[index - 1]! >= entry)) {
+    fail("NATIVE_EVIDENCE_POLICY_INVALID", "native evidence tuples are malformed");
+  }
+}
+
+function exactNativePolicyObject(
+  value: unknown,
+  expectedKeys: readonly string[],
+): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail("NATIVE_EVIDENCE_POLICY_INVALID", "native evidence policy member is malformed");
+  }
+  const object = value as Record<string, unknown>;
+  const actual = Object.keys(object).toSorted();
+  const expected = [...expectedKeys].toSorted();
+  if (actual.length !== expected.length
+    || actual.some((key, index) => key !== expected[index])) {
+    fail("NATIVE_EVIDENCE_POLICY_INVALID", "native evidence policy has unknown members");
+  }
+  return object;
 }
 
 export async function independentlyVerifyRpc(request: RpcVerificationRequest): Promise<void> {

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import test from "node:test";
 import { loadLock, validateLock } from "../toolchain.mjs";
@@ -67,5 +69,29 @@ test("Core and Agave lock paths reject traversal, separators, controls and optio
       mutated.tools[toolName].platforms["linux-x64"].expectedFiles[0] = value;
       assert.throws(() => validateLock(mutated), /TOOLCHAIN_LOCK_RELATIVE_PATH/);
     }
+  }
+});
+
+test("native no-replace policy is exact, bounded, atomic, and not downloadable", () => {
+  const lock = loadLock(join(repositoryRoot, "tooling/toolchain.lock.json"));
+  const policy = lock.nativeBuilds.noReplace;
+  assert.equal(policy.schemaVersion, 1);
+  assert.equal(policy.kind, "native-no-replace-build-policy");
+  assert.equal(policy.sourcePath, "tooling/deployment-plan/native/no-replace.c");
+  assert.equal(policy.sourceSha256, "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09");
+  assert.equal(policy.compileProfile, "c11-o2-werror-stdin-v1");
+  assert.equal(`0x${createHash("sha256").update(readFileSync(join(repositoryRoot, policy.sourcePath))).digest("hex")}`, policy.sourceSha256);
+  assert.equal(lock.coreTools.includes("noReplace"), false);
+  assert.deepEqual(policy.platforms["darwin-arm64"].tuples[0], { compilerPath: "/usr/bin/cc", compilerSha256: "0x7588ceab299393618d6f8861502ac0588d1594025f301d9a61a898215b5571d3", executableSha256: "0x333d90f849c3116bf477678e9439abce54bcf2eed1c724652e70172f69ae584e" });
+  assert.deepEqual(policy.platforms["linux-x64"].tuples[0], { compilerPath: "/usr/bin/cc", compilerSha256: "0x1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26", executableSha256: "0x814aba8dfb8f176c252a3fc8f4aa8564723c0790613ee101a9a45fc41f629e9b" });
+  for (const mutate of [
+    (copy) => { delete copy.nativeBuilds.noReplace.sourcePath; },
+    (copy) => { copy.nativeBuilds.noReplace.unknown = true; },
+    (copy) => { copy.nativeBuilds.noReplace.platforms["linux-x64"].strategy = "verified-path"; },
+    (copy) => { copy.nativeBuilds.noReplace.platforms["linux-x64"].tuples[0].compilerSha256 = "bad"; },
+    (copy) => { copy.nativeBuilds.noReplace.platforms["linux-x64"].tuples.push(structuredClone(copy.nativeBuilds.noReplace.platforms["linux-x64"].tuples[0])); },
+    (copy) => { const tuple = copy.nativeBuilds.noReplace.platforms["linux-x64"].tuples[0]; copy.nativeBuilds.noReplace.platforms["linux-x64"].tuples = [tuple, { ...tuple, compilerSha256: `0x${"e".repeat(64)}` }, { ...tuple, compilerSha256: `0x${"f".repeat(64)}` }]; },
+  ]) {
+    const copy = structuredClone(lock); mutate(copy); assert.throws(() => validateLock(copy), /TOOLCHAIN_LOCK_NATIVE/);
   }
 });

@@ -22,6 +22,8 @@ import type {
   ApprovedArtifact,
   ArtifactInputs,
   DeploymentRpc,
+  NativeNoReplaceEvidence,
+  NativeNoReplacePolicy,
   RawArtifactInputs,
   TrustRoots,
 } from "../application/ports.ts";
@@ -37,6 +39,7 @@ import { fail } from "../domain/model.ts";
 
 const PLAN = "deployment-plan.v2.json";
 const QUOTE = "fee-quote.v2.json";
+const NATIVE_EVIDENCE = "native-no-replace-evidence.v1.json";
 const READY = "READY";
 
 export interface PublishRequest {
@@ -47,6 +50,8 @@ export interface PublishRequest {
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
   readonly artifactInputs: RawArtifactInputs;
+  readonly nativeNoReplaceEvidence: NativeNoReplaceEvidence;
+  readonly nativeNoReplacePolicy: NativeNoReplacePolicy;
   readonly outputFaultInjection?: OutputFaultInjection;
 }
 
@@ -59,6 +64,7 @@ export interface VerifyBundleRequest {
   readonly nowSeconds: bigint;
   readonly rpc: DeploymentRpc;
   readonly creationInput: `0x${string}`;
+  readonly nativeNoReplacePolicy: NativeNoReplacePolicy;
 }
 
 export interface PlannerInput {
@@ -77,6 +83,7 @@ export interface PlannerInput {
 export interface PublishedBundleIdentity extends PublishedOutputIdentity {
   readonly planSha256: `0x${string}`;
   readonly quoteSha256: `0x${string}`;
+  readonly nativeNoReplaceEvidenceSha256: `0x${string}`;
   readonly readySha256: `0x${string}`;
 }
 
@@ -138,17 +145,20 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
   }
   const planBytes = jsonBytes(request.plan);
   const quoteBytes = jsonBytes(request.quote);
+  const nativeNoReplaceEvidenceBytes = jsonBytes(request.nativeNoReplaceEvidence);
   const planSha256 = sha256Hex(planBytes);
   const quoteSha256 = sha256Hex(quoteBytes);
+  const nativeNoReplaceEvidenceSha256 = sha256Hex(nativeNoReplaceEvidenceBytes);
   const ready: ReadyMarker = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     planSha256,
     quoteSha256,
+    nativeNoReplaceEvidenceSha256,
     planId: request.plan.planId,
     creationInputHash: request.quote.creationInputHash,
   };
   const readyBytes = jsonBytes(ready);
-  independentlyVerify({ ...request, ready, nowSeconds: trustedNowSeconds() });
+  independentlyVerify({ ...request, ready, nativeNoReplaceEvidenceBytes, nowSeconds: trustedNowSeconds() });
   const output = await claimOwnedOutputDirectory(
     request.parent,
     request.bundleName,
@@ -157,15 +167,16 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
   try {
     await output.writeExclusive(PLAN, planBytes);
     await output.writeExclusive(QUOTE, quoteBytes);
+    await output.writeExclusive(NATIVE_EVIDENCE, nativeNoReplaceEvidenceBytes);
     await assertExactBundle(output.path, false, false);
     await assertPreparedContent(
-      output.path, planBytes, quoteBytes, ready,
+      output.path, planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
     const published = await output.publish();
     await assertExactBundle(published, true, false);
     await assertPreparedContent(
-      published, planBytes, quoteBytes, ready,
+      published, planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready,
       { ...request, nowSeconds: trustedNowSeconds() },
     );
     await output.finalizeReady(READY, readyBytes);
@@ -174,6 +185,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
       ...output.publicationIdentity(),
       planSha256,
       quoteSha256,
+      nativeNoReplaceEvidenceSha256,
       readySha256: sha256Hex(readyBytes),
     });
   } catch (error) {
@@ -196,14 +208,15 @@ export async function verifyBundle(
   const markerBytes = await request.publication.readCommitted(READY);
   const planBytes = await request.publication.readCommitted(PLAN);
   const quoteBytes = await request.publication.readCommitted(QUOTE);
+  const nativeNoReplaceEvidenceBytes = await request.publication.readCommitted(NATIVE_EVIDENCE);
   if (sha256Hex(quoteBytes) !== request.expectedQuoteSha256) {
     fail("EXPECTED_QUOTE_DIGEST_MISMATCH", "authenticated quote bytes do not match expected digest");
   }
   const ready = parseReadyMarker(markerBytes);
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
-  verifyReadyDigests(planBytes, quoteBytes, ready);
-  independentlyVerify({ ...request, plan, quote, ready, nowSeconds: trustedNowSeconds() });
+  verifyReadyDigests(planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready);
+  independentlyVerify({ ...request, plan, quote, ready, nativeNoReplaceEvidenceBytes, nowSeconds: trustedNowSeconds() });
   await independentlyVerifyRpc({
     rpc: request.rpc,
     plan,
@@ -229,13 +242,13 @@ async function assertExactBundle(
   }
   if (await realpath(directory) !== directory) {fail("BUNDLE_DIRECTORY_UNSAFE", "bundle path must be canonical");}
   const names = (await readdir(directory)).toSorted();
-  const expected = readyRequired ? [PLAN, QUOTE, READY].toSorted() : [PLAN, QUOTE].toSorted();
+  const expected = readyRequired ? [PLAN, QUOTE, NATIVE_EVIDENCE, READY].toSorted() : [PLAN, QUOTE, NATIVE_EVIDENCE].toSorted();
   if (names.length !== expected.length || names.some((name, index) => name !== expected[index])) {
     fail(
       "BUNDLE_FILES_INVALID",
       readyRequired
-        ? "bundle must contain exactly plan, quote, and READY"
-        : "prepared bundle must contain exactly plan and quote",
+        ? "bundle must contain exactly plan, quote, native evidence, and READY"
+        : "prepared bundle must contain exactly plan, quote, and native evidence",
     );
   }
 }
@@ -244,21 +257,24 @@ async function assertPreparedContent(
   directory: string,
   expectedPlanBytes: Uint8Array,
   expectedQuoteBytes: Uint8Array,
+  expectedNativeEvidenceBytes: Uint8Array,
   expectedReady: ReadyMarker,
   request: PublishRequest & Pick<VerificationRequest, "nowSeconds">,
 ): Promise<void> {
   const planBytes = await safeRead(join(directory, PLAN));
   const quoteBytes = await safeRead(join(directory, QUOTE));
+  const nativeNoReplaceEvidenceBytes = await safeRead(join(directory, NATIVE_EVIDENCE));
   if (
     !Buffer.from(planBytes).equals(expectedPlanBytes)
     || !Buffer.from(quoteBytes).equals(expectedQuoteBytes)
+    || !Buffer.from(nativeNoReplaceEvidenceBytes).equals(expectedNativeEvidenceBytes)
   ) {
     fail("OUTPUT_CONTENT_SUBSTITUTED", "published bundle differs from verified staging bytes");
   }
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
-  verifyReadyDigests(planBytes, quoteBytes, expectedReady);
-  independentlyVerify({ ...request, plan, quote, ready: expectedReady });
+  verifyReadyDigests(planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, expectedReady);
+  independentlyVerify({ ...request, plan, quote, ready: expectedReady, nativeNoReplaceEvidenceBytes });
 }
 
 export async function runUnsignedPlanner(
@@ -267,6 +283,7 @@ export async function runUnsignedPlanner(
   directory: string;
   planId: string;
   quoteSha256: `0x${string}`;
+  nativeNoReplaceEvidenceSha256: `0x${string}`;
   bundleIdentity: PublishedBundleIdentity;
 }> {
   const roots = parseTrustRoots(await safeRead(input.trustRootsPath));
@@ -305,6 +322,8 @@ export async function runUnsignedPlanner(
       roots,
       expected: approved,
       artifactInputs,
+      nativeNoReplaceEvidence: nativeNoReplace.evidence,
+      nativeNoReplacePolicy: nativeNoReplace.policy,
       outputFaultInjection: { noReplaceDirectoryRename: nativeNoReplace.rename },
     };
     const publication = await publishReadyLast(publishRequest);
@@ -318,11 +337,13 @@ export async function runUnsignedPlanner(
         nowSeconds: trustedNowSeconds(),
         rpc,
         creationInput: approved.creationInput,
+        nativeNoReplacePolicy: nativeNoReplace.policy,
       });
       return {
         directory: publication.directory,
         planId: plan.planId,
         quoteSha256: publication.quoteSha256,
+        nativeNoReplaceEvidenceSha256: publication.identity.nativeNoReplaceEvidenceSha256,
         bundleIdentity: publication.identity,
       };
     } finally {

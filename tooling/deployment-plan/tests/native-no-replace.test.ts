@@ -12,11 +12,13 @@ import { acceptedCustodyCanonicalPath } from "../src/adapters/native-custody.ts"
 import {
   assertNativeNoReplacePlatform,
   createNativeNoReplaceCapability,
+  loadNativeNoReplacePolicy,
   isCustodyAncestorSafe,
   isExecutableCustodySafe,
   nativeCompilerExecutionStrategy,
   processGroupHasLiveMembersFromPs,
 } from "../src/adapters/native-no-replace.ts";
+import { runBoundChild } from "../src/adapters/native-custody-process.ts";
 import type { NoReplaceRenameRequest } from "../src/adapters/safe-output.ts";
 
 const SAFE_EXECUTABLE = {
@@ -273,36 +275,31 @@ test("compiler consumes pinned private source bytes from stdin after pathname re
   }
 });
 
-test("Linux compiler execution remains bound after the trusted original pathname is replaced", {
-  skip: process.platform !== "linux" || process.getuid?.() !== 0,
-}, async () => {
-  const compiler = join(dirname(NATIVE_SOURCE), `.replace-cc-${String(process.pid)}`);
-  const displaced = `${compiler}.held`;
-  const sentinel = `${compiler}.called`;
-  const previous = process.env.AGTMAI_CC_BINARY;
-  await writeFile(compiler, "#!/bin/sh\nexec /usr/bin/cc \"$@\"\n", { mode: 0o500 });
-  process.env.AGTMAI_CC_BINARY = compiler;
-  let capability: Awaited<ReturnType<typeof createNativeNoReplaceCapability>> | undefined;
-  try {
-    capability = await createNativeNoReplaceCapability({
-      async afterCompilerSnapshot(_snapshot, original) {
-        await rename(original, displaced);
-        await writeFile(original, `#!/bin/sh\ntouch '${sentinel}'\nexit 99\n`, { mode: 0o500 });
-      },
-    });
-    await assert.rejects(readFile(sentinel));
-    assert.match(capability.executableSha256, /^0x[0-9a-f]{64}$/u);
-  } finally {
-    if (previous === undefined) { delete process.env.AGTMAI_CC_BINARY; }
-    else { process.env.AGTMAI_CC_BINARY = previous; }
-    if (capability !== undefined) {
-      await capability.close();
-      await rm(capability.custodyPath, { recursive: true, force: true });
-    }
-    await rm(compiler, { force: true });
-    await rm(displaced, { force: true });
-    await rm(sentinel, { force: true });
-  }
+test("unapproved compiler tuple fails before the compiler spawn sentinel", async () => {
+  const policy = JSON.parse(JSON.stringify(await loadNativeNoReplacePolicy()));
+  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
+  policy.platforms[platform].tuples[0]!.compilerSha256 = `0x${"0".repeat(64)}`;
+  let spawned = false;
+  await assert.rejects(createNativeNoReplaceCapability({ policy, async beforeCompilerSpawn() { spawned = true; } }), (error: unknown) => error instanceof Error && "code" in error && error.code === "NO_REPLACE_COMPILER_UNAPPROVED");
+  assert.equal(spawned, false);
+});
+
+test("helper digest must belong to the same approved compiler tuple", async () => {
+  const policy = JSON.parse(JSON.stringify(await loadNativeNoReplacePolicy()));
+  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
+  policy.platforms[platform].tuples[0]!.executableSha256 = `0x${"0".repeat(64)}`;
+  await assert.rejects(createNativeNoReplaceCapability({ policy }), (error: unknown) => error instanceof Error && "code" in error && error.code === "NO_REPLACE_EXECUTABLE_UNAPPROVED");
+});
+
+test("compiler and helper approvals cannot be crossed between tuples", async () => {
+  const policy = JSON.parse(JSON.stringify(await loadNativeNoReplacePolicy()));
+  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
+  const actual = policy.platforms[platform].tuples[0]!;
+  policy.platforms[platform].tuples = [
+    { ...actual, executableSha256: `0x${"0".repeat(64)}` },
+    { ...actual, compilerSha256: `0x${"f".repeat(64)}` },
+  ].toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  await assert.rejects(createNativeNoReplaceCapability({ policy }), (error: unknown) => error instanceof Error && "code" in error && error.code === "NO_REPLACE_EXECUTABLE_UNAPPROVED");
 });
 
 test("Linux executes compiler and helper through held descriptors despite pathname replacement", {
@@ -374,90 +371,35 @@ test("Darwin rejects private helper pathname substitution before spawn", {
   }
 });
 
-test("timeout TERM/KILLs a TERM-ignoring descendant, drains streams, and reaps the group", {
-  skip: process.platform !== "linux" || process.getuid?.() !== 0,
-}, async () => {
-  const compiler = join(dirname(NATIVE_SOURCE), `.timeout-cc-${String(process.pid)}`);
-  const previous = process.env.AGTMAI_CC_BINARY;
-  await writeFile(compiler, `#!/bin/sh
-out=""
-previous=""
-for argument in "$@"; do
-  if [ "$previous" = "-o" ]; then out="$argument"; break; fi
-  previous="$argument"
-done
-cat >/dev/null
-printf '%s\\n' '#!/bin/sh' 'kid=""' \
-  'on_term() { kill -KILL "$kid"; wait "$kid" 2>/dev/null; while :; do :; done; }' \
-  'trap on_term TERM' \
-  '(trap "" TERM; echo descendant >&2; while :; do :; done) &' \
-  'kid=$!' 'while :; do wait "$kid"; done' > "$out"
-chmod 500 "$out"
+test("timeout TERM/KILLs a TERM-ignoring descendant, drains streams, and reaps the group", { skip: process.platform !== "linux" }, async () => {
+  const root = await canonicalTemporaryDirectory();
+  const helper = join(root, "term-helper");
+  await writeFile(helper, `#!/bin/sh
+kid=""
+on_term() { kill -KILL "$kid"; wait "$kid" 2>/dev/null; while :; do :; done; }
+trap on_term TERM
+(trap "" TERM; echo descendant >&2; while :; do :; done) &
+kid=$!
+while :; do wait "$kid"; done
 `, { mode: 0o500 });
-  process.env.AGTMAI_CC_BINARY = compiler;
-  let capability: Awaited<ReturnType<typeof createNativeNoReplaceCapability>> | undefined;
-  const parent = await canonicalTemporaryDirectory();
-  await mkdir(join(parent, "source"), { mode: 0o700 });
-  const parentHandle = await openDirectory(parent);
-  const sourceHandle = await openDirectory(join(parent, "source"));
+  const handle = await open(helper, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    capability = await createNativeNoReplaceCapability({
-      helperTimeoutMs: 100, termGraceMs: 100, groupReapMs: 2_000,
-    });
-    await assert.rejects(
-      capability.rename(renameRequest(parentHandle, sourceHandle, "source", "target")),
-      /process group timed out and was reaped/u,
-    );
-  } finally {
-    if (previous === undefined) { delete process.env.AGTMAI_CC_BINARY; }
-    else { process.env.AGTMAI_CC_BINARY = previous; }
-    await Promise.allSettled([parentHandle.close(), sourceHandle.close(), capability?.close()]);
-    if (capability !== undefined) { await rm(capability.custodyPath, { recursive: true, force: true }); }
-    await rm(compiler, { force: true });
-    await rm(parent, { recursive: true, force: true });
-  }
+    await assert.rejects(runBoundChild({ executable: { path: helper, handle }, assertExecutableReady: async () => {}, executeThroughHeldDescriptor: true, arguments: [], inherited: [], timeoutMs: 100, termGraceMs: 100, groupReapMs: 2_000, code: "TEST_TIMEOUT" }), /process group timed out and was reaped/u);
+  } finally { await handle.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("timeout escalation survives leader close until a descriptor-retaining descendant is killed", {
-  skip: process.platform !== "linux" || process.getuid?.() !== 0,
-}, async () => {
-  const compiler = join(dirname(NATIVE_SOURCE), `.leader-close-cc-${String(process.pid)}`);
-  const previous = process.env.AGTMAI_CC_BINARY;
-  await writeFile(compiler, `#!/bin/sh
-out=""
-previous=""
-for argument in "$@"; do
-  if [ "$previous" = "-o" ]; then out="$argument"; break; fi
-  previous="$argument"
-done
-cat >/dev/null
-printf '%s\\n' '#!/bin/sh' \
-  '(exec 0<&- 1>&- 2>&-; trap "" TERM; while :; do :; done) &' \
-  'trap "exit 0" TERM' 'while :; do :; done' > "$out"
-chmod 500 "$out"
+test("timeout escalation survives leader close until a descriptor-retaining descendant is killed", { skip: process.platform !== "linux" }, async () => {
+  const root = await canonicalTemporaryDirectory();
+  const helper = join(root, "leader-close-helper");
+  await writeFile(helper, `#!/bin/sh
+(exec 0<&- 1>&- 2>&-; trap "" TERM; while :; do :; done) &
+trap "exit 0" TERM
+while :; do :; done
 `, { mode: 0o500 });
-  process.env.AGTMAI_CC_BINARY = compiler;
-  let capability: Awaited<ReturnType<typeof createNativeNoReplaceCapability>> | undefined;
-  const parent = await canonicalTemporaryDirectory();
-  await mkdir(join(parent, "source"), { mode: 0o700 });
-  const parentHandle = await openDirectory(parent);
-  const sourceHandle = await openDirectory(join(parent, "source"));
+  const handle = await open(helper, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    capability = await createNativeNoReplaceCapability({
-      helperTimeoutMs: 100, termGraceMs: 100, groupReapMs: 2_000,
-    });
-    await assert.rejects(
-      capability.rename(renameRequest(parentHandle, sourceHandle, "source", "target")),
-      /process group timed out and was reaped/u,
-    );
-  } finally {
-    if (previous === undefined) { delete process.env.AGTMAI_CC_BINARY; }
-    else { process.env.AGTMAI_CC_BINARY = previous; }
-    await Promise.allSettled([parentHandle.close(), sourceHandle.close(), capability?.close()]);
-    if (capability !== undefined) { await rm(capability.custodyPath, { recursive: true, force: true }); }
-    await rm(compiler, { force: true });
-    await rm(parent, { recursive: true, force: true });
-  }
+    await assert.rejects(runBoundChild({ executable: { path: helper, handle }, assertExecutableReady: async () => {}, executeThroughHeldDescriptor: true, arguments: [], inherited: [], timeoutMs: 100, termGraceMs: 100, groupReapMs: 2_000, code: "TEST_LEADER_CLOSE" }), /process group timed out and was reaped/u);
+  } finally { await handle.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("close is idempotent and preserves authenticated and substituted custody evidence", async () => {

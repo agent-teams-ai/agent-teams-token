@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { validateExpectedFileHashes, validateFixtureToolShape, validateSecurityImage } from "./toolchain-policy.mjs";
+import { validateExpectedFileHashes, validateFixtureToolShape, validateNativeNoReplacePolicy, validateSecurityImage } from "./toolchain-policy.mjs";
 
 function hasControlCharacter(value) {
   return [...value].some((character) => {
@@ -19,6 +19,7 @@ export function validateLock(lock) {
   if (JSON.stringify(lock.fixtureTools) !== JSON.stringify(["agave"])) {
     throw new Error("TOOLCHAIN_LOCK_FIXTURE_TOOLS expected=agave");
   }
+  validateNativeNoReplacePolicy(lock.nativeBuilds?.noReplace);
   for (const name of lock.coreTools) {
     validateCoreTool(lock, name);
   }

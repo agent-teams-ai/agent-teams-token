@@ -6,10 +6,10 @@ gas, fee and cap values are canonical decimal strings converted to `bigint`.
 
 The committed `trust-roots.v2.json` is test-only and explicitly disallows
 mainnet and production approval. The builder cannot promote its own output.
-V2 is the first format whose canonical decimal fields are all required to fit
-`uint256`. Legacy V1 files remain only as migration fixtures: every V1 trust
-root, plan, quote, and READY marker fails closed with an instruction to
-regenerate the complete bundle. V2 also uses a distinct plan-ID domain and
+Plan and quote remain V2, the first format whose canonical decimal fields are all required to fit
+`uint256`. Legacy V1 trust roots, plans, and quotes remain only as migration
+fixtures. READY is V3 and every older READY marker fails closed so the complete
+bundle must be regenerated with native provenance. V2 also uses a distinct plan-ID domain and
 distinct artifact filenames, so V1 bytes cannot be relabelled or cross-swapped.
 It also pins independently generated hashes for the exact ABI constructor
 arguments and the complete creation input, so a coherent encoder defect cannot
@@ -43,8 +43,7 @@ The exact-block `eth_getTransactionCount` read binds the volatile quote to the
 canonical sender nonce. Nonce, derived RLP/Keccak CREATE address, observation
 block and hash, gas estimate and fee facts live only in that quote. The stable
 plan retains the full zero-value creation input and sender but excludes those
-observations, so refreshing any of them preserves `planId`; READY binds the
-exact quote bytes and the final RPC reread rejects cross-swapped observations.
+observations, so refreshing any of them preserves `planId`; READY binds the exact quote and native build evidence bytes and the final RPC reread rejects cross-swapped observations.
 
 Bundles are assembled without READY in an unguessable owned staging directory,
 validated there, and atomically renamed into place.
@@ -68,7 +67,9 @@ READY is the sole post-publication leaf. Its data and hidden name are synced
 before an atomic no-replace name commit, and its published name is synced before
 success. The held directory identity and exact payload bytes are checked before
 rename, so substitution and ABA races fail before acceptable evidence exists.
-Bundles contain `deployment-plan.v2.json`, `fee-quote.v2.json`, then `READY`.
+Bundles contain exactly `deployment-plan.v2.json`, `fee-quote.v2.json`,
+`native-no-replace-evidence.v1.json`, and then `READY`. READY V3 binds all
+three payload SHA-256 digests plus `planId` and `creationInputHash`.
 The independent verifier reparses the raw build-info, artifact, ABI and
 constructor-fixture bytes with its own duplicate-key-rejecting parser. It
 reconstructs bytecode, constructor ABI encoding, constructor arguments and the
@@ -132,3 +133,22 @@ fail-closed; there is no shell or replace-capable fallback. On macOS only, a
 root-owned compiler on the immutable system volume may have multiple hardlinks;
 that compiler remains admissible when it is not group/world writable. User-
 owned compilers and the privately built helper continue to require one link.
+
+
+Native build provenance
+
+The no-replace C helper is governed beside (and separately from) downloadable
+core tools by the strict `nativeBuilds.noReplace` policy in
+`tooling/toolchain.lock.json`. Each supported platform admits only one or two
+sorted, atomic compiler-path/compiler-digest/helper-digest tuples. Linux uses
+`snapshot-fd`; Darwin uses `verified-path`. The compiler path and digest must
+match an exact tuple before compiler spawn, and the produced helper digest must
+match that same tuple before a capability is returned.
+
+The canonical native evidence records the platform, pinned source and compile
+profile, compiler execution strategy, compiler path and digest, helper digest,
+and a domain-separated approval digest. The independent verifier reparses those
+bytes, checks the exact lock tuple, recomputes the approval digest, and rejects
+missing, substituted, linked, legacy, or forged evidence. This evidence is
+transient publication identity: it is deliberately excluded from
+`StablePlanIdentity` and cannot change `planId`.

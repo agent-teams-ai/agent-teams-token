@@ -1,3 +1,4 @@
+import { nativeNoReplaceEvidence, nativeNoReplaceEvidenceBytes, nativeNoReplacePolicy, nativeVerification } from "./native-provenance-fixture.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { artifactInputs, approvedArtifact, roots as fixtureRoots } from "./raw-artifact-fixture.ts";
@@ -11,8 +12,9 @@ import type { DeploymentRpc, RawArtifactInputs, RpcMethod } from "../src/applica
 import {
   independentlyVerify,
   independentlyVerifyRpc,
+  verifyNativeNoReplaceEvidence,
 } from "../src/application/verifier.ts";
-import { sha256Hex } from "../src/domain/identity.ts";
+import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
 import { UINT256_MAX } from "../src/domain/model.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
@@ -43,7 +45,7 @@ test("trust roots bind buffer, exact expiry and the complete time ordering", () 
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const verify = (candidate: FeeQuote, nowSeconds = 110n): void => {
-    independentlyVerify({
+    independentlyVerify({ ...nativeVerification,
       plan,
       quote: candidate,
       roots,
@@ -84,7 +86,7 @@ test("forged component hashes are rejected even when bytes are unchanged", () =>
   const quote = buildFeeQuote(plan, observation, roots);
   for (const field of ["creationBytecodeHash", "constructorAbiHash", "constructorArgumentsHash", "creationInputHash"] as const) {
     const forged = { ...artifact, [field]: hash };
-    assert.throws(() => independentlyVerify({ plan, quote, roots, expected: forged, artifactInputs, ready: readyFor(plan.planId), nowSeconds: 110n }), /forged|untrusted|binding|mismatch|approved build input/u);
+    assert.throws(() => independentlyVerify({ ...nativeVerification, plan, quote, roots, expected: forged, artifactInputs, ready: readyFor(plan.planId), nowSeconds: 110n }), /forged|untrusted|binding|mismatch|approved build input/u);
   }
 });
 
@@ -101,7 +103,7 @@ test("independent raw verification rejects a coherent corrupted builder result",
     creationInputHash: sha256Hex(Buffer.from(corruptedInput.slice(2), "hex")),
   };
   assert.throws(
-    () => independentlyVerify({
+    () => independentlyVerify({ ...nativeVerification,
       plan,
       quote,
       roots,
@@ -117,7 +119,7 @@ test("independent raw verification rejects a coherent corrupted builder result",
 test("independent verification parses every raw input and ignores builder constructor values", () => {
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const verify = (candidate: RawArtifactInputs = artifactInputs): void => independentlyVerify({
+  const verify = (candidate: RawArtifactInputs = artifactInputs): void => independentlyVerify({ ...nativeVerification,
     plan,
     quote,
     roots,
@@ -150,7 +152,7 @@ test("independent verification parses every raw input and ignores builder constr
 test("independent raw parsing accepts AST negatives and rejects noncanonical numbers", () => {
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const verifyBuild = (source: string): void => independentlyVerify({
+  const verifyBuild = (source: string): void => independentlyVerify({ ...nativeVerification,
     plan, quote, roots, expected: artifact,
     artifactInputs: { ...artifactInputs, buildInfoBytes: Buffer.from(source) },
     ready: readyFor(plan.planId), nowSeconds: 110n,
@@ -186,7 +188,7 @@ test("independent raw parsing accepts AST negatives and rejects noncanonical num
 test("independent raw parsing exposes duplicate and prototype-named members", () => {
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const verifyBuild = (source: string): void => independentlyVerify({
+  const verifyBuild = (source: string): void => independentlyVerify({ ...nativeVerification,
     plan, quote, roots, expected: artifact,
     artifactInputs: { ...artifactInputs, buildInfoBytes: Buffer.from(source) },
     ready: readyFor(plan.planId), nowSeconds: 110n,
@@ -225,7 +227,7 @@ test("build provenance fields are bound to trust roots", () => {
   const ready = readyFor(plan.planId);
   for (const field of ["sourceDependencyClosure", "compilerSettings", "rawBuildInfoSha256", "canonicalBuildInfoSha256", "buildInfoSolcVersion"] as const) {
     const mutated = { ...boundArtifact, [field]: field === "rawBuildInfoSha256" || field === "canonicalBuildInfoSha256" ? otherHash : field === "buildInfoSolcVersion" ? "0.8.37" : {} };
-    assert.throws(() => independentlyVerify({ plan, quote, roots: boundRoots, expected: mutated, artifactInputs, ready, nowSeconds: 110n }), /trust|binding|mismatch|untrusted|approved build input/u);
+    assert.throws(() => independentlyVerify({ ...nativeVerification, plan, quote, roots: boundRoots, expected: mutated, artifactInputs, ready, nowSeconds: 110n }), /trust|binding|mismatch|untrusted|approved build input/u);
   }
 });
 
@@ -300,10 +302,35 @@ function withObservation(
 
 function readyFor(planId: `0x${string}`) {
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     planSha256: hash,
     quoteSha256: hash,
+    nativeNoReplaceEvidenceSha256: hash,
     planId,
     creationInputHash,
   };
 }
+
+
+test("native evidence rejects forged approval and atomic cross-tuples", () => {
+  const forged = { ...nativeNoReplaceEvidence, approvalSha256: `0x${"f".repeat(64)}` };
+  assert.throws(() => verifyNativeNoReplaceEvidence(Buffer.from(canonicalJson(forged)), nativeNoReplacePolicy), /approval digest is forged/u);
+  const crossed = JSON.parse(JSON.stringify(nativeNoReplacePolicy));
+  const tuple = crossed.platforms["linux-x64"].tuples[0]!;
+  crossed.platforms["linux-x64"].tuples = [
+    { ...tuple, executableSha256: `0x${"0".repeat(64)}` },
+    { ...tuple, compilerSha256: `0x${"f".repeat(64)}` },
+  ];
+  assert.throws(() => verifyNativeNoReplaceEvidence(nativeNoReplaceEvidenceBytes, crossed), /atomically approved/u);
+});
+
+test("platform-native evidence is transient and cannot change stable plan identity", () => {
+  const linuxPlan = buildStablePlan(approvedArtifact, fixtureRoots);
+  const darwin = { ...nativeNoReplaceEvidence, platform: "darwin-arm64" as const, compilerExecution: "verified-path" as const, compilerSha256: nativeNoReplacePolicy.platforms["darwin-arm64"].tuples[0]!.compilerSha256, executableSha256: nativeNoReplacePolicy.platforms["darwin-arm64"].tuples[0]!.executableSha256 };
+  const fields = { platform: darwin.platform, sourcePath: darwin.sourcePath, sourceSha256: darwin.sourceSha256, compileProfile: darwin.compileProfile, compilerExecution: darwin.compilerExecution, compilerPath: darwin.compilerPath, compilerSha256: darwin.compilerSha256, executableSha256: darwin.executableSha256 };
+  darwin.approvalSha256 = sha256Hex(Buffer.concat([Buffer.from("AGTMAI_NATIVE_NO_REPLACE_APPROVAL_V1\0"), Buffer.from(canonicalJson(fields))]));
+  assert.doesNotThrow(() => verifyNativeNoReplaceEvidence(Buffer.from(canonicalJson(darwin)), nativeNoReplacePolicy));
+  const darwinPlan = buildStablePlan(approvedArtifact, fixtureRoots);
+  assert.equal(darwinPlan.planId, linuxPlan.planId);
+  assert.equal(canonicalJson(darwinPlan.identity), canonicalJson(linuxPlan.identity));
+});

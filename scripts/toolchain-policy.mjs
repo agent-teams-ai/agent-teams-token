@@ -1,5 +1,52 @@
 const SHA256 = /^[a-f0-9]{64}$/;
 const OCI_DIGEST = /^sha256:[a-f0-9]{64}$/;
+const PREFIXED_SHA256 = /^0x[a-f0-9]{64}$/;
+
+export function validateNativeNoReplacePolicy(policy) {
+  exactObjectKeys(policy, ["schemaVersion", "kind", "sourcePath", "sourceSha256", "compileProfile", "platforms"], "POLICY");
+  if (policy.schemaVersion !== 1 || policy.kind !== "native-no-replace-build-policy"
+    || policy.sourcePath !== "tooling/deployment-plan/native/no-replace.c"
+    || policy.sourceSha256 !== "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09"
+    || policy.compileProfile !== "c11-o2-werror-stdin-v1") {
+    throw new Error("TOOLCHAIN_LOCK_NATIVE_POLICY");
+  }
+  exactObjectKeys(policy.platforms, ["darwin-arm64", "linux-x64"], "PLATFORMS");
+  validateNativePlatform(policy.platforms["darwin-arm64"], "darwin-arm64", "verified-path");
+  validateNativePlatform(policy.platforms["linux-x64"], "linux-x64", "snapshot-fd");
+}
+
+function validateNativePlatform(value, platform, strategy) {
+  exactObjectKeys(value, ["strategy", "tuples"], `PLATFORM platform=${platform}`);
+  if (value.strategy !== strategy || !Array.isArray(value.tuples)
+    || value.tuples.length < 1 || value.tuples.length > 2) {
+    throw new Error(`TOOLCHAIN_LOCK_NATIVE_PLATFORM platform=${platform}`);
+  }
+  const serialized = [];
+  for (const tuple of value.tuples) {
+    exactObjectKeys(tuple, ["compilerPath", "compilerSha256", "executableSha256"], `TUPLE platform=${platform}`);
+    if (tuple.compilerPath !== "/usr/bin/cc" || !PREFIXED_SHA256.test(tuple.compilerSha256 ?? "")
+      || !PREFIXED_SHA256.test(tuple.executableSha256 ?? "")) {
+      throw new Error(`TOOLCHAIN_LOCK_NATIVE_TUPLE platform=${platform}`);
+    }
+    serialized.push(`${tuple.compilerPath}|${tuple.compilerSha256}|${tuple.executableSha256}`);
+  }
+  const compilerIdentities = value.tuples.map((tuple) => `${tuple.compilerPath}|${tuple.compilerSha256}`);
+  if (new Set(serialized).size !== serialized.length || new Set(compilerIdentities).size !== compilerIdentities.length
+    || serialized.some((entry, index) => index > 0 && serialized[index - 1].localeCompare(entry) >= 0)) {
+    throw new Error(`TOOLCHAIN_LOCK_NATIVE_TUPLE_ORDER platform=${platform}`);
+  }
+}
+
+function exactObjectKeys(value, expected, label) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`TOOLCHAIN_LOCK_NATIVE_${label}`);
+  }
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    throw new Error(`TOOLCHAIN_LOCK_NATIVE_${label}`);
+  }
+}
 
 export function validateFixtureToolShape(tool, name) {
   if (

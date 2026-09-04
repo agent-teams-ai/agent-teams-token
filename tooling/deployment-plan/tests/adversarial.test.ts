@@ -1,5 +1,6 @@
+import { nativePublication, nativeVerification, nativeNoReplacePolicy } from "./native-provenance-fixture.ts";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readdir, realpath, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -69,7 +70,7 @@ test("wrong chain, head lag, future, stale, reorg and exact expiry fail", () => 
   const quote = buildFeeQuote(plan, observation, roots);
   const ready = readyFor(plan.planId);
   assert.throws(
-    () => independentlyVerify({ plan, quote, roots, expected: artifact, artifactInputs, ready, nowSeconds: 170n }),
+    () => independentlyVerify({ ...nativeVerification, plan, quote, roots, expected: artifact, artifactInputs, ready, nowSeconds: 170n }),
     /expiresAt/u,
   );
 });
@@ -84,7 +85,7 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
   const changed = buildStablePlan(changedArtifact, roots);
   assert.notEqual(changed.planId, plan.planId);
   assert.throws(
-    () => independentlyVerify({
+    () => independentlyVerify({ ...nativeVerification,
       plan: changed,
       quote,
       roots,
@@ -95,7 +96,7 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
     /bound|binding|mismatch|untrusted/u,
   );
   assert.throws(
-    () => independentlyVerify({
+    () => independentlyVerify({ ...nativeVerification,
       plan: { ...plan, broadcastAllowed: true } as never,
       quote,
       roots,
@@ -115,7 +116,7 @@ test("quotes cannot be cross-swapped between stable plans", () => {
   const secondQuote = buildFeeQuote(secondPlan, observation, otherRoots);
   assert.notEqual(firstPlan.planId, secondPlan.planId);
   assert.throws(
-    () => independentlyVerify({
+    () => independentlyVerify({ ...nativeVerification,
       plan: firstPlan,
       quote: secondQuote,
       roots,
@@ -126,7 +127,7 @@ test("quotes cannot be cross-swapped between stable plans", () => {
     }),
     /not bound/u,
   );
-  assert.doesNotThrow(() => independentlyVerify({
+  assert.doesNotThrow(() => independentlyVerify({ ...nativeVerification,
     plan: firstPlan,
     quote: firstQuote,
     roots,
@@ -156,7 +157,7 @@ test("volatile observations preserve stable identity and remain internally bound
   assert.equal(quoteZero.planId, quoteOne.planId);
   assert.notDeepEqual(quoteZero, quoteOne);
   assert.throws(
-    () => independentlyVerify({
+    () => independentlyVerify({ ...nativeVerification,
       plan,
       quote: {
         ...quoteOne,
@@ -213,7 +214,7 @@ test("standalone verification rejects coherent non-local trust roots", () => {
     planId: computePlanId(identity),
   };
   assert.throws(
-    () => independentlyVerify({
+    () => independentlyVerify({ ...nativeVerification,
       plan: unsafePlan,
       quote: { ...quote, planId: unsafePlan.planId, observation: { ...observation, chainId: "1" } },
       roots: unsafeRoots,
@@ -231,7 +232,7 @@ test("expiry at the final pre-publication check leaves no target or staging bund
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   await assert.rejects(
-    publishReadyLast({
+    publishReadyLast({ ...nativePublication,
       parent,
       bundleName: "expired",
       plan,
@@ -249,7 +250,7 @@ test("READY-last verifies held bytes and detects live estimate drift", async (co
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-test-")));
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const publication = await publishReadyLast({
+  const publication = await publishReadyLast({ ...nativePublication,
     parent,
     bundleName: "bundle",
     plan,
@@ -260,7 +261,7 @@ test("READY-last verifies held bytes and detects live estimate drift", async (co
     outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename },
   });
   try {
-    await verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
+    await verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
     assert.match(publication.quoteSha256, /^0x[0-9a-f]{64}$/u);
     assert.match(publication.identity.directoryDevice, /^[0-9]+$/u);
     assert.match(publication.identity.directoryInode, /^[0-9]+$/u);
@@ -271,11 +272,11 @@ test("READY-last verifies held bytes and detects live estimate drift", async (co
       },
     };
     await assert.rejects(
-      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
+      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
       /estimate changed/u,
     );
     assert.deepEqual((await readdir(publication.directory)).toSorted(), [
-      "READY", "deployment-plan.v2.json", "fee-quote.v2.json",
+      "READY", "deployment-plan.v2.json", "fee-quote.v2.json", "native-no-replace-evidence.v1.json",
     ]);
   } finally {
     await publication.close();
@@ -290,9 +291,9 @@ test("same-plan quote substitution cannot replace the held approved quote", asyn
   const replacementQuote = buildFeeQuote(plan, { ...observation, gasEstimate: "150" }, roots);
   assert.equal(originalQuote.worstCaseWei, "200");
   assert.equal(replacementQuote.worstCaseWei, "300");
-  const options = { parent, plan, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } };
-  const original = await publishReadyLast({ ...options, bundleName: "bundle", quote: originalQuote });
-  const replacement = await publishReadyLast({ ...options, bundleName: "replacement", quote: replacementQuote });
+  const options = { ...nativePublication, parent, plan, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } };
+  const original = await publishReadyLast({ ...nativePublication, ...options, bundleName: "bundle", quote: originalQuote });
+  const replacement = await publishReadyLast({ ...nativePublication, ...options, bundleName: "replacement", quote: replacementQuote });
   const displaced = join(parent, "original-held");
   try {
     assert.notEqual(original.quoteSha256, replacement.quoteSha256);
@@ -308,7 +309,7 @@ test("same-plan quote substitution cannot replace the held approved quote", asyn
       },
     };
     await assert.rejects(
-      verifyBundle({ publication: original, expectedQuoteSha256: original.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: observedRpc, creationInput: artifact.creationInput }),
+      verifyBundle({ nativeNoReplacePolicy, publication: original, expectedQuoteSha256: original.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: observedRpc, creationInput: artifact.creationInput }),
       (error: unknown) => error instanceof Error
         && "code" in error
         && error.code === "OUTPUT_PUBLISHED_SUBSTITUTED",
@@ -325,12 +326,12 @@ test("final-directory replacement before verification fails closed", async (cont
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-directory-swap-")));
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
   try {
     await rename(publication.directory, join(parent, "held-original"));
     await mkdir(publication.directory, { mode: 0o700 });
     await assert.rejects(
-      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
       /identity changed/u,
     );
   } finally {
@@ -338,13 +339,13 @@ test("final-directory replacement before verification fails closed", async (cont
   }
 });
 
-for (const substitutedName of ["READY", "deployment-plan.v2.json"] as const) {
+for (const substitutedName of ["READY", "deployment-plan.v2.json", "native-no-replace-evidence.v1.json"] as const) {
   test(`${substitutedName} substitution at the final verification boundary fails closed`, async (context) => {
     context.mock.method(Date, "now", () => 120_000);
     const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-final-leaf-")));
     const plan = buildStablePlan(artifact, roots);
     const quote = buildFeeQuote(plan, observation, roots);
-    const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+    const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
     let substituted = false;
     const boundaryRpc: DeploymentRpc = {
       async request(method, params) {
@@ -360,7 +361,7 @@ for (const substitutedName of ["READY", "deployment-plan.v2.json"] as const) {
     };
     try {
       await assert.rejects(
-        verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: boundaryRpc, creationInput: artifact.creationInput }),
+        verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: boundaryRpc, creationInput: artifact.creationInput }),
         /substituted|identity changed|regular file/u,
       );
       assert.equal(substituted, true);
@@ -370,15 +371,46 @@ for (const substitutedName of ["READY", "deployment-plan.v2.json"] as const) {
   });
 }
 
+for (const mutation of ["missing", "symlink", "hardlink"] as const) {
+  test(`${mutation} native evidence is rejected by the held publication verifier`, async (context) => {
+    context.mock.method(Date, "now", () => 120_000);
+    const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-native-leaf-")));
+    const plan = buildStablePlan(artifact, roots);
+    const quote = buildFeeQuote(plan, observation, roots);
+    const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+    const leaf = join(publication.directory, "native-no-replace-evidence.v1.json");
+    const foreign = join(parent, "foreign-evidence");
+    await writeFile(foreign, "foreign", { mode: 0o600 });
+    await unlink(leaf);
+    if (mutation === "symlink") await symlink(foreign, leaf);
+    if (mutation === "hardlink") await link(foreign, leaf);
+    try {
+      await assert.rejects(verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /missing|substituted|regular file|identity changed/u);
+    } finally { await publication.close(); }
+  });
+}
+
+test("an extra bundle leaf is rejected", async (context) => {
+  context.mock.method(Date, "now", () => 120_000);
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-extra-leaf-")));
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  await writeFile(join(publication.directory, "extra"), "foreign", { mode: 0o600 });
+  try {
+    await assert.rejects(verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /foreign entry/u);
+  } finally { await publication.close(); }
+});
+
 test("verification rejects an expected quote digest mismatch", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-digest-")));
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
   try {
     await assert.rejects(
-      verifyBundle({ publication, expectedQuoteSha256: `0x${"f".repeat(64)}`, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: `0x${"f".repeat(64)}`, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
       /expected quote digest/u,
     );
   } finally {
@@ -391,11 +423,11 @@ test("legacy leaf names cannot be verified through a publication capability", as
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-legacy-")));
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
-  const publication = await publishReadyLast({ parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
+  const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
   try {
     await rename(join(publication.directory, "deployment-plan.v2.json"), join(publication.directory, "deployment-plan.v1.json"));
     await assert.rejects(
-      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
       /foreign entry|substituted|identity changed/u,
     );
   } finally {
@@ -405,9 +437,10 @@ test("legacy leaf names cannot be verified through a publication capability", as
 
 function readyFor(planId: `0x${string}`) {
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     planSha256: hash,
     quoteSha256: hash,
+    nativeNoReplaceEvidenceSha256: hash,
     planId,
     creationInputHash: inputHash,
   };
