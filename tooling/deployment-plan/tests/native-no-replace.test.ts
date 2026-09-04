@@ -47,10 +47,16 @@ test("temporary ancestry policy rejects cross-UID control and unsafe modes", () 
     isDirectory: true, isSymbolicLink: false, uid: 501, mode: 0o40700,
   } as const;
   assert.equal(isCustodyAncestorSafe(directory, 501), true);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40755 }, 501), true);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40711 }, 501), true);
   assert.equal(isCustodyAncestorSafe({ ...directory, uid: 0, mode: 0o41777 }, 501), true);
   assert.equal(isCustodyAncestorSafe({ ...directory, uid: 0, mode: 0o40755 }, 501), true);
   assert.equal(isCustodyAncestorSafe({ ...directory, uid: 502 }, 501), false);
   assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40770 }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40757 }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40720 }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40702 }, 501), false);
+  assert.equal(isCustodyAncestorSafe({ ...directory, mode: 0o40777 }, 501), false);
   assert.equal(isCustodyAncestorSafe({ ...directory, isSymbolicLink: true }, 501), false);
   assert.equal(isCustodyAncestorSafe({ ...directory, isDirectory: false }, 501), false);
   assert.equal(isCustodyAncestorSafe(directory), false);

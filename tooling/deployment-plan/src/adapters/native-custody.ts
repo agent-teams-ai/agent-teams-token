@@ -29,7 +29,7 @@ export function isCustodyAncestorSafe(
   const rootOwned = metadata.uid === 0;
   const rootProtected = rootOwned
     && ((metadata.mode & 0o022) === 0 || (metadata.mode & 0o1000) !== 0);
-  const callerPrivate = metadata.uid === expectedUid && (metadata.mode & 0o077) === 0;
+  const callerPrivate = metadata.uid === expectedUid && (metadata.mode & 0o022) === 0;
   return rootProtected || callerPrivate;
 }
 
