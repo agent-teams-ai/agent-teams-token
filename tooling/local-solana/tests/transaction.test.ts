@@ -10,7 +10,7 @@ test("base58 codec preserves leading zero bytes", () => {
   const bytes = Uint8Array.from([0, 0, 1, 2, 3, 254, 255]); assert.deepEqual(base58Decode(base58Encode(bytes)), bytes);
 });
 
-test("negative authority transactions contain two full Ed25519 signatures", async () => {
+test("negative authority transactions contain exact classic SPL instruction bytes and two signatures", async () => {
   const directory = await mkdtemp(join(tmpdir(), "agtmai-tx-test-"));
   try {
     const payer = Uint8Array.from({ length: 64 }, (_v, i) => i + 1); const authority = Uint8Array.from({ length: 64 }, (_v, i) => 200 - i);
@@ -19,7 +19,11 @@ test("negative authority transactions contain two full Ed25519 signatures", asyn
     const rpc = { latestBlockhash: async () => base58Encode(new Uint8Array(32)) } as unknown as RpcPort;
     const mint = base58Encode(payer.slice(32)); const freeze = base58Encode(authority.slice(32));
     const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: new AbortController().signal };
-    for (const bytes of [await signedRestoreFreezeTransaction({ ...context, mint, newAuthority: freeze }), await signedFreezeAccountTransaction({ ...context, account: mint, mint })]) {
+    const restoreBytes = await signedRestoreFreezeTransaction({ ...context, mint, newAuthority: freeze });
+    const freezeBytes = await signedFreezeAccountTransaction({ ...context, account: mint, mint });
+    assert.equal(messageFacts(restoreBytes).instructionDataHex, "060101a8a7a6a5a4a3a2a1a09f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89");
+    assert.equal(messageFacts(freezeBytes).instructionDataHex, "0a");
+    for (const bytes of [restoreBytes, freezeBytes]) {
       assert.equal(bytes[0], 2); assert.equal(bytes.length > 200, true); assert.notDeepEqual(bytes.slice(1, 65), new Uint8Array(64)); assert.notDeepEqual(bytes.slice(65, 129), new Uint8Array(64));
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -58,7 +62,12 @@ test("abort returned with the blockhash prevents signing and transaction bytes",
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-function messageFacts(transaction: Uint8Array): { readonly header: readonly number[]; readonly accountCount: number; readonly instructionAccounts: readonly number[] } {
+function messageFacts(transaction: Uint8Array): {
+  readonly header: readonly number[];
+  readonly accountCount: number;
+  readonly instructionAccounts: readonly number[];
+  readonly instructionDataHex: string;
+} {
   const signatureCount = transaction[0]!;
   const messageOffset = 1 + signatureCount * 64;
   const header = Array.from(transaction.slice(messageOffset, messageOffset + 3));
@@ -66,9 +75,12 @@ function messageFacts(transaction: Uint8Array): { readonly header: readonly numb
   const instructionOffset = messageOffset + 4 + accountCount * 32 + 32;
   assert.equal(transaction[instructionOffset], 1);
   const accountIndexCount = transaction[instructionOffset + 2]!;
+  const dataLengthOffset = instructionOffset + 3 + accountIndexCount;
+  const dataLength = transaction[dataLengthOffset]!;
   return {
     header,
     accountCount,
     instructionAccounts: Array.from(transaction.slice(instructionOffset + 3, instructionOffset + 3 + accountIndexCount)),
+    instructionDataHex: Buffer.from(transaction.slice(dataLengthOffset + 1, dataLengthOffset + 1 + dataLength)).toString("hex"),
   };
 }

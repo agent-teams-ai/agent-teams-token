@@ -12,7 +12,7 @@ function fact(operation: LifecycleKind, index: number): TransactionFact {
   const common = { operation, signature: String(index + 2).repeat(64), slot: String(index + 1), confirmationStatus: "finalized" as const, error: null, genesisHash: genesis, signers: [] as readonly string[] };
   switch (operation) {
     case "createMint": return transaction({ ...common, signers: [payer, mintAddress] }, [instruction({ kind: "initializeMint2", accounts: [mintAddress, mintAddress], mint: mintAddress, authority: mintAddress, newAuthority: mintAddress, decimals: 9 })]);
-    case "revokeFreeze": return transaction({ ...common, signers: [payer, mintAddress] }, [instruction({ kind: "setAuthority", accounts: [mintAddress, mintAddress], tokenAccount: mintAddress, authority: mintAddress, authorityType: "freezeAccount", newAuthority: null })]);
+    case "revokeFreeze": return transaction({ ...common, signers: [payer, mintAddress] }, [instruction({ kind: "setAuthority", accounts: [mintAddress, mintAddress], dataHex: "060100", tokenAccount: mintAddress, authority: mintAddress, authorityType: "freezeAccount", newAuthority: null })]);
     case "createAta": {
       const systemData = Buffer.alloc(52); systemData.writeBigUInt64LE(2_039_280n, 4); systemData.writeBigUInt64LE(165n, 12); Buffer.from(base58Decode(CLASSIC_TOKEN_PROGRAM)).copy(systemData, 20);
       const initializeData = Buffer.concat([Buffer.from([18]), Buffer.from(base58Decode(owner))]);
@@ -26,8 +26,8 @@ function fact(operation: LifecycleKind, index: number): TransactionFact {
     }
     case "mint": return transaction({ ...common, signers: [payer, mintAddress] }, [instruction({ kind: "mintTo", accounts: [mintAddress, ata, mintAddress], mint: mintAddress, tokenAccount: ata, authority: mintAddress, amountBaseUnits: amount })]);
     case "burn": return transaction({ ...common, signers: [payer, owner] }, [instruction({ kind: "burn", accounts: [ata, mintAddress, owner], mint: mintAddress, tokenAccount: ata, authority: owner, amountBaseUnits: amount })]);
-    case "restoreFreezeAttempt": return transaction({ ...common, error: { instructionIndex: 0, code: "Custom(16)" }, signers: [payer, mintAddress] }, [instruction({ kind: "setAuthority", accounts: [mintAddress, mintAddress], tokenAccount: mintAddress, authority: mintAddress, authorityType: "freezeAccount", newAuthority: mintAddress })]);
-    case "freezeAttempt": return transaction({ ...common, error: { instructionIndex: 0, code: "Custom(16)" }, signers: [payer, mintAddress] }, [instruction({ kind: "freezeAccount", accounts: [ata, mintAddress, mintAddress], tokenAccount: ata, mint: mintAddress, authority: mintAddress })]);
+    case "restoreFreezeAttempt": return transaction({ ...common, error: { instructionIndex: 0, code: "Custom(16)" }, signers: [payer, mintAddress] }, [instruction({ kind: "setAuthority", accounts: [mintAddress, mintAddress], dataHex: `060101${"02".repeat(32)}`, tokenAccount: mintAddress, authority: mintAddress, authorityType: "freezeAccount", newAuthority: mintAddress })]);
+    case "freezeAttempt": return transaction({ ...common, error: { instructionIndex: 0, code: "Custom(16)" }, signers: [payer, mintAddress] }, [instruction({ kind: "freezeAccount", accounts: [ata, mintAddress, mintAddress], dataHex: "0a", tokenAccount: ata, mint: mintAddress, authority: mintAddress })]);
   }
 }
 

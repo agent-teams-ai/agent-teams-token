@@ -132,6 +132,7 @@ function verifyCreateMint(fact: TransactionFact, relevant: InstructionFact, valu
 
 function verifyRevokeFreeze(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
   requireKind(relevant, ["setAuthority"]);
+  verifySetAuthorityWire(relevant, null);
   assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
     && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === null,
   "SOLANA_REVOKE_SEMANTICS", "freeze revocation does not bind mint and former authority");
@@ -205,6 +206,7 @@ function verifyBurn(fact: TransactionFact, relevant: InstructionFact, value: Fix
 
 function verifyRestoreFreeze(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
   requireKind(relevant, ["setAuthority"]);
+  verifySetAuthorityWire(relevant, value.freezeAuthority);
   assertCondition(relevant.tokenAccount === value.mintAddress && (relevant.mint === null || relevant.mint === value.mintAddress)
     && relevant.authority === value.freezeAuthority && relevant.authorityType === "freezeAccount" && relevant.newAuthority === value.freezeAuthority,
   "SOLANA_RESTORE_SEMANTICS", "restore attempt does not bind mint and former authority");
@@ -224,6 +226,20 @@ function relevantInstruction(fact: TransactionFact): InstructionFact {
     : fact.instructions.filter((item) => item.programId === CLASSIC_TOKEN_PROGRAM);
   if (candidates.length !== 1) { fail("SOLANA_TRANSACTION_INSTRUCTION_COUNT", `${fact.operation} must contain exactly one relevant instruction`); }
   return candidates[0] as InstructionFact;
+}
+
+/** Independently validates the classic SPL Token SetAuthority instruction wire format. */
+function verifySetAuthorityWire(instruction: InstructionFact, expectedNewAuthority: string | null): void {
+  const prefix = "0601"; // SetAuthority, AuthorityType::FreezeAccount
+  if (expectedNewAuthority === null) {
+    assertCondition(instruction.dataHex === `${prefix}00`,
+      "SOLANA_SET_AUTHORITY_WIRE", "freeze revocation is not the exact three-byte None encoding");
+    return;
+  }
+  assertCondition(instruction.dataHex.length === 70 && instruction.dataHex.startsWith(`${prefix}01`),
+    "SOLANA_SET_AUTHORITY_WIRE", "freeze restoration is not the exact 35-byte Some encoding");
+  assertCondition(base58(instruction.dataHex.slice(6)) === expectedNewAuthority,
+    "SOLANA_SET_AUTHORITY_WIRE", "freeze restoration pubkey bytes do not match the expected authority");
 }
 
 function requireKind(instruction: InstructionFact, kinds: readonly string[]): void { assertCondition(kinds.includes(instruction.kind), "SOLANA_INSTRUCTION_KIND", `unexpected instruction ${instruction.kind}`); }

@@ -16,6 +16,16 @@ function mutateAtaGetSize(change: (instruction: FixtureObservations["transaction
   }));
 }
 
+function mutateAuthorityWire(operation: "revokeFreeze" | "restoreFreezeAttempt", dataHex: string): FixtureObservations {
+  const base = observationFixture();
+  return {
+    ...base,
+    transactions: base.transactions.map((transaction) => transaction.operation === operation
+      ? { ...transaction, instructions: transaction.instructions.map((item) => ({ ...item, dataHex })) }
+      : transaction),
+  };
+}
+
 test("verifier reconstructs an exact seven-step mint/ATA/burn/authority lifecycle", () => {
   const report = verifyObservations(observationFixture());
   assert.equal(report.transactions.length, 7); assert.equal(report.transactions[2]?.operation, "createAta"); assert.equal(report.snapshots.finalTokenAccount.amount, "0");
@@ -62,6 +72,28 @@ test("verifier rejects supply introduced only after freeze-authority revocation"
     () => verifyObservations({ ...observation, afterRevokeMint: { ...observation.afterRevokeMint, supply: "777" } }),
     /SOLANA_PRE_MINT_SUPPLY/u,
   );
+});
+
+test("verifier independently enforces exact classic SPL SetAuthority wire encodings", () => {
+  const fixture = observationFixture();
+  assert.equal(fixture.transactions[1]?.instructions[0]?.dataHex, "060100");
+  assert.equal(fixture.transactions[5]?.instructions[0]?.dataHex, `060101${"02".repeat(32)}`);
+  assert.doesNotThrow(() => verifyObservations(fixture));
+
+  const revokeAttacks = [
+    "", "06", "0601", "070100", "060000", "060102", "06010000", "060100000000",
+  ];
+  const restoreAttacks = [
+    "060101", `060001${"02".repeat(32)}`, `070101${"02".repeat(32)}`,
+    `060102${"02".repeat(32)}`, `060101${"03".repeat(32)}`,
+    `060101${"02".repeat(32)}00`, `060101000000${"02".repeat(32)}`,
+  ];
+  for (const dataHex of revokeAttacks) {
+    assert.throws(() => verifyObservations(mutateAuthorityWire("revokeFreeze", dataHex)), /SOLANA_SET_AUTHORITY_WIRE/u);
+  }
+  for (const dataHex of restoreAttacks) {
+    assert.throws(() => verifyObservations(mutateAuthorityWire("restoreFreezeAttempt", dataHex)), /SOLANA_SET_AUTHORITY_WIRE/u);
+  }
 });
 
 test("verifier rejects zero, extra, duplicate, sparse, reordered and semantically forged ATA CPI evidence", () => {
