@@ -1,16 +1,24 @@
 # AGTMAI: план трёх следующих локальных zero-cost slices
 
-Status: local/test-only candidate accepted; all nine retained `P2` and six
-retained `P3` have a locally green remediation candidate, 2026-08-29. Final
-acceptance still requires one clean exact-SHA CI run and repeated independent
-specialist plus holistic reviews of that same SHA.
+Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
+below is historical evidence, not a green result for the current candidate.
+Current code candidate `caedc5d6c055a769a686385ec1e61c93e44b1cfb` includes the
+reviewed toolchain lint fix. Separate completed deployment and local-EVM fixes
+pass actual Mac Anvil (125 tests, 3 Linux skips) and runner integration (7/7)
+respectively, but await independent reviews before integration. They address
+Foundation/TS/lint, real Forge JSON bounds and the two local-EVM P2 findings.
+The recovery checkpoint remains unaccepted, including actual Darwin failures;
+its failed partial writer was replaced with a fresh isolated filesystem lane.
+See [the current reconciliation ledger](research/E2E-RECONCILIATION-2026-09-04.md).
+Final acceptance still requires a clean exact-SHA full local/CI run and repeated
+independent specialist plus holistic reviews of that same SHA.
 
 Correction: the first Barrier 3 closure correctly proved no `P0/P1`, but it did
 not prove that every explicit requirement below was implemented. The final
 holistic review retained nine `P2` and six `P3`; several are direct requirements
 of sections 5-8 rather than optional future hardening. Therefore the three
 vertical slices remain accepted for local MVP use. The direct code gaps are now
-implemented and pass the complete local gate, real local Solana lifecycle, real
+implemented and passed the then-current complete local gate, real local Solana lifecycle, real
 local EVM lifecycle and real unsigned Anvil deployment-plan test. The stronger
 claim "this plan is fully accepted" remains suspended until the new exact-SHA
 CI and independent reviews finish. This correction does not expand scope into
@@ -35,7 +43,7 @@ USDC, faucet assets, public RPC и transaction broadcast запрещены.
    До green preflight coding-workers не стартуют. 🎯 10/10  🛡️ 10/10  🧠 5/10,
    около `400-700` строк конфигурации, контрактных тестов и evidence.
 2. **Параллельно реализовать три независимых vertical slices.** Три hosted
-   implementation-worker на `gpt-5.6-sol medium`, без fast, работают в отдельных
+   implementation-worker на `gpt-5.6-sol medium`, с режимом из раздела 4.1, работают в отдельных
    worktree и не меняют shared-файлы: W1 делает local SPL lifecycle, W2 -
    unsigned deployment plan, W3 - Slither policy/tooling. 🎯 9/10  🛡️ 9/10
    🧠 7/10, около `3 200-5 000` строк рабочего кода и тестов.
@@ -131,10 +139,10 @@ installer и network fallback в CI запрещены.
 ### 4.1 Model split
 
 - planners, threat critics, specialist reviewers и final holistic reviewer:
-  `gpt-5.6-sol`, reasoning `xhigh`, fast mode выключен; поле `serviceTier=fast`
-  не передаётся;
+  `gpt-5.6-sol`, reasoning `xhigh`; по указанию пользователя от 4 сентября
+  следующие jobs запускаются в fast (`serviceTier=priority`);
 - implementation/remediation workers: `gpt-5.6-sol`, reasoning `medium`, fast
-  mode выключен;
+  включён для следующих jobs; уже работающие no-fast jobs не перезапускаются;
 - integrator остаётся основным агентом и единолично меняет shared/root wiring;
 - каждый job имеет отдельный isolated worktree, job ID и scoped ownership;
 - одна account identity может обслуживать параллельные jobs, если runtime это
@@ -188,7 +196,7 @@ conventional commits только в своём scope и никогда не mer
 
 ### 4.4 Brief/result contract
 
-Каждый brief фиксирует `jobId`, exact `baseSha`, model/effort/no-fast profile,
+Каждый brief фиксирует `jobId`, exact `baseSha`, model/effort/service-tier profile,
 owned/forbidden paths, required docs, deliverables, commands, acceptance,
 non-goals и expected handoff schema.
 
@@ -577,7 +585,7 @@ checkout; tool/policy/environment failures remain distinguishable and nonzero.
 ### Barrier 3 - hosted review
 
 Сначала четыре parallel read-only specialist reviewers используют
-`gpt-5.6-sol xhigh`, no fast mode и isolated clean worktrees:
+`gpt-5.6-sol xhigh`, fast mode согласно разделу 4.1 и isolated clean worktrees:
 
 1. Solana/SPL authority and lifecycle security;
 2. deployment-plan math, artifact binding and broadcast absence;
@@ -592,6 +600,8 @@ ledger. Параллельный holistic review до завершения speci
 Reviewer job identity должна отличаться от всех author/integrator/remediation
 job identities её scope. Holistic reviewer не может быть участником реализации,
 интеграции или исправлений кандидата.
+Речь об отдельных jobs/сессиях и авторстве кода, не об обязательных разных
+subscription-аккаунтах: один разрешённый аккаунт может обслуживать эти jobs.
 
 Every finding requires verdict `ACCEPT/AMEND/REJECT`, severity `P0/P1/P2/P3`, exact
 `file:line`, reproducible scenario, violated invariant, minimal fix and a test

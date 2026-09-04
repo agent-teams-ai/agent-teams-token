@@ -1,6 +1,62 @@
 # Project status
 
-Last updated: 2026-08-29.
+Last reconciled: 2026-09-04. Earlier evidence below retains its original scope;
+it must not be read as a current exact-head full-gate pass.
+
+## Current execution checkpoint
+
+Latest update at 12:42 UTC supersedes the earlier snapshots below:
+toolchain checkpoint has independent ACCEPT and is integrated as `caedc5d6`.
+Solc checkpoint `7926ace` passes all 7 actual Mac runner integration tests;
+deployment checkpoint `d1bd4d95` passes 125 actual Mac tests including real
+Anvil, with 3 Linux-only skips. Both await running independent fast reviews.
+Recovery70 ended incomplete on process/namespace EAGAIN; its partial is
+preserved and a fresh filesystem writer75 is active. Pinned-pnpm spike74 is
+running independently. New jobs use priority/fast; implementation medium,
+review xhigh. Full-plan acceptance remains open, not production clearance.
+
+12:44 UTC: solc review73 found one new P2 in exposed error-cause stderr;
+the two earlier P2s are closed. Dedicated fast writer77 is fixing only redaction
+and its regressions before integration. No real key leak was observed.
+
+Update at 12:05 UTC: `account-m` (`tv goog five`) passed a fresh live check.
+Four new isolated hosted writers reached model execution: deployment-closure67,
+toolchain-lint68, solc-p2-closure69 and recovery-custody70. All use medium,
+no fast, network disabled; old partial workspaces remain untouched. The quota
+snapshot below is historical. No new writer result has been accepted yet.
+
+Update at 12:18 UTC: all four writers are active; toolchain68 resumed its
+inspected partial changes after an intentional guidance interruption. A fifth
+read-only xhigh planner is comparing minimal authenticated dependency-cache
+designs for the next recovery checkpoint. Main is unchanged at `370c3aac`.
+
+- Code candidate: `caedc5d6c055a769a686385ec1e61c93e44b1cfb`, in the isolated
+  `/tmp/agtmai-r212-integration2` worktree. The user's original worktree is untouched.
+- Native provenance remediation is integrated, but Foundation, TypeScript and
+  lint are not green. Its remaining defects must be fixed before acceptance.
+- The Darwin test portability fix is integrated and verified on actual macOS:
+  focused native-helper tests: 17 passed, 0 failed, 3 Linux-only skips;
+  deployment-plan suite: 120 passed, 0 failed, 4 skips, including the separate
+  real-Anvil opt-in test. This is not a full E2E acceptance claim.
+- The separately enabled real-Anvil suite fails: 2 passed, 1 failed, 0 skipped.
+  The new shared JSON parser incorrectly applies the 64 KiB policy-file bound
+  to real Forge build-info. A current valid build-info is 1,366,773 bytes and
+  contains a 33,914-byte string, exceeding both the byte and string bounds.
+- Local-EVM source review: AMEND, no P0/P1, two open P2 findings.
+- Separate recovery source review: REJECT, seven P1 plus P2/P3 findings;
+  portable filesystem custody and archive/package execution authority remain unproven.
+- Four hosted writer attempts ended partial after quota exhaustion. Their dirty
+  workspaces/patches remain isolated and are not accepted code. No r212 worker
+  was alive at the 11:25 UTC reconciliation.
+- Earlier hosted pool snapshot: no eligible account in the 25-slot registry.
+  Those checks confirmed quota exhaustion for l/v/w/y/t and reconnect-required a/g;
+  fresh account-m availability now supersedes that snapshot.
+  Do not retry these before new capacity/auth evidence; no safety bypass.
+- Full exact-head CI, independent final reviews and safe main reconciliation
+  remain outstanding. No Mainnet or production clearance is implied.
+
+See [the reconciliation ledger](research/E2E-RECONCILIATION-2026-09-04.md)
+for exact source commits, remaining work and the safe continuation contract.
 
 Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
 clearance remains required.
