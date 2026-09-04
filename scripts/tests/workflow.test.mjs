@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
@@ -23,10 +25,15 @@ test("workflow syntax has the six integrated exact-scope jobs", () => {
   ]);
   assert.deepEqual(workflow.permissions, { contents: "read" });
   assert.equal(workflow.concurrency["cancel-in-progress"], true);
-  for (const job of Object.values(workflow.jobs)) {
+  for (const [name, job] of Object.entries(workflow.jobs)) {
     assert.equal(job["runs-on"], "ubuntu-24.04");
     assert.ok(Number.isInteger(job["timeout-minutes"]));
-    assert.ok(job["timeout-minutes"] <= 20);
+    if (name === "foundation-and-typescript") {
+      assert.equal(job["timeout-minutes"], 120);
+      assert.equal(job.needs, undefined);
+    } else {
+      assert.ok(job["timeout-minutes"] <= 20, name);
+    }
   }
   assert.doesNotMatch(workflowText, /\bccip\b/i);
 });
@@ -41,7 +48,7 @@ test("all third-party actions use immutable full commit SHAs without package-man
   ));
   assert.equal(
     uses.filter((value) => value.startsWith("actions/upload-artifact@")).length,
-    1,
+    3,
   );
   assert.doesNotMatch(workflowText, /pnpm\/action-setup|actions\/setup-node|actions\/cache/);
 });
@@ -49,8 +56,19 @@ test("all third-party actions use immutable full commit SHAs without package-man
 test("every job asserts exact clean GITHUB_SHA before and after its gates", () => {
   for (const [name, job] of Object.entries(workflow.jobs)) {
     const commands = job.steps.flatMap((step) => typeof step.run === "string" ? [step.run] : []);
-    assert.equal(commands.filter((command) => command === 'scripts/assert-clean-head.sh "$GITHUB_SHA"').length, 2, name);
-    assert.equal(job.steps.find((step) => step.name === "Assert exact clean checkout").shell, "bash");
+    assert.equal(
+      [...commands.join("\n").matchAll(/scripts\/assert-clean-head\.sh "\$GITHUB_SHA"/gu)].length,
+      name === "foundation-and-typescript" ? 3 : 2,
+      name,
+    );
+    if (name === "foundation-and-typescript") {
+      assert.equal(
+        job.steps.find((step) => step.id === "assert-complete-history-and-exact-clean-head-before").shell,
+        "bash",
+      );
+    } else {
+      assert.equal(job.steps.find((step) => step.name === "Assert exact clean checkout").shell, "bash");
+    }
   }
 });
 
@@ -64,17 +82,96 @@ test("workflow dispatch records GitHub exact-SHA metadata", () => {
   assert.equal(step.uses, undefined);
 });
 
-test("foundation and TypeScript job bootstraps verified pnpm and runs the final gate", () => {
-  const commands = runs("foundation-and-typescript");
-  for (const expected of [
-    "source scripts/env.sh && pnpm install --frozen-lockfile",
-    "source scripts/env.sh && pnpm check",
-  ]) {assert.ok(commands.includes(expected), `missing command: ${expected}`);}
-  const bootstrap = commands.join("\n");
-  assert.match(bootstrap, /bootstrap fetch/);
-  assert.match(bootstrap, /bootstrap install --offline/);
-  assert.match(bootstrap, /bootstrap verify --offline/);
-  assert.match(bootstrap, /command -v pnpm.*\.tools\/bin\/pnpm/);
+test("foundation job proves complete exact history and preflights every rollback prerequisite before root gates", () => {
+  const job = workflow.jobs["foundation-and-typescript"];
+  assert.equal(job["timeout-minutes"], 120);
+  assert.equal(job.needs, undefined);
+  assert.deepEqual(job.permissions, { contents: "read" });
+  assert.deepEqual(job.env, {
+    AGTMAI_ROLLBACK_TMPDIR: "${{ runner.temp }}",
+    AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+    SLITHER_REPOSITORY_ROOT: "${{ github.workspace }}",
+    SLITHER_CANDIDATE_SHA: "${{ github.sha }}",
+    SLITHER_EVIDENCE_DIRECTORY: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+    SLITHER_DOCKER_PATH: "/usr/bin/docker",
+    SLITHER_FORGE_PATH: "${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge",
+    SLITHER_SOLC_PATH: "${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc",
+  });
+
+  const byId = (id) => job.steps.find((step) => step.id === id);
+  const checkout = byId("checkout-complete-history-at-exact-head");
+  assert.equal(checkout.uses, "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1");
+  assert.deepEqual(checkout.with, {
+    ref: "${{ github.sha }}",
+    "fetch-depth": 0,
+    "persist-credentials": false,
+  });
+
+  const historyBefore = byId("assert-complete-history-and-exact-clean-head-before");
+  assert.equal(historyBefore.run.trim(), [
+    'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45',
+    'scripts/assert-clean-head.sh "$GITHUB_SHA"',
+  ].join("\n"));
+  const fetch = byId("fetch-pinned-core-and-solana-prerequisites");
+  assert.match(fetch.run, /bootstrap fetch\n.*bootstrap fetch --scope=solana/u);
+  const offline = byId("offline-install-and-verify-pinned-prerequisites");
+  assert.match(offline.run, /bootstrap install --offline\n.*bootstrap install --offline --scope=solana/u);
+  assert.match(offline.run, /bootstrap verify --offline\n.*bootstrap verify --offline --scope=solana/u);
+  assert.match(offline.run, /doctor --scope=core/u);
+  assert.match(offline.run, /command -v pnpm.*\.tools\/bin\/pnpm/u);
+  const workspace = byId("install-frozen-source-workspace-and-populate-store");
+  assert.equal(workspace.run, "source scripts/env.sh && pnpm install --frozen-lockfile");
+  const preload = byId("preload-pinned-slither-image");
+  assert.equal(preload.run, "source scripts/env.sh && pnpm security:solidity:prepare-image");
+  const preflight = byId("non-pulling-rollback-environment-cache-preflight");
+  assert.equal(
+    preflight.run,
+    'source scripts/env.sh && pnpm rollback:preflight -- --expected-sha="$GITHUB_SHA"',
+  );
+  const rootCheck = byId("run-root-check-with-exact-rollback-proof");
+  assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check:linux");
+  const historyAfter = byId("assert-complete-history-and-exact-clean-head-after");
+  assert.equal(historyAfter.if, "${{ always() }}");
+  assert.equal(historyAfter.run.trim(), historyBefore.run.trim());
+  const validation = byId("validate-rollback-proof");
+  assert.equal(validation.if, "${{ success() }}");
+  assert.match(validation.run, /pnpm rollback:evidence:validate --/u);
+  assert.match(validation.run, /--expected-sha="\$GITHUB_SHA"/u);
+  assert.match(validation.run, /assert-complete-history\.sh "\$GITHUB_SHA"/u);
+  assert.match(validation.run, /assert-clean-head\.sh "\$GITHUB_SHA"/u);
+  const upload = byId("upload-rollback-proof-evidence");
+  assert.equal(upload.if, "${{ success() && steps.validate-rollback-proof.outcome == 'success' }}");
+  assert.equal(upload.uses, "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+  assert.deepEqual(upload.with, {
+    name: "rollback-proof-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+    path: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+    "if-no-files-found": "error",
+    "retention-days": 14,
+  });
+  assert.equal(upload["continue-on-error"], false);
+  const diagnostics = byId("upload-rollback-failure-diagnostics");
+  assert.equal(diagnostics.if, "${{ failure() }}");
+  assert.equal(diagnostics.uses, "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+  assert.match(diagnostics.with.name, /^rollback-diagnostics-/u);
+  assert.doesNotMatch(diagnostics.with.path, /statement\.json|seal\.json|READY/u);
+  assert.equal(diagnostics.with["if-no-files-found"], "warn");
+  assert.equal(diagnostics["continue-on-error"], false);
+
+  for (const [earlier, later] of [
+    [checkout, historyBefore],
+    [historyBefore, fetch],
+    [fetch, offline],
+    [offline, workspace],
+    [workspace, preload],
+    [preload, preflight],
+    [preflight, rootCheck],
+    [rootCheck, historyAfter],
+    [historyAfter, validation],
+    [validation, upload],
+    [upload, diagnostics],
+  ]) {
+    assert.ok(job.steps.indexOf(earlier) < job.steps.indexOf(later));
+  }
 });
 
 test("solidity job selects pinned solc for format/build/unit/fuzz/invariants/gas-size", () => {
@@ -142,7 +239,7 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   const commands = runs("solidity-security").join("\n");
   assert.match(commands, /pnpm security:solidity:prepare-image/);
   assert.match(commands, /pnpm security:solidity/);
-  assert.match(commands, /node tooling\/security\/slither\/src\/composition\/validate-evidence\.ts/);
+  assert.match(commands, /\.tools\/bin\/node tooling\/security\/slither\/src\/composition\/validate-evidence\.ts/);
   const validation = job.steps.find((step) => step.name === "Validate finalized Slither evidence");
   assert.equal(validation.id, "validate-slither-evidence");
   assert.equal(validation.if, "${{ always() }}");
@@ -152,6 +249,32 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   assert.equal(upload.with["if-no-files-found"], "error");
   assert.equal(upload.with["retention-days"], 14);
   assert.doesNotMatch(JSON.stringify(job), /continue-on-error|:latest\b/u);
+});
+
+test("actual workflow Node validation ignores inherited preload and proxy authority", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-workflow-node-authority-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const marker = join(root, "workflow-node-attacker-marker");
+  const preload = join(root, "preload.cjs");
+  writeFileSync(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed\\n");\n`);
+  const command = workflow.jobs["solidity-security"].steps
+    .find((step) => step.name === "Validate finalized Slither evidence").run;
+  const result = spawnSync("/bin/bash", ["-c", command], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ALL_PROXY: "http://sentinel.invalid/",
+      GITHUB_SHA: "invalid",
+      HTTP_PROXY: "http://sentinel.invalid/",
+      NODE_OPTIONS: `--require=${preload}`,
+      SLITHER_CANDIDATE_SHA: "invalid",
+    },
+    timeout: 30_000,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /one unambiguous exact candidate SHA is required/u);
+  assert.equal(existsSync(marker), false);
 });
 
 test("Compose is digest-pinned, local-only and hardened", () => {
@@ -209,6 +332,20 @@ test("package-manager policy disables implicit downloads and the final check has
   for (const command of ["test:linux-parity", "genesis:vector:check", "security:check", "test:local-evm:built", "test:local-solana", "test:deployment-plan", "security:slither:test"]) {
     assert.match(packageJson.scripts.check, new RegExp(`pnpm ${command.replaceAll(":", "\\:")}`));
   }
+  assert.match(
+    packageJson.scripts["test:linux-parity"],
+    /scripts\/tests\/toolchain-hardening\.test\.mjs/u,
+  );
+  assert.doesNotMatch(packageJson.scripts.check, /rollback:(?:preflight|prove)/u);
+  assert.equal(
+    packageJson.scripts["check:linux"],
+    "pnpm rollback:preflight && pnpm check && pnpm rollback:prove",
+  );
+  assert.match(
+    workflow.jobs["foundation-and-typescript"].steps
+      .find((step) => step.id === "run-root-check-with-exact-rollback-proof").run,
+    /pnpm check:linux$/u,
+  );
   assert.doesNotMatch(packageJson.scripts.check, /\|\|\s*true|--if-present/);
 });
 

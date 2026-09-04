@@ -4,6 +4,12 @@ if [[ -n "${ZSH_VERSION:-}" ]]; then
   eval 'token_env_script=${(%):-%x}'
 else
   token_env_script=${BASH_SOURCE[0]}
+  if [[ "$token_env_script" == */* ]]; then
+    token_env_script_directory=${token_env_script%/*}
+    [[ -n "$token_env_script_directory" ]] || token_env_script_directory=/
+  else
+    token_env_script_directory=.
+  fi
 fi
 
 token_env_main() {

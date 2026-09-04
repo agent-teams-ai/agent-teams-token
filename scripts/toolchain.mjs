@@ -1,26 +1,46 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
-  chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync,
-  openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync,
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  rmSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalizeTrustedPath, assertOwnedDirectoryChain } from "./toolchain-paths.mjs";
 import { validateLock } from "./toolchain-lock-validation.mjs";
 import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolchain-execution.mjs";
-import { pnpmWrapper, writePnpmWrapper } from "./toolchain-pnpm-wrapper.mjs";
 import { fileURLToPath } from "node:url";
-import { assertExpectedFileHashes, lockedFileMismatch } from "./toolchain-policy.mjs";
 import { parseToolchainJson, TOOLCHAIN_JSON_LIMITS } from "./toolchain-json.mjs";
 import {
   checkedRegularDescriptor, hashDescriptor, readVerifiedBytes, sameIdentity,
 } from "./toolchain-files.mjs";
+import {
+  cleanupPreparedPayload,
+  prepareVerifiedPayload,
+} from "./toolchain-archive.mjs";
+import {
+  inspectInstallation,
+  installPreparedArtifact,
+} from "./toolchain-installation.mjs";
 
-export { canonicalizeTrustedPath, descriptorRoot, executeVerifiedFile, validateLock };
+export {
+  canonicalizeTrustedPath,
+  cleanupPreparedPayload,
+  descriptorRoot,
+  executeVerifiedFile,
+  inspectInstallation,
+  installPreparedArtifact,
+  prepareVerifiedPayload,
+  validateLock,
+};
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const provenanceFile = ".agtmai-toolchain-install.json";
 
 export function hostPlatform({ platform = process.platform, arch = process.arch } = {}) {
   if (platform === "darwin" && arch === "arm64") {return "darwin-arm64";}
@@ -148,35 +168,59 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
   if (!offline) {throw new Error("TOOLCHAIN_INSTALL_REQUIRES_OFFLINE use=install --offline");}
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot, { platform: host });
-  const downloads = join(toolsRoot, "downloads");
   assertOwnedDirectoryChain(toolsRoot, { platform: host });
+  const downloads = containedPath(toolsRoot, "downloads");
   assertOwnedDirectoryChain(downloads, { platform: host });
   mkdirSync(toolsRoot, { recursive: true });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = containedPath(downloads, artifact.archiveName);
-    verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_OFFLINE_CACHE_MISS" });
-    const destination = containedPath(toolsRoot, artifact.installDirectory);
-    const present = inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock, hostPlatform: host });
-    if (present.ok) {
+    const prepared = prepareVerifiedPayload({
+      name,
+      platform,
+      artifact,
+      archive,
+      toolsRoot,
+      missingCode: "TOOLCHAIN_OFFLINE_CACHE_MISS",
+    });
+    try {
+      const destination = containedPath(toolsRoot, artifact.installDirectory);
+      assertOwnedDirectoryChain(destination, { platform: host });
+      const present = inspectInstallation({
+        name,
+        tool,
+        artifact,
+        authorityFiles: prepared.files,
+        authorityInventory: prepared.inventory,
+        authorityInventorySha256: prepared.inventorySha256,
+        platform,
+        destination,
+        toolsRoot,
+        lock,
+      });
+      if (present.ok) {
+        process.stdout.write(
+          `INSTALL_PRESENT tool=${name} platform=${platform} version=${present.actualVersion} sha256=${artifact.sha256}\n`,
+        );
+        continue;
+      }
+      installPreparedArtifact({
+        name,
+        tool,
+        artifact,
+        prepared,
+        destination,
+        platform,
+        toolsRoot,
+        lock,
+      });
       process.stdout.write(
-        `INSTALL_PRESENT tool=${name} platform=${platform} version=${present.actualVersion} sha256=${artifact.sha256}\n`,
+        `INSTALL_OK tool=${name} platform=${platform} version=${tool.version} sha256=${artifact.sha256}`
+        + `${present.code === "missing" ? "" : ` replaced=${present.code}`}\n`,
       );
-      continue;
+    } finally {
+      cleanupPreparedPayload(prepared);
     }
-    atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock, hostPlatform: host });
-    process.stdout.write(
-      `INSTALL_OK tool=${name} platform=${platform} version=${tool.version} sha256=${artifact.sha256}`
-      + `${present.code === "missing" ? "" : ` replaced=${present.code}`}\n`,
-    );
   }
-}
-
-function verifyArchive({ name, platform, artifact, archive, missingCode }) {
-  let actual;
-  try { actual = readVerifiedBytes(archive); }
-  catch (error) { if (error?.code === "ENOENT") {throw new Error(`${missingCode} tool=${name} platform=${platform} expected=${archive}`, { cause: error });} throw error; }
-  if (actual.hash !== artifact.sha256) {throw new Error(`TOOLCHAIN_OFFLINE_UNVERIFIED_CACHE tool=${name} platform=${platform} expected=${artifact.sha256} actual=${actual.hash}`);}
-  return actual.bytes;
 }
 
 function containedPath(root, value) {
@@ -191,268 +235,218 @@ function containedPath(root, value) {
   return target;
 }
 
-function atomicInstall({ name, tool, artifact, archive, destination, platform, toolsRoot, lock, hostPlatform: host = process.platform }) {
-  assertOwnedDirectoryChain(destination, { platform: host });
-  const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
-  const staged = join(stageRoot, "payload");
-  let backup;
-  try {
-    mkdirSync(staged);
-    const verifiedArchive = join(stageRoot, "archive");
-    const archiveBytes = verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_OFFLINE_UNVERIFIED_CACHE" });
-    const archiveFd = openSync(verifiedArchive, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
-    try { writeSync(archiveFd, archiveBytes); } finally { closeSync(archiveFd); }
-    if (artifact.archive === "executable") {
-      const target = containedPath(staged, artifact.expectedFiles[0]);
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, archiveBytes);
-      chmodSync(target, 0o755);
-    } else {
-      const args = artifact.archive === "tar.xz"
-        ? ["-xJf", verifiedArchive, "-C", staged]
-        : artifact.archive === "tar.bz2"
-          ? ["-xjf", verifiedArchive, "-C", staged]
-          : ["-xzf", verifiedArchive, "-C", staged];
-      execFileSync("/usr/bin/tar", ["--no-same-owner", ...args], { stdio: "pipe", env: minimalSubprocessEnv() });
-    }
-    const entries = readdirSync(staged);
-    const source = entries.length === 1 && statSync(join(staged, entries[0])).isDirectory()
-      ? join(staged, entries[0])
-      : staged;
-    const files = Object.fromEntries(artifact.expectedFiles.map((path) => {
-      const target = containedPath(source, path);
-      if (!existsSync(target) || !lstatSync(target).isFile()) {
-        throw new Error(`TOOLCHAIN_INSTALL_EXPECTED_FILE tool=${name} platform=${platform} path=${path}`);
-      }
-      return [path, sha256(target)];
-    }));
-    assertExpectedFileHashes({ name, platform, artifact, files });
-    if (name === "pnpm") {
-      executePnpmVersionCheck({
-        root: source,
-        node: pinnedNode(lock, toolsRoot, platform),
-        pnpmHash: sha256(containedPath(source, "dist/pnpm.mjs")),
-        tool,
-      });
-    } else {
-      executeVersionChecks(source, artifact, files);
-    }
-    writeFileSync(join(source, provenanceFile), `${JSON.stringify({
-      schemaVersion: 1,
-      tool: name,
-      version: tool.version,
-      platform,
-      artifactSha256: artifact.sha256,
-      files,
-    }, null, 2)}\n`, { mode: 0o644 });
-    if (existsSync(destination)) {
-      backup = `${destination}.replace-${process.pid}-${Date.now()}`;
-      renameSync(destination, backup);
-    }
-    try {
-      renameSync(source, destination);
-    } catch (error) {
-      if (backup && !existsSync(destination)) {renameSync(backup, destination);}
-      throw error;
-    }
-    if (name === "pnpm") {writePnpmWrapper({ toolsRoot, hostPlatform: host });}
-    if (backup) {rmSync(backup, { force: true, recursive: true });}
-  } finally {
-    rmSync(stageRoot, { recursive: true, force: true });
-  }
-}
-
-export function inspectInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock, hostPlatform: host = process.platform }) {
-  try { assertOwnedDirectoryChain(toolsRoot, { platform: host }); assertOwnedDirectoryChain(join(toolsRoot, "downloads"), { platform: host }); assertOwnedDirectoryChain(destination, { platform: host }); }
-  catch { return { ok: false, code: "installation-path-unsafe", actualVersion: "unknown" }; }
-  if (!existsSync(destination)) {return { ok: false, code: "missing", actualVersion: "missing" };}
-  const provenancePath = join(destination, provenanceFile);
-  if (!existsSync(provenancePath)) {return { ok: false, code: "provenance-missing", actualVersion: "unknown" };}
-  let provenance;
-  try {
-    provenance = JSON.parse(readVerifiedBytes(provenancePath).bytes.toString("utf8"));
-  } catch {
-    return { ok: false, code: "provenance-invalid", actualVersion: "unknown" };
-  }
-  if (!validProvenance({ provenance, artifact, name, platform, version: tool.version })) {
-    return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
-  }
-  const fileKeys = Object.keys(provenance.files).toSorted();
-  let canonicalFiles;
-  const authenticatedPaths = name === "pnpm" ? [...artifact.expectedFiles, "dist/pnpm.mjs"] : artifact.expectedFiles;
-  try { canonicalFiles = artifact.expectedFileSha256
-    ? Object.fromEntries(authenticatedPaths.map((path) => [path, artifact.expectedFileSha256[path]]))
-    : canonicalArchiveFileHashes({
-        artifact, archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName), paths: authenticatedPaths,
-      }); }
-  catch { return { ok: false, code: "archive-provenance-unavailable", actualVersion: "unknown" }; }
-  if (fileKeys.some((path) => provenance.files[path] !== canonicalFiles[path])) {
-    return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
-  }
-  for (const path of artifact.expectedFiles) {
-    const target = containedPath(destination, path);
-    const exists = existsSync(target);
-    const code = inspectStableExpectedFile({ artifact: { ...artifact, provenanceFiles: canonicalFiles }, path, target, exists });
-    if (code) {return { ok: false, code, actualVersion: "unknown" };}
-  }
-  let actualVersion;
-  try {
-    actualVersion = name === "pnpm"
-      ? executePnpmVersionCheck({
-          root: destination,
-          node: pinnedNode(lock, toolsRoot, platform),
-          pnpmHash: canonicalFiles["dist/pnpm.mjs"],
-          tool,
-        })
-      : executeVersionChecks(destination, artifact, canonicalFiles);
-  } catch (error) {
-    return { ok: false, code: "version-command", actualVersion: error instanceof Error ? error.message : String(error) };
-  }
-  if (name === "pnpm") {
-    const wrapper = join(toolsRoot, "bin", "pnpm");
-    if (!existsSync(wrapper) || readVerifiedBytes(wrapper).bytes.toString("utf8") !== pnpmWrapper()) {
-      return { ok: false, code: "wrapper-missing-or-tampered", actualVersion: singleLine(actualVersion) };
-    }
-  }
-  return { ok: true, code: "ok", actualVersion: singleLine(actualVersion) };
-}
-
-function validProvenance({ provenance, artifact, name, platform, version }) {
-  if (typeof provenance !== "object" || provenance === null
-    || typeof provenance.files !== "object" || provenance.files === null) {return false;}
-  const provenanceKeys = ["artifactSha256", "files", "platform", "schemaVersion", "tool", "version"];
-  const fileKeys = Object.keys(provenance.files).toSorted();
-  return JSON.stringify(Object.keys(provenance).toSorted()) === JSON.stringify(provenanceKeys)
-    && JSON.stringify(fileKeys) === JSON.stringify(artifact.expectedFiles.toSorted())
-    && fileKeys.every((key) => /^[a-f0-9]{64}$/.test(provenance.files[key]))
-    && provenance.schemaVersion === 1
-    && provenance.tool === name
-    && provenance.version === version
-    && provenance.platform === platform
-    && provenance.artifactSha256 === artifact.sha256;
-}
-
-function inspectStableExpectedFile({ artifact, path, target, exists }) {
-  if (!exists) {return `file-missing:${path}`;}
-  let fd;
-  try {
-    fd = openSync(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) {return `file-missing:${path}`;}
-    const bytes = readFileSync(fd); const actual = createHash("sha256").update(bytes).digest("hex");
-    const after = fstatSync(fd); const pathStat = lstatSync(target);
-    if (after.ino !== before.ino || after.dev !== before.dev || pathStat.ino !== before.ino || pathStat.dev !== before.dev || pathStat.nlink !== 1) {return `file-checksum:${path}`;}
-    if (artifact.provenanceFiles?.[path] !== actual) {return `file-checksum:${path}`;}
-    return lockedFileMismatch(artifact, path, actual) ? `file-lock-checksum:${path}` : undefined;
-  } catch { return `file-missing:${path}`; } finally { if (fd !== undefined) {closeSync(fd);} }
-}
-
-function canonicalArchiveFileHashes({ artifact, archive, paths = artifact.expectedFiles }) {
-  const bytes = verifyArchive({ name: "canonical", platform: "canonical", artifact, archive, missingCode: "TOOLCHAIN_ARCHIVE_MISSING" });
-  if (artifact.archive === "executable") {return { [artifact.expectedFiles[0]]: createHash("sha256").update(bytes).digest("hex") };}
-  const root = mkdtempSync(join(dirname(archive), ".inspect-archive-")); const snapshot = join(root, "archive");
-  try {
-    writeFileSync(snapshot, bytes, { mode: 0o600 });
-    execFileSync("/usr/bin/tar", ["--no-same-owner", artifact.archive === "tar.xz" ? "-xJf" : artifact.archive === "tar.bz2" ? "-xjf" : "-xzf", snapshot, "-C", root], { stdio: "pipe", env: minimalSubprocessEnv() });
-    const entries = readdirSync(root).filter((entry) => entry !== "archive"); const source = entries.length === 1 && statSync(join(root, entries[0])).isDirectory() ? join(root, entries[0]) : root;
-    return Object.fromEntries(paths.map((path) => [path, sha256(join(source, path))]));
-  } finally { rmSync(root, { recursive: true, force: true }); }
-}
-
-function pinnedNode(lock, toolsRoot, platform) {
-  const artifact = lock.tools.node.platforms[platform];
-  const hashes = canonicalArchiveFileHashes({ artifact, archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName) });
-  return { path: containedPath(containedPath(toolsRoot, artifact.installDirectory), "bin/node"), sha256: hashes["bin/node"] };
-}
-
-function executePnpmVersionCheck({ root, node, pnpmHash, tool }) {
-  const packageJson = JSON.parse(readVerifiedBytes(containedPath(root, "package.json")).bytes.toString("utf8"));
-  if (packageJson.name !== "pnpm" || packageJson.version !== tool.version) {
-    throw new Error(`pnpm-package-mismatch:actual=${packageJson.name}@${packageJson.version}`);
-  }
-  const script = { path: containedPath(root, "dist/pnpm.mjs"), sha256: pnpmHash };
-  const actual = executeOpenedNode({ node, script, args: ["--version"] });
-  if (actual !== tool.version) { throw new Error(`pnpm-version-mismatch:actual=${singleLine(actual)}`); }
-  return `pnpm=${actual}`;
-}
-
-function executeVersionChecks(root, artifact, hashes) {
-  return artifact.versionChecks.map((check) => {
-    const actual = executeVerifiedFile({ path: containedPath(root, check.path), expectedSha256: hashes[check.path], args: check.args });
-    if (!new RegExp(check.pattern).test(actual)) { throw new Error(`version-mismatch:${check.name}:actual=${singleLine(actual)}`); }
-    return `${check.name}=${singleLine(actual)}`;
-  }).join(",");
-}
-
-function singleLine(value) {
-  return String(value).replaceAll(/\s+/g, " ").trim();
-}
-
 export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core", hostPlatform: host = process.platform }) {
   if (!offline) {throw new Error("TOOLCHAIN_VERIFY_REQUIRES_OFFLINE use=verify --offline");}
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot, { platform: host });
-  const downloads = join(toolsRoot, "downloads");
   assertOwnedDirectoryChain(toolsRoot, { platform: host });
+  const downloads = containedPath(toolsRoot, "downloads");
   assertOwnedDirectoryChain(downloads, { platform: host });
   for (const [name, tool, artifact] of downloadableTools(lock, platform, scope)) {
     const archive = containedPath(downloads, artifact.archiveName);
-    verifyArchive({ name, platform, artifact, archive, missingCode: "TOOLCHAIN_CACHE_MISSING" });
-    const installation = inspectInstallation({
+    const prepared = prepareVerifiedPayload({
       name,
-      tool,
-      artifact,
       platform,
-      destination: containedPath(toolsRoot, artifact.installDirectory),
+      artifact,
+      archive,
       toolsRoot,
-      lock,
-      hostPlatform: host,
+      missingCode: "TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE",
     });
-    if (!installation.ok) {
-      throw new Error(`TOOLCHAIN_INSTALL_INVALID tool=${name} platform=${platform} reason=${installation.code}`);
+    try {
+      const destination = containedPath(toolsRoot, artifact.installDirectory);
+      assertOwnedDirectoryChain(destination, { platform: host });
+      const installation = inspectInstallation({
+        name,
+        tool,
+        artifact,
+        authorityFiles: prepared.files,
+        authorityInventory: prepared.inventory,
+        authorityInventorySha256: prepared.inventorySha256,
+        platform,
+        destination,
+        toolsRoot,
+        lock,
+      });
+      if (!installation.ok) {
+        throw new Error(`TOOLCHAIN_INSTALL_INVALID tool=${name} platform=${platform} reason=${installation.code}`);
+      }
+      process.stdout.write(
+        `VERIFY_OK tool=${name} platform=${platform} version=${installation.actualVersion} sha256=${artifact.sha256}\n`,
+      );
+    } finally {
+      cleanupPreparedPayload(prepared);
     }
-    process.stdout.write(
-      `VERIFY_OK tool=${name} platform=${platform} version=${installation.actualVersion} sha256=${artifact.sha256}\n`,
-    );
   }
 }
 
 export function runPnpm({ lock, platform, toolsRoot, args }) {
-  assertSupported(lock, platform); toolsRoot = canonicalizeTrustedPath(toolsRoot); assertOwnedDirectoryChain(toolsRoot);
-  const pnpmTool = lock.tools.pnpm;
-  const authenticatedPath = [containedPath(toolsRoot, "bin")];
-  for (const name of lock.coreTools) {
-    const tool = lock.tools[name]; const artifact = tool.platforms[platform];
-    const destination = containedPath(toolsRoot, artifact.installDirectory);
-    assertRunInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock });
-    if (name !== "node") {authenticatedPath.push(...executableDirectories(destination, artifact));}
+  assertSupported(lock, platform);
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
+  assertOwnedDirectoryChain(toolsRoot);
+  assertPnpmArguments(args);
+
+  const preparedAuthorities = [];
+  let primaryFailure;
+  let result;
+  try {
+    const authorities = new Map();
+    const authenticate = (name, tool, artifact) => {
+      const prepared = prepareRunInstallation({
+        name, tool, artifact, platform, toolsRoot, lock,
+      });
+      preparedAuthorities.push(prepared);
+      authorities.set(name, prepared);
+      return prepared;
+    };
+
+    const authenticatedPath = [containedPath(toolsRoot, "bin")];
+    for (const name of lock.coreTools) {
+      const tool = lock.tools[name];
+      const artifact = tool.platforms[platform];
+      authenticate(name, tool, artifact);
+      if (name !== "node") {
+        authenticatedPath.push(...executableDirectories(
+          containedPath(toolsRoot, artifact.installDirectory),
+          artifact,
+        ));
+      }
+    }
+
+    const pnpmTool = lock.tools.pnpm;
+    authenticate("pnpm", pnpmTool, pnpmTool);
+    for (const name of lock.fixtureTools) {
+      const tool = lock.tools[name];
+      const artifact = tool.platforms[platform];
+      const destination = containedPath(toolsRoot, artifact.installDirectory);
+      if (!pathEntryExists(destination)) {continue;}
+      authenticate(name, tool, artifact);
+      authenticatedPath.push(...executableDirectories(destination, artifact));
+    }
+
+    const store = containedPath(toolsRoot, "pnpm-store");
+    if (!existsSync(store)) {mkdirSync(store, { mode: 0o700 });}
+    chmodSync(store, 0o700);
+    assertOwnedDirectoryChain(store);
+    const storeIdentity = lstatSync(store);
+    if (!storeIdentity.isDirectory() || storeIdentity.isSymbolicLink()
+      || (storeIdentity.mode & 0o777) !== 0o700
+      || (typeof process.getuid === "function" && storeIdentity.uid !== process.getuid())) {
+      throw new Error("TOOLCHAIN_PNPM_STORE_UNSAFE");
+    }
+
+    const nodeTool = lock.tools.node;
+    const nodeArtifact = nodeTool.platforms[platform];
+    const nodeAuthority = authorities.get("node");
+    const pnpmAuthority = authorities.get("pnpm");
+    const pnpmEntrypoint = "dist/pnpm.mjs";
+    const pnpmEntrypointAuthority = pnpmAuthority.inventory[pnpmEntrypoint];
+    if (pnpmEntrypointAuthority?.type !== "file") {
+      throw new Error(`TOOLCHAIN_RUN_INVALID tool=pnpm reason=entry-missing:${pnpmEntrypoint}`);
+    }
+    result = executeOpenedNode({
+      node: {
+        path: containedPath(
+          containedPath(toolsRoot, nodeArtifact.installDirectory),
+          "bin/node",
+        ),
+        sha256: nodeAuthority.files["bin/node"],
+      },
+      script: {
+        path: containedPath(
+          containedPath(toolsRoot, pnpmTool.installDirectory),
+          pnpmEntrypoint,
+        ),
+        sha256: pnpmEntrypointAuthority.sha256,
+      },
+      args: [
+        ...args,
+        `--config.store-dir=${store}`,
+        "--config.cache-dir=/dev/null",
+        "--config.ignore-pnpmfile=true",
+        "--config.userconfig=/dev/null",
+        "--config.globalconfig=/dev/null",
+        "--config.auto-install-peers=false",
+        "--config.verify-deps-before-run=false",
+      ],
+      stdio: "inherit",
+      subprocessPath: [...new Set(authenticatedPath)],
+    });
+  } catch (error) {
+    primaryFailure = error;
   }
-  assertRunInstallation({ name: "pnpm", tool: pnpmTool, artifact: pnpmTool, platform,
-    destination: containedPath(toolsRoot, pnpmTool.installDirectory), toolsRoot, lock });
-  for (const name of lock.fixtureTools) {
-    const tool = lock.tools[name]; const artifact = tool.platforms[platform];
-    const destination = containedPath(toolsRoot, artifact.installDirectory);
-    if (!pathEntryExists(destination)) {continue;}
-    assertRunInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock });
-    authenticatedPath.push(...executableDirectories(destination, artifact));
+
+  const cleanupFailures = [];
+  for (const prepared of preparedAuthorities.reverse()) {
+    try {cleanupPreparedPayload(prepared);}
+    catch (error) {cleanupFailures.push(error);}
   }
-  const pnpmHashes = canonicalArchiveFileHashes({ artifact: pnpmTool,
-    archive: containedPath(join(toolsRoot, "downloads"), pnpmTool.archiveName), paths: [...pnpmTool.expectedFiles, "dist/pnpm.mjs"] });
-  return executeOpenedNode({
-    node: pinnedNode(lock, toolsRoot, platform),
-    script: { path: containedPath(containedPath(toolsRoot, pnpmTool.installDirectory), "dist/pnpm.mjs"), sha256: pnpmHashes["dist/pnpm.mjs"] },
-    args, stdio: "inherit", subprocessPath: [...new Set(authenticatedPath)],
+  if (primaryFailure !== undefined || cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures].filter((error) => error !== undefined),
+      primaryFailure instanceof Error ? primaryFailure.message : "TOOLCHAIN_RUN_CLEANUP_FAILED",
+    );
+  }
+  return result;
+}
+
+function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, lock }) {
+  const destination = containedPath(toolsRoot, artifact.installDirectory);
+  assertOwnedDirectoryChain(destination);
+  const prepared = prepareVerifiedPayload({
+    name,
+    platform,
+    artifact,
+    archive: containedPath(containedPath(toolsRoot, "downloads"), artifact.archiveName),
+    toolsRoot,
+    missingCode: "TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE",
   });
+  const installation = inspectInstallation({
+    name,
+    tool,
+    artifact,
+    authorityFiles: prepared.files,
+    authorityInventory: prepared.inventory,
+    authorityInventorySha256: prepared.inventorySha256,
+    platform,
+    destination,
+    toolsRoot,
+    lock,
+  });
+  if (!installation.ok) {
+    try {cleanupPreparedPayload(prepared);}
+    catch (cleanupError) {
+      throw new AggregateError(
+        [new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`), cleanupError],
+        `TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`,
+      );
+    }
+    throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`);
+  }
+  return prepared;
 }
 
-function assertRunInstallation(options) {
-  const installation = inspectInstallation(options);
-  if (!installation.ok) {throw new Error(`TOOLCHAIN_RUN_INVALID tool=${options.name} reason=${installation.code}`);}
+function assertPnpmArguments(args) {
+  const forbidden = args.find((argument) => /^(?:--agtmai-trusted-store=|--(?:cache-dir|store-dir|global-pnpmfile|pnpmfile|ignore-pnpmfile|config\.cache-dir|config\.store-dir|config\.ignore-pnpmfile|config\.userconfig|config\.globalconfig)(?:=|$))/u.test(argument));
+  if (forbidden !== undefined) {
+    throw new Error(`TOOLCHAIN_PNPM_AUTHORITY_ARGUMENT_FORBIDDEN argument=${forbidden}`);
+  }
 }
 
-function executableDirectories(destination, artifact) {return [...new Set(artifact.versionChecks.map((check) => dirname(containedPath(destination, check.path))))];}
+function executableDirectories(destination, artifact) {
+  return [...new Set(artifact.versionChecks.map((check) =>
+    dirname(containedPath(destination, check.path))))];
+}
 
-function pathEntryExists(path) {try {lstatSync(path); return true;} catch (error) {if (error?.code === "ENOENT") {return false;} throw error;}}
+function pathEntryExists(path) {
+  try {lstatSync(path); return true;}
+  catch (error) {if (error?.code === "ENOENT") {return false;} throw error;}
+}
+
+/*
+ * The authenticated runner deliberately does not execute .tools/bin/pnpm.
+ * That wrapper remains the interactive shell boundary, while this path holds
+ * verified Node and pnpm descriptors across process creation.
+ */
 
 function assertSupported(lock, platform) {
   if (!lock.platforms.includes(platform)) {throw new Error(`TOOLCHAIN_UNSUPPORTED_PLATFORM platform=${platform}`);}

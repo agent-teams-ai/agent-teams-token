@@ -16,14 +16,32 @@ concurrency:
 jobs:
   foundation-and-typescript:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      AGTMAI_ROLLBACK_TMPDIR: ${{ runner.temp }}
+      AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY: ${{ runner.temp }}/rollback-proof-${{ github.sha }}
+      SLITHER_REPOSITORY_ROOT: ${{ github.workspace }}
+      SLITHER_CANDIDATE_SHA: ${{ github.sha }}
+      SLITHER_EVIDENCE_DIRECTORY: ${{ runner.temp }}/rollback-proof-${{ github.sha }}
+      SLITHER_DOCKER_PATH: /usr/bin/docker
+      SLITHER_FORGE_PATH: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge
+      SLITHER_SOLC_PATH: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout complete history at exact head
+        id: checkout-complete-history-at-exact-head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Assert exact clean checkout
+      - name: Assert complete history and exact clean checkout
+        id: assert-complete-history-and-exact-clean-head-before
         shell: bash
-        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+        run: |
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-clean-head.sh "$GITHUB_SHA"
       - name: Record workflow-dispatch exact-SHA evidence
         if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
@@ -36,24 +54,81 @@ jobs:
             "run_attempt=$GITHUB_RUN_ATTEMPT" \
             "ref=$GITHUB_REF" \
             "sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-      - name: Fetch, install and verify pinned toolchain
+      - name: Fetch pinned Core and Solana prerequisites
+        id: fetch-pinned-core-and-solana-prerequisites
         shell: bash
         run: |
           ./dev bootstrap fetch
+          ./dev bootstrap fetch --scope=solana
+      - name: Install and verify pinned prerequisites offline
+        id: offline-install-and-verify-pinned-prerequisites
+        shell: bash
+        run: |
           ./dev bootstrap install --offline
+          ./dev bootstrap install --offline --scope=solana
           source scripts/env.sh
           ./dev bootstrap verify --offline
+          ./dev bootstrap verify --offline --scope=solana
+          ./dev doctor --scope=core
           test "$(command -v pnpm)" = "$PWD/.tools/bin/pnpm"
           test "$(pnpm --version)" = "11.24.0"
       - name: Install frozen workspace
+        id: install-frozen-source-workspace-and-populate-store
         shell: bash
         run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Preload pinned Slither image
+        id: preload-pinned-slither-image
+        shell: bash
+        run: source scripts/env.sh && pnpm security:solidity:prepare-image
+      - name: Validate rollback environment and caches without pulling
+        id: non-pulling-rollback-environment-cache-preflight
+        shell: bash
+        run: source scripts/env.sh && pnpm rollback:preflight -- --expected-sha="$GITHUB_SHA"
       - name: Final repository check
+        id: run-root-check-with-exact-rollback-proof
         shell: bash
-        run: source scripts/env.sh && pnpm check
-      - name: Assert gates kept the exact checkout clean
+        run: source scripts/env.sh && pnpm check:linux
+      - name: Reassert complete history and exact clean checkout
+        id: assert-complete-history-and-exact-clean-head-after
+        if: ${{ always() }}
         shell: bash
-        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+        run: |
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Validate sealed rollback proof and revalidate candidate inventory
+        id: validate-rollback-proof
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          source scripts/env.sh
+          pnpm rollback:evidence:validate -- \
+            --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" \
+            --expected-sha="$GITHUB_SHA"
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Upload validated rollback proof artifact
+        id: upload-rollback-proof-evidence
+        if: ${{ success() && steps.validate-rollback-proof.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rollback-proof-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rollback-proof-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+        continue-on-error: false
+      - name: Upload rollback failure diagnostics
+        id: upload-rollback-failure-diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rollback-diagnostics-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/rollback-proof-${{ github.sha }}/diagnostics.json
+            ${{ runner.temp }}/rollback-proof-${{ github.sha }}/commands
+            ${{ runner.temp }}/rollback-proof-${{ github.sha }}/survivors
+          if-no-files-found: warn
+          retention-days: 14
+        continue-on-error: false
 
   solidity:
     runs-on: ubuntu-24.04
@@ -257,7 +332,7 @@ jobs:
         run: |
           if ! test -f "$SLITHER_EVIDENCE_DIRECTORY/READY"; then
             source scripts/env.sh
-            node tooling/security/slither/src/composition/record-environment-failure.ts
+            .tools/bin/node tooling/security/slither/src/composition/record-environment-failure.ts
           fi
       - name: Validate finalized Slither evidence
         id: validate-slither-evidence
@@ -265,7 +340,7 @@ jobs:
         shell: bash
         run: |
           source scripts/env.sh
-          node tooling/security/slither/src/composition/validate-evidence.ts
+          .tools/bin/node tooling/security/slither/src/composition/validate-evidence.ts
       - name: Upload immutable Slither evidence
         if: ${{ always() && steps.validate-slither-evidence.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

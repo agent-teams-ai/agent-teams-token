@@ -72,17 +72,38 @@ test("parser ignores non-tooling boundaries and rejects an incomplete fixture", 
   assert.throws(() => validateToolingBoundaryPolicy(parsed), /TOOLING_BOUNDARY_ROOT_MISSING/);
 });
 
-test("every tooling lane routes representative non-TypeScript changes through the Foundation fast-full gate", async () => {
+test("every toolchain, tooling and recovery lane routes representative changes through the Foundation fast-full gate", async () => {
   const { loadAgentWorkflowPolicy, runChangedAgentWorkflow } = await foundationChangedWorkflow();
   const workflowPolicy = await loadAgentWorkflowPolicy(
     repositoryRoot,
     "architecture/foundation/repository-agent-workflow.yaml",
   );
   const representatives = [
+    "dev",
+    "scripts/bootstrap.sh",
+    "scripts/doctor.mjs",
+    "scripts/env.sh",
+    "scripts/tests/root-entrypoint.test.mjs",
+    "scripts/tests/toolchain-authority.test.mjs",
+    "scripts/tests/toolchain-fixture.mjs",
+    "scripts/tests/toolchain.test.mjs",
+    "scripts/toolchain-archive.mjs",
+    "scripts/toolchain-installation.mjs",
+    "scripts/toolchain-policy.mjs",
+    "scripts/toolchain.mjs",
+    "tooling/toolchain.lock.json",
     "tooling/local-evm/evidence-report.schema.v1.json",
     "tooling/local-solana/evidence-report.schema.v1.json",
     "tooling/deployment-plan/schema.v2.json",
     "tooling/security/slither/fixtures/vulnerable/contracts/src/Vulnerable.sol",
+    "architecture/rollback/local-solana.json",
+    "scripts/rollback/prove-slices.mjs",
+    "scripts/assert-complete-history.sh",
+    "scripts/tests/rollback-ci-history.test.mjs",
+    "scripts/tests/rollback-cleanup-safety.test.mjs",
+    "scripts/tests/rollback-evidence.test.mjs",
+    "scripts/tests/rollback-proof.test.mjs",
+    "scripts/tests/rollback-routing.test.mjs",
   ];
 
   for (const changedPath of representatives) {

@@ -1,0 +1,491 @@
+import { spawnSync } from "node:child_process";
+import {
+  constants,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
+import { trustedChildInvocation } from "../../toolchain-environment.mjs";
+import { closeDescriptorOnce, throwDescriptorCloseFailures } from "./descriptor-close.mjs";
+import {
+  assertCustodyCanonicalSpelling,
+  closeDirectoryCustody,
+  createDirectoryCustody,
+  refreshDirectoryCustody,
+  verifyDirectoryCustody,
+} from "./custody.mjs";
+
+const EVIDENCE_ENVIRONMENT_KEYS = [
+  "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY",
+  "AGTMAI_ROLLBACK_TMPDIR",
+  "AGTMAI_ANVIL_BINARY",
+  "AGTMAI_FORGE_BINARY",
+  "AGTMAI_SOLANA_REAL_TESTS_REQUIRED",
+  "AGTMAI_SOLC_BINARY",
+  "CI",
+  "FOUNDRY_PROFILE",
+  "GITHUB_SHA",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "PATH",
+  "SLITHER_CANDIDATE_SHA",
+  "SLITHER_DOCKER_PATH",
+  "SLITHER_EVIDENCE_DIRECTORY",
+  "SLITHER_FORGE_PATH",
+  "SLITHER_REPOSITORY_ROOT",
+  "SLITHER_SOLC_PATH",
+  "TMPDIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_RUNTIME_DIR",
+];
+
+function selectedEnvironment(environment) {
+  return Object.fromEntries(
+    EVIDENCE_ENVIRONMENT_KEYS
+      .filter((key) => environment[key] !== undefined)
+      .map((key) => [key, String(environment[key])]),
+  );
+}
+
+function closeCommandLogDescriptors(descriptors) {
+  const failures = [];
+  for (const descriptor of descriptors) {
+    if (!Number.isInteger(descriptor)) {
+      continue;
+    }
+    try {
+      closeDescriptorOnce(descriptor);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  return failures;
+}
+
+function evidenceTarget(value) {
+  if (typeof value === "string") {
+    return { custody: undefined, path: value };
+  }
+  if (value === null || typeof value !== "object" || typeof value.path !== "string"
+    || !("custody" in value)) {
+    throw new Error("ROLLBACK_EVIDENCE_TARGET_INVALID");
+  }
+  return value;
+}
+
+export function evidenceDirectoryPath(value) {
+  return evidenceTarget(value).path;
+}
+
+export function verifyEvidenceDirectory(
+  value,
+  code = "ROLLBACK_EVIDENCE_CUSTODY_SUBSTITUTED",
+) {
+  const target = evidenceTarget(value);
+  if (target.custody !== undefined) {
+    verifyDirectoryCustody(target.custody, code);
+  }
+  return target.path;
+}
+
+function mutateEvidenceDirectory(value, code, action) {
+  const target = evidenceTarget(value);
+  verifyEvidenceDirectory(target);
+  let result;
+  let primaryFailure;
+  try {
+    result = action(target.path);
+  } catch (error) {
+    primaryFailure = error;
+  }
+  const finalizationFailures = [];
+  if (target.custody !== undefined) {
+    try {
+      refreshDirectoryCustody(target.custody);
+    } catch (error) {
+      finalizationFailures.push(error);
+    }
+  }
+  throwDescriptorCloseFailures(finalizationFailures, code, primaryFailure);
+  return result;
+}
+
+export function closeEvidenceDirectory(value) {
+  const target = evidenceTarget(value);
+  if (target.custody !== undefined) {
+    closeDirectoryCustody(target.custody);
+  }
+}
+
+function combinedEvidenceFailure(message, primary, secondary) {
+  return new AggregateError([primary, secondary], message, { cause: primary });
+}
+
+export function runEvidenceLifecycle(value, createRecorder, action) {
+  let failure;
+  let recorder;
+  let result;
+  try {
+    recorder = createRecorder();
+    result = action(recorder);
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message += "\nROLLBACK_EVIDENCE path=" + evidenceDirectoryPath(value);
+    }
+    failure = error;
+    if (recorder !== undefined) {
+      try {
+        recorder.finalize("failed", error);
+      } catch (finalizationError) {
+        failure = combinedEvidenceFailure(
+          "ROLLBACK_EVIDENCE_FAILURE_FINALIZATION_FAILED",
+          failure,
+          finalizationError,
+        );
+      }
+    }
+  }
+  try {
+    closeEvidenceDirectory(value);
+  } catch (closeError) {
+    failure = failure === undefined
+      ? closeError
+      : combinedEvidenceFailure("ROLLBACK_EVIDENCE_CUSTODY_CLOSE_FAILED", failure, closeError);
+  }
+  if (failure !== undefined) {
+    throw failure;
+  }
+  return result;
+}
+
+export class EvidenceRecorder {
+  constructor(directory, initial) {
+    this.target = evidenceTarget(directory);
+    this.directory = this.target.path;
+    this.document = {
+      schemaVersion: 1,
+      kind: "agtmai-slice-rollback-proof",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      commands: [],
+      stages: [],
+      slices: [],
+      ...initial,
+    };
+    this.sequence = 0;
+    this.flush();
+  }
+
+  directory;
+  document;
+  sequence;
+  target;
+
+  writeArtifact(relativePath, value) {
+    const path = resolveInside(this.directory, relativePath);
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_ARTIFACT_DIRECTORY_FAILED", () => {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    });
+    const bytes = Buffer.isBuffer(value)
+      ? value
+      : Buffer.from(typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n", "utf8");
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_ARTIFACT_WRITE_FAILED", () => {
+      writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+    });
+    return {
+      path: relativePath,
+      byteLength: bytes.length,
+      sha256: sha256(bytes),
+    };
+  }
+
+  run(group, id, command, arguments_, options = {}) {
+    this.sequence += 1;
+    const stem = String(this.sequence).padStart(3, "0") + "-" + safeLabel(group) + "-" + safeLabel(id);
+    const stdoutRelative = "commands/" + stem + ".stdout.log";
+    const stderrRelative = "commands/" + stem + ".stderr.log";
+    const stdoutPath = resolveInside(this.directory, stdoutRelative);
+    const stderrPath = resolveInside(this.directory, stderrRelative);
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_COMMAND_DIRECTORY_FAILED", () => {
+      mkdirSync(dirname(stdoutPath), { recursive: true, mode: 0o700 });
+    });
+    const startedAt = new Date();
+    const started = Date.now();
+    let stdoutDescriptor;
+    let stderrDescriptor;
+    let result;
+    let invocation;
+    let primaryFailure;
+    try {
+      stdoutDescriptor = mutateEvidenceDirectory(
+        this.target,
+        "ROLLBACK_EVIDENCE_COMMAND_STDOUT_CREATE_FAILED",
+        () => openSync(stdoutPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600),
+      );
+      stderrDescriptor = mutateEvidenceDirectory(
+        this.target,
+        "ROLLBACK_EVIDENCE_COMMAND_STDERR_CREATE_FAILED",
+        () => openSync(stderrPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600),
+      );
+      invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
+        workingDirectory: options.cwd,
+      });
+      try {
+        result = spawnSync(command, invocation.arguments, {
+          cwd: options.cwd,
+          env: invocation.environment,
+          input: options.input,
+          stdio: [options.input === undefined ? "ignore" : "pipe", stdoutDescriptor, stderrDescriptor],
+          timeout: options.timeout ?? 600_000,
+        });
+      } catch (error) {
+        result = { error, status: null, signal: null };
+      }
+    } catch (error) {
+      primaryFailure = error;
+    }
+    // Disarm before attempting close: a rejected close may already have
+    // consumed the descriptor. Attempt all owners, never retry an FD number.
+    const descriptors = [stdoutDescriptor, stderrDescriptor];
+    stdoutDescriptor = undefined;
+    stderrDescriptor = undefined;
+    const finalizationFailures = closeCommandLogDescriptors(descriptors);
+    if (primaryFailure !== undefined) {
+      throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
+    }
+    const commandPassed = !result.error && result.status === 0;
+    if (!commandPassed) {
+      primaryFailure = new Error(
+        "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
+        + " status=" + String(result.status) + " signal=" + String(result.signal),
+        { cause: result.error },
+      );
+    }
+    let recorded;
+    try {
+      verifyEvidenceDirectory(this.target);
+      const stdout = readFileSync(stdoutPath);
+      const stderr = readFileSync(stderrPath);
+      if (primaryFailure !== undefined) {
+        primaryFailure.message += "\n" + tail(stdout.toString("utf8") + "\n" + stderr.toString("utf8"), 80);
+      }
+      const entry = {
+        sequence: this.sequence,
+        group,
+        id,
+        phase: options.phase ?? "preparation",
+        command,
+        arguments: invocation.arguments,
+        cwd: options.cwd,
+        environment: selectedEnvironment(invocation.environment),
+        startedAt: startedAt.toISOString(),
+        durationMs: Date.now() - started,
+        exitCode: result.status,
+        signal: result.signal,
+        timedOut: result.error?.code === "ETIMEDOUT",
+        spawnError: result.error?.code ?? null,
+        status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
+        stdout: {
+          path: stdoutRelative,
+          byteLength: stdout.length,
+          sha256: sha256(stdout),
+        },
+        stderr: {
+          path: stderrRelative,
+          byteLength: stderr.length,
+          sha256: sha256(stderr),
+        },
+      };
+      this.document.commands.push(entry);
+      this.flush();
+      recorded = { stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), entry };
+    } catch (error) {
+      if (primaryFailure !== undefined || finalizationFailures.length > 0) {
+        finalizationFailures.push(error);
+      } else {
+        primaryFailure = error;
+      }
+    }
+    throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
+    return recorded;
+  }
+
+  stage(group, id, action, summarize = () => {}) {
+    const entry = {
+      group,
+      id,
+      startedAt: new Date().toISOString(),
+      status: "running",
+    };
+    const started = Date.now();
+    this.document.stages.push(entry);
+    this.document.phase = id;
+    this.flush();
+    try {
+      const value = action();
+      const result = summarize(value);
+      entry.status = "passed";
+      entry.durationMs = Date.now() - started;
+      if (result !== undefined) {
+        entry.result = result;
+      }
+      this.flush();
+      return value;
+    } catch (error) {
+      entry.status = "failed";
+      entry.durationMs = Date.now() - started;
+      entry.error = {
+        name: error instanceof Error ? error.name : "Error",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      this.flush();
+      throw error;
+    }
+  }
+
+  update(mutator) {
+    mutator(this.document);
+    this.flush();
+  }
+
+  finalize(status, error) {
+    this.document.status = status;
+    this.document.phase = "finished";
+    this.document.finishedAt = new Date().toISOString();
+    if (error !== undefined) {
+      this.document.error = {
+        name: error instanceof Error ? error.name : "Error",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+    this.flush();
+  }
+
+  flush() {
+    const path = join(this.directory, "diagnostics.json");
+    const partial = path + ".part";
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_DIAGNOSTICS_WRITE_FAILED", () => {
+      writeFileSync(partial, JSON.stringify(this.document, null, 2) + "\n", { mode: 0o600 });
+    });
+    mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_DIAGNOSTICS_PUBLISH_FAILED", () => {
+      renameSync(partial, path);
+    });
+  }
+}
+
+export function canonicalJson(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) {throw new Error("ROLLBACK_CANONICAL_NUMBER_UNSAFE");}
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    return `{${Object.keys(value).toSorted().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  throw new Error("ROLLBACK_CANONICAL_VALUE_UNSUPPORTED");
+}
+
+export function publishEvidenceSeal(directory, statement, schemaPath) {
+  const target = evidenceTarget(directory);
+  const statementCanonical = Buffer.from(canonicalJson(statement), "utf8");
+  const statementBytes = Buffer.concat([statementCanonical, Buffer.from("\n", "utf8")]);
+  const statementPath = join(target.path, "statement.json");
+  mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_STATEMENT_WRITE_FAILED", () => {
+    writeFileSync(statementPath, statementBytes, { flag: "wx", mode: 0o600 });
+  });
+  const schemaBytes = readFileSync(schemaPath);
+  const seal = {
+    schemaVersion: 1,
+    kind: "agtmai-recovery-proof-seal",
+    candidateSha: statement.candidate.sha,
+    schema: {
+      path: "architecture/rollback/recovery-evidence.schema.json",
+      byteLength: schemaBytes.length,
+      sha256: sha256(schemaBytes),
+    },
+    statement: {
+      path: "statement.json",
+      byteLength: statementBytes.length,
+      sha256: sha256(statementBytes),
+      canonicalSha256: sha256(statementCanonical),
+    },
+  };
+  const sealBytes = Buffer.from(canonicalJson(seal) + "\n", "utf8");
+  mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_SEAL_WRITE_FAILED", () => {
+    writeFileSync(join(target.path, "seal.json"), sealBytes, { flag: "wx", mode: 0o600 });
+  });
+  return { seal, sealSha256: sha256(sealBytes), statement };
+}
+
+export function publishReadyMarker(directory, publication) {
+  const target = evidenceTarget(directory);
+  const ready = {
+    schemaVersion: 1,
+    kind: "agtmai-recovery-proof-ready",
+    candidateSha: publication.statement.candidate.sha,
+    sealSha256: publication.sealSha256,
+    proofDigestSha256: publication.seal.statement.canonicalSha256,
+  };
+  mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_READY_WRITE_FAILED", () => {
+    writeFileSync(
+      join(target.path, "READY"),
+      Buffer.from(canonicalJson(ready) + "\n", "utf8"),
+      { flag: "wx", mode: 0o400 },
+    );
+  });
+  return ready;
+}
+
+export function createEvidenceDirectory(configuredPath, temporaryRoot, repositoryRoot) {
+  let directory;
+  if (configuredPath === undefined) {
+    directory = mkdtempSync(join(temporaryRoot, "agtmai-rollback-evidence-"));
+  } else {
+    if (!isAbsolute(configuredPath)) {
+      throw new Error("ROLLBACK_EVIDENCE_PATH_NOT_ABSOLUTE");
+    }
+    directory = resolve(configuredPath);
+    if (existsSync(directory)) {
+      throw new Error("ROLLBACK_EVIDENCE_PATH_EXISTS path=" + directory);
+    }
+    const requestedParent = dirname(directory);
+    const parent = realpathSync(requestedParent);
+    try {
+      assertCustodyCanonicalSpelling({
+        allowDarwinTemporaryAlias: true,
+        canonicalPath: parent,
+        requestedPath: requestedParent,
+      });
+    } catch {
+      throw new Error("ROLLBACK_EVIDENCE_PARENT_SUBSTITUTED path=" + dirname(directory));
+    }
+    mkdirSync(directory, { mode: 0o700 });
+  }
+  const real = realpathSync(directory);
+  const repositoryRelative = relative(repositoryRoot, real);
+  if (repositoryRelative === "" || (!repositoryRelative.startsWith(".." + sep) && repositoryRelative !== "..")) {
+    throw new Error("ROLLBACK_EVIDENCE_INSIDE_REPOSITORY path=" + real);
+  }
+  const custody = createDirectoryCustody(real, {
+    allowDarwinTemporaryAlias: true,
+    owned: true,
+  });
+  return Object.freeze({ custody, path: real });
+}

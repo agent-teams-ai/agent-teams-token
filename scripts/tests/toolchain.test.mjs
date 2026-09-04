@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync,
-  rmSync, symlinkSync, unlinkSync, writeFileSync, writeSync,
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -13,6 +25,9 @@ import {
   fetchArtifacts,
   hostPlatform,
   installArtifacts,
+  loadLock,
+  prepareVerifiedPayload,
+  validateLock,
   verifyCache,
   canonicalizeTrustedPath,
 } from "../toolchain.mjs";
@@ -27,6 +42,9 @@ import {
   makeFixture,
 } from "../toolchain-test-fixture.mjs";
 import { brokenDownloader, digest, writeExecutable } from "./toolchain-fixtures.mjs";
+import { registerToolchainAuthorityTests } from "./toolchain-authority.test.mjs";
+
+registerToolchainAuthorityTests();
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
@@ -131,9 +149,34 @@ test("Bash bootstrap starts from checksum-pinned Node without a system Node fall
   assert.doesNotMatch(bootstrap, /exec \{token_part_fd\}/);
   assert.match(bootstrap, /--output - .*>&"\$token_part_fd"/);
   assert.doesNotMatch(bootstrap, /--output "?\$token_part/);
-  assert.match(bootstrap, /token_pinned_node.*scripts\/toolchain\.mjs/);
+  assert.match(bootstrap, /token_run_node\(\)[\s\S]*token_pinned_node/);
   assert.match(bootstrap, /fetch --scope=solana/);
   assert.doesNotMatch(bootstrap, /foundry-v1\.8\.0-linux-x64:.*solc-v0\.8\.36-linux-x64/);
+  assert.match(bootstrap, /\/usr\/bin\/tar --no-same-owner --no-same-permissions/u);
+  assert.match(bootstrap, /exec 7<"\$token_archive_path"/u);
+  assert.match(bootstrap, /exec 8<"\$token_archive_path"/u);
+  assert.match(bootstrap, /exec 9<"\$token_archive_path"/u);
+  assert.match(bootstrap, /exec 10<"\$token_snapshot_path"/u);
+  assert.match(bootstrap, /exec 11<"\$token_snapshot_path"/u);
+  assert.match(bootstrap, /exec 12<"\$token_snapshot_path"/u);
+  assert.match(bootstrap, /token_descriptor_fingerprint\(\)/u);
+  assert.match(bootstrap, /%d\|%i\|%p\|%u\|%g\|%z\|%Fm\|%Fc\|%l/u);
+  assert.match(bootstrap, /%d\|%i\|%f\|%u\|%g\|%s\|%y\|%z\|%h/u);
+  assert.match(bootstrap, /token_path_fingerprint\(\)/u);
+  assert.doesNotMatch(bootstrap, /\/dev\/fd\/[789] -ef|-ef \/dev\/fd\/[789]/u);
+  assert.doesNotMatch(bootstrap, /stat -f '%d\|%i' -/u);
+  assert.match(bootstrap, /\/bin\/dd if=\/dev\/fd\/8 of="\$token_snapshot_path"/u);
+  assert.doesNotMatch(bootstrap, /\/bin\/cp \/dev\/fd\//u);
+  assert.match(bootstrap, /token_snapshot_sha256=\$\(token_sha256 \/dev\/fd\/10\)/u);
+  assert.match(bootstrap, /token_post_extract_snapshot_sha256=\$\(token_sha256 \/dev\/fd\/12\)/u);
+  assert.match(bootstrap, /"\$token_node_tar_flag" \/dev\/fd\/11/u);
+  assert.match(bootstrap, /token_sha256 \/dev\/fd\/7/u);
+  assert.doesNotMatch(bootstrap, /"\$token_node_tar_flag" "\$token_archive_path"/u);
+  assert.match(bootstrap, /token_assert_private_snapshot_fingerprint[\s\S]*"\$token_archive_size" 0/u);
+  assert.match(bootstrap, /token_run_node "\$token_repo_root\/scripts\/toolchain\.mjs"/u);
+  assert.match(bootstrap, /archive\.snapshot/u);
+  assert.match(bootstrap, /toolchain-cleanup\.mjs/u);
+  assert.doesNotMatch(bootstrap, /rm -rf/u);
   assert.doesNotMatch(bootstrap, /TOKEN_BOOTSTRAP_NODE|\$\{[^}]+:-node\}/);
   assert.ok(bootstrap.indexOf("token_validate_directory \"$token_tools_root\" false") < bootstrap.indexOf("/bin/mkdir -p \"$token_tools_root\""));
   const dev = readFileSync(join(repositoryRoot, "dev"), "utf8");
@@ -220,7 +263,9 @@ test("environment helper requires Bash and runs Zsh portability where required o
   }
   writeExecutable(join(bin, "pnpm"), "#!/bin/sh\nexit 0\n");
   copyFileSync(join(repositoryRoot, "scripts/env.sh"), join(scripts, "env.sh"));
-  writeExecutable(join(bin, "agtmai-env-probe"), "#!/bin/sh\nexit 0\n");
+  const probe = join(bin, "agtmai-env-probe");
+  writeExecutable(probe, "#!/bin/sh\nexit 0\n");
+  const canonicalProbe = realpathSync(probe);
   assert.equal(existsSync("/bin/bash"), true, "Bash is a required portability dependency");
   const shells = ["/bin/bash"];
   const zsh = ["/bin/zsh", "/usr/bin/zsh"].find(existsSync);
@@ -233,7 +278,7 @@ test("environment helper requires Bash and runs Zsh portability where required o
   for (const shell of shells) {
     const result = spawnSync(shell, ["-c", `source '${join(scripts, "env.sh")}' && command -v agtmai-env-probe`], { encoding: "utf8" });
     assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
-    assert.equal(result.stdout.trim(), realpathSync(join(bin, "agtmai-env-probe")));
+    assert.equal(result.stdout.trim(), canonicalProbe);
   }
 });
 test("pnpm offline cold cache ignores a system package manager", (context) => {
@@ -406,7 +451,7 @@ test("failed extraction preserves the present install and a verified retry repla
 
   assert.throws(
     () => installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true }),
-    /Command failed.*tar/s,
+    /TOOLCHAIN_ARCHIVE_EXTRACTION_FAILED/u,
   );
   assert.equal(readFileSync(forge, "utf8"), "tampered-present-install\n");
   assert.deepEqual(readdirSync(fixture.toolsRoot).filter((name) => name.startsWith(".install-part-")), []);
@@ -448,7 +493,30 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
     /TOOLCHAIN_INSTALL_INVALID tool=pnpm.*wrapper-missing-or-tampered/,
   );
   installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
-  assert.match(readFileSync(wrapper, "utf8"), /bootstrap\.sh.*run-pnpm/);
+  const wrapperText = readFileSync(wrapper, "utf8");
+  const nodeWrapperText = readFileSync(join(fixture.toolsRoot, "bin", "node"), "utf8");
+  assert.match(wrapperText, /^#!\/bin\/bash/u);
+  assert.match(wrapperText, /pnpm-test\/bin\/pnpm\.cjs/);
+  assert.match(wrapperText, /--ignore-pnpmfile/u);
+  assert.match(wrapperText, /--config\.store-dir="\$token_pnpm_store"/u);
+  assert.match(wrapperText, /--config\.cache-dir=\/dev\/null/u);
+  assert.match(wrapperText, /--config\.ignore-pnpmfile=true/u);
+  assert.match(wrapperText, /--config\.userconfig=\/dev\/null/u);
+  assert.match(wrapperText, /\/usr\/bin\/stat -c '%u\|%a'/u);
+  assert.match(wrapperText, /\/usr\/bin\/id -u/u);
+  assert.match(wrapperText, /--config\.auto-install-peers=false/);
+  assert.match(wrapperText, /--config\.verify-deps-before-run=false/);
+  assert.doesNotMatch(wrapperText, /\/usr\/bin\/env|\bdirname\b/u);
+  assert.match(nodeWrapperText, /\/usr\/bin\/env -i/u);
+  assert.match(nodeWrapperText, /GIT_CONFIG_COUNT=6/u);
+  assert.match(nodeWrapperText, /GIT_CONFIG_KEY_0=core\.fsmonitor GIT_CONFIG_VALUE_0=false/u);
+  assert.match(nodeWrapperText, /GIT_CONFIG_KEY_1=core\.hooksPath GIT_CONFIG_VALUE_1=\/dev\/null/u);
+  assert.match(nodeWrapperText, /GIT_CONFIG_KEY_2=core\.attributesFile GIT_CONFIG_VALUE_2=\/dev\/null/u);
+  assert.match(nodeWrapperText, /GIT_CONFIG_KEY_5=safe\.directory/u);
+  assert.match(nodeWrapperText, /HOME="\$token_node_private_root\/home"/u);
+  assert.match(nodeWrapperText, /NODE_DISABLE_COMPILE_CACHE=1/u);
+  assert.match(nodeWrapperText, /npm_config_userconfig=\/dev\/null/u);
+  assert.doesNotMatch(nodeWrapperText, /NODE_OPTIONS|NODE_PATH|HTTP_PROXY/iu);
 
   const payload = join(fixture.toolsRoot, "pnpm-test", "bin", "pnpm.cjs");
   writeFileSync(payload, "tampered-payload\n");
@@ -460,24 +528,110 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
   verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
 });
 
-test("forged provenance cannot bless a spoofed executable", (context) => {
+test("coherent forged payload and mutable provenance cannot self-attest Foundry, solc or pnpm", (context) => {
   const fixture = makeFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
   fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
   installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
-  const destination = join(fixture.toolsRoot, "solc-test-linux-x64");
-  const executable = join(destination, "solc");
-  writeExecutable(executable, "#!/bin/sh\necho spoofed\n");
-  const provenancePath = join(destination, ".agtmai-toolchain-install.json");
-  const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
-  provenance.files.solc = digest(executable);
-  writeFileSync(provenancePath, `${JSON.stringify(provenance)}\n`);
+  const forgeries = [
+    {
+      directory: "foundry-test-linux-x64",
+      path: "forge",
+      contents: "#!/bin/sh\necho 'forge Version: 1.8.0'\n# forged no-op\n",
+      tool: "foundry",
+    },
+    {
+      directory: "solc-test-linux-x64",
+      path: "solc",
+      contents: "#!/bin/sh\necho 'Version: 0.8.36+commit.8a079791.Linux.g++'\n# forged compiler\n",
+      tool: "solc",
+    },
+    {
+      directory: "pnpm-test",
+      path: "bin/pnpm.cjs",
+      contents: "process.stdout.write('11.24.0\\n'); // forged package manager\n",
+      tool: "pnpm",
+    },
+  ];
+  for (const forgery of forgeries) {
+    const directory = join(fixture.toolsRoot, forgery.directory);
+    const payload = join(directory, forgery.path);
+    writeFileSync(payload, forgery.contents);
+    if (forgery.tool !== "pnpm") {chmodSync(payload, 0o755);}
+    const provenancePath = join(directory, ".agtmai-toolchain-install.json");
+    const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+    provenance.files[forgery.path] = digest(payload);
+    writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`);
+    assert.throws(
+      () => verifyCache({
+        lock: fixture.lock,
+        platform: "linux-x64",
+        toolsRoot: fixture.toolsRoot,
+        offline: true,
+      }),
+      new RegExp(`TOOLCHAIN_INSTALL_INVALID tool=${forgery.tool}.*file-checksum:${forgery.path.replace("/", "\\/")}`),
+    );
+    installArtifacts({
+      lock: fixture.lock,
+      platform: "linux-x64",
+      toolsRoot: fixture.toolsRoot,
+      offline: true,
+    });
+  }
+});
+
+test("verification reports unavailable pinned payload authority instead of trusting an installed tool", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
+  installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
+  rmSync(join(
+    fixture.toolsRoot,
+    "downloads",
+    fixture.lock.tools.foundry.platforms["linux-x64"].archiveName,
+  ));
   assert.throws(
-    () => verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true }),
-    /TOOLCHAIN_INSTALL_INVALID tool=solc.*provenance-mismatch/,
+    () => verifyCache({
+      lock: fixture.lock,
+      platform: "linux-x64",
+      toolsRoot: fixture.toolsRoot,
+      offline: true,
+    }),
+    /TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE tool=foundry platform=linux-x64/u,
   );
 });
 
+test("verified archive descriptors remain the copy and extraction source and pathname substitution fails closed", (context) => {
+  const fixture = makeFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
+
+  for (const [name, artifact] of [
+    ["foundry", fixture.lock.tools.foundry.platforms["linux-x64"]],
+    ["solc", fixture.lock.tools.solc.platforms["linux-x64"]],
+  ]) {
+    const archive = join(fixture.toolsRoot, "downloads", artifact.archiveName);
+    assert.throws(
+      () => prepareVerifiedPayload({
+        name,
+        platform: "linux-x64",
+        artifact,
+        archive,
+        toolsRoot: fixture.toolsRoot,
+        missingCode: "TOOLCHAIN_CACHE_MISSING",
+        onArchiveVerified() {
+          renameSync(archive, `${archive}.held`);
+          writeFileSync(archive, "forged archive at the verified pathname\n");
+        },
+      }),
+      new RegExp(`TOOLCHAIN_ARCHIVE_SUBSTITUTED tool=${name}`),
+    );
+    assert.deepEqual(
+      readdirSync(fixture.toolsRoot).filter((entry) => entry.startsWith(".install-part-")),
+      [],
+    );
+  }
+});
 test("doctor identifies a cached installation for the wrong platform", (context) => {
   const fixture = makeFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));

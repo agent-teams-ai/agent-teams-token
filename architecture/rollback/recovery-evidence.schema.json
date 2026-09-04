@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentteams.invalid/schemas/recovery-evidence.v1.json",
+  "title": "AGTMAI recovery proof evidence",
+  "oneOf": [
+    {"$ref": "#/$defs/statement"},
+    {"$ref": "#/$defs/seal"},
+    {"$ref": "#/$defs/ready"}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "gitSha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "safePath": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f]).+$"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "byteLength", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/safePath"},
+        "byteLength": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "tree", "inventorySha256", "entryCount", "totalBytes", "inventory"],
+      "properties": {
+        "sha": {"$ref": "#/$defs/gitSha"},
+        "tree": {"$ref": "#/$defs/gitSha"},
+        "inventorySha256": {"$ref": "#/$defs/sha256"},
+        "entryCount": {"type": "integer", "minimum": 1},
+        "totalBytes": {"type": "integer", "minimum": 1},
+        "inventory": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "version", "artifactSha256", "executableSha256"],
+      "properties": {
+        "platform": {"const": "linux-x64"},
+        "version": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "artifactSha256": {"$ref": "#/$defs/sha256"},
+        "executableSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "slitherImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifestDigest", "sourceRevision", "platform"],
+      "properties": {
+        "manifestDigest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "sourceRevision": {"$ref": "#/$defs/gitSha"},
+        "platform": {"const": "linux/amd64"}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binaries", "runtime", "slitherImage", "workspaceLinkCount"],
+      "properties": {
+        "binaries": {
+          "type": "array",
+          "minItems": 10,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9-]+$"}
+        },
+        "runtime": {"$ref": "#/$defs/runtime"},
+        "slitherImage": {"$ref": "#/$defs/slitherImage"},
+        "workspaceLinkCount": {"type": "integer", "minimum": 1}
+      }
+    },
+    "manifestFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sliceId", "sha256", "artifact"],
+      "properties": {
+        "sliceId": {"enum": ["local-solana", "deployment-plan", "slither"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "artifact": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "assertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateByteEquivalent",
+        "rollbackStatusEquivalent",
+        "rollbackTreeEquivalent",
+        "rollbackInventoryEquivalent",
+        "forbiddenResidueAbsent",
+        "ownedRootShapeValid"
+      ],
+      "properties": {
+        "candidateByteEquivalent": {"const": true},
+        "rollbackStatusEquivalent": {"const": true},
+        "rollbackTreeEquivalent": {"const": true},
+        "rollbackInventoryEquivalent": {"const": true},
+        "forbiddenResidueAbsent": {"const": true},
+        "ownedRootShapeValid": {"const": true}
+      }
+    },
+    "sliceFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sliceId",
+        "manifestSha256",
+        "candidateSha",
+        "checkoutInventorySha256",
+        "preState",
+        "application",
+        "rollback",
+        "assertions",
+        "expectedGateIds",
+        "executedGateIds",
+        "cleanupStatus",
+        "status"
+      ],
+      "properties": {
+        "sliceId": {"enum": ["local-solana", "deployment-plan", "slither"]},
+        "manifestSha256": {"$ref": "#/$defs/sha256"},
+        "candidateSha": {"$ref": "#/$defs/gitSha"},
+        "checkoutInventorySha256": {"$ref": "#/$defs/sha256"},
+        "preState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha", "tree", "statusSha256", "status", "inventorySha256", "inventory", "entryCount", "totalBytes"],
+          "properties": {
+            "sha": {"$ref": "#/$defs/gitSha"},
+            "tree": {"$ref": "#/$defs/gitSha"},
+            "statusSha256": {"$ref": "#/$defs/sha256"},
+            "status": {"$ref": "#/$defs/artifact"},
+            "inventorySha256": {"$ref": "#/$defs/sha256"},
+            "inventory": {"$ref": "#/$defs/artifact"},
+            "entryCount": {"type": "integer", "minimum": 1},
+            "totalBytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "application": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidateSha", "tree", "pathCount", "pathsSha256"],
+          "properties": {
+            "candidateSha": {"$ref": "#/$defs/gitSha"},
+            "tree": {"$ref": "#/$defs/gitSha"},
+            "pathCount": {"type": "integer", "minimum": 1},
+            "pathsSha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha", "tree", "statusSha256", "status", "inventorySha256", "inventory", "entryCount", "totalBytes"],
+          "properties": {
+            "sha": {"$ref": "#/$defs/gitSha"},
+            "tree": {"$ref": "#/$defs/gitSha"},
+            "statusSha256": {"$ref": "#/$defs/sha256"},
+            "status": {"$ref": "#/$defs/artifact"},
+            "inventorySha256": {"$ref": "#/$defs/sha256"},
+            "inventory": {"$ref": "#/$defs/artifact"},
+            "entryCount": {"type": "integer", "minimum": 1},
+            "totalBytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "assertions": {"$ref": "#/$defs/assertions"},
+        "expectedGateIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9-]+$"}
+        },
+        "executedGateIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9-]+$"}
+        },
+        "cleanupStatus": {"const": "passed"},
+        "status": {"const": "passed"}
+      }
+    },
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "kind",
+        "status",
+        "mode",
+        "baselineSha",
+        "globalManifestEvidence",
+        "candidate",
+        "environment",
+        "manifests",
+        "slices"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "kind": {"const": "agtmai-recovery-proof-statement"},
+        "status": {"const": "passed"},
+        "mode": {"const": "full"},
+        "baselineSha": {"const": "b7a868f85d89c4bb7a9aeed1d854a5f949306a45"},
+        "globalManifestEvidence": {"const": "candidate-bound-local-proof-complete-hosted-ci-pending"},
+        "candidate": {"$ref": "#/$defs/candidate"},
+        "environment": {"$ref": "#/$defs/environment"},
+        "manifests": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/manifestFact"}
+        },
+        "slices": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/sliceFact"}
+        }
+      }
+    },
+    "seal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "candidateSha", "schema", "statement"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "kind": {"const": "agtmai-recovery-proof-seal"},
+        "candidateSha": {"$ref": "#/$defs/gitSha"},
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "byteLength", "sha256"],
+          "properties": {
+            "path": {"const": "architecture/rollback/recovery-evidence.schema.json"},
+            "byteLength": {"type": "integer", "minimum": 1},
+            "sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "statement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "byteLength", "sha256", "canonicalSha256"],
+          "properties": {
+            "path": {"const": "statement.json"},
+            "byteLength": {"type": "integer", "minimum": 1},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "canonicalSha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "ready": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "candidateSha", "sealSha256", "proofDigestSha256"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "kind": {"const": "agtmai-recovery-proof-ready"},
+        "candidateSha": {"$ref": "#/$defs/gitSha"},
+        "sealSha256": {"$ref": "#/$defs/sha256"},
+        "proofDigestSha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

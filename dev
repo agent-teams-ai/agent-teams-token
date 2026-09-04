@@ -5,8 +5,13 @@ token_dev_script=${BASH_SOURCE[0]}
 [[ "$token_dev_script" == */* ]] || token_dev_script="./$token_dev_script"
 token_repo_root=$(CDPATH='' cd -P -- "${token_dev_script%/*}" && pwd -P)
 token_command=${1:-help}
-shift || true
+if (($# > 0)); then
+  shift
+fi
 
+# Bootstrap recovery and inert help do not require a previously trusted install.
+# Doctor delegates to bootstrap so both offline verification and the diagnostic
+# execute through Node extracted from the checksum-pinned archive.
 case "$token_command" in
   bootstrap)
     exec "$token_repo_root/scripts/bootstrap.sh" "$@"
