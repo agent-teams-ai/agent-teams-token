@@ -64,6 +64,14 @@ export function assertPinnedSolcVersionOutput(output: string): string {
   return version;
 }
 
+export function containsAsciiControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) { return true; }
+  }
+  return false;
+}
+
 function supportedPlatform(): keyof typeof PLATFORM_SHA256 {
   if (process.platform === "linux" && process.arch === "x64") { return "linux-x64"; }
   if (process.platform === "darwin" && process.arch === "arm64") { return "darwin-arm64"; }
@@ -111,7 +119,7 @@ function assertDirectory(path: string, code: string): void {
 
 function contained(root: string, value: string, code: string): string {
   if (value.length === 0 || value === "." || value === ".." || value.startsWith("-")
-    || /[\u0000-\u001f\u007f]/u.test(value) || value.includes("\\") || isAbsolute(value)) {
+    || containsAsciiControlCharacter(value) || value.includes("\\") || isAbsolute(value)) {
     throw new LocalEvmError(code, "toolchain path is not a safe relative path");
   }
   const target = resolve(root, value);

@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { test } from "node:test";
-import { assertPinnedSolcSha256, assertPinnedSolcVersionOutput, pinnedSolcPath } from "../toolchain.ts";
+import {
+  assertPinnedSolcSha256,
+  assertPinnedSolcVersionOutput,
+  containsAsciiControlCharacter,
+  pinnedSolcPath,
+} from "../toolchain.ts";
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
@@ -47,5 +52,20 @@ test("only the pinned long solc version is accepted for evidence", () => {
   for (const output of ["Version: 0.8.36", "Version: 0.8.35+commit.abcdef01.Linux.g++", "Version: 0.8.36+commit.deadbeef.Linux.g++", "Version: 0.8.36+commit.8a079791.Linux.g++.forged"]) {
     assert.throws(() => assertPinnedSolcVersionOutput(output), (cause: unknown) => cause instanceof Error
       && "code" in cause && cause.code === "LOCAL_EVM_SOLC_VERSION_MISMATCH");
+  }
+});
+
+test("ASCII control characters are rejected without rejecting printable or non-ASCII text", () => {
+  for (const value of ["\0", "safe\0path", "\u0001", "\u001f", "\u007f"]) {
+    assert.equal(containsAsciiControlCharacter(value), true, JSON.stringify(value));
+  }
+  for (const value of [
+    "",
+    "Version: 0.8.36+commit.8a079791.Linux.g++",
+    "\u0020",
+    "\u007e",
+    "\u0080",
+  ]) {
+    assert.equal(containsAsciiControlCharacter(value), false, JSON.stringify(value));
   }
 });
