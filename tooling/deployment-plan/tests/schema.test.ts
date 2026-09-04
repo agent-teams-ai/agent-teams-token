@@ -45,9 +45,10 @@ const ready = {
 
 test("strict JSON accepts only RFC 8259 whitespace and canonical integer tokens", () => {
   const valid = parseJsonWithoutDuplicates(
-    Buffer.from(' \t\r\n{"value":200}\n'),
+    Buffer.from(' \t\r\n{"positive":200,"negative":-27}\n'),
   ) as Record<string, unknown>;
-  assert.equal(valid.value, 200);
+  assert.equal(valid.positive, 200);
+  assert.equal(valid.negative, -27);
   assert.equal(Object.getPrototypeOf(valid), null);
   for (const whitespace of ["\u00a0", "\u000b", "\u000c", "\u0085", "\u2028", "\ufeff"]) {
     assert.throws(
@@ -55,12 +56,39 @@ test("strict JSON accepts only RFC 8259 whitespace and canonical integer tokens"
       /malformed JSON/u,
     );
   }
-  for (const token of ["2e2", "200.0", "0200", "-0", "+200", "9007199254740992"]) {
+  for (const token of [
+    "-0", "2e2", "200.0", "0200", "+200",
+    "9007199254740992", "-9007199254740992",
+  ]) {
     assert.throws(
       () => parseJsonWithoutDuplicates(Buffer.from(`{"value":${token}}`)),
       /malformed JSON/u,
     );
   }
+});
+
+test("plan, quote and trust-root fields remain semantically nonnegative", async () => {
+  const roots = JSON.parse(
+    await readFile(new URL("../trust-roots.v2.json", import.meta.url), "utf8"),
+  ) as Record<string, unknown>;
+  assert.throws(
+    () => parseTrustRoots(bytes({ ...roots, maximumWorstCaseWei: "-27" })),
+    /malformed/u,
+  );
+  assert.throws(
+    () => parseStablePlan(bytes({
+      ...plan,
+      identity: {
+        ...identity,
+        capPolicy: { maximumWorstCaseWei: "-27", testOnly: true },
+      },
+    })),
+    /malformed/u,
+  );
+  assert.throws(
+    () => parseFeeQuote(bytes({ ...quote, gasLimit: "-27" })),
+    /malformed/u,
+  );
 });
 
 test("duplicate and prototype-named JSON members remain visible and fail closed", () => {

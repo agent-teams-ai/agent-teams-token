@@ -162,11 +162,11 @@ class Parser {
         return value;
       }
     }
-    const number = /^(?:0|[1-9][0-9]*)/u.exec(this.source.slice(this.index));
+    const number = /^-?(?:0|[1-9][0-9]*)/u.exec(this.source.slice(this.index));
     if (number) {
       this.index += number[0].length;
       const parsed = Number(number[0]);
-      if (!Number.isSafeInteger(parsed)) {
+      if (number[0] === "-0" || !Number.isSafeInteger(parsed)) {
         this.invalid();
       }
       return parsed;

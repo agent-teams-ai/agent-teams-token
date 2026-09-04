@@ -147,7 +147,7 @@ test("independent verification parses every raw input and ignores builder constr
   );
 });
 
-test("independent raw parsing rejects non-JSON whitespace and noncanonical numbers", () => {
+test("independent raw parsing accepts AST negatives and rejects noncanonical numbers", () => {
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const verifyBuild = (source: string): void => independentlyVerify({
@@ -156,17 +156,28 @@ test("independent raw parsing rejects non-JSON whitespace and noncanonical numbe
     ready: readyFor(plan.planId), nowSeconds: 110n,
   });
   const build = Buffer.from(artifactInputs.buildInfoBytes).toString("utf8");
+  const buildWithNegativeAstReference = build.replace(
+    '"output":{',
+    '"output":{"sources":{"src/features/token-genesis/AGTMAIToken.sol":{"ast":{"referencedDeclaration":-27}}},',
+  );
 
   assert.doesNotThrow(() => verifyBuild(build));
+  assert.throws(
+    () => verifyBuild(buildWithNegativeAstReference),
+    /canonical build-info digest differs/u,
+  );
   for (const whitespace of ["\u00a0", "\u000b", "\u000c", "\u0085", "\u2028", "\ufeff"]) {
     assert.throws(
       () => verifyBuild(build.replace('"runs":200', `"runs"${whitespace}:200`)),
       /malformed JSON/u,
     );
   }
-  for (const token of ["2e2", "200.0", "0200", "-0", "+200", "9007199254740992"]) {
+  for (const token of [
+    "-0", "2e2", "200.0", "0200", "+200",
+    "9007199254740992", "-9007199254740992",
+  ]) {
     assert.throws(
-      () => verifyBuild(build.replace('"runs":200', `"runs":${token}`)),
+      () => verifyBuild(buildWithNegativeAstReference.replace("-27", token)),
       /malformed JSON/u,
     );
   }
