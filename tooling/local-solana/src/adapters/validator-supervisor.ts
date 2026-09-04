@@ -16,7 +16,10 @@ let validator: ChildProcess | undefined;
 let acknowledged = false;
 let stopping: Promise<boolean> | undefined;
 let validatorIdentity: Promise<ValidatorIdentity | null> | undefined;
+let capturedValidatorIdentity: ValidatorIdentity | null | undefined;
+let validatorStartIdentity: Promise<string | null> | undefined;
 let leaseToken: string | undefined;
+let acknowledgementTimer: NodeJS.Timeout | undefined;
 
 process.on("message", (message: ControlMessage) => {
   if (message.type === "start" && validator === undefined) {
@@ -25,6 +28,10 @@ process.on("message", (message: ControlMessage) => {
       stdio: ["ignore", "pipe", "pipe"],
     });
     leaseToken = message.leaseToken;
+    validatorStartIdentity = new Promise((resolve) => {
+      validator?.once("spawn", () => { void processStartIdentity(validator?.pid ?? -1).then(resolve, () => { resolve(null); }); });
+      validator?.once("error", () => { resolve(null); });
+    });
     const ledgerIndex = message.args.indexOf("--ledger"); const ledger = ledgerIndex < 0 ? undefined : message.args[ledgerIndex + 1];
     validatorIdentity = new Promise((resolve) => {
       validator?.once("spawn", () => { void (async () => { resolve(validator?.pid === undefined || ledger === undefined ? null : await captureValidatorIdentity(validator.pid, message.executable, ledger, message.leaseToken).catch(() => null)); })(); });
@@ -32,13 +39,20 @@ process.on("message", (message: ControlMessage) => {
     });
     validator.stdout?.on("data", (chunk: Buffer) => { send({ type: "output", value: chunk.toString("utf8") }); });
     validator.stderr?.on("data", (chunk: Buffer) => { send({ type: "output", value: chunk.toString("utf8") }); });
-    void validatorIdentity.then((identity) => { if (identity === null) { send({ type: "spawnError" }); } else { send({ type: "spawned", pid: validator?.pid, identity }); } });
+    void validatorIdentity.then((identity) => {
+      capturedValidatorIdentity = identity;
+      if (identity === null) { send({ type: "spawnError" }); void terminateAndExit(); }
+      else { send({ type: "spawned", pid: validator?.pid, identity }); }
+      return null;
+    });
     validator.once("error", () => { send({ type: "spawnError" }); });
     validator.once("exit", (code, signal) => { send({ type: "exit", code, signal }); });
+    acknowledgementTimer = setTimeout(() => { void terminateAndExit(); }, 15_000);
     return;
   }
   if (message.type === "acknowledge" && validator !== undefined) {
     acknowledged = true;
+    clearAcknowledgementTimer();
     send({ type: "acknowledged" });
     return;
   }
@@ -54,6 +68,7 @@ function send(message: object): void {
 }
 
 async function terminateAndExit(): Promise<void> {
+  clearAcknowledgementTimer();
   const result = stopping ??= stopValidator();
   if (await result.catch(() => false)) {
     send({ type: "stopped" });
@@ -66,19 +81,27 @@ async function stopValidator(): Promise<boolean> {
   const child = validator;
   if (child === undefined || child.exitCode !== null || child.signalCode !== null) { return true; }
   const closed = new Promise<void>((resolve) => { child.once("close", () => { resolve(); }); });
-  const identity = validatorIdentity === undefined ? null : await validatorIdentity;
-  if (identity === null || leaseToken === undefined || !await authenticateValidatorIdentity(identity, leaseToken)) { return false; }
+  const startIdentity = await (validatorStartIdentity ?? Promise.resolve(null));
+  if (startIdentity === null) { return false; }
+  const identity = capturedValidatorIdentity;
+  if (identity !== undefined && identity !== null && (leaseToken === undefined || !await authenticateValidatorIdentity(identity, leaseToken))) { return false; }
+  if (!await stillExactChild(child, startIdentity)) { return child.exitCode !== null || child.signalCode !== null; }
   child.kill("SIGTERM");
-  const afterTerm = await processStartIdentity(child.pid ?? -1).catch(() => null);
-  if (afterTerm !== null && afterTerm !== identity.startTime) { return false; }
   if (!await within(closed, 5_000)) {
-    if (!await authenticateValidatorIdentity(identity, leaseToken)) { return false; }
+    if (!await stillExactChild(child, startIdentity)) { return child.exitCode !== null || child.signalCode !== null; }
     child.kill("SIGKILL");
-    const afterKill = await processStartIdentity(child.pid ?? -1).catch(() => null);
-    if (afterKill !== null && afterKill !== identity.startTime) { return false; }
     return await within(closed, 5_000);
   }
   return true;
+}
+
+async function stillExactChild(child: ChildProcess, startIdentity: string): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) { return false; }
+  return await processStartIdentity(child.pid).then((current) => current === startIdentity, () => false);
+}
+
+function clearAcknowledgementTimer(): void {
+  if (acknowledgementTimer !== undefined) { clearTimeout(acknowledgementTimer); acknowledgementTimer = undefined; }
 }
 
 async function within(promise: Promise<void>, timeoutMs: number): Promise<boolean> {

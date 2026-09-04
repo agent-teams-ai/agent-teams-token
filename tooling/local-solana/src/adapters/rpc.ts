@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { request as httpRequest } from "node:http";
+import type { RequestOptions } from "node:http";
 import { LocalSolanaError } from "../domain/model.ts";
 import type { RpcPort } from "../application/ports.ts";
 import { array, assertLoopbackRpcUrl, integer, object, parseAccountState, parseFinalizedTransaction, parseTokenAccountState, string } from "./rpc-parsers.ts";
@@ -115,7 +116,7 @@ export class JsonRpcAdapter implements RpcPort {
       // `node:http` consults NODE_USE_ENV_PROXY/HTTP_PROXY unless proxyEnv is
       // explicitly disabled; use a direct, non-pooled socket as an additional
       // guard so the peer identity check always observes the owned validator.
-      const options = { protocol: "http:", hostname: "127.0.0.1", port, path: "/", method: "POST", agent: false, proxyEnv: {}, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) }, signal } as Parameters<typeof httpRequest>[0];
+      const options = { protocol: "http:", hostname: "127.0.0.1", port, path: "/", method: "POST", agent: false, proxyEnv: {}, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) }, signal } satisfies RequestOptions & { readonly proxyEnv: NodeJS.ProcessEnv };
       const request = httpRequest(options, (response) => {
         if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) { response.resume(); fail(new LocalSolanaError("SOLANA_RPC_RESPONSE", `RPC HTTP status ${response.statusCode ?? 0}`)); return; }
         let size = 0; const chunks: Buffer[] = [];

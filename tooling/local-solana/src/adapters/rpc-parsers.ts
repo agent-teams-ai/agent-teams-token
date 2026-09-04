@@ -35,7 +35,7 @@ export function parseFinalizedTransaction(parsedRaw: unknown, compiledRaw: unkno
   const parsedOuter = array(parsedMessage.instructions, "parsed transaction instructions");
   const compiledOuter = array(compiledMessage.instructions, "compiled transaction instructions");
   if (parsedOuter.length !== compiledOuter.length) { throw new LocalSolanaError("SOLANA_TRANSACTION_RAW_BINDING", "parsed and compiled outer instruction counts differ"); }
-  const outer = parsedOuter.map((entry, index) => decodeInstruction(entry, compiledOuter[index], accountKeys, index, null, null));
+  const outer = parsedOuter.map((entry, index) => decodeInstruction(entry, compiledOuter[index], accountKeys, { instructionIndex: index, innerInstructionIndex: null, innerGroupIndex: null }));
   const parsedGroups = parsedMeta.innerInstructions === null ? [] : array(parsedMeta.innerInstructions, "parsed inner instruction groups");
   const compiledGroups = compiledMeta.innerInstructions === null ? [] : array(compiledMeta.innerInstructions, "compiled inner instruction groups");
   if (parsedGroups.length !== compiledGroups.length) { throw new LocalSolanaError("SOLANA_TRANSACTION_RAW_BINDING", "parsed and compiled CPI group counts differ"); }
@@ -53,7 +53,7 @@ export function parseFinalizedTransaction(parsedRaw: unknown, compiledRaw: unkno
     const parsedInstructions = array(parsedGroup.instructions, "parsed inner instructions");
     const compiledInstructions = array(compiledGroup.instructions, "compiled inner instructions");
     if (parsedInstructions.length !== compiledInstructions.length) { throw new LocalSolanaError("SOLANA_TRANSACTION_RAW_BINDING", "parsed and compiled CPI instruction counts differ"); }
-    return parsedInstructions.map((item, innerIndex) => decodeInstruction(item, compiledInstructions[innerIndex], accountKeys, outerIndex, innerIndex, groupIndex));
+    return parsedInstructions.map((item, innerIndex) => decodeInstruction(item, compiledInstructions[innerIndex], accountKeys, { instructionIndex: outerIndex, innerInstructionIndex: innerIndex, innerGroupIndex: groupIndex }));
   });
   const instructions = [...outer, ...inner];
   const error = parseTransactionError(parsedMeta.err);
@@ -85,7 +85,9 @@ export function array(value: unknown, label: string): readonly unknown[] { if (!
 export function string(value: unknown, label: string): string { if (typeof value !== "string" || value.length === 0) { throw new LocalSolanaError("SOLANA_JSON_STRING", `${label} must be a non-empty string`); } return value; }
 export function integer(value: unknown, label: string): number { if (typeof value !== "number" || !Number.isSafeInteger(value)) { throw new LocalSolanaError("SOLANA_JSON_INTEGER", `${label} must be a safe integer`); } return value; }
 
-function decodeInstruction(value: unknown, compiledValue: unknown, accountKeys: readonly string[], instructionIndex: number, innerInstructionIndex: number | null, innerGroupIndex: number | null): InstructionFact {
+type InstructionPosition = Pick<InstructionFact, "instructionIndex" | "innerInstructionIndex" | "innerGroupIndex">;
+
+function decodeInstruction(value: unknown, compiledValue: unknown, accountKeys: readonly string[], position: InstructionPosition): InstructionFact {
   const instruction = object(value, "parsed instruction");
   const compiled = object(compiledValue, "compiled instruction");
   const programIdIndex = integer(compiled.programIdIndex, "instruction program index");
@@ -96,9 +98,13 @@ function decodeInstruction(value: unknown, compiledValue: unknown, accountKeys: 
   const parsedAccounts = instruction.accounts === undefined ? [] : array(instruction.accounts, "instruction accounts").map((item) => string(item, "instruction account"));
   const dataHex = Buffer.from(base58Bytes(string(compiled.data, "compiled instruction data"))).toString("hex");
   if (parsedAccounts.length > 0 && !sameStrings(parsedAccounts, compiledAccounts)) { throw new LocalSolanaError("SOLANA_TRANSACTION_RAW_BINDING", "instruction account indices do not resolve to parsed accounts"); }
-  const location = { programId, programIdIndex, instructionIndex, innerInstructionIndex, innerGroupIndex, accounts: compiledAccounts, accountIndices, dataHex };
+  const location = { programId, programIdIndex, ...position, accounts: compiledAccounts, accountIndices, dataHex };
   if (instruction.parsed === undefined) { return semantic({ ...location, kind: "raw" }, {}); }
-  const parsed = object(instruction.parsed, "parsed instruction");
+  return decodeSemanticInstruction(instruction.parsed, programId, location);
+}
+
+function decodeSemanticInstruction(value: unknown, programId: string, location: Omit<InstructionLocation, "kind">): InstructionFact {
+  const parsed = object(value, "parsed instruction");
   const kind = string(parsed.type, "instruction type");
   const info = object(parsed.info, "instruction info");
   const tokenAmount = typeof info.tokenAmount === "object" && info.tokenAmount !== null ? object(info.tokenAmount, "instruction token amount").amount : undefined;

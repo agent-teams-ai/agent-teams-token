@@ -34,6 +34,6 @@ function fact(operation: LifecycleKind, index: number): TransactionFact {
 export function observationFixture(): FixtureObservations {
   const mint = (supply: string, freezeAuthority: string | null) => ({ address: mintAddress, programOwner: CLASSIC_TOKEN_PROGRAM, decimals: 9, supply, mintAuthority: mintAddress, freezeAuthority });
   const token = (balance: string) => ({ address: ata, mint: mintAddress, owner, amount: balance });
-  return { schemaVersion: 1, rpcUrl: "http://127.0.0.1:8899/", genesisHashBefore: genesis, genesisHashAfter: genesis, validatorVersion: "4.2.1", payerAddress: payer, mintAddress, mintAuthority: mintAddress, freezeAuthority: mintAddress, ownerAddress: owner, tokenAccountAddress: ata,
+  return { schemaVersion: 1, rpcUrl: "http://127.0.0.1:8899/", genesisHashBefore: genesis, genesisHashAfter: genesis, validatorVersion: "4.2.1", rpcListener: { scope: "ipv4-loopback" }, payerAddress: payer, mintAddress, mintAuthority: mintAddress, freezeAuthority: mintAddress, ownerAddress: owner, tokenAccountAddress: ata,
     initialMint: mint("0", mintAddress), afterRevokeMint: mint("0", null), afterMint: mint(amount, null), afterMintTokenAccount: token(amount), finalMint: mint("0", null), finalTokenAccount: token("0"), transactions: LIFECYCLE.map((operation, index) => fact(operation, index)) };
 }

@@ -148,7 +148,7 @@ test("reused owner PID never authenticates a neighbouring process as its validat
   try {
     const neighbourPid = neighbour.pid; assert.ok(neighbourPid); const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const lease = JSON.parse(await readFile(marker, "utf8"));
     lease.processStart = process.platform === "linux" ? "linux:0" : "darwin:00";
-    lease.validator = { pid: neighbourPid, platform: process.platform, startTime: process.platform === "linux" ? "linux:0" : "darwin:00", executable: await realpath(process.execPath), ledger: paths.ledger, commandHash: "a".repeat(64), leaseTokenHash: createHash("sha256").update(lease.token).digest("hex") };
+    lease.validator = { pid: neighbourPid, platform: process.platform, startTime: process.platform === "linux" ? "linux:0" : "darwin:00", executable: await realpath(process.execPath), ledger: paths.ledger, commandHash: "a".repeat(64), bindAddress: "127.0.0.1", rpcPort: 30_000, leaseTokenHash: createHash("sha256").update(lease.token).digest("hex") };
     await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
     await assert.rejects(store.reclaimStale(), /SOLANA_RECLAIM_IDENTITY/u);
     assert.equal(processAlive(neighbourPid), true); assert.equal((await lstat(paths.directory)).isDirectory(), true);
@@ -159,7 +159,7 @@ test("normal cleanup refuses to delete state beneath a registered live validator
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-active-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
   try {
     const paths = await store.create(); const marker = join(paths.directory, ".agtmai-local-solana-lease.json"); const lease = JSON.parse(await readFile(marker, "utf8"));
-    lease.validator = { pid: process.pid, platform: process.platform, startTime: process.platform === "linux" ? "linux:1" : "darwin:61", executable: "/bin/validator", ledger: paths.ledger, commandHash: "a".repeat(64), leaseTokenHash: createHash("sha256").update(lease.token).digest("hex") };
+    lease.validator = { pid: process.pid, platform: process.platform, startTime: process.platform === "linux" ? "linux:1" : "darwin:61", executable: "/bin/validator", ledger: paths.ledger, commandHash: "a".repeat(64), bindAddress: "127.0.0.1", rpcPort: 30_000, leaseTokenHash: createHash("sha256").update(lease.token).digest("hex") };
     await writeFile(marker, `${JSON.stringify(lease)}\n`, { mode: 0o600 });
     await assert.rejects(store.cleanup(paths), /SOLANA_VALIDATOR_ACTIVE/u); assert.equal((await lstat(paths.directory)).isDirectory(), true);
   } finally { await rm(boundary, { recursive: true, force: true }); }
@@ -226,7 +226,7 @@ test("marker inode replacement is rejected even when lease bytes are identical",
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
 
-async function buildValidator(directory: string): Promise<string> { const source = join(directory, "validator.c"); const executable = join(directory, "validator"); await writeFile(source, "#include <unistd.h>\nint main(void){for(;;) pause();}\n"); await new Promise<void>((resolve, reject) => execFile("/usr/bin/cc", [source, "-o", executable], (cause) => cause ? reject(cause) : resolve())); return executable; }
+async function buildValidator(directory: string): Promise<string> { const source = join(directory, "validator.c"); const executable = join(directory, "validator"); await writeFile(source, "#include <unistd.h>\nint main(void){for(;;) pause();}\n"); await new Promise<void>((resolve, reject) => { execFile("/usr/bin/cc", [source, "-o", executable], (cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); return executable; }
 
 function processAlive(pid: number): boolean {
   try {

@@ -96,16 +96,18 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
     const transactionSignatures = [createSignature, revokeSignature, ataSignature, mintSignature, burnSignature, restoreSignature, freezeSignature] as const;
     const transactions: TransactionFact[] = [];
     for (const signature of transactionSignatures) { transactions.push(await validatorRpc(resources.validator, resources.portLease.rpcPort, signal, async () => await deps.rpc.finalizedTransaction(rpcUrl, signature, signal))); }
-    observations = {
+    const observationDraft = {
       schemaVersion: 1, rpcUrl, genesisHashBefore: ready.genesisHash, genesisHashAfter: genesisAfter,
       validatorVersion: ready.version, payerAddress: keys.payer, mintAddress: keys.mint, mintAuthority: keys.mint, freezeAuthority: keys.mint,
       ownerAddress: keys.owner, tokenAccountAddress, initialMint, afterRevokeMint,
       afterMint, afterMintTokenAccount, finalMint, finalTokenAccount, transactions,
-    };
+    } satisfies Omit<FixtureObservations, "rpcListener">;
     mutationPhase = "verification";
-    await assertValidatorRpc(resources.validator, resources.portLease.rpcPort); ensureNotAborted(signal);
+    const rpcListener = await assertValidatorRpc(resources.validator, resources.portLease.rpcPort); ensureNotAborted(signal);
+    observations = { ...observationDraft, rpcListener };
     report = verifyObservations(observations);
-    await assertValidatorRpc(resources.validator, resources.portLease.rpcPort); ensureNotAborted(signal);
+    const confirmedRpcListener = await assertValidatorRpc(resources.validator, resources.portLease.rpcPort); ensureNotAborted(signal);
+    if (confirmedRpcListener.scope !== rpcListener.scope) { throw new LocalSolanaError("SOLANA_RPC_LISTENER_IDENTITY", "RPC listener scope changed during final evidence verification"); }
   } catch (cause) {
     failed = true;
     failure = cause;
@@ -121,7 +123,8 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
       throw cause;
     }
     try {
-      return await deps.store.publish(observations as FixtureObservations, report);
+      if (observations === undefined || report === undefined) { throw new LocalSolanaError("SOLANA_EVIDENCE_INCOMPLETE", "verified observations are absent after successful cleanup"); }
+      return await deps.store.publish(observations, report);
     } catch (cause) {
       if (mutationPhase !== undefined) {
         await deps.store.publishFailure({
@@ -235,5 +238,5 @@ export function assertFixtureAmount(value: bigint): void {
 }
 
 async function assertValidatorHealthy(value: CleanupResources["validator"]): Promise<void> { if (value === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "validator identity is absent"); } await value.assertHealthy(); }
-async function assertValidatorRpc(value: CleanupResources["validator"], port: number): Promise<void> { await assertValidatorHealthy(value); await value?.assertRpcListener(port); await assertValidatorHealthy(value); }
+async function assertValidatorRpc(value: CleanupResources["validator"], port: number) { if (value === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "validator identity is absent"); } await assertValidatorHealthy(value); const fact = await value.assertRpcListener(port); await assertValidatorHealthy(value); return fact; }
 async function validatorRpc<T>(value: CleanupResources["validator"], port: number, signal: AbortSignal, action: () => Promise<T>): Promise<T> { ensureNotAborted(signal); await assertValidatorRpc(value, port); ensureNotAborted(signal); const result = await action(); ensureNotAborted(signal); await assertValidatorRpc(value, port); ensureNotAborted(signal); return result; }

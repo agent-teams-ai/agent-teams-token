@@ -5,11 +5,16 @@ import type { FixtureObservations } from "../src/domain/model.ts";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, SYSTEM_PROGRAM } from "../src/domain/model.ts";
 import { amount, ata, instruction, mintAddress, observationFixture, owner, payer } from "./helpers/observations.ts";
 
+function mutateAta(change: (transaction: FixtureObservations["transactions"][number]) => FixtureObservations["transactions"][number]): FixtureObservations {
+  const base = observationFixture(); return { ...base, transactions: base.transactions.map((transaction) => transaction.operation === "createAta" ? change(transaction) : transaction) };
+}
+
 test("verifier reconstructs an exact seven-step mint/ATA/burn/authority lifecycle", () => {
   const report = verifyObservations(observationFixture());
   assert.equal(report.transactions.length, 7); assert.equal(report.transactions[2]?.operation, "createAta"); assert.equal(report.snapshots.finalTokenAccount.amount, "0");
   assert.equal(report.mintAddress, mintAddress); assert.equal(report.tokenAccountAddress, ata); assert.equal(report.formerFreezeAuthority, mintAddress);
   assert.equal(report.assertions.exactLoopbackRpc, true);
+  assert.equal(verifyObservations({ ...observationFixture(), rpcListener: { scope: "wildcard" } }).rpcListener.scope, "wildcard");
   assert.equal("rpcUrl" in report, false);
 });
 
@@ -53,9 +58,6 @@ test("verifier rejects supply introduced only after freeze-authority revocation"
 });
 
 test("verifier rejects zero, extra, duplicate, sparse, reordered and semantically forged ATA CPI evidence", () => {
-  const mutateAta = (change: (transaction: FixtureObservations["transactions"][number]) => FixtureObservations["transactions"][number]): FixtureObservations => {
-    const base = observationFixture(); return { ...base, transactions: base.transactions.map((transaction) => transaction.operation === "createAta" ? change(transaction) : transaction) };
-  };
   const attacks = [
     mutateAta((transaction) => ({ ...transaction, instructions: transaction.instructions.slice(0, 1), innerInstructionGroups: [] })),
     mutateAta((transaction) => ({ ...transaction, innerInstructionGroups: [...transaction.innerInstructionGroups, { groupIndex: 1, outerInstructionIndex: 0 }] })),

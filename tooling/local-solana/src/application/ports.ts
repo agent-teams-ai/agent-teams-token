@@ -1,4 +1,4 @@
-import type { AccountState, FailureEvidenceReport, FixtureObservations, TokenAccountState, TransactionFact } from "../domain/model.ts";
+import type { AccountState, FailureEvidenceReport, FixtureObservations, TokenAccountState, TransactionFact, ValidatorRpcListenerFact } from "../domain/model.ts";
 
 export interface ToolPaths {
   readonly solana: string;
@@ -18,7 +18,7 @@ export interface ValidatorHandle {
   readonly pid: number;
   stop(): Promise<void>;
   assertHealthy(): Promise<void>;
-  assertRpcListener(port: number): Promise<void>;
+  assertRpcListener(port: number): Promise<ValidatorRpcListenerFact>;
 }
 export interface ValidatorStartRequest {
   readonly executable: string;
@@ -44,6 +44,8 @@ export interface ValidatorIdentity {
   readonly ledger: string;
   readonly commandHash: string;
   readonly leaseTokenHash: string;
+  readonly bindAddress: "127.0.0.1";
+  readonly rpcPort: number;
 }
 export interface ValidatorPort {
   start(request: ValidatorStartRequest): Promise<ValidatorHandle>;

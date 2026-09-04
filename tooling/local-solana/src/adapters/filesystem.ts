@@ -24,7 +24,7 @@ export class PrivateRunStore implements RunStorePort {
     let markerIdentity: FileIdentity;
     try {
       const markerStat = await handle.stat({ bigint: true }); assertPrivateMarkerStat(markerStat); markerIdentity = fileIdentity(markerStat);
-      const lease = leaseRecord(processStart, token, rootIdentity, directoryIdentity, markerIdentity, null);
+      const lease = leaseRecord({ processStart, token, rootIdentity, directoryIdentity, markerIdentity, validator: null });
       await handle.writeFile(`${JSON.stringify(lease)}\n`); await handle.sync();
     } finally { await handle.close(); }
     await assertDirectoryIdentity(root, rootIdentity); await assertDirectoryIdentity(directory, directoryIdentity);
@@ -35,7 +35,7 @@ export class PrivateRunStore implements RunStorePort {
   public async registerValidator(paths: RunPaths, identity: ValidatorIdentity): Promise<void> {
     const root = await canonicalTarget(this.root); const validated = await validateOwnedRun(root, paths.directory, false, paths);
     if (validated.lease.token !== paths.leaseToken || identity.ledger !== await realpath(paths.ledger) || validated.lease.validator !== null) { throw new LocalSolanaError("SOLANA_VALIDATOR_LEASE", "validator identity is not bound to this unregistered owned run"); }
-    const updated = leaseRecord(validated.lease.processStart, validated.lease.token, paths.rootIdentity, paths.directoryIdentity, paths.markerIdentity, identity);
+    const updated = leaseRecord({ processStart: validated.lease.processStart, token: validated.lease.token, rootIdentity: paths.rootIdentity, directoryIdentity: paths.directoryIdentity, markerIdentity: paths.markerIdentity, validator: identity });
     await rewriteLease(paths.directory, updated, paths); await validateOwnedRun(root, paths.directory, false, paths);
   }
   public async cleanup(paths: RunPaths): Promise<void> {
@@ -112,8 +112,8 @@ interface Lease {
 }
 interface ValidatedRun { readonly lease: Lease; readonly rootIdentity: FileIdentity; readonly directoryIdentity: FileIdentity; readonly markerIdentity: FileIdentity; }
 
-function leaseRecord(processStart: string, token: string, rootIdentity: FileIdentity, directoryIdentity: FileIdentity, markerIdentity: FileIdentity, validator: ValidatorIdentity | null): Record<string, unknown> {
-  return { schemaVersion: 4, kind: "agtmai-local-solana", pid: process.pid, processStart, token, rootIdentity, directoryIdentity, markerIdentity, validator };
+function leaseRecord(value: Omit<Lease, "pid">): Record<string, unknown> {
+  return { schemaVersion: 4, kind: "agtmai-local-solana", pid: process.pid, ...value };
 }
 
 async function validateOwnedRun(root: string, directory: string, allowStale: boolean, expected?: Pick<RunPaths, "rootIdentity" | "directoryIdentity" | "markerIdentity">): Promise<ValidatedRun> {
@@ -185,13 +185,22 @@ function parseLease(raw: Record<string, unknown>): Lease {
 function parseValidatorIdentity(child: unknown): ValidatorIdentity {
   if (typeof child !== "object" || child === null || Array.isArray(child)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "validator identity is invalid"); }
   const identity = child as Record<string, unknown>;
-  const childValid = Object.keys(identity).toSorted().join(",") === "commandHash,executable,leaseTokenHash,ledger,pid,platform,startTime"
-    && typeof identity.pid === "number" && Number.isSafeInteger(identity.pid) && identity.pid >= 1 && (identity.platform === "linux" || identity.platform === "darwin")
-    && typeof identity.startTime === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(identity.startTime)
-    && typeof identity.executable === "string" && identity.executable.startsWith("/") && typeof identity.ledger === "string" && identity.ledger.startsWith("/")
-    && typeof identity.commandHash === "string" && /^[a-f0-9]{64}$/u.test(identity.commandHash) && typeof identity.leaseTokenHash === "string" && /^[a-f0-9]{64}$/u.test(identity.leaseTokenHash);
+  const childValid = Object.keys(identity).toSorted().join(",") === "bindAddress,commandHash,executable,leaseTokenHash,ledger,pid,platform,rpcPort,startTime"
+    && validValidatorProcess(identity) && validValidatorCommand(identity) && validValidatorNetwork(identity);
   if (!childValid) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "validator identity is invalid"); }
   return identity as unknown as ValidatorIdentity;
+}
+
+function validValidatorProcess(identity: Record<string, unknown>): boolean {
+  return typeof identity.pid === "number" && Number.isSafeInteger(identity.pid) && identity.pid >= 1 && (identity.platform === "linux" || identity.platform === "darwin")
+    && typeof identity.startTime === "string" && /^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(identity.startTime);
+}
+function validValidatorCommand(identity: Record<string, unknown>): boolean {
+  return typeof identity.executable === "string" && identity.executable.startsWith("/") && typeof identity.ledger === "string" && identity.ledger.startsWith("/")
+    && typeof identity.commandHash === "string" && /^[a-f0-9]{64}$/u.test(identity.commandHash) && typeof identity.leaseTokenHash === "string" && /^[a-f0-9]{64}$/u.test(identity.leaseTokenHash);
+}
+function validValidatorNetwork(identity: Record<string, unknown>): boolean {
+  return identity.bindAddress === "127.0.0.1" && typeof identity.rpcPort === "number" && Number.isSafeInteger(identity.rpcPort) && identity.rpcPort >= 1 && identity.rpcPort <= 65_535;
 }
 
 async function quarantineAndDeleteRun(root: string, directory: string, validated: ValidatedRun): Promise<void> {
@@ -261,7 +270,7 @@ export async function atomicWrite(path: string, content: string, mode: number): 
 }
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; } }
 async function exists(path: string): Promise<boolean> { try { await stat(path); return true; } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return false; } throw cause; } }
-function markdown(report: EvidenceReport): string { return `# Local Solana SPL fixture evidence\n\n- Status: READY\n- Mint: ${report.mintAddress}\n- Program: ${report.programId}\n- Decimals: ${report.decimals}\n- Supply: ${report.initialSupply} -> ${report.intermediateSupply} -> ${report.finalSupply}\n- Freeze authority: None\n- Signed restore/freeze attempts: reached Token Program and failed\n- Public network: false\n- Real asset cost USD: 0\n- Mint authority revoked: false\n- Authority key retained: false\n- Remint possible until teardown: true\n- Production hard cap proven: false\n`; }
+function markdown(report: EvidenceReport): string { return `# Local Solana SPL fixture evidence\n\n- Status: READY\n- Mint: ${report.mintAddress}\n- Program: ${report.programId}\n- Authenticated RPC listener scope: ${report.rpcListener.scope}\n- Decimals: ${report.decimals}\n- Supply: ${report.initialSupply} -> ${report.intermediateSupply} -> ${report.finalSupply}\n- Freeze authority: None\n- Signed restore/freeze attempts: reached Token Program and failed\n- Public network: false\n- Real asset cost USD: 0\n- Mint authority revoked: false\n- Authority key retained: false\n- Remint possible until teardown: true\n- Production hard cap proven: false\n`; }
 function assertFailureEvidence(value: FailureEvidenceReport): void {
   const keys = Object.keys(value).toSorted().join(",");
   const expected = "cleanupCompleted,diagnosticCode,failedPhase,mutationsMayHaveOccurred,portLeaseReleased,privateDirectoryRemoved,productionApproved,publicNetwork,realAssetCostUsd,schemaVersion,secretsRetained,status,validatorStopped";

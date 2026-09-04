@@ -20,6 +20,7 @@ const EXPECTED_DISABLED_FREEZE_ERROR = "Custom(16)";
 export function verifyObservations(value: FixtureObservations): EvidenceReport {
   if (value.schemaVersion !== 1) { fail("SOLANA_EVIDENCE_SCHEMA", "unsupported observation schema"); }
   if (!isExactLoopbackRpcUrl(value.rpcUrl)) { fail("SOLANA_RPC_NOT_EXACT_LOOPBACK", "observations must come from the canonical loopback RPC boundary"); }
+  if (!["ipv4-loopback", "ipv6-loopback", "wildcard"].includes(value.rpcListener.scope)) { fail("SOLANA_RPC_LISTENER_SCOPE", "validator listener scope is not an allowed authenticated fact"); }
   if (value.genesisHashBefore !== value.genesisHashAfter) { fail("SOLANA_GENESIS_CHANGED", "validator genesis changed during the fixture"); }
   verifyMintStates(value);
   verifySupply(value);
@@ -138,6 +139,13 @@ function verifyRevokeFreeze(fact: TransactionFact, relevant: InstructionFact, va
 }
 
 function verifyCreateAta(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
+  verifyAtaOuter(fact, relevant, value);
+  const inner = verifyAtaGroups(fact);
+  verifyAtaCpis(inner, value);
+  requireSigners(fact, [value.payerAddress]);
+}
+
+function verifyAtaOuter(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
   const outer = fact.instructions.filter((item) => item.innerInstructionIndex === null);
   assertCondition(outer.length === 1 && outer[0] === relevant && relevant.instructionIndex === 0 && relevant.innerGroupIndex === null,
     "SOLANA_ATA_OUTER", "ATA lifecycle must contain exactly one outer Associated Token instruction at index 0");
@@ -145,26 +153,40 @@ function verifyCreateAta(fact: TransactionFact, relevant: InstructionFact, value
     "SOLANA_ATA_DISCRIMINANT", "ATA creation must use the pinned Create discriminant");
   const expectedOuterAccounts = [value.payerAddress, value.tokenAccountAddress, value.ownerAddress, value.mintAddress, SYSTEM_PROGRAM, CLASSIC_TOKEN_PROGRAM];
   assertCondition(sameAddresses(relevant.accounts, expectedOuterAccounts), "SOLANA_ATA_ACCOUNTS", "ATA Create outer metas are not exact");
+}
+
+function verifyAtaGroups(fact: TransactionFact): readonly [InstructionFact, InstructionFact, InstructionFact, InstructionFact] {
   assertCondition(fact.innerInstructionGroups.length === 1 && fact.innerInstructionGroups[0]?.groupIndex === 0 && fact.innerInstructionGroups[0]?.outerInstructionIndex === 0,
     "SOLANA_ATA_CPI_GROUPS", "ATA Create must contain exactly one CPI group for outer index zero");
   const inner = fact.instructions.filter((item) => item.innerInstructionIndex !== null);
   assertCondition(inner.length === 4 && inner.every((item, index) => item.instructionIndex === 0 && item.innerGroupIndex === 0 && item.innerInstructionIndex === index),
     "SOLANA_ATA_INNER_SEQUENCE", "ATA CPI instructions must be one contiguous four-instruction sequence");
-  const [size, create, immutableOwner, initialize] = inner as [InstructionFact, InstructionFact, InstructionFact, InstructionFact];
+  return inner as unknown as readonly [InstructionFact, InstructionFact, InstructionFact, InstructionFact];
+}
+
+function verifyAtaCpis(inner: readonly [InstructionFact, InstructionFact, InstructionFact, InstructionFact], value: FixtureObservations): void {
+  const [size, create, immutableOwner, initialize] = inner;
   assertCondition(size.programId === CLASSIC_TOKEN_PROGRAM && size.kind === "getAccountDataSize" && size.dataHex === "15"
     && sameAddresses(size.accounts, [value.mintAddress]), "SOLANA_ATA_GET_SIZE", "ATA CPI getAccountDataSize semantics differ");
+  verifyAtaAccountCreation(create, value);
+  verifyAtaInitialization(immutableOwner, initialize, value);
+}
+
+function verifyAtaAccountCreation(create: InstructionFact, value: FixtureObservations): void {
   assertCondition(create.programId === SYSTEM_PROGRAM && create.kind === "createAccount" && create.dataHex.length === 104
     && create.dataHex.startsWith("00000000") && create.newAccount === value.tokenAccountAddress && create.owner === CLASSIC_TOKEN_PROGRAM
     && sameAddresses(create.accounts, [value.payerAddress, value.tokenAccountAddress]) && systemCreateLamports(create.dataHex) > 0n
     && systemCreateSpace(create.dataHex) === 165n && systemCreateOwner(create.dataHex) === CLASSIC_TOKEN_PROGRAM,
     "SOLANA_ATA_CREATE_ACCOUNT", "ATA CPI System createAccount semantics differ");
+}
+
+function verifyAtaInitialization(immutableOwner: InstructionFact, initialize: InstructionFact, value: FixtureObservations): void {
   assertCondition(immutableOwner.programId === CLASSIC_TOKEN_PROGRAM && immutableOwner.kind === "initializeImmutableOwner" && immutableOwner.dataHex === "16"
     && sameAddresses(immutableOwner.accounts, [value.tokenAccountAddress]), "SOLANA_ATA_IMMUTABLE_OWNER", "ATA CPI initializeImmutableOwner semantics differ");
   assertCondition(initialize.programId === CLASSIC_TOKEN_PROGRAM && initialize.kind === "initializeAccount3" && initialize.dataHex.length === 66
     && initialize.dataHex.startsWith("12") && initialize.owner === value.ownerAddress && initialize.tokenAccount === value.tokenAccountAddress
     && initialize.mint === value.mintAddress && sameAddresses(initialize.accounts, [value.tokenAccountAddress, value.mintAddress])
     && base58(initialize.dataHex.slice(2)) === value.ownerAddress, "SOLANA_ATA_INITIALIZE", "ATA CPI initializeAccount3 semantics differ");
-  requireSigners(fact, [value.payerAddress]);
 }
 
 function verifyMint(fact: TransactionFact, relevant: InstructionFact, value: FixtureObservations): void {
@@ -216,7 +238,7 @@ function evidence(value: FixtureObservations): EvidenceReport {
     schemaVersion: 1, status: "READY", identity: { name: "Agent Teams AI", symbol: "AGTMAI" }, programId: CLASSIC_TOKEN_PROGRAM, decimals: 9,
     testAmountBaseUnits: amount, initialSupply: "0", intermediateSupply: amount, finalSupply: "0", freezeAuthority: null,
     payerAddress: value.payerAddress, mintAddress: value.mintAddress, tokenAccountAddress: value.tokenAccountAddress, ownerAddress: value.ownerAddress,
-    mintAuthority: value.mintAuthority, formerFreezeAuthority: value.freezeAuthority, genesisHash: value.genesisHashBefore, validatorVersion: value.validatorVersion,
+    mintAuthority: value.mintAuthority, formerFreezeAuthority: value.freezeAuthority, genesisHash: value.genesisHashBefore, validatorVersion: value.validatorVersion, rpcListener: value.rpcListener,
     snapshots: { initialMint: value.initialMint, afterRevokeMint: value.afterRevokeMint, afterMint: value.afterMint, afterMintTokenAccount: value.afterMintTokenAccount, finalMint: value.finalMint, finalTokenAccount: value.finalTokenAccount },
     transactions: value.transactions,
     assertions: { exactLoopbackRpc: true, productionAuthorityProven: false, ccip: false, publicNetwork: false, realAssetCostUsd: 0, mintAuthorityRevoked: false, authorityKeyRetained: false, remintPossibleUntilTeardown: true, productionHardCapProven: false, signedRestoreReachedTokenProgramAndFailed: true, signedFreezeReachedTokenProgramAndFailed: true },

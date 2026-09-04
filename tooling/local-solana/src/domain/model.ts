@@ -46,6 +46,13 @@ export interface TransactionErrorFact {
   readonly code: string;
 }
 
+export type ValidatorRpcListenerScope = "ipv4-loopback" | "ipv6-loopback" | "wildcard";
+
+/** Kernel observation of the exact validator-owned RPC listener. */
+export interface ValidatorRpcListenerFact {
+  readonly scope: ValidatorRpcListenerScope;
+}
+
 /** Semantic instruction facts decoded by the RPC adapter, never supplied by the runner. */
 export interface InstructionFact {
   readonly programId: string;
@@ -92,6 +99,7 @@ export interface FixtureObservations {
   readonly genesisHashBefore: string;
   readonly genesisHashAfter: string;
   readonly validatorVersion: string;
+  readonly rpcListener: ValidatorRpcListenerFact;
   readonly payerAddress: string;
   readonly mintAddress: string;
   readonly mintAuthority: string;
@@ -126,6 +134,7 @@ export interface EvidenceReport {
   readonly formerFreezeAuthority: string;
   readonly genesisHash: string;
   readonly validatorVersion: string;
+  readonly rpcListener: ValidatorRpcListenerFact;
   readonly snapshots: {
     readonly initialMint: AccountState;
     readonly afterRevokeMint: AccountState;

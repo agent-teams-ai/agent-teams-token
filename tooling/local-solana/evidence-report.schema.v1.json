@@ -4,7 +4,7 @@
   "title": "AGTMAI local Solana SPL fixture evidence",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "status", "identity", "programId", "decimals", "testAmountBaseUnits", "initialSupply", "intermediateSupply", "finalSupply", "freezeAuthority", "payerAddress", "mintAddress", "tokenAccountAddress", "ownerAddress", "mintAuthority", "formerFreezeAuthority", "genesisHash", "validatorVersion", "snapshots", "transactions", "assertions"],
+  "required": ["schemaVersion", "status", "identity", "programId", "decimals", "testAmountBaseUnits", "initialSupply", "intermediateSupply", "finalSupply", "freezeAuthority", "payerAddress", "mintAddress", "tokenAccountAddress", "ownerAddress", "mintAuthority", "formerFreezeAuthority", "genesisHash", "validatorVersion", "rpcListener", "snapshots", "transactions", "assertions"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "status": { "const": "READY" },
@@ -24,6 +24,7 @@
     "formerFreezeAuthority": { "$ref": "#/$defs/address" },
     "genesisHash": { "$ref": "#/$defs/address" },
     "validatorVersion": { "type": "string", "minLength": 1 },
+    "rpcListener": { "type": "object", "additionalProperties": false, "required": ["scope"], "properties": { "scope": { "enum": ["ipv4-loopback", "ipv6-loopback", "wildcard"] } } },
     "snapshots": {
       "type": "object", "additionalProperties": false,
       "required": ["initialMint", "afterRevokeMint", "afterMint", "afterMintTokenAccount", "finalMint", "finalTokenAccount"],

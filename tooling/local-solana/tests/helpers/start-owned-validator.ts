@@ -7,7 +7,7 @@ const [runRoot, outputRoot, readyPath] = process.argv.slice(2);
 if (runRoot === undefined || outputRoot === undefined || readyPath === undefined) { throw new Error("missing helper arguments"); }
 const store = new PrivateRunStore(runRoot, outputRoot); const paths = await store.create();
 const executable = await realpath(process.execPath);
-const child = spawn(executable, ["-e", "setInterval(() => {}, 1000)", "--", "--ledger", paths.ledger], {
+const child = spawn(executable, ["-e", "setInterval(() => {}, 1000)", "--", "--ledger", paths.ledger, "--bind-address", "127.0.0.1", "--rpc-port", "30000"], {
   env: { PATH: "/usr/bin:/bin", AGTMAI_LOCAL_SOLANA_LEASE_TOKEN: paths.leaseToken }, stdio: "ignore",
 });
 if (child.pid === undefined) { throw new Error("validator helper child has no PID"); }
