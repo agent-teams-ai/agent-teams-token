@@ -93,7 +93,8 @@ async function authenticatedSnapshots(
   const root = await mkdtemp(join(install, ".authenticated-tools-"));
   await chmod(root, 0o700);
   try {
-    const entries = await Promise.all(Object.entries(sources).map(async ([name, source]) => {
+    const entries: Array<readonly [string, string]> = [];
+    for (const [name, source] of Object.entries(sources)) {
       if (typeof source.hash !== "string" || !/^[a-f0-9]{64}$/u.test(source.hash)) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} hash pin is invalid`); }
       const bytes = await stableRead(source.path);
       const actual = createHash("sha256").update(bytes).digest("hex");
@@ -103,8 +104,8 @@ async function authenticatedSnapshots(
       await chmod(target, 0o500);
       const snapshotHash = createHash("sha256").update(await stableRead(target)).digest("hex");
       if (snapshotHash !== source.hash) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} authenticated snapshot changed`); }
-      return [name, target] as const;
-    }));
+      entries.push([name, target]);
+    }
     return Object.fromEntries(entries) as unknown as ToolPaths;
   } catch (error) {
     await rm(root, { recursive: true, force: true });

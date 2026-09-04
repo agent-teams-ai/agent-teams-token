@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { hasAsciiControlCharacter, PinnedToolResolver } from "../src/adapters/toolchain.ts";
 import type { CommandPort, CommandResult } from "../src/application/ports.ts";
@@ -70,6 +70,17 @@ test("pinned resolver rejects cold, tampered and symlinked binaries without fall
   const cold = await fixture(); try { await rm(cold.binaries.solana); await assert.rejects(new PinnedToolResolver(cold.root, cold.command).resolve(), /SOLANA_TOOL_MISSING/u); } finally { await rm(cold.root, { recursive: true, force: true }); }
   const tampered = await fixture(); try { await writeFile(tampered.binaries.solana, "tampered"); await assert.rejects(new PinnedToolResolver(tampered.root, tampered.command).resolve(), /SOLANA_TOOL_HASH/u); } finally { await rm(tampered.root, { recursive: true, force: true }); }
   const linked = await fixture(); try { const target = `${linked.binaries.solana}.target`; await writeFile(target, "fixture-solana"); await rm(linked.binaries.solana); await symlink(target, linked.binaries.solana); await assert.rejects(new PinnedToolResolver(linked.root, linked.command).resolve(), /SOLANA_TOOL_MISSING/u); } finally { await rm(linked.root, { recursive: true, force: true }); }
+});
+
+test("partial authenticated snapshot failure preserves validation error and removes fallback", async () => {
+  const value = await fixture();
+  try {
+    await writeFile(value.binaries["solana-keygen"], "tampered");
+    await assert.rejects(new PinnedToolResolver(value.root, value.command).resolve(), /SOLANA_TOOL_HASH: keygen binary hash mismatch/u);
+    const install = dirname(dirname(value.binaries.solana));
+    assert.deepEqual((await readdir(install)).filter((name) => name.startsWith(".authenticated-tools-")), []);
+    assert.deepEqual(value.command.calls, []);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
 });
 
 
