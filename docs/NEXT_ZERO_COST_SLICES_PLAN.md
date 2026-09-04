@@ -2,6 +2,9 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest14:45: EVM25b Mac39/39 under109;105AMEND ->110 inherited shared-file
+close/acquisition fixes.106 complete but unapplied;108 reviewing Solana80bb.
+108/109/110 are running/alive. No new acceptance or root E2E claim.
 Latest14:40:103AMEND ->106Slither cancellation/terminal deadline;
 104AMEND ->107EVM nonblocking FIFO rejection. Custody598b Mac41/41 under105.
 Solana80bb Mac31pass1Linuxskip+TS7/lint awaits108 aggregate N2 review.

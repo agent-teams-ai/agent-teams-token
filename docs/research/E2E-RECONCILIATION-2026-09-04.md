@@ -3,7 +3,41 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 14:40 UTC
+## Latest reconciliation: 14:45 UTC
+
+- EVM107 patch is applied and main corrected its child-process ownership
+  fixture: the registering child must create its own synthetic lease, otherwise
+  owner rejection happens before the attack hook. First2tests1pass1fixturefail;
+  corrected2/2, then exact-source Mac39/39,0skips,8.5seconds; TS7/lint pass.
+  /tmp/agtmai-evm-94-mac now25b33245221b08a00db70569c7770e8e1a732cab,
+  parent1f4f,3files+108/-2. Production change is O_NONBLOCK on both read opens.
+  Independent109 is running/alive on exact25b, PID1347934.
+  Bundle /tmp/agtmai-evm107-candidate.bundle, prerequisite1f4f,
+  SHA256caddd1f3dc1f8cd9c63bf387e4957bc4a05389b7b596704d0aab0a37b26cd72a.
+  Worker result SHA2566c0e1527910314c086d24d43855c0019e6dee0f4e4cf00f22953a63c082fa478.
+- Review105 returned AMEND on598b with no newly introduced defects, but two
+  inherited closure blockers: shared-file-operations.mjs actual read/edit/restore/
+  create/absence traversal still uses raw closeSync without once-close/primary
+  preservation, and removal traversal has canonicalization/registration outside
+  the next-descriptor acquisition cleanup scope. These are concrete preexisting
+  production paths, not an extension of the final-syscall residual threat model.
+  Writer110 is running/alive from598b, PID1347970, owning only those2files plus
+  focused regression tests. Review105 tests NOT RUN after bwrap; earlier41/41
+  actualMac remains main evidence only. Review JSON SHA256
+  761640026182c6a1d367f3dd2ffc3d105ad781c5fe82df4bb19d5c946892739d.
+- Slither106 is completed; its result is being preserved locally for application
+  on /tmp/agtmai-slither-91-mac fb416. Do not treat it as applied or accepted.
+  Solana108 is still running/alive on80bb, PID1293268. Active3jobs108/109/110
+  use priority;108/109 xhigh reviewers,110 medium writer. No idle/restart action
+  is indicated. Always re-observe before launching a continuation.
+- Last admission old-host disk5.1GiB, available RAM10.6GiB and swap3.5GiB.
+  New jobs do not unpack duplicate tool runtimes; same5GB disk guard remains.
+  Integration accepted codee723 and the original user worktree are unchanged.
+
+Next: consume/apply106, consume108/109/110, focused tests and independent review
+before integration. Do not drop the still-open full original-plan matrix below.
+
+## Earlier reconciliation: 14:40 UTC
 
 Accepted integration code is still e723bc0d. New drafts remain OUTSIDE
 integration, original user dirty worktree preserved. Do not mark the root

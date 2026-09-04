@@ -5,6 +5,12 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+14:45 UTC: EVM25b33245 passes39/39Mac, TS7/lint; independent109 is running.
+Custody105 AMEND found2inherited production close/acquisition gaps, owned by110.
+Slither106 completed, not yet applied; Solana108 is still reviewing80bb.
+Three hosted jobs108/109/110 are observed alive, all fast/priority.
+No new source has entered accepted integratione723; full E2E is still open.
+
 14:40 UTC: review103 AMEND found3Slither cancellation/terminal-deadline gaps,
 owned by106. Review104 AMEND found blocking FIFO reads in EVM, owned by107;
 its independentLinux37/37 did not cover FIFOs. Custody598b Mac41/41 is under105.
