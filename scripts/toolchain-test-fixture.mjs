@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmdirSync, rmSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolchain-execution.mjs";
 import { validateLock } from "./toolchain-lock-validation.mjs";
 import {
@@ -158,6 +159,86 @@ function writeCurrentNodeWrapper(root) {
   return wrapper;
 }
 
+export function assertPrivateInvocationRejectsAmbientConfig(context) {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-config-poisoning-"));
+  const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  const ambientConfigRoot = join("/tmp", ".config");
+  const ambientPnpmRoot = join(ambientConfigRoot, "pnpm");
+  const ambientConfig = join(ambientPnpmRoot, "config.yaml");
+  let createdConfigRoot = false;
+  let createdPnpmRoot = false;
+  let createdConfig = false;
+  const poisonShell = join(root, "poison-shell");
+  const marker = join(root, "ambient-config-executed");
+  const project = join(root, "project");
+  const output = join(project, "probe-output");
+  try {
+    if (existsSync(ambientPnpmRoot)) {
+      context.skip("ambient /tmp/.config/pnpm already exists; refusing to alter non-fixture state");
+      return;
+    }
+    if (!existsSync(ambientConfigRoot)) {
+      mkdirSync(ambientConfigRoot, { mode: 0o700 });
+      createdConfigRoot = true;
+    }
+    mkdirSync(ambientPnpmRoot, { mode: 0o700 });
+    createdPnpmRoot = true;
+    const configFd = openSync(ambientConfig, "wx", 0o600);
+    createdConfig = true;
+    closeSync(configFd);
+    writeExecutable(poisonShell, `#!/bin/sh\nprintf poison > ${shellQuote(marker)}\nexec /bin/sh "$@"\n`);
+    writeFileSync(ambientConfig, `scriptShell: ${poisonShell}\n`);
+    mkdirSync(project);
+    writeFileSync(join(project, "package.json"), `${JSON.stringify({
+      name: "config-poisoning-probe",
+      private: true,
+      scripts: { probe: "printf safe > probe-output" },
+    })}\n`);
+    const pnpm = join(repositoryRoot, ".tools", "pnpm-11.24.0", "dist", "pnpm.mjs");
+    executeOpenedNode({
+      node: { path: process.execPath, sha256: digest(process.execPath) },
+      script: { path: pnpm, sha256: digest(pnpm) },
+      args: ["--dir", project, "run", "probe"],
+      platform: process.platform,
+    });
+    assert.equal(readFileSync(output, "utf8"), "safe");
+    assert.equal(existsSync(marker), false);
+  } finally {
+    if (createdConfig) {try {unlinkSync(ambientConfig);} catch {}}
+    if (createdPnpmRoot) {try {rmdirSync(ambientPnpmRoot);} catch {}}
+    if (createdConfigRoot) {try {rmdirSync(ambientConfigRoot);} catch {}}
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+export function assertTimedOutProcessGroupCannotWriteLate() {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-process-group-"));
+  try {
+    const runtime = join(root, "pnpm-runtime.mjs");
+    const marker = join(root, "late-write");
+    writeFileSync(runtime, [
+      "import { spawn } from 'node:child_process';",
+      `const marker = ${JSON.stringify(marker)};`,
+      "const code = `const {writeFileSync}=require('node:fs'); process.on('SIGTERM',()=>{}); setTimeout(()=>writeFileSync(process.argv[1],'late'),700); setInterval(()=>{},1000);`;",
+      "spawn(process.execPath, ['-e', code, marker], { stdio: 'ignore' });",
+      "process.on('SIGTERM', () => {});",
+      "setInterval(() => {}, 1_000);",
+      "",
+    ].join("\n"));
+    assert.throws(() => executeOpenedNode({
+      node: { path: process.execPath, sha256: digest(process.execPath) },
+      script: { path: runtime, sha256: digest(runtime) },
+      args: [],
+      platform: process.platform,
+      timeoutMs: 100,
+    }), /TOOLCHAIN_PROCESS_GROUP_TIMEOUT/);
+    spawnSync("/bin/sleep", ["0.8"]);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 export function assertDarwinDescriptorEntrypointIsSemanticallyWrong() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-pnpm-fd-"));
   try {
@@ -199,6 +280,15 @@ export function assertDarwinMjsSnapshotEntrypointWorks() {
 export function assertDarwinSnapshotBehavior() {
   const root = mkdtempSync(join(tmpdir(), "agtmai-darwin-execution-"));
   const preserved = [];
+  const expectPreserved = (run, code = /TOOLCHAIN_INVOCATION_CLEANUP_UNCERTAIN/) => {
+    let failure;
+    try {run();} catch (error) {failure = error;}
+    assert.match(failure?.message ?? "", code);
+    const invocation = failure.message.match(/invocation=(\S+)/)?.[1];
+    assert.ok(invocation);
+    preserved.push(invocation);
+    return invocation;
+  };
   try {
     const executable = join(root, "tool");
     writeExecutable(executable, "#!/bin/sh\nprintf '%s\\n' \"$0\"\n");
@@ -230,44 +320,53 @@ export function assertDarwinSnapshotBehavior() {
     assert.equal(existsSync(scriptTarget), false);
     assert.equal(descriptorRoot("darwin"), "/dev/fd");
 
-    writeExecutable(node, ["#!/bin/sh", "printf 'foreign evidence\\n' > \"${0%/*}/foreign\"", "printf '%s|%s\\n' \"$0\" \"$1\"", ""].join("\n"));
-    const [preservedNode, preservedScript] = executeOpenedNode({
-      node: { path: node, sha256: digest(node) },
-      script: { path: script, sha256: digest(script) },
+    writeExecutable(node, ["#!/bin/sh", "printf 'foreign evidence\\n' > \"${0%/*}/foreign\"", ""].join("\n"));
+    const foreignRoot = expectPreserved(() => executeOpenedNode({
+      node: { path: node, sha256: digest(node) }, script: { path: script, sha256: digest(script) },
       args: [], platform: "darwin",
-    }).split("|");
-    preserved.push(dirname(preservedNode));
-    assert.equal(dirname(preservedScript), dirname(preservedNode));
-    assert.equal(existsSync(preservedNode), true);
-    assert.equal(existsSync(preservedScript), true);
-    assert.equal(readFileSync(join(dirname(preservedNode), "foreign"), "utf8"), "foreign evidence\n");
+    }));
+    assert.equal(readFileSync(join(foreignRoot, "foreign"), "utf8"), "foreign evidence\n");
+    assert.equal(existsSync(join(foreignRoot, "node")), true);
+    assert.equal(existsSync(join(foreignRoot, "pnpm.mjs")), true);
 
     writeExecutable(executable, ["#!/bin/sh", "/bin/mv \"$0\" \"$0.original\"", "/bin/mkdir \"$0\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
-    const substituted = executeVerifiedFile({
+    const substitutedRoot = expectPreserved(() => executeVerifiedFile({
       path: executable, expectedSha256: digest(executable), platform: "darwin",
-    });
-    preserved.push(dirname(substituted));
-    assert.equal(lstatSync(dirname(substituted)).mode & 0o777, 0o700);
-    assert.equal(lstatSync(substituted).isDirectory(), true);
-    assert.equal(lstatSync(`${substituted}.original`).isFile(), true);
-    assert.equal(lstatSync(`${substituted}.original`).mode & 0o777, 0o500);
+    }));
+    assert.equal(lstatSync(substitutedRoot).mode & 0o777, 0o700);
+    assert.equal(lstatSync(join(substitutedRoot, "executable")).isDirectory(), true);
+    assert.equal(lstatSync(join(substitutedRoot, "executable.original")).isFile(), true);
+    assert.equal(lstatSync(join(substitutedRoot, "executable.original")).mode & 0o777, 0o500);
 
     writeExecutable(executable, ["#!/bin/sh", "root=${0%/*}", "/bin/mv \"$root\" \"$root.original\"", "/bin/mkdir -m 700 \"$root\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
-    const rootSubstituted = executeVerifiedFile({
+    const replacedRoot = expectPreserved(() => executeVerifiedFile({
       path: executable, expectedSha256: digest(executable), platform: "darwin",
-    });
-    preserved.push(dirname(rootSubstituted), `${dirname(rootSubstituted)}.original`);
-    assert.equal(lstatSync(dirname(rootSubstituted)).isDirectory(), true);
-    assert.equal(lstatSync(join(`${dirname(rootSubstituted)}.original`, "executable")).isFile(), true);
+    }));
+    preserved.push(`${replacedRoot}.original`);
+    assert.equal(lstatSync(replacedRoot).isDirectory(), true);
+    assert.equal(lstatSync(join(`${replacedRoot}.original`, "executable")).isFile(), true);
 
     writeExecutable(executable, ["#!/bin/sh", "printf 'foreign evidence\\n' > \"${0%/*}/foreign\"", "printf '%s\\n' \"$0\"", ""].join("\n"));
-    const foreign = executeVerifiedFile({
+    const secondForeignRoot = expectPreserved(() => executeVerifiedFile({
       path: executable, expectedSha256: digest(executable), platform: "darwin",
-    });
-    preserved.push(dirname(foreign));
-    assert.equal(existsSync(foreign), true);
-    assert.equal(lstatSync(foreign).mode & 0o777, 0o500);
-    assert.equal(readFileSync(join(dirname(foreign), "foreign"), "utf8"), "foreign evidence\n");
+    }));
+    assert.equal(existsSync(join(secondForeignRoot, "executable")), true);
+    assert.equal(lstatSync(join(secondForeignRoot, "executable")).mode & 0o777, 0o500);
+    assert.equal(readFileSync(join(secondForeignRoot, "foreign"), "utf8"), "foreign evidence\n");
+
+    const externalHardlink = join(root, "external-hardlink");
+    writeExecutable(executable, ["#!/bin/sh", `/bin/ln "$0" ${shellQuote(externalHardlink)}`, ""].join("\n"));
+    const hardlinkRoot = expectPreserved(() => executeVerifiedFile({
+      path: executable, expectedSha256: digest(executable), platform: "darwin",
+    }));
+    assert.equal(lstatSync(join(hardlinkRoot, "executable")).nlink, 2);
+    assert.equal(lstatSync(externalHardlink).ino, lstatSync(join(hardlinkRoot, "executable")).ino);
+
+    writeExecutable(executable, ["#!/bin/sh", "/bin/chmod 700 \"$0\"", "printf '# late mutation\\n' >> \"$0\"", ""].join("\n"));
+    const mutatedRoot = expectPreserved(() => executeVerifiedFile({
+      path: executable, expectedSha256: digest(executable), platform: "darwin",
+    }));
+    assert.match(readFileSync(join(mutatedRoot, "executable"), "utf8"), /late mutation/);
   } finally {
     for (const path of preserved) {rmSync(path, { recursive: true, force: true });}
     rmSync(root, { recursive: true, force: true });

@@ -21,6 +21,8 @@ import {
   assertDarwinDescriptorEntrypointIsSemanticallyWrong,
   assertDarwinMjsSnapshotEntrypointWorks,
   assertDarwinSnapshotBehavior,
+  assertPrivateInvocationRejectsAmbientConfig,
+  assertTimedOutProcessGroupCannotWriteLate,
   makeFixture,
 } from "../toolchain-test-fixture.mjs";
 import { digest, writeExecutable } from "./toolchain-fixtures.mjs";
@@ -325,9 +327,15 @@ test("descriptor execution rejects unsupported hosts", () => {
 
 test("Darwin execution uses private snapshots and preserves uncertain cleanup evidence", assertDarwinSnapshotBehavior);
 
-test("Darwin dev-fd entrypoint loses pathname-sensitive pnpm output", assertDarwinDescriptorEntrypointIsSemanticallyWrong);
+test("Darwin dev-fd entrypoint loses pathname-sensitive pnpm output", {
+  skip: process.platform === "darwin" ? false : `Darwin-only semantic check (host=${process.platform})`,
+}, assertDarwinDescriptorEntrypointIsSemanticallyWrong);
 
 test("Darwin authenticated mjs snapshot preserves pathname-sensitive pnpm output", assertDarwinMjsSnapshotEntrypointWorks);
+
+test("private invocation environment behaviorally ignores ambient pnpm config poisoning", assertPrivateInvocationRejectsAmbientConfig);
+
+test("timeout kills a TERM-ignoring process group before its grandchild writes", assertTimedOutProcessGroupCannotWriteLate);
 
 test("Linux verified execution retains proc descriptor execution", (context) => {
   const root = mkdtempSync(join(tmpdir(), "agtmai-linux-exec-"));
