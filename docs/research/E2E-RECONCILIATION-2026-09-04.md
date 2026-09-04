@@ -3,7 +3,62 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 14:45 UTC
+## Latest reconciliation: 14:56 UTC
+
+Accepted integration source is now31e909f72d5470613d8875ed9266adb482ddff85.
+This accepts the reviewed EVM N2 delta, NOT full original-plan E2E.
+
+- Review109 ACCEPT exact25b over1f4: remaining FIFO issue closed; independent
+  Linux2/2, no findings. Review104 had already confirmed the preceding content,
+  identity and cleanup corrections. Exact EVM bytes are integrated as
+  51475c32/59271cb4/a5ebb06d/548325f6, then31e909f7 registers cleanup.test.ts in
+  test:local-evm:built. Byte comparison against25b is empty for tooling/local-evm.
+  TS7 and scoped lint passed. Combined root-listed EVM plus real runner tests
+  on31e909 passed86/86,0skips,82.0seconds, actualMac pinned Node/Foundry/solc
+  and real pnpm. This includes7real runner lifecycle cases. Source remained
+  unchanged while documentation was reconciled; not a full root/CI pass.
+  Review109 result SHA2563de3e67e234dd92c257ee51b9f530579cb2d193b19bc187a88e6751e2d927a7f.
+- Slither106 applied and main corrected the test options type plus a coherent
+  move of the unchanged image environment parser into image-preflight.ts to
+  satisfy500lines/module. No lint rule disabled. Exactb74e115782bfa26d26da140d58cbaf9a47c5ca60
+  at /tmp/agtmai-slither-91-mac passes135/135 actualMac,0skips,11.4seconds,
+  TS7/scoped lint/diffcheck. Firstpreflight failed testtype, nextlint failed
+  max-lines; neither is hidden. Independent112 is running, PID1447431.
+  Bundle /tmp/agtmai-slither106-candidate.bundle prerequisitefb416, SHA256
+  b5cdcd78d1dccdd1659aca677305b0308a673d440e31d546dde1e6cb50aedaa7.
+  Worker106 result SHA2569d2cf3a81aecb9c468468338ca671f995082b86f63e1c0dfaee1f2826c017662.
+- Review108 AMEND on80bb: final publication name was not checked after held
+  read; rejected post-READY bundle retained owned READY; config identity/bounds
+  were discarded before actual validator/CLI use. IndependentLinux32/32 passed
+  but a separate corruption probe demonstrated retained READY. Writer111 owns
+  these3findings from80bb, running PID1407825. Legacyv3 and raw wire unchanged.
+  Review result SHA2566058c6391935640586000f236e67de287d3848f3cc5de858d4d1142bebc66c62.
+- Custody110 applied at /tmp/agtmai-custody-76c-mac as
+  7437ec04ad265f37d0981d388563abeb5b9fd489, parent598b,4files+325/-48.
+  Main corrected one patch-context mismatch, curly lint and prior test close
+  injection index1->4/count2->5 because shared reads now have three additional
+  protected closes before the final plan close. Firstfocused14/15 failed that
+  old injection location. Correctedfocused15/15 plus scoped lint/diffcheck pass.
+  Expanded47 was46pass1fail: unchanged custody-acquisition test saw ordinary
+  ancestor identity rejection before the intended nonprivate-target policy.
+  A focused retry passes, but47/47 is NOT claimed; reviewer113 independently
+  classifies this inherited full-directory-metadata issue separately from110.
+  113 running PID1461782. Full recoverybase f2d remains outside integration.
+  Bundle /tmp/agtmai-custody110-candidate.bundle prerequisite598b, SHA256
+  1da1df4f25385711a073b6921f30f8ee832d5035242cb7213bf9b5222bc3b9f7.
+  Worker110 result SHA25650397c1f358f2d7bbac9eabe96c81d3197eb3e7f593f5c34391d2df222f930f1.
+- Current hosted111/112/113 are observed running/alive. All fast/priority,
+ 111 medium writer,112/113 xhigh reviewers, isolated jobs on account-m.
+  Fresh old-host admission machine-id verified,~11GiB disk,~11GiB availableRAM,
+  ~4GiB free swap; no duplicate Node extraction or runtime/service changes.
+  Mac disk now28GiB available without further deletion by this turn.
+  Original userHEAD212b and exact plan SHA256f3779136... remain unchanged.
+
+Next: consume111/112/113, apply only
+reviewed scoped source, preserve full S5/S11/S13, L5/L6, R3-R8, both-platform
+qualification, semantic main reconciliation and exact-head root/CI/review work.
+
+## Earlier reconciliation: 14:45 UTC
 
 - EVM107 patch is applied and main corrected its child-process ownership
   fixture: the registering child must create its own synthetic lease, otherwise

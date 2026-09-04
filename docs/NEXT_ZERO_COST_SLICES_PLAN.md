@@ -2,6 +2,11 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest14:56: reviewed EVM N2 integrated31e909f7; cleanup test root registration
+included, TS7/lint passed, combined real-EVM86/86,0skips. Slitherb74e
+135/135Mac under112. Solana108AMEND ->111 publication/config-at-use fixes.
+Custody7437 focused15/15 but expanded46/47;113 reviews changes and inherited
+ancestor-metadata rejection separately.111/112/113 alive, allfast. Fullscope open.
 Latest14:45: EVM25b Mac39/39 under109;105AMEND ->110 inherited shared-file
 close/acquisition fixes.106 complete but unapplied;108 reviewing Solana80bb.
 108/109/110 are running/alive. No new acceptance or root E2E claim.
