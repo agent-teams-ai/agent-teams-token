@@ -6,7 +6,8 @@ import {
 } from "../domain/identity.ts";
 import { calculateCosts, checkedAdd, fail, parseUint } from "../domain/model.ts";
 import { validateTrustRootSafety, type FeeQuote, type StablePlan } from "./builder.ts";
-import type { ApprovedArtifact, DeploymentRpc, TrustRoots } from "./ports.ts";
+import type { ApprovedArtifact, DeploymentRpc, RawArtifactInputs, TrustRoots } from "./ports.ts";
+import { independentlyApproveRawArtifact } from "./raw-artifact-verifier.ts";
 
 export interface ReadyMarker {
   readonly schemaVersion: 2;
@@ -21,6 +22,7 @@ export interface VerificationRequest {
   readonly quote: FeeQuote;
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
+  readonly artifactInputs: RawArtifactInputs;
   readonly ready: ReadyMarker;
   readonly nowSeconds: bigint;
 }
@@ -36,8 +38,9 @@ export function independentlyVerify(request: VerificationRequest): void {
   validateTrustRootSafety(request.roots);
   validatePlanSafety(request.plan);
   validatePlanTrust(request.plan, request.roots);
-  validateBuildBindings(request.plan, request.expected);
-  validateApprovedArtifactIntegrity(request.expected, request.roots);
+  const independentlyApproved = independentlyApproveRawArtifact(request.artifactInputs, request.roots);
+  validateBuildBindings(request.plan, independentlyApproved);
+  validateBuilderAgreement(request.expected, independentlyApproved);
   validateQuote(request);
   validateReadyBinding(request.plan, request.quote, request.ready);
 }
@@ -77,7 +80,6 @@ export async function independentlyVerifyRpc(request: RpcVerificationRequest): P
   ]));
   if (
     nonce.toString() !== quote.observation.senderNonce
-    || nonce.toString() !== plan.identity.senderNonce
   ) {
     fail("RPC_NONCE_CHANGED", "sender nonce changed or was cross-swapped");
   }
@@ -122,10 +124,6 @@ function validatePlanTrust(plan: StablePlan, roots: TrustRoots): void {
   ) {
     fail("PLAN_TRUST_MISMATCH", "plan differs from trust roots");
   }
-  const nonce = parseUint(identity.senderNonce, "senderNonce");
-  if (identity.expectedCreateAddress !== deriveCreateAddress(roots.from, nonce)) {
-    fail("CREATE_ADDRESS_MISMATCH", "expected CREATE address is not derived from sender and nonce");
-  }
   validateCapPolicy(identity.capPolicy, roots);
   if (
     identity.artifactSha256 !== roots.artifactSha256
@@ -153,30 +151,9 @@ function validateCapPolicy(value: unknown, roots: TrustRoots): void {
   }
 }
 
-function validateApprovedArtifactIntegrity(expected: ApprovedArtifact, roots: TrustRoots): void {
-  if (sha256Hex(Buffer.from(expected.creationBytecode.slice(2), "hex")) !== expected.creationBytecodeHash
-    || sha256Hex(Buffer.from(expected.constructorArguments.slice(2), "hex")) !== expected.constructorArgumentsHash
-    || sha256Hex(Buffer.from(expected.constructorAbiBytes.slice(2), "hex")) !== expected.constructorAbiHash) {
-    fail("APPROVED_ARTIFACT_FORGED", "approved artifact component hashes are not bound to their bytes");
-  }
-  const inputBytes = Buffer.from(expected.creationInput.slice(2), "hex");
-  if (sha256Hex(inputBytes) !== expected.creationInputHash
-    || expected.creationInput !== `${expected.creationBytecode}${expected.constructorArguments.slice(2)}`) {
-    fail("APPROVED_ARTIFACT_FORGED", "creation input is not independently bound to its bytes");
-  }
-  if (expected.creationInputHash !== roots.creationInputHash
-    || expected.constructorArgumentsHash !== roots.constructorArgumentsHash
-    || expected.artifactSha256 !== roots.artifactSha256
-    || expected.abiSha256 !== roots.abiSha256
-    || expected.fixtureSha256 !== roots.fixtureSha256
-    || expected.compilerInputSha256 !== roots.compilerInputSha256) {
-    fail("APPROVED_ARTIFACT_UNTRUSTED", "approved artifact digests differ from trust roots");
-  }
-  if (expected.canonicalBuildInfoSha256 !== roots.canonicalBuildInfoSha256
-    || expected.buildInfoSolcVersion !== roots.buildInfoSolcVersion
-    || canonicalJson(expected.compilerSettings) !== canonicalJson(roots.compilerSettings)
-    || canonicalJson(expected.sourceDependencyClosure) !== canonicalJson(roots.sourceDependencyClosure)) {
-    fail("APPROVED_ARTIFACT_UNTRUSTED", "approved build provenance differs from trust roots");
+function validateBuilderAgreement(expected: ApprovedArtifact, independent: ApprovedArtifact): void {
+  if (canonicalJson(expected) !== canonicalJson(independent)) {
+    fail("BUILDER_VERIFICATION_MISMATCH", "builder verification mismatch against independent raw inputs");
   }
 }
 
@@ -203,7 +180,7 @@ function validateBuildBindings(plan: StablePlan, expected: ApprovedArtifact): vo
     if (canonicalJson(plan.identity[key]) !== canonicalJson(value)) {
       fail(
         "PLAN_BUILD_BINDING_MISMATCH",
-        `${key} differs from independently approved build input`,
+        `${key} has a mismatch with independent approved build input`,
       );
     }
   }
@@ -214,12 +191,9 @@ function validateQuote(request: VerificationRequest): void {
   if (quote.planId !== plan.planId || quote.creationInputHash !== plan.identity.creationInputHash) {
     fail("QUOTE_PLAN_MISMATCH", "quote is not bound to plan creation input");
   }
-  if (
-    plan.identity.senderNonce !== quote.observation.senderNonce
-    || plan.identity.observedBlockNumber !== quote.observation.blockNumber
-    || plan.identity.observedBlockHash !== quote.observation.blockHash
-  ) {
-    fail("QUOTE_DEPLOYMENT_BINDING_MISMATCH", "quote nonce or block is not bound to plan identity");
+  const nonce = parseUint(quote.observation.senderNonce, "senderNonce");
+  if (quote.observation.expectedCreateAddress !== deriveCreateAddress(roots.from, nonce)) {
+    fail("CREATE_ADDRESS_MISMATCH", "quote CREATE address is not derived from sender and nonce");
   }
   if (quote.observation.chainId !== roots.chainId) {
     fail("WRONG_CHAIN", "quote chain is wrong");

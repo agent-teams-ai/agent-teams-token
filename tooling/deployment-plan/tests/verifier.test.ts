@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ApprovedArtifact, TrustRoots } from "../src/adapters/artifact.ts";
+import { artifactInputs, approvedArtifact, roots as fixtureRoots } from "./raw-artifact-fixture.ts";
 import {
   buildFeeQuote,
   buildStablePlan,
   type FeeQuote,
   type QuoteObservation,
 } from "../src/application/builder.ts";
-import type { DeploymentRpc, RpcMethod } from "../src/application/ports.ts";
+import type { DeploymentRpc, RawArtifactInputs, RpcMethod } from "../src/application/ports.ts";
 import {
   independentlyVerify,
   independentlyVerifyRpc,
@@ -17,58 +17,10 @@ import { UINT256_MAX } from "../src/domain/model.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
 const otherHash = `0x${"b".repeat(64)}` as const;
-const creationInput = "0x0103" as const;
-const creationInputHash = sha256Hex(Buffer.from(creationInput.slice(2), "hex"));
-const creationBytecode = "0x01" as const;
-const creationBytecodeHash = sha256Hex(Buffer.from(creationBytecode.slice(2), "hex"));
-const constructorAbiBytes = "0x02" as const;
-const constructorAbiHash = sha256Hex(Buffer.from(constructorAbiBytes.slice(2), "hex"));
-const constructorArguments = "0x03" as const;
-const constructorArgumentsHash = sha256Hex(Buffer.from(constructorArguments.slice(2), "hex"));
-const roots: TrustRoots = {
-  schemaVersion: 2,
-  testOnly: true,
-  productionApproved: false,
-  mainnetAllowed: false,
-  chainId: "31337",
-  contractFqn: "src/X.sol:X",
-  buildProfile: "default",
-  from: "0x0000000000000000000000000000000000000001",
-  maximumWorstCaseWei: "1000000",
-  gasBufferBps: "0",
-  quoteTtlSeconds: "60",
-  maximumHeadLag: "2",
-  buildInfoSolcVersion: "0.8.36",
-  canonicalBuildInfoSha256: hash,
-  compilerInputSha256: hash,
-  compilerSettings: {},
-  artifactSha256: hash,
-  abiSha256: hash,
-  fixtureSha256: hash,
-  fixtureReadySha256: hash,
-  constructorArgumentsHash,
-  creationInputHash,
-  sourceDependencyClosure: {},
-};
-const artifact: ApprovedArtifact = {
-  rawBuildInfoSha256: hash,
-  canonicalBuildInfoSha256: hash,
-  artifactSha256: hash,
-  abiSha256: hash,
-  fixtureSha256: hash,
-  sourceDependencyClosure: {},
-  buildInfoSolcVersion: roots.buildInfoSolcVersion,
-  compilerInputSha256: roots.compilerInputSha256,
-  compilerSettings: {},
-  creationBytecode,
-  creationBytecodeHash,
-  constructorAbiBytes,
-  constructorAbiHash,
-  constructorArguments,
-  constructorArgumentsHash,
-  creationInput,
-  creationInputHash,
-};
+const roots = { ...fixtureRoots, maximumHeadLag: "2" } as const;
+const artifact = approvedArtifact;
+const creationInput = artifact.creationInput;
+const creationInputHash = artifact.creationInputHash;
 const observation: QuoteObservation = {
   chainId: "31337",
   blockNumber: "10",
@@ -78,6 +30,7 @@ const observation: QuoteObservation = {
   currentHeadHash: hash,
   feeHistoryNewestBlock: "10",
   senderNonce: "0",
+  expectedCreateAddress: "0x522b3294e6d06aa25ad0f1b8891242e335d3b459",
   gasEstimate: "100",
   blockGasLimit: "1000",
   baseFeePerGas: "1",
@@ -87,7 +40,7 @@ const observation: QuoteObservation = {
 };
 
 test("trust roots bind buffer, exact expiry and the complete time ordering", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const verify = (candidate: FeeQuote, nowSeconds = 110n): void => {
     independentlyVerify({
@@ -95,6 +48,7 @@ test("trust roots bind buffer, exact expiry and the complete time ordering", () 
       quote: candidate,
       roots,
       expected: artifact,
+      artifactInputs,
       ready: readyFor(plan.planId),
       nowSeconds,
     });
@@ -126,12 +80,71 @@ test("trust roots bind buffer, exact expiry and the complete time ordering", () 
 });
 
 test("forged component hashes are rejected even when bytes are unchanged", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   for (const field of ["creationBytecodeHash", "constructorAbiHash", "constructorArgumentsHash", "creationInputHash"] as const) {
     const forged = { ...artifact, [field]: hash };
-    assert.throws(() => independentlyVerify({ plan, quote, roots, expected: forged, ready: readyFor(plan.planId), nowSeconds: 110n }), /forged|untrusted|binding|mismatch|approved build input/u);
+    assert.throws(() => independentlyVerify({ plan, quote, roots, expected: forged, artifactInputs, ready: readyFor(plan.planId), nowSeconds: 110n }), /forged|untrusted|binding|mismatch|approved build input/u);
   }
+});
+
+test("independent raw verification rejects a coherent corrupted builder result", () => {
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const creationBytecode = "0x61" as const;
+  const corruptedInput = `${creationBytecode}${artifact.constructorArguments.slice(2)}` as const;
+  const corrupted = {
+    ...artifact,
+    creationBytecode,
+    creationBytecodeHash: sha256Hex(Buffer.from(creationBytecode.slice(2), "hex")),
+    creationInput: corruptedInput,
+    creationInputHash: sha256Hex(Buffer.from(corruptedInput.slice(2), "hex")),
+  };
+  assert.throws(
+    () => independentlyVerify({
+      plan,
+      quote,
+      roots,
+      expected: corrupted,
+      artifactInputs,
+      ready: readyFor(plan.planId),
+      nowSeconds: 110n,
+    }),
+    /builder verification mismatch/u,
+  );
+});
+
+test("independent verification parses every raw input and ignores builder constructor values", () => {
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const verify = (candidate: RawArtifactInputs = artifactInputs): void => independentlyVerify({
+    plan,
+    quote,
+    roots,
+    expected: artifact,
+    artifactInputs: candidate,
+    ready: readyFor(plan.planId),
+    nowSeconds: 110n,
+  });
+
+  const maliciousBuilderInputs = {
+    ...artifactInputs,
+    constructorValues: { initialSupply: "malicious builder-only value" },
+  };
+  assert.doesNotThrow(() => verify(maliciousBuilderInputs));
+  for (const field of ["buildInfoBytes", "artifactBytes", "abiBytes", "fixtureBytes"] as const) {
+    assert.throws(
+      () => verify({ ...artifactInputs, [field]: Buffer.from("{") }),
+      /JSON|BUILD_INFO|ARTIFACT|ABI|FIXTURE/u,
+    );
+  }
+  assert.throws(
+    () => verify({
+      ...artifactInputs,
+      fixtureBytes: Buffer.from('{"initialSupply":"1","initialSupply":"1","allocations":[]}'),
+    }),
+    /duplicate JSON member/u,
+  );
 });
 
 test("build provenance fields are bound to trust roots", () => {
@@ -147,17 +160,17 @@ test("build provenance fields are bound to trust roots", () => {
     sourceDependencyClosure: boundRoots.sourceDependencyClosure,
     compilerSettings: boundRoots.compilerSettings,
   };
-  const plan = buildStablePlan(boundArtifact, boundRoots, observation);
+  const plan = buildStablePlan(boundArtifact, boundRoots);
   const quote = buildFeeQuote(plan, observation, boundRoots);
   const ready = readyFor(plan.planId);
   for (const field of ["sourceDependencyClosure", "compilerSettings", "rawBuildInfoSha256", "canonicalBuildInfoSha256", "buildInfoSolcVersion"] as const) {
     const mutated = { ...boundArtifact, [field]: field === "rawBuildInfoSha256" || field === "canonicalBuildInfoSha256" ? otherHash : field === "buildInfoSolcVersion" ? "0.8.37" : {} };
-    assert.throws(() => independentlyVerify({ plan, quote, roots: boundRoots, expected: mutated, ready, nowSeconds: 110n }), /trust|binding|mismatch|untrusted|approved build input/u);
+    assert.throws(() => independentlyVerify({ plan, quote, roots: boundRoots, expected: mutated, artifactInputs, ready, nowSeconds: 110n }), /trust|binding|mismatch|untrusted|approved build input/u);
   }
 });
 
 test("quote expiry addition is uint256 overflow checked", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   assert.throws(
     () => buildFeeQuote(plan, {
       ...observation,
@@ -169,7 +182,7 @@ test("quote expiry addition is uint256 overflow checked", () => {
 });
 
 test("independent RPC verification binds every quoted chain fact", async () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const rpc = fixtureRpc();
   await independentlyVerifyRpc({ rpc, plan, quote, creationInput });

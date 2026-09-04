@@ -28,7 +28,6 @@ const IDENTITY_KEYS = [
   "buildInfoSolcVersion", "compilerSettings", "creationBytecodeHash",
   "constructorAbiBytes", "constructorAbiHash", "constructorArguments",
   "constructorArgumentsHash", "creationInput", "creationInputHash", "chainId", "from",
-  "senderNonce", "expectedCreateAddress", "observedBlockNumber", "observedBlockHash",
   "value", "capPolicy", "broadcastAllowed",
 ] as const;
 const QUOTE_KEYS = [
@@ -38,7 +37,7 @@ const QUOTE_KEYS = [
 ] as const;
 const OBSERVATION_KEYS = [
   "chainId", "blockNumber", "blockHash", "blockTimestamp", "currentHeadNumber",
-  "currentHeadHash", "feeHistoryNewestBlock", "senderNonce", "gasEstimate", "blockGasLimit",
+  "currentHeadHash", "feeHistoryNewestBlock", "senderNonce", "expectedCreateAddress", "gasEstimate", "blockGasLimit",
   "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt",
 ] as const;
 const READY_KEYS = [
@@ -80,9 +79,6 @@ export function parseStablePlan(bytes: Uint8Array): StablePlan {
   match(identity.constructorArguments, HEX, "PLAN_IDENTITY_SCHEMA", "constructorArguments");
   match(identity.creationInput, HEX, "PLAN_IDENTITY_SCHEMA", "creationInput");
   match(identity.from, ADDRESS, "PLAN_IDENTITY_SCHEMA", "from");
-  match(identity.expectedCreateAddress, ADDRESS, "PLAN_IDENTITY_SCHEMA", "expectedCreateAddress");
-  match(identity.observedBlockHash, HASH, "PLAN_IDENTITY_SCHEMA", "observedBlockHash");
-  decimals(identity, ["senderNonce", "observedBlockNumber"]);
   if (identity.broadcastAllowed !== false) {
     fail("PLAN_IDENTITY_SCHEMA", "identity broadcastAllowed must be false");
   }
@@ -108,6 +104,7 @@ export function parseFeeQuote(bytes: Uint8Array): FeeQuote {
   exactKeys(observation, OBSERVATION_KEYS, "QUOTE_OBSERVATION_SCHEMA");
   decimals(observation, ["chainId", "blockNumber", "blockTimestamp", "currentHeadNumber", "feeHistoryNewestBlock", "senderNonce", "gasEstimate", "blockGasLimit", "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt"]);
   hashes(observation, ["blockHash", "currentHeadHash"]);
+  match(observation.expectedCreateAddress, ADDRESS, "QUOTE_OBSERVATION_SCHEMA", "expectedCreateAddress");
   return quote as unknown as FeeQuote;
 }
 

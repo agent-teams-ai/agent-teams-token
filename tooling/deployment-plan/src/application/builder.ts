@@ -33,6 +33,7 @@ export interface QuoteObservation {
   readonly currentHeadHash: `0x${string}`;
   readonly feeHistoryNewestBlock: string;
   readonly senderNonce: string;
+  readonly expectedCreateAddress: `0x${string}`;
   readonly gasEstimate: string;
   readonly blockGasLimit: string;
   readonly baseFeePerGas: string;
@@ -68,7 +69,6 @@ interface QuoteTimes {
 export function buildStablePlan(
   approved: ApprovedArtifact,
   roots: TrustRoots,
-  observation: QuoteObservation,
 ): StablePlan {
   validateTrustRootSafety(roots);
   if (
@@ -77,10 +77,6 @@ export function buildStablePlan(
   ) {
     fail("GOLDEN_INPUT_MISMATCH", "creation input differs from independently pinned golden hashes");
   }
-  if (observation.chainId !== roots.chainId) {
-    fail("WRONG_CHAIN", "observed chain does not match approved chain");
-  }
-  const senderNonce = parseUint(observation.senderNonce, "senderNonce");
   const identity: StablePlanIdentity = {
     contractFqn: roots.contractFqn,
     buildProfile: roots.buildProfile,
@@ -103,10 +99,6 @@ export function buildStablePlan(
     creationInputHash: approved.creationInputHash,
     chainId: roots.chainId,
     from: roots.from,
-    senderNonce: senderNonce.toString(),
-    expectedCreateAddress: deriveCreateAddress(roots.from, senderNonce),
-    observedBlockNumber: parseUint(observation.blockNumber, "blockNumber").toString(),
-    observedBlockHash: observation.blockHash,
     value: "0",
     capPolicy: { maximumWorstCaseWei: roots.maximumWorstCaseWei, testOnly: true },
     broadcastAllowed: false,
@@ -130,6 +122,10 @@ export function buildFeeQuote(
 ): FeeQuote {
   if (observation.chainId !== roots.chainId) {
     fail("WRONG_CHAIN", "observed chain does not match approved chain");
+  }
+  const senderNonce = parseUint(observation.senderNonce, "senderNonce");
+  if (observation.expectedCreateAddress !== deriveCreateAddress(roots.from, senderNonce)) {
+    fail("CREATE_ADDRESS_MISMATCH", "quote CREATE address is not derived from sender and nonce");
   }
   const times = parseQuoteTimes(observation, roots);
   validateQuoteBinding(observation, roots, times);

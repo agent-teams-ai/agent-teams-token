@@ -1,5 +1,6 @@
 import type { QuoteObservation } from "../application/builder.ts";
 import type { DeploymentRpc, RpcMethod } from "../application/ports.ts";
+import { deriveCreateAddress } from "../domain/identity.ts";
 import { fail } from "../domain/model.ts";
 
 const ALLOWED = new Set<RpcMethod>([
@@ -94,6 +95,7 @@ export async function observeFees(
     currentHeadHash: head.hash,
     feeHistoryNewestBlock: history.newest.toString(),
     senderNonce: senderNonce.toString(),
+    expectedCreateAddress: deriveCreateAddress(request.from, senderNonce),
     gasEstimate: gas.toString(),
     blockGasLimit: head.gasLimit.toString(),
     baseFeePerGas: history.baseFee.toString(),

@@ -16,7 +16,13 @@ import {
   parseTrustRoots,
 } from "../adapters/strict-json.ts";
 import { buildFeeQuote, buildStablePlan, type FeeQuote, type StablePlan } from "../application/builder.ts";
-import type { ApprovedArtifact, DeploymentRpc, TrustRoots } from "../application/ports.ts";
+import type {
+  ApprovedArtifact,
+  ArtifactInputs,
+  DeploymentRpc,
+  RawArtifactInputs,
+  TrustRoots,
+} from "../application/ports.ts";
 import {
   independentlyVerify,
   independentlyVerifyRpc,
@@ -38,6 +44,7 @@ export interface PublishRequest {
   readonly quote: FeeQuote;
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
+  readonly artifactInputs: RawArtifactInputs;
   readonly outputFaultInjection?: OutputFaultInjection;
 }
 
@@ -45,6 +52,7 @@ export interface VerifyBundleRequest {
   readonly directory: string;
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
+  readonly artifactInputs: RawArtifactInputs;
   readonly nowSeconds: bigint;
   readonly rpc: DeploymentRpc;
   readonly creationInput: `0x${string}`;
@@ -181,13 +189,14 @@ export async function runUnsignedPlanner(
 ): Promise<{ directory: string; planId: string }> {
   const roots = parseTrustRoots(await safeRead(input.trustRootsPath));
   const fixtureBytes = await safeRead(input.fixturePath);
-  const approved = approveForgeArtifact({
+  const artifactInputs: ArtifactInputs = {
     buildInfoBytes: await safeRead(input.buildInfoPath),
     artifactBytes: await safeRead(input.artifactPath),
     abiBytes: await safeRead(input.abiPath),
     fixtureBytes,
     constructorValues: parseJsonWithoutDuplicates(fixtureBytes),
-  }, roots);
+  };
+  const approved = approveForgeArtifact(artifactInputs, roots);
   const rpc = createLocalRpc(input.rpcUrl);
   const observation = await observeFees(rpc, {
     from: roots.from,
@@ -196,7 +205,7 @@ export async function runUnsignedPlanner(
     maxPriorityFeePerGas: input.maxPriorityFeePerGas,
     maxFeePerGas: input.maxFeePerGas,
   });
-  const plan = buildStablePlan(approved, roots, observation);
+  const plan = buildStablePlan(approved, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   await independentlyVerifyRpc({
     rpc,
@@ -213,6 +222,7 @@ export async function runUnsignedPlanner(
       quote,
       roots,
       expected: approved,
+      artifactInputs,
       outputFaultInjection: { noReplaceDirectoryRename: nativeNoReplace.rename },
     };
     const directory = await publishReadyLast(publishRequest);
@@ -220,6 +230,7 @@ export async function runUnsignedPlanner(
       directory,
       roots,
       expected: approved,
+      artifactInputs,
       nowSeconds: trustedNowSeconds(),
       rpc,
       creationInput: approved.creationInput,

@@ -59,6 +59,7 @@ const observation: QuoteObservation = {
   currentHeadHash: hash,
   feeHistoryNewestBlock: "9007199254740993",
   senderNonce: "0",
+  expectedCreateAddress: "0x522b3294e6d06aa25ad0f1b8891242e335d3b459",
   gasEstimate: "1000000",
   blockGasLimit: "30000000",
   baseFeePerGas: "7000000000",
@@ -135,8 +136,8 @@ test("malformed fee relations and overflow fail closed", () => {
 });
 
 test("gas estimate changes quote but not stable plan identity", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
-  assert.equal(plan.planId, "0x57e99194be1fa8c0f9cada3b07ee8437b221803cfed6dcdefa3441255374ce20");
+  const plan = buildStablePlan(artifact, roots);
+  assert.equal(plan.planId, "0x560ead5feda36e390f2b5157c1da4c24337c86825ca7535167658a8738804ec7");
   const first = buildFeeQuote(plan, observation, roots);
   const second = buildFeeQuote(plan, { ...observation, gasEstimate: "1000001" }, roots);
   assert.equal(first.planId, second.planId);
@@ -162,15 +163,27 @@ test("canonical RLP plus Ethereum Keccak derives CREATE nonce and integer bounda
   assert.throws(() => deriveCreateAddress(sender, UINT256_MAX + 1n), /nonce/u);
 });
 
-test("nonce zero and one bind different CREATE addresses and plan IDs", () => {
-  const zero = buildStablePlan(artifact, roots, observation);
-  const one = buildStablePlan(artifact, roots, { ...observation, senderNonce: "1" });
-  assert.notEqual(zero.identity.expectedCreateAddress, one.identity.expectedCreateAddress);
-  assert.notEqual(zero.planId, one.planId);
+test("nonce, block, hash and gas changes do not alter stable plan ID", () => {
+  const stable = buildStablePlan(artifact, roots);
+  const changed = buildStablePlan(artifact, roots);
+  const first = buildFeeQuote(stable, observation, roots);
+  const nextHash = `0x${"2".repeat(64)}` as const;
+  const second = buildFeeQuote(changed, {
+    ...observation,
+    senderNonce: "1",
+    expectedCreateAddress: deriveCreateAddress(roots.from, 1n),
+    blockNumber: "9007199254740994",
+    blockHash: nextHash,
+    currentHeadHash: nextHash,
+    feeHistoryNewestBlock: "9007199254740994",
+    gasEstimate: "1000001",
+  }, roots);
+  assert.equal(stable.planId, changed.planId);
+  assert.notDeepEqual(first, second);
 });
 
 test("every stable identity field participates in planId", () => {
-  const identity = buildStablePlan(artifact, roots, observation).identity;
+  const identity = buildStablePlan(artifact, roots).identity;
   const baseline = computePlanId(identity);
   for (const key of Object.keys(identity)) {
     const value = identity[key];

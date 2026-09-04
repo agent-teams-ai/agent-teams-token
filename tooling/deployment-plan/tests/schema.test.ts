@@ -15,7 +15,7 @@ const bytes = (value: unknown): Uint8Array => Buffer.from(JSON.stringify(value))
 const observation = {
   chainId: "31337", blockNumber: "1", blockHash: hash, blockTimestamp: "1",
   currentHeadNumber: "1", currentHeadHash: hash, feeHistoryNewestBlock: "1",
-  senderNonce: "0", gasEstimate: "1", blockGasLimit: "2", baseFeePerGas: "1",
+  senderNonce: "0", expectedCreateAddress: "0x522b3294e6d06aa25ad0f1b8891242e335d3b459", gasEstimate: "1", blockGasLimit: "2", baseFeePerGas: "1",
   maxPriorityFeePerGas: "1", maxFeePerGas: "2", observedAt: "1",
 };
 const identity = {
@@ -26,8 +26,6 @@ const identity = {
   constructorArguments: "0x", constructorArgumentsHash: hash, creationInput: "0x",
   creationInputHash: hash,
   chainId: "31337", from: "0x0000000000000000000000000000000000000001",
-  senderNonce: "0", expectedCreateAddress: "0xbd770416a3345f91e4b34576cb804a576fa48eb1",
-  observedBlockNumber: "1", observedBlockHash: hash,
   value: "0", capPolicy: { maximumWorstCaseWei: "1", testOnly: true },
   broadcastAllowed: false,
 };
@@ -62,6 +60,23 @@ test("plan, quote and READY parsers enforce exact keys and versions", () => {
   assert.throws(
     () => parseStablePlan(bytes({ ...plan, identity: { ...identity, sendMethod: "eth_sendRawTransaction" } })),
     /unknown/u,
+  );
+  for (const [field, value] of [
+    ["senderNonce", "0"],
+    ["expectedCreateAddress", "0x522b3294e6d06aa25ad0f1b8891242e335d3b459"],
+    ["observedBlockNumber", "1"],
+    ["observedBlockHash", hash],
+  ] as const) {
+    assert.throws(
+      () => parseStablePlan(bytes({ ...plan, identity: { ...identity, [field]: value } })),
+      /unknown/u,
+    );
+  }
+  const { expectedCreateAddress: omitted, ...incompleteObservation } = observation;
+  assert.equal(omitted.length, 42);
+  assert.throws(
+    () => parseFeeQuote(bytes({ ...quote, observation: incompleteObservation })),
+    /missing/u,
   );
 });
 
@@ -103,9 +118,9 @@ test("every V2 decimal parser rejects values outside uint256", async () => {
   assert.throws(
     () => parseStablePlan(bytes({
       ...plan,
-      identity: { ...identity, senderNonce: overflow },
+      identity: { ...identity, senderNonce: "0" },
     })),
-    /outside uint256/u,
+    /unknown/u,
   );
   assert.throws(
     () => parseStablePlan(bytes({
@@ -118,7 +133,7 @@ test("every V2 decimal parser rejects values outside uint256", async () => {
     /outside uint256/u,
   );
   assert.throws(
-    () => parseFeeQuote(bytes({ ...quote, gasLimit: overflow })),
+    () => parseFeeQuote(bytes({ ...quote, observation: { ...observation, senderNonce: overflow } })),
     /outside uint256/u,
   );
 });

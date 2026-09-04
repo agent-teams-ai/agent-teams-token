@@ -9,11 +9,14 @@ export interface DeploymentRpc {
   request(method: RpcMethod, params: readonly unknown[]): Promise<unknown>;
 }
 
-export interface ArtifactInputs {
+export interface RawArtifactInputs {
   readonly buildInfoBytes: Uint8Array;
   readonly artifactBytes: Uint8Array;
   readonly abiBytes: Uint8Array;
   readonly fixtureBytes: Uint8Array;
+}
+
+export interface ArtifactInputs extends RawArtifactInputs {
   readonly constructorValues: unknown;
 }
 

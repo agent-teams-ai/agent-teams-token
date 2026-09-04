@@ -3,67 +3,20 @@ import { mkdtemp, readFile, readdir, realpath, rename, symlink, unlink, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ApprovedArtifact, TrustRoots } from "../src/adapters/artifact.ts";
+import type { ApprovedArtifact } from "../src/adapters/artifact.ts";
+import { artifactInputs, approvedArtifact, roots as fixtureRoots } from "./raw-artifact-fixture.ts";
 import type { DeploymentRpc, RpcMethod } from "../src/application/ports.ts";
 import { buildFeeQuote, buildStablePlan, type QuoteObservation } from "../src/application/builder.ts";
 import { independentlyVerify, independentlyVerifyRpc } from "../src/application/verifier.ts";
 import { publishReadyLast, verifyBundle } from "../src/composition/index.ts";
-import { computePlanId, sha256Hex } from "../src/domain/identity.ts";
+import { computePlanId, deriveCreateAddress, sha256Hex } from "../src/domain/identity.ts";
 import { main as estimateLocalMain } from "../../../scripts/deployment/estimate-local.ts";
 import { testOnlyNoReplaceDirectoryRename } from "./helpers/no-replace-directory-rename.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
-const inputHash = sha256Hex(Buffer.from("0103", "hex"));
-const creationBytecode = "0x01" as const;
-const creationBytecodeHash = sha256Hex(Buffer.from(creationBytecode.slice(2), "hex"));
-const constructorAbiBytes = "0x02" as const;
-const constructorAbiHash = sha256Hex(Buffer.from(constructorAbiBytes.slice(2), "hex"));
-const constructorArguments = "0x03" as const;
-const constructorArgumentsHash = sha256Hex(Buffer.from(constructorArguments.slice(2), "hex"));
-const roots: TrustRoots = {
-  schemaVersion: 2,
-  testOnly: true,
-  productionApproved: false,
-  mainnetAllowed: false,
-  chainId: "31337",
-  contractFqn: "src/X.sol:X",
-  buildProfile: "default",
-  from: "0x0000000000000000000000000000000000000001",
-  maximumWorstCaseWei: "1000000",
-  gasBufferBps: "0",
-  quoteTtlSeconds: "60",
-  maximumHeadLag: "2",
-  buildInfoSolcVersion: "0.8.36",
-  canonicalBuildInfoSha256: hash,
-  compilerInputSha256: hash,
-  compilerSettings: {},
-  artifactSha256: hash,
-  abiSha256: hash,
-  fixtureSha256: hash,
-  fixtureReadySha256: hash,
-  constructorArgumentsHash,
-  creationInputHash: inputHash,
-  sourceDependencyClosure: {},
-};
-const artifact: ApprovedArtifact = {
-  rawBuildInfoSha256: hash,
-  canonicalBuildInfoSha256: hash,
-  artifactSha256: hash,
-  abiSha256: hash,
-  fixtureSha256: hash,
-  sourceDependencyClosure: {},
-  buildInfoSolcVersion: roots.buildInfoSolcVersion,
-  compilerInputSha256: roots.compilerInputSha256,
-  compilerSettings: {},
-  creationBytecode,
-  creationBytecodeHash,
-  constructorAbiBytes,
-  constructorAbiHash,
-  constructorArguments,
-  constructorArgumentsHash,
-  creationInput: "0x0103",
-  creationInputHash: inputHash,
-};
+const roots = { ...fixtureRoots, maximumHeadLag: "2" } as const;
+const artifact = approvedArtifact;
+const inputHash = artifact.creationInputHash;
 const observation: QuoteObservation = {
   chainId: "31337",
   blockNumber: "10",
@@ -73,6 +26,7 @@ const observation: QuoteObservation = {
   currentHeadHash: hash,
   feeHistoryNewestBlock: "10",
   senderNonce: "0",
+  expectedCreateAddress: "0x522b3294e6d06aa25ad0f1b8891242e335d3b459",
   gasEstimate: "100",
   blockGasLimit: "1000",
   baseFeePerGas: "1",
@@ -86,7 +40,7 @@ test("production CLI rejects caller-supplied simulated time", async () => {
 });
 
 test("wrong chain, head lag, future, stale, reorg and exact expiry fail", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   assert.throws(
     () => buildFeeQuote(plan, { ...observation, chainId: "1" }, roots),
     /chain/u,
@@ -114,26 +68,26 @@ test("wrong chain, head lag, future, stale, reorg and exact expiry fail", () => 
   const quote = buildFeeQuote(plan, observation, roots);
   const ready = readyFor(plan.planId);
   assert.throws(
-    () => independentlyVerify({ plan, quote, roots, expected: artifact, ready, nowSeconds: 170n }),
+    () => independentlyVerify({ plan, quote, roots, expected: artifact, artifactInputs, ready, nowSeconds: 170n }),
     /expiresAt/u,
   );
 });
 
 test("identity mutation, quote swapping and unsafe plan flags are rejected", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const changedArtifact = {
     ...artifact,
     rawBuildInfoSha256: `0x${"b".repeat(64)}` as const,
   };
-  const changed = buildStablePlan(changedArtifact, roots, observation);
+  const changed = buildStablePlan(changedArtifact, roots);
   assert.notEqual(changed.planId, plan.planId);
   assert.throws(
     () => independentlyVerify({
       plan: changed,
       quote,
       roots,
-      expected: changedArtifact,
+      expected: changedArtifact, artifactInputs,
       ready: readyFor(changed.planId),
       nowSeconds: 120n,
     }),
@@ -144,7 +98,7 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
       plan: { ...plan, broadcastAllowed: true } as never,
       quote,
       roots,
-      expected: artifact,
+      expected: artifact, artifactInputs,
       ready: readyFor(plan.planId),
       nowSeconds: 120n,
     }),
@@ -152,69 +106,75 @@ test("identity mutation, quote swapping and unsafe plan flags are rejected", () 
   );
 });
 
-test("nonce-zero and nonce-one evidence cannot be cross-swapped", async () => {
-  const planZero = buildStablePlan(artifact, roots, observation);
-  const quoteZero = buildFeeQuote(planZero, observation, roots);
-  const observationOne = { ...observation, senderNonce: "1" };
-  const planOne = buildStablePlan(artifact, roots, observationOne);
-  const quoteOne = buildFeeQuote(planOne, observationOne, roots);
-  assert.notEqual(planZero.planId, planOne.planId);
-  assert.notEqual(planZero.identity.expectedCreateAddress, planOne.identity.expectedCreateAddress);
-  const swappedAddressIdentity = {
-    ...planZero.identity,
-    expectedCreateAddress: planOne.identity.expectedCreateAddress,
-  };
-  const swappedAddressPlan = {
-    ...planZero,
-    identity: swappedAddressIdentity,
-    planId: computePlanId(swappedAddressIdentity),
-  };
+test("quotes cannot be cross-swapped between stable plans", () => {
+  const firstPlan = buildStablePlan(artifact, roots);
+  const otherRoots = { ...roots, maximumWorstCaseWei: "999999" } as const;
+  const secondPlan = buildStablePlan(artifact, otherRoots);
+  const firstQuote = buildFeeQuote(firstPlan, observation, roots);
+  const secondQuote = buildFeeQuote(secondPlan, observation, otherRoots);
+  assert.notEqual(firstPlan.planId, secondPlan.planId);
   assert.throws(
     () => independentlyVerify({
-      plan: swappedAddressPlan,
-      quote: { ...quoteZero, planId: swappedAddressPlan.planId },
+      plan: firstPlan,
+      quote: secondQuote,
       roots,
       expected: artifact,
-      ready: readyFor(swappedAddressPlan.planId),
-      nowSeconds: 120n,
-    }),
-    /CREATE address/u,
-  );
-  assert.throws(
-    () => independentlyVerify({
-      plan: planZero,
-      quote: { ...quoteZero, observation: observationOne },
-      roots,
-      expected: artifact,
-      ready: readyFor(planZero.planId),
-      nowSeconds: 120n,
-    }),
-    /nonce|binding/u,
-  );
-  assert.throws(
-    () => independentlyVerify({
-      plan: planZero,
-      quote: quoteOne,
-      roots,
-      expected: artifact,
-      ready: readyFor(planZero.planId),
+      artifactInputs,
+      ready: readyFor(firstPlan.planId),
       nowSeconds: 120n,
     }),
     /not bound/u,
   );
-  const nonceOneRpc: DeploymentRpc = {
-    async request(method, params) {
-      return method === "eth_getTransactionCount" ? "0x1" : rpc.request(method, params);
-    },
+  assert.doesNotThrow(() => independentlyVerify({
+    plan: firstPlan,
+    quote: firstQuote,
+    roots,
+    expected: artifact,
+    artifactInputs,
+    ready: readyFor(firstPlan.planId),
+    nowSeconds: 120n,
+  }));
+});
+
+test("volatile observations preserve stable identity and remain internally bound", async () => {
+  const plan = buildStablePlan(artifact, roots);
+  const quoteZero = buildFeeQuote(plan, observation, roots);
+  const nextHash = `0x${"b".repeat(64)}` as const;
+  const observationOne = {
+    ...observation,
+    senderNonce: "1",
+    expectedCreateAddress: deriveCreateAddress(roots.from, 1n),
+    blockNumber: "11",
+    blockHash: nextHash,
+    currentHeadNumber: "11",
+    currentHeadHash: nextHash,
+    feeHistoryNewestBlock: "11",
+    gasEstimate: "101",
   };
-  await assert.rejects(
-    independentlyVerifyRpc({
-      rpc: nonceOneRpc,
-      plan: planZero,
-      quote: quoteZero,
-      creationInput: artifact.creationInput,
+  const quoteOne = buildFeeQuote(plan, observationOne, roots);
+  assert.equal(quoteZero.planId, quoteOne.planId);
+  assert.notDeepEqual(quoteZero, quoteOne);
+  assert.throws(
+    () => independentlyVerify({
+      plan,
+      quote: {
+        ...quoteOne,
+        observation: {
+          ...observationOne,
+          expectedCreateAddress: quoteZero.observation.expectedCreateAddress,
+        },
+      },
+      roots,
+      expected: artifact,
+      artifactInputs,
+      ready: readyFor(plan.planId),
+      nowSeconds: 120n,
     }),
-    /nonce changed/u,
+    /CREATE address/u,
+  );
+  await assert.rejects(
+    independentlyVerifyRpc({ rpc, plan, quote: quoteOne, creationInput: artifact.creationInput }),
+    /block|nonce|estimate changed/u,
   );
 });
 
@@ -228,7 +188,7 @@ test("independent complete-input golden rejects coherent wrong bytecode and cons
     creationInput: wrongInput,
     creationInputHash: sha256Hex(Buffer.from("0104", "hex")),
   };
-  assert.throws(() => buildStablePlan(coherentlyWrong, roots, observation), /golden/u);
+  assert.throws(() => buildStablePlan(coherentlyWrong, roots), /golden/u);
   const wrongBytecode = "0x02" as const;
   const wrongBytecodeInput = "0x0203" as const;
   const coherentlyWrongBytecode: ApprovedArtifact = {
@@ -238,11 +198,11 @@ test("independent complete-input golden rejects coherent wrong bytecode and cons
     creationInput: wrongBytecodeInput,
     creationInputHash: sha256Hex(Buffer.from("0203", "hex")),
   };
-  assert.throws(() => buildStablePlan(coherentlyWrongBytecode, roots, observation), /golden/u);
+  assert.throws(() => buildStablePlan(coherentlyWrongBytecode, roots), /golden/u);
 });
 
 test("standalone verification rejects coherent non-local trust roots", () => {
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const unsafeRoots = { ...roots, chainId: "1" as never };
   const identity = { ...plan.identity, chainId: "1" };
@@ -256,7 +216,7 @@ test("standalone verification rejects coherent non-local trust roots", () => {
       plan: unsafePlan,
       quote: { ...quote, planId: unsafePlan.planId, observation: { ...observation, chainId: "1" } },
       roots: unsafeRoots,
-      expected: artifact,
+      expected: artifact, artifactInputs,
       ready: readyFor(unsafePlan.planId),
       nowSeconds: 120n,
     }),
@@ -267,7 +227,7 @@ test("standalone verification rejects coherent non-local trust roots", () => {
 test("expiry at the final pre-publication check leaves no target or staging bundle", async (context) => {
   context.mock.method(Date, "now", () => 170_000);
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-expiry-")));
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   await assert.rejects(
     publishReadyLast({
@@ -276,7 +236,7 @@ test("expiry at the final pre-publication check leaves no target or staging bund
       plan,
       quote,
       roots,
-      expected: artifact,
+      expected: artifact, artifactInputs,
     }),
     /expiresAt/u,
   );
@@ -286,25 +246,25 @@ test("expiry at the final pre-publication check leaves no target or staging bund
 test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substitution", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
   const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-test-")));
-  const plan = buildStablePlan(artifact, roots, observation);
+  const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const publish = {
     parent,
     plan,
     quote,
     roots,
-    expected: artifact,
+    expected: artifact, artifactInputs,
     outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename },
   };
   const directory = await publishReadyLast({ ...publish, bundleName: "bundle" });
-  await verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
+  await verifyBundle({ directory, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
   const changedRpc: DeploymentRpc = {
     async request(method, params) {
       return method === "eth_estimateGas" ? "0x65" : rpc.request(method, params);
     },
   };
   await assert.rejects(
-    verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
+    verifyBundle({ directory, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
     /estimate changed/u,
   );
   assert.deepEqual((await readdir(directory)).toSorted(), [
@@ -317,14 +277,14 @@ test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substi
     join(legacyNames, "deployment-plan.v1.json"),
   );
   await assert.rejects(
-    verifyBundle({ directory: legacyNames, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+    verifyBundle({ directory: legacyNames, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
     /exactly plan, quote, and READY/u,
   );
 
   const planPath = join(directory, "deployment-plan.v2.json");
   await writeFile(planPath, Buffer.concat([await readFile(planPath), Buffer.from(" ")]));
   await assert.rejects(
-    verifyBundle({ directory, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+    verifyBundle({ directory, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
     /stale|substituted/u,
   );
 
@@ -335,7 +295,7 @@ test("READY-last detects final estimate N-to-N+1 drift and immutable-byte substi
   await unlink(quotePath);
   await symlink(other, quotePath);
   await assert.rejects(
-    verifyBundle({ directory: fresh, roots, expected: artifact, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+    verifyBundle({ directory: fresh, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
     /regular file/u,
   );
 });

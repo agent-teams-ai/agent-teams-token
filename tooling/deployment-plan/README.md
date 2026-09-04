@@ -39,11 +39,12 @@ cannot replace the full compiler-input identity.
 The RPC port has five read-only methods, rejects redirects and final-URL
 changes, and cannot accept public hosts. There is deliberately no wallet,
 signer, key, raw-transaction, deploy, transaction-send, or broadcast surface.
-The additional read is the exact-block `eth_getTransactionCount` needed to bind
-the unsigned identity to the canonical sender nonce. The identity carries the
-full zero-value creation input, observation block, and independently derived
-RLP/Keccak CREATE address, so nonce-zero and nonce-one plans cannot collide or
-exchange evidence.
+The exact-block `eth_getTransactionCount` read binds the volatile quote to the
+canonical sender nonce. Nonce, derived RLP/Keccak CREATE address, observation
+block and hash, gas estimate and fee facts live only in that quote. The stable
+plan retains the full zero-value creation input and sender but excludes those
+observations, so refreshing any of them preserves `planId`; READY binds the
+exact quote bytes and the final RPC reread rejects cross-swapped observations.
 
 Bundles are assembled without READY in an unguessable owned staging directory,
 validated there, and atomically renamed into place.
@@ -68,14 +69,20 @@ before an atomic no-replace name commit, and its published name is synced before
 success. The held directory identity and exact payload bytes are checked before
 rename, so substitution and ABA races fail before acceptable evidence exists.
 Bundles contain `deployment-plan.v2.json`, `fee-quote.v2.json`, then `READY`.
-The independent verifier recomputes identity, fee math, cap and freshness and
-checks READY digests using no-follow file reads. The planner independently
-rereads the RPC facts before any output claim, applies the trusted-clock check
-again to the staged bytes immediately before rename, and then performs a final
-post-publication RPC reread of the block, nonce, one-block fee-history shape,
-base fee, and gas estimate against the reconstructed creation input. A quote is
-expired when `now >= expiresAt`; failed cap or pre-publication validation checks
-occur before publication.
+The independent verifier reparses the raw build-info, artifact, ABI and
+constructor-fixture bytes with its own duplicate-key-rejecting parser. It
+reconstructs bytecode, constructor ABI encoding, constructor arguments and the
+complete initcode without consuming the builder's parsed constructor values,
+then compares that result with both the stable plan and the builder result. It
+also recomputes identity, fee math, cap and freshness and checks READY digests
+using no-follow file reads. The duplicated raw verifier is intentionally a
+separate authority rather than a shared artifact-parser helper. The planner
+independently rereads the RPC facts before any output claim, applies the
+trusted-clock check again to the staged bytes immediately before rename, and
+then performs a final post-publication RPC reread of the block, nonce, one-block
+fee-history shape, base fee, and gas estimate against the reconstructed creation
+input. A quote is expired when `now >= expiresAt`; failed cap or pre-publication
+validation checks occur before publication.
 
 Production observation, the final pre-publication freshness gate, and the
 pre-return verification each read the system clock themselves. The CLI has no
