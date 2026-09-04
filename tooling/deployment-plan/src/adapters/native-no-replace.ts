@@ -1,12 +1,11 @@
 import { constants, type Stats } from "node:fs";
-import { chmod, lstat, mkdtemp, open, readFile, realpath, type FileHandle } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, open, realpath, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, parse, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NoReplaceDirectoryRename, NoReplaceRenameRequest } from "./safe-output.ts";
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
-import { parseJsonWithoutDuplicates } from "./strict-json.ts";
-import type { NativeNoReplaceEvidence, NativeNoReplaceEvidenceFields, NativeNoReplacePolicy } from "../application/ports.ts";
+import type { NativeNoReplaceEvidence, NativeNoReplaceEvidenceFields } from "../application/ports.ts";
 import { fail } from "../domain/model.ts";
 import {
   assertHeldDirectoryAtPath,
@@ -16,12 +15,12 @@ import {
   type HeldDirectory,
 } from "./native-custody.ts";
 import { ChildExitError, runBoundChild } from "./native-custody-process.ts";
+import { loadCommittedNativeNoReplacePolicy } from "./native-policy.ts";
 export { isCustodyAncestorSafe } from "./native-custody.ts";
 export { processGroupHasLiveMembersFromPs } from "./native-custody-process.ts";
 
 const APPROVAL_DOMAIN = "AGTMAI_NATIVE_NO_REPLACE_APPROVAL_V1\0";
-const LOCK = resolvePath(dirname(fileURLToPath(import.meta.url)), "../../../toolchain.lock.json");
-const SOURCE = resolvePath(dirname(fileURLToPath(import.meta.url)), "../../native/no-replace.c");
+const SOURCE = fileURLToPath(new URL("../../native/no-replace.c", import.meta.url));
 const COMPILER_TIMEOUT_MS = 30_000;
 const HELPER_TIMEOUT_MS = 5_000;
 const TERM_GRACE_MS = 1_000;
@@ -48,7 +47,6 @@ export interface NativeNoReplaceFaultInjection {
   readonly helperTimeoutMs?: number;
   readonly termGraceMs?: number;
   readonly groupReapMs?: number;
-  readonly policy?: NativeNoReplacePolicy;
 }
 
 export interface ExecutableCustodyMetadata {
@@ -75,7 +73,6 @@ export interface NativeNoReplaceCapability {
   readonly compilerPath: string;
   readonly approvalSha256: `0x${string}`;
   readonly evidence: NativeNoReplaceEvidence;
-  readonly policy: NativeNoReplacePolicy;
   readonly custodyPath: string;
   close(): Promise<void>;
 }
@@ -99,8 +96,7 @@ export async function createNativeNoReplaceCapability(
   faultInjection: NativeNoReplaceFaultInjection = {},
 ): Promise<NativeNoReplaceCapability> {
   assertNativeNoReplacePlatform(process.platform);
-  const policy = faultInjection.policy ?? await loadNativeNoReplacePolicy();
-  assertNativeNoReplacePolicy(policy);
+  const policy = await loadCommittedNativeNoReplacePolicy();
   const platform = nativePlatformKey(process.platform);
   const platformPolicy = policy.platforms[platform];
   const sourcePath = faultInjection.sourcePath ?? SOURCE;
@@ -132,7 +128,7 @@ export async function createNativeNoReplaceCapability(
       compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", allowTrustedCompilerMultipleLinks,
     );
     const approvedCompilerTuples = platformPolicy.tuples.filter((tuple) =>
-      tuple.compilerPath === configuredCompiler && tuple.compilerSha256 === compilerIdentity.sha256);
+      tuple.compilerPath === compilerPath && tuple.compilerSha256 === compilerIdentity.sha256);
     if (approvedCompilerTuples.length === 0) {
       fail("NO_REPLACE_COMPILER_UNAPPROVED", "native compiler path and digest tuple is not approved");
     }
@@ -214,7 +210,7 @@ export async function createNativeNoReplaceCapability(
     return {
       platform, sourcePath: policy.sourcePath, sourceSha256: policy.sourceSha256,
       compileProfile: policy.compileProfile, strategy, compilerPath: approvedTuple.compilerPath,
-      approvalSha256: evidence.approvalSha256, evidence, policy,
+      approvalSha256: evidence.approvalSha256, evidence,
       executableSha256: heldHelper.identity.sha256,
       compilerSha256: compilerIdentity.sha256,
       custodyPath: custody,
@@ -279,89 +275,6 @@ export function nativeNoReplaceApprovalSha256(fields: NativeNoReplaceEvidenceFie
 export function nativePlatformKey(platform: string): "darwin-arm64" | "linux-x64" {
   assertNativeNoReplacePlatform(platform);
   return platform === "darwin" ? "darwin-arm64" : "linux-x64";
-}
-
-export async function loadNativeNoReplacePolicy(): Promise<NativeNoReplacePolicy> {
-  const lock = parseJsonWithoutDuplicates(await readFile(LOCK));
-  if (lock === null || typeof lock !== "object" || Array.isArray(lock)) fail("NO_REPLACE_POLICY_INVALID", "toolchain lock is malformed");
-  const policy = (lock as Record<string, unknown>).nativeBuilds;
-  if (policy === null || typeof policy !== "object" || Array.isArray(policy)) fail("NO_REPLACE_POLICY_INVALID", "native build policy is missing");
-  return assertNativeNoReplacePolicy((policy as Record<string, unknown>).noReplace);
-}
-
-export function assertNativeNoReplacePolicy(value: unknown): NativeNoReplacePolicy {
-  const object = exactPolicyObject(value, [
-    "schemaVersion", "kind", "sourcePath", "sourceSha256", "compileProfile", "platforms",
-  ]);
-  if (
-    object.schemaVersion !== 1
-    || object.kind !== "native-no-replace-build-policy"
-    || object.sourcePath !== "tooling/deployment-plan/native/no-replace.c"
-    || object.compileProfile !== "c11-o2-werror-stdin-v1"
-    || object.sourceSha256 !== "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09"
-  ) {
-    fail("NO_REPLACE_POLICY_INVALID", "native build policy header is invalid");
-  }
-  const platforms = exactPolicyObject(object.platforms, ["darwin-arm64", "linux-x64"]);
-  validatePlatformPolicy(platforms["darwin-arm64"], "verified-path");
-  validatePlatformPolicy(platforms["linux-x64"], "snapshot-fd");
-  return object as unknown as NativeNoReplacePolicy;
-}
-
-function validatePlatformPolicy(value: unknown, strategy: string): void {
-  const platform = exactPolicyObject(value, ["strategy", "tuples"]);
-  if (
-    platform.strategy !== strategy
-    || !Array.isArray(platform.tuples)
-    || platform.tuples.length < 1
-    || platform.tuples.length > 2
-  ) {
-    fail("NO_REPLACE_POLICY_INVALID", "native platform policy is invalid");
-  }
-  const tuples = platform.tuples.map((item) => {
-    const tuple = exactPolicyObject(item, [
-      "compilerPath", "compilerSha256", "executableSha256",
-    ]);
-    if (
-      tuple.compilerPath !== "/usr/bin/cc"
-      || !isHash(tuple.compilerSha256)
-      || !isHash(tuple.executableSha256)
-    ) {
-      fail("NO_REPLACE_POLICY_INVALID", "native tuple is malformed");
-    }
-    return tuple;
-  });
-  const serialized = tuples.map((tuple) => canonicalJson(tuple));
-  const compilerIdentities = tuples.map((tuple) =>
-    `${String(tuple.compilerPath)}|${String(tuple.compilerSha256)}`);
-  if (
-    new Set(serialized).size !== serialized.length
-    || new Set(compilerIdentities).size !== compilerIdentities.length
-    || serialized.some((entry, index) => index > 0 && serialized[index - 1]! >= entry)
-  ) {
-    fail("NO_REPLACE_POLICY_INVALID", "native tuples must be unique and sorted");
-  }
-}
-
-function exactPolicyObject(
-  value: unknown,
-  keys: readonly string[],
-): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    fail("NO_REPLACE_POLICY_INVALID", "native policy member is not an object");
-  }
-  const object = value as Record<string, unknown>;
-  const actual = Object.keys(object).toSorted();
-  const expected = [...keys].toSorted();
-  if (actual.length !== expected.length
-    || actual.some((key, index) => key !== expected[index])) {
-    fail("NO_REPLACE_POLICY_INVALID", "native policy has missing or unknown members");
-  }
-  return object;
-}
-
-function isHash(value: unknown): value is `0x${string}` {
-  return typeof value === "string" && /^0x[0-9a-f]{64}$/u.test(value);
 }
 
 interface HeldExecutable {

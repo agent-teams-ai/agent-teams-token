@@ -16,6 +16,10 @@ export interface RawArtifactInputs {
   readonly fixtureBytes: Uint8Array;
 }
 
+export interface JsonParserPort {
+  parse(bytes: Uint8Array): unknown;
+}
+
 export interface ArtifactInputs extends RawArtifactInputs {
   readonly constructorValues: unknown;
 }

@@ -6,8 +6,7 @@ import {
 } from "../domain/identity.ts";
 import { calculateCosts, checkedAdd, fail, parseUint } from "../domain/model.ts";
 import { validateTrustRootSafety, type FeeQuote, type StablePlan } from "./builder.ts";
-import type { ApprovedArtifact, DeploymentRpc, NativeNoReplaceEvidence, NativeNoReplaceEvidenceFields, NativeNoReplacePolicy, RawArtifactInputs, TrustRoots } from "./ports.ts";
-import { parseNativeNoReplaceEvidence } from "../adapters/strict-json.ts";
+import type { ApprovedArtifact, DeploymentRpc, JsonParserPort, NativeNoReplaceEvidence, NativeNoReplaceEvidenceFields, NativeNoReplacePolicy, RawArtifactInputs, TrustRoots } from "./ports.ts";
 import { independentlyApproveRawArtifact } from "./raw-artifact-verifier.ts";
 
 export interface ReadyMarker {
@@ -28,7 +27,9 @@ export interface VerificationRequest {
   readonly ready: ReadyMarker;
   readonly nowSeconds: bigint;
   readonly nativeNoReplaceEvidenceBytes: Uint8Array;
+  readonly nativeNoReplaceEvidence: NativeNoReplaceEvidence;
   readonly nativeNoReplacePolicy: NativeNoReplacePolicy;
+  readonly jsonParser: JsonParserPort;
 }
 
 export interface RpcVerificationRequest {
@@ -42,11 +43,15 @@ export function independentlyVerify(request: VerificationRequest): void {
   validateTrustRootSafety(request.roots);
   validatePlanSafety(request.plan);
   validatePlanTrust(request.plan, request.roots);
-  const independentlyApproved = independentlyApproveRawArtifact(request.artifactInputs, request.roots);
+  const independentlyApproved = independentlyApproveRawArtifact(
+    request.artifactInputs,
+    request.roots,
+    request.jsonParser,
+  );
   validateBuildBindings(request.plan, independentlyApproved);
   validateBuilderAgreement(request.expected, independentlyApproved);
   validateQuote(request);
-  verifyNativeNoReplaceEvidence(request.nativeNoReplaceEvidenceBytes, request.nativeNoReplacePolicy);
+  verifyNativeNoReplaceEvidence(request.nativeNoReplaceEvidence, request.nativeNoReplacePolicy);
   validateReadyBinding(request.plan, request.quote, request.ready);
 }
 
@@ -66,11 +71,10 @@ export function verifyReadyDigests(
 }
 
 export function verifyNativeNoReplaceEvidence(
-  bytes: Uint8Array,
+  evidence: NativeNoReplaceEvidence,
   candidatePolicy: NativeNoReplacePolicy,
 ): NativeNoReplaceEvidence {
   const policy = validateNativePolicy(candidatePolicy);
-  const evidence = parseNativeNoReplaceEvidence(bytes);
   const platformPolicy = policy.platforms[evidence.platform];
   if (
     evidence.sourcePath !== policy.sourcePath
@@ -136,7 +140,9 @@ function validateNativePolicyPlatform(value: unknown, strategy: string): void {
   ));
   const serialized = tuples.map((tuple) => canonicalJson(tuple));
   const compilers = tuples.map((tuple) => `${String(tuple.compilerPath)}|${String(tuple.compilerSha256)}`);
-  if (tuples.some((tuple) => tuple.compilerPath !== "/usr/bin/cc"
+  const compilerPath = strategy === "verified-path"
+    ? "/usr/bin/cc" : "/usr/bin/x86_64-linux-gnu-gcc-13";
+  if (tuples.some((tuple) => tuple.compilerPath !== compilerPath
       || typeof tuple.compilerSha256 !== "string" || !/^0x[0-9a-f]{64}$/u.test(tuple.compilerSha256)
       || typeof tuple.executableSha256 !== "string" || !/^0x[0-9a-f]{64}$/u.test(tuple.executableSha256))
     || new Set(serialized).size !== serialized.length

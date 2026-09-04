@@ -141,9 +141,18 @@ The no-replace C helper is governed beside (and separately from) downloadable
 core tools by the strict `nativeBuilds.noReplace` policy in
 `tooling/toolchain.lock.json`. Each supported platform admits only one or two
 sorted, atomic compiler-path/compiler-digest/helper-digest tuples. Linux uses
-`snapshot-fd`; Darwin uses `verified-path`. The compiler path and digest must
-match an exact tuple before compiler spawn, and the produced helper digest must
-match that same tuple before a capability is returned.
+`snapshot-fd` and admits the measured canonical
+`/usr/bin/x86_64-linux-gnu-gcc-13`; Darwin uses `verified-path` and its
+independently measured `/usr/bin/cc`. Admission binds the resolved realpath,
+not an alias. The compiler path and digest must match an exact tuple before
+compiler spawn, and the produced helper digest must match that same tuple
+before a capability is returned.
+
+The capability factory neither accepts nor returns policy. Publication and
+verification each load and strictly parse the committed lock independently;
+caller-selected policy cannot become authority. Policy and evidence JSON have
+explicit byte, depth, member, array, and string bounds and reject duplicate
+members, ambiguous numbers, and wrapper extras.
 
 The canonical native evidence records the platform, pinned source and compile
 profile, compiler execution strategy, compiler path and digest, helper digest,

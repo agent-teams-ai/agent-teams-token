@@ -314,22 +314,22 @@ function readyFor(planId: `0x${string}`) {
 
 test("native evidence rejects forged approval and atomic cross-tuples", () => {
   const forged = { ...nativeNoReplaceEvidence, approvalSha256: `0x${"f".repeat(64)}` };
-  assert.throws(() => verifyNativeNoReplaceEvidence(Buffer.from(canonicalJson(forged)), nativeNoReplacePolicy), /approval digest is forged/u);
+  assert.throws(() => verifyNativeNoReplaceEvidence(forged, nativeNoReplacePolicy), /approval digest is forged/u);
   const crossed = JSON.parse(JSON.stringify(nativeNoReplacePolicy));
   const tuple = crossed.platforms["linux-x64"].tuples[0]!;
   crossed.platforms["linux-x64"].tuples = [
     { ...tuple, executableSha256: `0x${"0".repeat(64)}` },
     { ...tuple, compilerSha256: `0x${"f".repeat(64)}` },
   ];
-  assert.throws(() => verifyNativeNoReplaceEvidence(nativeNoReplaceEvidenceBytes, crossed), /atomically approved/u);
+  assert.throws(() => verifyNativeNoReplaceEvidence(nativeNoReplaceEvidence, crossed), /atomically approved/u);
 });
 
 test("platform-native evidence is transient and cannot change stable plan identity", () => {
   const linuxPlan = buildStablePlan(approvedArtifact, fixtureRoots);
-  const darwin = { ...nativeNoReplaceEvidence, platform: "darwin-arm64" as const, compilerExecution: "verified-path" as const, compilerSha256: nativeNoReplacePolicy.platforms["darwin-arm64"].tuples[0]!.compilerSha256, executableSha256: nativeNoReplacePolicy.platforms["darwin-arm64"].tuples[0]!.executableSha256 };
+  const darwin = { ...nativeNoReplaceEvidence, platform: "darwin-arm64" as const, compilerExecution: "verified-path" as const, compilerPath: "/usr/bin/cc", compilerSha256: nativeNoReplacePolicy.platforms["darwin-arm64"].tuples[0]!.compilerSha256, executableSha256: nativeNoReplacePolicy.platforms["darwin-arm64"].tuples[0]!.executableSha256 };
   const fields = { platform: darwin.platform, sourcePath: darwin.sourcePath, sourceSha256: darwin.sourceSha256, compileProfile: darwin.compileProfile, compilerExecution: darwin.compilerExecution, compilerPath: darwin.compilerPath, compilerSha256: darwin.compilerSha256, executableSha256: darwin.executableSha256 };
   darwin.approvalSha256 = sha256Hex(Buffer.concat([Buffer.from("AGTMAI_NATIVE_NO_REPLACE_APPROVAL_V1\0"), Buffer.from(canonicalJson(fields))]));
-  assert.doesNotThrow(() => verifyNativeNoReplaceEvidence(Buffer.from(canonicalJson(darwin)), nativeNoReplacePolicy));
+  assert.doesNotThrow(() => verifyNativeNoReplaceEvidence(darwin, nativeNoReplacePolicy));
   const darwinPlan = buildStablePlan(approvedArtifact, fixtureRoots);
   assert.equal(darwinPlan.planId, linuxPlan.planId);
   assert.equal(canonicalJson(darwinPlan.identity), canonicalJson(linuxPlan.identity));

@@ -12,6 +12,7 @@ import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolch
 import { pnpmWrapper, writePnpmWrapper } from "./toolchain-pnpm-wrapper.mjs";
 import { fileURLToPath } from "node:url";
 import { assertExpectedFileHashes, lockedFileMismatch } from "./toolchain-policy.mjs";
+import { parseToolchainJson, TOOLCHAIN_JSON_LIMITS } from "./toolchain-json.mjs";
 
 export { canonicalizeTrustedPath, descriptorRoot, executeVerifiedFile, validateLock };
 
@@ -27,7 +28,9 @@ export function hostPlatform({ platform = process.platform, arch = process.arch 
 }
 
 export function loadLock(lockPath = join(repositoryRoot, "tooling/toolchain.lock.json")) {
-  const lock = JSON.parse(readVerifiedBytes(lockPath).bytes.toString("utf8"));
+  const lock = parseToolchainJson(readVerifiedBytes(lockPath, {
+    maximumBytes: TOOLCHAIN_JSON_LIMITS.bytes,
+  }).bytes);
   validateLock(lock);
   return lock;
 }
@@ -173,10 +176,14 @@ function verifyArchive({ name, platform, artifact, archive, missingCode }) {
   return actual.bytes;
 }
 
-function readVerifiedBytes(path) {
+function readVerifiedBytes(path, { maximumBytes } = {}) {
   const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const before = checkedRegularDescriptor(fd);
+    if (!Number.isSafeInteger(before.size)
+      || (maximumBytes !== undefined && before.size > maximumBytes)) {
+      throw new Error("TOOLCHAIN_JSON_LIMIT_BYTES");
+    }
     const bytes = readDescriptorBytes(fd, before.size);
     const after = checkedRegularDescriptor(fd);
     const pathStat = lstatSync(path);

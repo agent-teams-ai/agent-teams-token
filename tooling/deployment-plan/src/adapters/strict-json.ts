@@ -2,6 +2,7 @@ import type { FeeQuote, StablePlan } from "../application/builder.ts";
 import type { NativeNoReplaceEvidence, TrustRoots } from "../application/ports.ts";
 import type { ReadyMarker } from "../application/verifier.ts";
 import { fail, parseUint } from "../domain/model.ts";
+import { parseBoundedJson } from "./bounded-json.ts";
 
 const HASH = /^0x[0-9a-f]{64}$/u;
 const ADDRESS = /^0x[0-9a-f]{40}$/u;
@@ -128,155 +129,17 @@ export function parseNativeNoReplaceEvidence(bytes: Uint8Array): NativeNoReplace
   if (evidence.platform !== "darwin-arm64" && evidence.platform !== "linux-x64") fail("NATIVE_EVIDENCE_SCHEMA", "platform is invalid");
   if (evidence.sourcePath !== "tooling/deployment-plan/native/no-replace.c" || evidence.compileProfile !== "c11-o2-werror-stdin-v1") fail("NATIVE_EVIDENCE_SCHEMA", "source or compile profile is invalid");
   if (evidence.compilerExecution !== "snapshot-fd" && evidence.compilerExecution !== "verified-path") fail("NATIVE_EVIDENCE_SCHEMA", "compiler execution is invalid");
-  if (evidence.compilerPath !== "/usr/bin/cc") fail("NATIVE_EVIDENCE_SCHEMA", "compiler path is invalid");
+  const compilerPath = evidence.platform === "darwin-arm64"
+    ? "/usr/bin/cc" : "/usr/bin/x86_64-linux-gnu-gcc-13";
+  if (evidence.compilerPath !== compilerPath) {
+    fail("NATIVE_EVIDENCE_SCHEMA", "compiler path is invalid");
+  }
   hashes(evidence, ["sourceSha256", "compilerSha256", "executableSha256", "approvalSha256"]);
   return evidence as unknown as NativeNoReplaceEvidence;
 }
 
 export function parseJsonWithoutDuplicates(bytes: Uint8Array): unknown {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    fail("JSON_INVALID", "JSON is not strict UTF-8");
-  }
-  return new Parser(text).parse();
-}
-
-class Parser {
-  private index = 0;
-  private readonly source: string;
-
-  constructor(source: string) {
-    this.source = source;
-  }
-
-  parse(): unknown {
-    const result = this.value();
-    this.space();
-    if (this.index !== this.source.length) {
-      this.invalid();
-    }
-    return result;
-  }
-
-  private value(): unknown {
-    this.space();
-    const character = this.source[this.index];
-    if (character === "{") {
-      return this.object();
-    }
-    if (character === "[") {
-      return this.array();
-    }
-    if (character === '"') {
-      return this.string();
-    }
-    for (const [token, value] of [["true", true], ["false", false], ["null", null]] as const) {
-      if (this.source.startsWith(token, this.index)) {
-        this.index += token.length;
-        return value;
-      }
-    }
-    const number = /^-?(?:0|[1-9][0-9]*)/u.exec(this.source.slice(this.index));
-    if (number) {
-      this.index += number[0].length;
-      const parsed = Number(number[0]);
-      if (number[0] === "-0" || !Number.isSafeInteger(parsed)) {
-        this.invalid();
-      }
-      return parsed;
-    }
-    return this.invalid();
-  }
-
-  private object(): Record<string, unknown> {
-    this.index += 1;
-    const result = Object.create(null) as Record<string, unknown>;
-    const keys = new Set<string>();
-    this.space();
-    if (this.take("}")) {
-      return result;
-    }
-    while (true) {
-      this.space();
-      if (this.source[this.index] !== '"') {
-        this.invalid();
-      }
-      const key = this.string();
-      if (keys.has(key)) {
-        fail("JSON_DUPLICATE_KEY", `duplicate JSON member: ${key}`);
-      }
-      keys.add(key);
-      this.space();
-      if (!this.take(":")) {
-        this.invalid();
-      }
-      result[key] = this.value();
-      this.space();
-      if (this.take("}")) {
-        return result;
-      }
-      if (!this.take(",")) {
-        this.invalid();
-      }
-    }
-  }
-
-  private array(): unknown[] {
-    this.index += 1;
-    const result: unknown[] = [];
-    this.space();
-    if (this.take("]")) {
-      return result;
-    }
-    while (true) {
-      result.push(this.value());
-      this.space();
-      if (this.take("]")) {
-        return result;
-      }
-      if (!this.take(",")) {
-        this.invalid();
-      }
-    }
-  }
-
-  private string(): string {
-    const start = this.index;
-    this.index += 1;
-    while (this.index < this.source.length) {
-      const character = this.source[this.index++];
-      if (character === '"') {
-        try { return JSON.parse(this.source.slice(start, this.index)) as string; }
-        catch { return this.invalid(); }
-      }
-      if (character === "\\") {
-        this.index += 1;
-      } else if (character.charCodeAt(0) < 0x20) {
-        this.invalid();
-      }
-    }
-    return this.invalid();
-  }
-
-  private space(): void {
-    while (isJsonWhitespace(this.source[this.index])) {
-      this.index += 1;
-    }
-  }
-  private take(character: string): boolean {
-    if (this.source[this.index] !== character) {
-      return false;
-    }
-    this.index += 1;
-    return true;
-  }
-  private invalid(): never { fail("JSON_INVALID", `malformed JSON at byte ${this.index}`); }
-}
-
-function isJsonWhitespace(character: string | undefined): boolean {
-  return character === " " || character === "\t" || character === "\r" || character === "\n";
+  return parseBoundedJson(bytes);
 }
 
 function object(value: unknown, code: string): Record<string, unknown> {

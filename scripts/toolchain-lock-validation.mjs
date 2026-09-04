@@ -9,6 +9,14 @@ function hasControlCharacter(value) {
 }
 
 export function validateLock(lock) {
+  const keys = [
+    "schemaVersion", "retrievedAt", "platforms", "coreTools", "nativeBuilds",
+    "fixtureTools", "policy", "tools", "securityImages",
+  ].toSorted();
+  if (JSON.stringify(Object.keys(lock).toSorted()) !== JSON.stringify(keys)
+    || JSON.stringify(Object.keys(lock.nativeBuilds ?? {}).toSorted()) !== JSON.stringify(["noReplace"])) {
+    throw new Error("TOOLCHAIN_LOCK_WRAPPER");
+  }
   if (lock.schemaVersion !== 2) {throw new Error("TOOLCHAIN_LOCK_SCHEMA expected=2");}
   if (JSON.stringify(lock.platforms) !== JSON.stringify(["darwin-arm64", "linux-x64"])) {
     throw new Error("TOOLCHAIN_LOCK_PLATFORMS expected=darwin-arm64,linux-x64");

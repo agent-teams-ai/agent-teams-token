@@ -1,5 +1,6 @@
 import type {
   ApprovedArtifact,
+  JsonParserPort,
   RawArtifactInputs,
   TrustRoots,
 } from "./ports.ts";
@@ -42,8 +43,9 @@ interface Allocation {
 export function independentlyApproveRawArtifact(
   inputs: RawArtifactInputs,
   roots: TrustRoots,
+  parser: JsonParserPort,
 ): ApprovedArtifact {
-  const parsed = parseArtifactInputs(inputs);
+  const parsed = parseArtifactInputs(inputs, parser);
   validateInputDigests(parsed, roots);
   validateBuildInfoCompiler(parsed.build, roots);
   const buildContract = readBuildContract(parsed.build, roots);
@@ -84,18 +86,21 @@ export function independentlyApproveRawArtifact(
   return approved;
 }
 
-function parseArtifactInputs(inputs: RawArtifactInputs): ParsedArtifactInputs {
+function parseArtifactInputs(
+  inputs: RawArtifactInputs,
+  parser: JsonParserPort,
+): ParsedArtifactInputs {
   return {
-    build: parseObject(inputs.buildInfoBytes, "BUILD_INFO"),
-    artifact: parseObject(inputs.artifactBytes, "ARTIFACT"),
-    abi: parseArray(inputs.abiBytes, "ABI"),
-    fixture: parseObject(inputs.fixtureBytes, "FIXTURE"),
+    build: parseObject(parser.parse(inputs.buildInfoBytes), "BUILD_INFO"),
+    artifact: parseObject(parser.parse(inputs.artifactBytes), "ARTIFACT"),
+    abi: parseArray(parser.parse(inputs.abiBytes), "ABI"),
+    fixture: parseObject(parser.parse(inputs.fixtureBytes), "FIXTURE"),
     artifactSha256: sha256Hex(inputs.artifactBytes),
     abiSha256: sha256Hex(inputs.abiBytes),
     fixtureSha256: sha256Hex(inputs.fixtureBytes),
     rawBuildInfoSha256: sha256Hex(inputs.buildInfoBytes),
     canonicalBuildInfoSha256: canonicalBuildInfoSha256(
-      parseObject(inputs.buildInfoBytes, "BUILD_INFO"),
+      parseObject(parser.parse(inputs.buildInfoBytes), "BUILD_INFO"),
     ),
   };
 }
@@ -344,164 +349,16 @@ function word(value: string): string {
   }
 }
 
-function parseObject(bytes: Uint8Array, code: string): Record<string, unknown> {
-  return object(parseJson(bytes, code), `${code}_INVALID`);
+function parseObject(value: unknown, code: string): Record<string, unknown> {
+  return object(value, `${code}_INVALID`);
 }
 
-function parseArray(bytes: Uint8Array, code: string): unknown[] {
-  const value = parseJson(bytes, code);
+function parseArray(value: unknown, code: string): unknown[] {
   if (!Array.isArray(value)) {
     fail(`${code}_INVALID`, `${code} must be an array`);
   }
   return value;
 }
-
-function parseJson(bytes: Uint8Array, code: string): unknown {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    fail(`${code}_INVALID`, `${code} is not strict UTF-8 JSON`);
-  }
-  return new IndependentJsonParser(text).parse();
-}
-
-class IndependentJsonParser {
-  private index = 0;
-  private readonly source: string;
-
-  constructor(source: string) {
-    this.source = source;
-  }
-
-  parse(): unknown {
-    const result = this.value();
-    this.space();
-    if (this.index !== this.source.length) {
-      this.invalid();
-    }
-    return result;
-  }
-
-  private value(): unknown {
-    this.space();
-    const character = this.source[this.index];
-    if (character === "{") {
-      return this.object();
-    }
-    if (character === "[") {
-      return this.array();
-    }
-    if (character === '"') {
-      return this.string();
-    }
-    for (const [token, value] of [["true", true], ["false", false], ["null", null]] as const) {
-      if (this.source.startsWith(token, this.index)) {
-        this.index += token.length;
-        return value;
-      }
-    }
-    const number = /^-?(?:0|[1-9][0-9]*)/u.exec(this.source.slice(this.index));
-    if (number) {
-      this.index += number[0].length;
-      const parsed = Number(number[0]);
-      if (number[0] === "-0" || !Number.isSafeInteger(parsed)) {
-        this.invalid();
-      }
-      return parsed;
-    }
-    return this.invalid();
-  }
-
-  private object(): Record<string, unknown> {
-    this.index += 1;
-    const result = Object.create(null) as Record<string, unknown>;
-    const keys = new Set<string>();
-    this.space();
-    if (this.take("}")) {
-      return result;
-    }
-    while (true) {
-      this.space();
-      if (this.source[this.index] !== '"') {
-        this.invalid();
-      }
-      const key = this.string();
-      if (keys.has(key)) {
-        fail("JSON_DUPLICATE_KEY", `duplicate JSON member: ${key}`);
-      }
-      keys.add(key);
-      this.space();
-      if (!this.take(":")) {
-        this.invalid();
-      }
-      result[key] = this.value();
-      this.space();
-      if (this.take("}")) {
-        return result;
-      }
-      if (!this.take(",")) {
-        this.invalid();
-      }
-    }
-  }
-
-  private array(): unknown[] {
-    this.index += 1;
-    const result: unknown[] = [];
-    this.space();
-    if (this.take("]")) {
-      return result;
-    }
-    while (true) {
-      result.push(this.value());
-      this.space();
-      if (this.take("]")) {
-        return result;
-      }
-      if (!this.take(",")) {
-        this.invalid();
-      }
-    }
-  }
-
-  private string(): string {
-    const start = this.index;
-    this.index += 1;
-    while (this.index < this.source.length) {
-      const character = this.source[this.index++];
-      if (character === '"') {
-        try { return JSON.parse(this.source.slice(start, this.index)) as string; }
-        catch { return this.invalid(); }
-      }
-      if (character === "\\") {
-        this.index += 1;
-      } else if (character.charCodeAt(0) < 0x20) {
-        this.invalid();
-      }
-    }
-    return this.invalid();
-  }
-
-  private space(): void {
-    while (isJsonWhitespace(this.source[this.index])) {
-      this.index += 1;
-    }
-  }
-  private take(character: string): boolean {
-    if (this.source[this.index] !== character) {
-      return false;
-    }
-    this.index += 1;
-    return true;
-  }
-  private invalid(): never { fail("JSON_INVALID", `malformed JSON at byte ${this.index}`); }
-}
-
-function isJsonWhitespace(character: string | undefined): boolean {
-  return character === " " || character === "\t" || character === "\r" || character === "\n";
-}
-
 
 function object(value: unknown, code: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {

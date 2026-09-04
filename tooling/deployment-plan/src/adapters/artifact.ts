@@ -5,6 +5,7 @@ import type {
 } from "../application/ports.ts";
 import { canonicalJson, sha256Hex } from "../domain/identity.ts";
 import { fail, parseUint } from "../domain/model.ts";
+import { parseBoundedJson } from "./bounded-json.ts";
 
 const SOURCE = "src/features/token-genesis/AGTMAIToken.sol";
 const CONTRACT = "AGTMAIToken";
@@ -360,7 +361,7 @@ function parseArray(bytes: Uint8Array, code: string): unknown[] {
 
 function parseJson(bytes: Uint8Array, code: string): unknown {
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return parseBoundedJson(bytes);
   } catch {
     fail(`${code}_INVALID`, `${code} is not strict UTF-8 JSON`);
   }

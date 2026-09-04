@@ -83,7 +83,7 @@ test("native no-replace policy is exact, bounded, atomic, and not downloadable",
   assert.equal(`0x${createHash("sha256").update(readFileSync(join(repositoryRoot, policy.sourcePath))).digest("hex")}`, policy.sourceSha256);
   assert.equal(lock.coreTools.includes("noReplace"), false);
   assert.deepEqual(policy.platforms["darwin-arm64"].tuples[0], { compilerPath: "/usr/bin/cc", compilerSha256: "0x7588ceab299393618d6f8861502ac0588d1594025f301d9a61a898215b5571d3", executableSha256: "0x333d90f849c3116bf477678e9439abce54bcf2eed1c724652e70172f69ae584e" });
-  assert.deepEqual(policy.platforms["linux-x64"].tuples[0], { compilerPath: "/usr/bin/cc", compilerSha256: "0x1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26", executableSha256: "0x814aba8dfb8f176c252a3fc8f4aa8564723c0790613ee101a9a45fc41f629e9b" });
+  assert.deepEqual(policy.platforms["linux-x64"].tuples[0], { compilerPath: "/usr/bin/x86_64-linux-gnu-gcc-13", compilerSha256: "0x1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26", executableSha256: "0x814aba8dfb8f176c252a3fc8f4aa8564723c0790613ee101a9a45fc41f629e9b" });
   for (const mutate of [
     (copy) => { delete copy.nativeBuilds.noReplace.sourcePath; },
     (copy) => { copy.nativeBuilds.noReplace.unknown = true; },

@@ -167,7 +167,7 @@ test("plan, quote and READY parsers enforce exact keys and versions", () => {
 });
 
 test("native evidence parser rejects missing, extra, malformed and duplicate members", () => {
-  const evidence = { schemaVersion: 1, kind: "native-no-replace-evidence", platform: "linux-x64", sourcePath: "tooling/deployment-plan/native/no-replace.c", sourceSha256: hash, compileProfile: "c11-o2-werror-stdin-v1", compilerExecution: "snapshot-fd", compilerPath: "/usr/bin/cc", compilerSha256: hash, executableSha256: hash, approvalSha256: hash };
+  const evidence = { schemaVersion: 1, kind: "native-no-replace-evidence", platform: "linux-x64", sourcePath: "tooling/deployment-plan/native/no-replace.c", sourceSha256: hash, compileProfile: "c11-o2-werror-stdin-v1", compilerExecution: "snapshot-fd", compilerPath: "/usr/bin/x86_64-linux-gnu-gcc-13", compilerSha256: hash, executableSha256: hash, approvalSha256: hash };
   assert.doesNotThrow(() => parseNativeNoReplaceEvidence(bytes(evidence)));
   const { approvalSha256: omitted, ...missing } = evidence;
   assert.equal(omitted, hash);

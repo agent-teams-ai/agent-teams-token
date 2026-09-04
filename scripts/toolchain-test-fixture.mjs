@@ -119,9 +119,38 @@ function fixtureLock(archives) {
   );
   return {
     schemaVersion: 2,
+    retrievedAt: "2026-08-29T00:00:00Z",
     platforms: ["darwin-arm64", "linux-x64"],
     coreTools: ["node", "foundry", "solc"],
+    nativeBuilds: {
+      noReplace: {
+        schemaVersion: 1,
+        kind: "native-no-replace-build-policy",
+        sourcePath: "tooling/deployment-plan/native/no-replace.c",
+        sourceSha256: "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09",
+        compileProfile: "c11-o2-werror-stdin-v1",
+        platforms: {
+          "darwin-arm64": {
+            strategy: "verified-path",
+            tuples: [{
+              compilerPath: "/usr/bin/cc",
+              compilerSha256: `0x${"1".repeat(64)}`,
+              executableSha256: `0x${"2".repeat(64)}`,
+            }],
+          },
+          "linux-x64": {
+            strategy: "snapshot-fd",
+            tuples: [{
+              compilerPath: "/usr/bin/x86_64-linux-gnu-gcc-13",
+              compilerSha256: `0x${"3".repeat(64)}`,
+              executableSha256: `0x${"4".repeat(64)}`,
+            }],
+          },
+        },
+      },
+    },
     fixtureTools: ["agave"],
+    policy: {},
     tools: {
       node: coreTool("24.20.0", definitions.node),
       foundry: coreTool("1.8.0", definitions.foundry),

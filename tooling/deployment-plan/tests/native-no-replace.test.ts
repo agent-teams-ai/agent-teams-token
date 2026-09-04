@@ -12,7 +12,6 @@ import { acceptedCustodyCanonicalPath } from "../src/adapters/native-custody.ts"
 import {
   assertNativeNoReplacePlatform,
   createNativeNoReplaceCapability,
-  loadNativeNoReplacePolicy,
   isCustodyAncestorSafe,
   isExecutableCustodySafe,
   nativeCompilerExecutionStrategy,
@@ -275,31 +274,29 @@ test("compiler consumes pinned private source bytes from stdin after pathname re
   }
 });
 
-test("unapproved compiler tuple fails before the compiler spawn sentinel", async () => {
-  const policy = JSON.parse(JSON.stringify(await loadNativeNoReplacePolicy()));
-  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
-  policy.platforms[platform].tuples[0]!.compilerSha256 = `0x${"0".repeat(64)}`;
+test("alias resolving to an unapproved canonical compiler fails before spawn", async () => {
+  const previous = process.env.AGTMAI_CC_BINARY;
+  process.env.AGTMAI_CC_BINARY = "/bin/false";
   let spawned = false;
-  await assert.rejects(createNativeNoReplaceCapability({ policy, async beforeCompilerSpawn() { spawned = true; } }), (error: unknown) => error instanceof Error && "code" in error && error.code === "NO_REPLACE_COMPILER_UNAPPROVED");
-  assert.equal(spawned, false);
-});
-
-test("helper digest must belong to the same approved compiler tuple", async () => {
-  const policy = JSON.parse(JSON.stringify(await loadNativeNoReplacePolicy()));
-  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
-  policy.platforms[platform].tuples[0]!.executableSha256 = `0x${"0".repeat(64)}`;
-  await assert.rejects(createNativeNoReplaceCapability({ policy }), (error: unknown) => error instanceof Error && "code" in error && error.code === "NO_REPLACE_EXECUTABLE_UNAPPROVED");
-});
-
-test("compiler and helper approvals cannot be crossed between tuples", async () => {
-  const policy = JSON.parse(JSON.stringify(await loadNativeNoReplacePolicy()));
-  const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
-  const actual = policy.platforms[platform].tuples[0]!;
-  policy.platforms[platform].tuples = [
-    { ...actual, executableSha256: `0x${"0".repeat(64)}` },
-    { ...actual, compilerSha256: `0x${"f".repeat(64)}` },
-  ].toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-  await assert.rejects(createNativeNoReplaceCapability({ policy }), (error: unknown) => error instanceof Error && "code" in error && error.code === "NO_REPLACE_EXECUTABLE_UNAPPROVED");
+  try {
+    await assert.rejects(
+      createNativeNoReplaceCapability({
+        beforeCompilerSpawn() {
+          spawned = true;
+          return Promise.resolve();
+        },
+      }),
+      (error: unknown) => error instanceof Error && "code" in error
+        && error.code === "NO_REPLACE_COMPILER_UNAPPROVED",
+    );
+    assert.equal(spawned, false);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AGTMAI_CC_BINARY;
+    } else {
+      process.env.AGTMAI_CC_BINARY = previous;
+    }
+  }
 });
 
 test("Linux executes compiler and helper through held descriptors despite pathname replacement", {
@@ -435,6 +432,10 @@ test("native helper build is deterministic for one compiler identity", async () 
   try {
     assert.equal(first.compilerSha256, second.compilerSha256);
     assert.equal(first.executableSha256, second.executableSha256);
+    const canonicalCompiler = process.platform === "linux"
+      ? "/usr/bin/x86_64-linux-gnu-gcc-13" : "/usr/bin/cc";
+    assert.equal(first.compilerPath, canonicalCompiler);
+    assert.equal(first.evidence.compilerPath, canonicalCompiler);
   } finally {
     await Promise.all([first.close(), second.close()]);
     await Promise.all([

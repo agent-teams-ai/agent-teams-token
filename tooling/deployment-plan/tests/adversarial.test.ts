@@ -1,4 +1,4 @@
-import { nativePublication, nativeVerification, nativeNoReplacePolicy } from "./native-provenance-fixture.ts";
+import { nativePublication, nativeVerification } from "./native-provenance-fixture.ts";
 import assert from "node:assert/strict";
 import { link, mkdir, mkdtemp, readdir, realpath, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -261,7 +261,7 @@ test("READY-last verifies held bytes and detects live estimate drift", async (co
     outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename },
   });
   try {
-    await verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
+    await verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput });
     assert.match(publication.quoteSha256, /^0x[0-9a-f]{64}$/u);
     assert.match(publication.identity.directoryDevice, /^[0-9]+$/u);
     assert.match(publication.identity.directoryInode, /^[0-9]+$/u);
@@ -272,7 +272,7 @@ test("READY-last verifies held bytes and detects live estimate drift", async (co
       },
     };
     await assert.rejects(
-      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
+      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: changedRpc, creationInput: artifact.creationInput }),
       /estimate changed/u,
     );
     assert.deepEqual((await readdir(publication.directory)).toSorted(), [
@@ -309,7 +309,7 @@ test("same-plan quote substitution cannot replace the held approved quote", asyn
       },
     };
     await assert.rejects(
-      verifyBundle({ nativeNoReplacePolicy, publication: original, expectedQuoteSha256: original.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: observedRpc, creationInput: artifact.creationInput }),
+      verifyBundle({ publication: original, expectedQuoteSha256: original.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: observedRpc, creationInput: artifact.creationInput }),
       (error: unknown) => error instanceof Error
         && "code" in error
         && error.code === "OUTPUT_PUBLISHED_SUBSTITUTED",
@@ -331,7 +331,7 @@ test("final-directory replacement before verification fails closed", async (cont
     await rename(publication.directory, join(parent, "held-original"));
     await mkdir(publication.directory, { mode: 0o700 });
     await assert.rejects(
-      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
       /identity changed/u,
     );
   } finally {
@@ -361,7 +361,7 @@ for (const substitutedName of ["READY", "deployment-plan.v2.json", "native-no-re
     };
     try {
       await assert.rejects(
-        verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: boundaryRpc, creationInput: artifact.creationInput }),
+        verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc: boundaryRpc, creationInput: artifact.creationInput }),
         /substituted|identity changed|regular file/u,
       );
       assert.equal(substituted, true);
@@ -385,7 +385,7 @@ for (const mutation of ["missing", "symlink", "hardlink"] as const) {
     if (mutation === "symlink") await symlink(foreign, leaf);
     if (mutation === "hardlink") await link(foreign, leaf);
     try {
-      await assert.rejects(verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /missing|substituted|regular file|identity changed/u);
+      await assert.rejects(verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /missing|substituted|regular file|identity changed/u);
     } finally { await publication.close(); }
   });
 }
@@ -398,7 +398,7 @@ test("an extra bundle leaf is rejected", async (context) => {
   const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
   await writeFile(join(publication.directory, "extra"), "foreign", { mode: 0o600 });
   try {
-    await assert.rejects(verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /foreign entry/u);
+    await assert.rejects(verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }), /foreign entry/u);
   } finally { await publication.close(); }
 });
 
@@ -410,7 +410,7 @@ test("verification rejects an expected quote digest mismatch", async (context) =
   const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
   try {
     await assert.rejects(
-      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: `0x${"f".repeat(64)}`, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      verifyBundle({ publication, expectedQuoteSha256: `0x${"f".repeat(64)}`, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
       /expected quote digest/u,
     );
   } finally {
@@ -427,7 +427,7 @@ test("legacy leaf names cannot be verified through a publication capability", as
   try {
     await rename(join(publication.directory, "deployment-plan.v2.json"), join(publication.directory, "deployment-plan.v1.json"));
     await assert.rejects(
-      verifyBundle({ nativeNoReplacePolicy, publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
+      verifyBundle({ publication, expectedQuoteSha256: publication.quoteSha256, roots, expected: artifact, artifactInputs, nowSeconds: 120n, rpc, creationInput: artifact.creationInput }),
       /foreign entry|substituted|identity changed/u,
     );
   } finally {

@@ -115,7 +115,7 @@ test("planner publishes canonical native evidence and READY V3 last", async (con
     assert.equal(evidence.compilerSha256, expectedNative.compilerSha256);
     assert.equal(evidence.executableSha256, expectedNative.executableSha256);
     if (process.platform === "linux") {
-      assert.equal(evidence.approvalSha256, "0xf1fa7618fcabf0f34c70eea49bf1786a62554b29d4b820c1221fa0c89c0a79bd");
+      assert.equal(evidence.approvalSha256, "0x1799839fd965cd6297ed95a1676070687d52fbdb5343c54fae05598c14b61e8c");
     }
     assert.equal(result.nativeNoReplaceEvidenceSha256, sha256Hex(evidenceBytes));
     assert.equal(ready.nativeNoReplaceEvidenceSha256, result.nativeNoReplaceEvidenceSha256);

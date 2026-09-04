@@ -24,7 +24,9 @@ function validateNativePlatform(value, platform, strategy) {
   const serialized = [];
   for (const tuple of value.tuples) {
     exactObjectKeys(tuple, ["compilerPath", "compilerSha256", "executableSha256"], `TUPLE platform=${platform}`);
-    if (tuple.compilerPath !== "/usr/bin/cc" || !PREFIXED_SHA256.test(tuple.compilerSha256 ?? "")
+    const compilerPath = platform === "darwin-arm64"
+      ? "/usr/bin/cc" : "/usr/bin/x86_64-linux-gnu-gcc-13";
+    if (tuple.compilerPath !== compilerPath || !PREFIXED_SHA256.test(tuple.compilerSha256 ?? "")
       || !PREFIXED_SHA256.test(tuple.executableSha256 ?? "")) {
       throw new Error(`TOOLCHAIN_LOCK_NATIVE_TUPLE platform=${platform}`);
     }

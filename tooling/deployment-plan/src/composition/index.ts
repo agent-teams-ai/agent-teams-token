@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { approveForgeArtifact } from "../adapters/artifact.ts";
 import { createLocalRpc, observeFees } from "../adapters/rpc.ts";
 import { createNativeNoReplaceCapability } from "../adapters/native-no-replace.ts";
+import { loadCommittedNativeNoReplacePolicy } from "../adapters/native-policy.ts";
 import {
   claimOwnedOutputDirectory,
   type ClaimedOutputDirectory,
@@ -13,6 +14,7 @@ import {
 import {
   parseFeeQuote,
   parseJsonWithoutDuplicates,
+  parseNativeNoReplaceEvidence,
   parseReadyMarker,
   parseStablePlan,
   parseTrustRoots,
@@ -22,8 +24,6 @@ import type {
   ApprovedArtifact,
   ArtifactInputs,
   DeploymentRpc,
-  NativeNoReplaceEvidence,
-  NativeNoReplacePolicy,
   RawArtifactInputs,
   TrustRoots,
 } from "../application/ports.ts";
@@ -50,8 +50,7 @@ export interface PublishRequest {
   readonly roots: TrustRoots;
   readonly expected: ApprovedArtifact;
   readonly artifactInputs: RawArtifactInputs;
-  readonly nativeNoReplaceEvidence: NativeNoReplaceEvidence;
-  readonly nativeNoReplacePolicy: NativeNoReplacePolicy;
+  readonly nativeNoReplaceEvidenceBytes: Uint8Array;
   readonly outputFaultInjection?: OutputFaultInjection;
 }
 
@@ -64,7 +63,6 @@ export interface VerifyBundleRequest {
   readonly nowSeconds: bigint;
   readonly rpc: DeploymentRpc;
   readonly creationInput: `0x${string}`;
-  readonly nativeNoReplacePolicy: NativeNoReplacePolicy;
 }
 
 export interface PlannerInput {
@@ -145,7 +143,7 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
   }
   const planBytes = jsonBytes(request.plan);
   const quoteBytes = jsonBytes(request.quote);
-  const nativeNoReplaceEvidenceBytes = jsonBytes(request.nativeNoReplaceEvidence);
+  const nativeNoReplaceEvidenceBytes = request.nativeNoReplaceEvidenceBytes;
   const planSha256 = sha256Hex(planBytes);
   const quoteSha256 = sha256Hex(quoteBytes);
   const nativeNoReplaceEvidenceSha256 = sha256Hex(nativeNoReplaceEvidenceBytes);
@@ -158,7 +156,12 @@ export async function publishReadyLast(request: PublishRequest): Promise<Publish
     creationInputHash: request.quote.creationInputHash,
   };
   const readyBytes = jsonBytes(ready);
-  independentlyVerify({ ...request, ready, nativeNoReplaceEvidenceBytes, nowSeconds: trustedNowSeconds() });
+  await verifyWithCommittedAuthority({
+    ...request,
+    ready,
+    nativeNoReplaceEvidenceBytes,
+    nowSeconds: trustedNowSeconds(),
+  });
   const output = await claimOwnedOutputDirectory(
     request.parent,
     request.bundleName,
@@ -216,7 +219,14 @@ export async function verifyBundle(
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
   verifyReadyDigests(planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, ready);
-  independentlyVerify({ ...request, plan, quote, ready, nativeNoReplaceEvidenceBytes, nowSeconds: trustedNowSeconds() });
+  await verifyWithCommittedAuthority({
+    ...request,
+    plan,
+    quote,
+    ready,
+    nativeNoReplaceEvidenceBytes,
+    nowSeconds: trustedNowSeconds(),
+  });
   await independentlyVerifyRpc({
     rpc: request.rpc,
     plan,
@@ -274,7 +284,32 @@ async function assertPreparedContent(
   const plan = parseStablePlan(planBytes);
   const quote = parseFeeQuote(quoteBytes);
   verifyReadyDigests(planBytes, quoteBytes, nativeNoReplaceEvidenceBytes, expectedReady);
-  independentlyVerify({ ...request, plan, quote, ready: expectedReady, nativeNoReplaceEvidenceBytes });
+  await verifyWithCommittedAuthority({
+    ...request,
+    plan,
+    quote,
+    ready: expectedReady,
+    nativeNoReplaceEvidenceBytes,
+  });
+}
+
+async function verifyWithCommittedAuthority(
+  request: Omit<VerificationRequest, "nativeNoReplacePolicy" | "nativeNoReplaceEvidence" | "jsonParser">,
+): Promise<void> {
+  const nativeNoReplacePolicy = await loadCommittedNativeNoReplacePolicy();
+  const nativeNoReplaceEvidence = parseNativeNoReplaceEvidence(
+    request.nativeNoReplaceEvidenceBytes,
+  );
+  if (!Buffer.from(request.nativeNoReplaceEvidenceBytes)
+    .equals(jsonBytes(nativeNoReplaceEvidence))) {
+    fail("NATIVE_EVIDENCE_NONCANONICAL", "native evidence must use canonical JSON bytes");
+  }
+  independentlyVerify({
+    ...request,
+    nativeNoReplacePolicy,
+    nativeNoReplaceEvidence,
+    jsonParser: { parse: parseJsonWithoutDuplicates },
+  });
 }
 
 export async function runUnsignedPlanner(
@@ -322,8 +357,7 @@ export async function runUnsignedPlanner(
       roots,
       expected: approved,
       artifactInputs,
-      nativeNoReplaceEvidence: nativeNoReplace.evidence,
-      nativeNoReplacePolicy: nativeNoReplace.policy,
+      nativeNoReplaceEvidenceBytes: jsonBytes(nativeNoReplace.evidence),
       outputFaultInjection: { noReplaceDirectoryRename: nativeNoReplace.rename },
     };
     const publication = await publishReadyLast(publishRequest);
@@ -337,7 +371,6 @@ export async function runUnsignedPlanner(
         nowSeconds: trustedNowSeconds(),
         rpc,
         creationInput: approved.creationInput,
-        nativeNoReplacePolicy: nativeNoReplace.policy,
       });
       return {
         directory: publication.directory,
