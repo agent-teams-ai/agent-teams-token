@@ -5,6 +5,14 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+14:04 UTC supersedes older entries: custody4c93 passes32/32 actualMac and lint,
+now under independent fast reviewer99. EVMcfba covers all7realMac runner cases
+(6pass plus1focused retry after timeout), publication/process30/30; review98
+still found P1 mutable-file-state and P3 diagnostic-precedence gaps, owned by
+fast writer100. Recovered96/97 patches are preserved, not applied/accepted.
+Mac ENOSPC was relieved by removing only a duplicate inactive Agave tool copy;
+the primary copy and all source remain. Original user worktree is unchanged.
+
 Current accepted code e723bc0d includes independently accepted Solana raw-wire
 verification. ActualMac source coverage:90total,87pass,3Linux-only skips,0fail;
 real integration4/4 has no skips. Review92 found another P1 in filesystem FD

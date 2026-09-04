@@ -3,7 +3,89 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 13:55 UTC
+## Latest reconciliation: 14:04 UTC
+
+Accepted integration code remains e723bc0df8efa867a78f8a4cd68e8862e95a18f2.
+Nothing from the new unaccepted drafts entered the main candidate. Original
+user worktree212b278f and its dirty paths are unchanged; original plan SHA256
+still f377913670ba55be1b032afa47cdeb24d88fb612b242f91f4004a356a1a9666d.
+
+- Custody95 patch was applied locally in /tmp/agtmai-custody-76c-mac. Main fixed
+  the middle-FD-reuse test fixture (lower freed FD numbers must be temporarily
+  occupied) and extracted pure cleanup evidence formatting/hash helpers.
+  Candidate4c93be88b37ee955019f4e7abf9868745e920ace, parentff44,9files+557/-103.
+  Actual Mac32/32 descriptor/cleanup/custody/replay tests,0skips,31.2seconds;
+  scoped lint passes. First targeted5 had3pass/2test-fixture failures, then5/5.
+  Independent reviewer99 is running on exact4c93 vsff44, not accepted yet.
+- EVM94 draft plus main typing/structure/read-state/parent-custody corrections
+  is cfba200f42e32de2b54cbbdaaac92dc93e3988e3 in /tmp/agtmai-evm-94-mac,
+  parent checkpoint57a8d18e, basee723. Review98 returned AMEND P1: publication
+  after the hook checks structural identity but omits mutable state/expected
+  bytes, and an in-place predecessor rewrite is not detected. P3: teardown can
+  mask the primary error. Pinned Linux focused15/15 passed but did not cover
+  these boundaries. Writer100 owns exactly these two findings and regressions.
+- Actual Mac cfba: publication/process30/30; required runner lifecycle6/7 passed
+  with one90second timeout. Only the timed-out solc-substitution test was rerun
+  and passed1/1 in6.2seconds, covering all7 real runner cases without a repeated
+  full run. No full E2E/CI or security acceptance follows from that coverage.
+  Verifier18/18 ran on earlier57a8; it is not relabeled as exactcfba evidence.
+  Root TS7 build and scoped EVM lint now pass with existing pinned development
+  dependency links, not an authenticated package-producer claim.
+- Earlier setup failures are retained: absent Anvil PATH2cases; absent .tools
+  solc18cases; absent pnpm PATH7runner cases; then ENOSPC and absent compiled
+  supply CLI affected runner tests. A pinned solc copy, real pinned pnpm11.24.0
+  --version (not a fabricated version shim), existing supply dependency link
+  and TS7 build prepared the fixture. No package installation was performed.
+- Mac disk reached918MiB free and actual solc snapshot writes hit ENOSPC.
+  Main removed only its inactive copied Agave tool directory at
+  /tmp/agtmai-solana-wire86-mac/.tools/agave-v4.2.1-darwin-arm64 (8GiB nominal).
+  The authoritative development copy remains in integration2; the deleted copy
+  is reproducible. No source, worktree or user data was deleted. Afterwards
+  df reported10GiB then12GiB free. Do not assume the isolated Solana fixture
+  still has binaries; rehydrate only if another actual-platform run needs them.
+- Planner93 established missing v3 provenance. docs/PLAN.md now explicitly
+  retains old Solana v3 directories and leaves L5 open for an owner decision;
+  do not fabricate v4 bindings or authorize legacy deletion/signalling.
+  Writer97 implements only current-format N2 publication/bounds, not that L5
+  decision. Its final launcher summary lost the inline patch;96 likewise lost
+  its refinement and incorrectly marked its own goal blocked after tool failure.
+  Their useful patches were recovered from task-specific assistant final_answer
+  records only, never auth/key/reasoning records. They remain UNAPPLIED drafts.
+- Recovery files: .tools/hosted-evidence/2026-09-04/recovered-96-final-1.md is the
+  Slither refinement diff on4a0db1a3; recovered-96-final-2.md supersedes its
+  OwnedProcessExecution implementation. Apply both, not just one. Slither local
+  /tmp/agtmai-slither-91-mac remains4a0db1a3ea5230e1b3c5376d036cb1ece931910a,
+  the unaccepted16/17,9lint draft. recovered-97-final-1.md contains the complete
+  Solana publication patch on e723. Original terminal JSONs are also retained.
+
+Currently live old-host jobs, freshly observed:
+- agtmai-r212-custody-review99-20260904, PID786658, xhigh/priority/read-only,
+  exact4c93, workspace /var/data/agtmai-r212-custody-review99-workspace.
+- agtmai-r212-evm-closure100-20260904, PID813028, medium/priority,
+  exactcfba, workspace /var/data/agtmai-r212-evm-closure100-workspace.
+Registry /var/data/agtmai-r212-resume-20260904-registry, account-m, old host
+209.38.106.83 machinebe0aad971ea647fab370acd110b469b7. Last admission about
+11.2GiB RAM available,4GiB swap free,12GiB disk. All source-packet fallbacks
+require actual local application/tests and independent review, not sandbox bypass.
+
+Bundles verified and copied to old host:
+- /tmp/agtmai-custody95-candidate.bundle, prerequisiteff44,
+  SHA2567736f67d57e1d1364cab780ef038bff071fdde2918b8418411126b152e4e30ec.
+- /tmp/agtmai-evm94-parent-candidate.bundle, prerequisitee723,
+  SHA256ae527207acff2aadb485217cb16e856804474056fd558d6077c55b24723f9d76.
+- /tmp/agtmai-slither91-draft.bundle, prerequisiteb95,
+  SHA2565804488768479b8f80aa3cce683340678f855d4f94ef92862445c51795fd3597.
+Review98 JSON SHA2562cf5167e40e70503571f6630d21a09414b4502c358c4ad95e2077670a94f9a20.
+Recovered96 final1 SHA25686cc2f2a63744f0cbac6b3016f3302d47802b750a5a63c786197ac4301107824;
+final2 SHA2568d50b1b4362b3fdc4756b6068a8438ba74fd433a6e9c211231be07b5455a592a;
+recovered97 SHA256a897dd521d6c6c3ec15871a0b692d2f304f6c5aae548fc886381f2bbced6e1d4.
+
+Next: consume99/100, apply/test recovered96+97 in isolated source worktrees;
+then independent review and accepted checkpoint integration. Full original-plan
+matrix remains authoritative, including recovery package/bootstrap/loaded-image
+and Slither authority obligations, Linux qualification, root/CI and final reviews.
+
+## Earlier reconciliation: 13:49 UTC
 
 Accepted integration code remains e723bc0df8efa867a78f8a4cd68e8862e95a18f2.
 Original user worktree212b278f and its dirty paths remain untouched.

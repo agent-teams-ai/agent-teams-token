@@ -2,6 +2,11 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest14:04 checkpoint: custody4c93 actualMac32/32 is under reviewer99;
+EVMcfba real runner7cases covered but review98 P1/P3 await writer100. Slither96
+and Solana97 source patches are recovered but unapplied. Legacyv3 auto-delete
+is not authorized because its schema lacks historical directory provenance.
+No new draft is integrated; read the latest ledger before older snapshots.
 Latest accepted code is e723bc0d: review89 accepted canonical Some/None wire
 verification. ActualMac Solana90total/87pass/3Linux-only skips, including
 4/4required real integration. Review92 found a further P1 in filesystem teardown;
