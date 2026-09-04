@@ -1,17 +1,10 @@
 import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-} from "node:fs";
-import { join } from "node:path";
 
 import {
   assertExactCleanCandidate,
   assertInventoryEqual,
   basicRun,
   captureCleanupTreeSnapshot,
-  createCleanupHandle,
   gitExecutable,
   trackedCandidateInventory,
 } from "../proof-runtime.mjs";
@@ -26,7 +19,7 @@ import {
   snapshotRollbackSharedPaths,
 } from "./shared-paths.mjs";
 import { hashRollbackSharedOrAbsent } from "./shared-file-operations.mjs";
-import { createRollbackWorkspaceHandle } from "./workspace-handle.mjs";
+import { createRollbackProofWorkspace } from "./proof-workspace.mjs";
 
 function run(command, commandArguments, options = {}) {
   return basicRun(command === "git" ? gitExecutable() : command, commandArguments, {
@@ -36,21 +29,16 @@ function run(command, commandArguments, options = {}) {
 }
 
 export function printReverseHashes(manifest, candidateSha, candidateInventory) {
-  const temporaryParent = mkdtempSync(
-    join(rollbackTemporaryRoot, "agtmai-rollback-hashes-" + manifest.sliceId + "-"),
-  );
-  chmodSync(temporaryParent, 0o700);
-  const cleanupHandle = createCleanupHandle(temporaryParent, {
+  const workspace = createRollbackProofWorkspace({
     temporaryRoot: rollbackTemporaryRoot,
     targetPrefix: "agtmai-rollback-hashes-" + manifest.sliceId + "-",
-    allowedEntries: ["checkout", "gate-tmp"],
   });
-  const checkout = join(temporaryParent, "checkout");
-  const quarantineRoot = join(temporaryParent, "gate-tmp");
-  mkdirSync(checkout, { mode: 0o700 });
-  mkdirSync(quarantineRoot, { mode: 0o700 });
+  const {
+    checkout,
+    cleanupHandle,
+    workspaceHandle,
+  } = workspace;
   let failure;
-  const workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
   try {
     run("git", [
       "clone", "--local", "--no-hardlinks", "--no-checkout", repositoryRoot, checkout,

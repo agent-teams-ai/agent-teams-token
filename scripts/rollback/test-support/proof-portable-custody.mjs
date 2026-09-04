@@ -244,14 +244,22 @@ test("staging hashes held bytes and rejects a regular-file to symlink replacemen
 test("proof-slice and manifest-proof capture custody before untrusted Git and omit READY on substitution", () => {
   const proofSlice = readFileSync(join(process.cwd(), "scripts/rollback/slices/proof-slice.mjs"), "utf8");
   const manifestProof = readFileSync(join(process.cwd(), "scripts/rollback/slices/manifest-proof.mjs"), "utf8");
+  const proofWorkspace = readFileSync(
+    join(process.cwd(), "scripts/rollback/slices/proof-workspace.mjs"),
+    "utf8",
+  );
   const sliceCreate = proofSlice.slice(
     proofSlice.indexOf("function createSliceContext("),
     proofSlice.indexOf("function prepareSlicePreState("),
   );
-  assert.ok(sliceCreate.indexOf("mkdirSync(checkout") >= 0);
-  assert.ok(sliceCreate.indexOf("createRollbackWorkspaceHandle(") > sliceCreate.indexOf("mkdirSync(checkout"));
-  assert.ok(proofSlice.indexOf("createRollbackWorkspaceHandle(") < proofSlice.indexOf("materializeCandidateCheckout({"));
-  assert.ok(manifestProof.indexOf("createRollbackWorkspaceHandle(") < manifestProof.indexOf("run(\"git\", ["));
+  assert.ok(proofWorkspace.indexOf("mkdirSync(workspace.checkout") >= 0);
+  assert.ok(
+    proofWorkspace.indexOf("createRollbackWorkspaceHandle(")
+      > proofWorkspace.indexOf("mkdirSync(workspace.checkout"),
+  );
+  assert.ok(sliceCreate.indexOf("createRollbackProofWorkspace(") >= 0);
+  assert.ok(proofSlice.indexOf("createRollbackProofWorkspace(") < proofSlice.indexOf("materializeCandidateCheckout({"));
+  assert.ok(manifestProof.indexOf("createRollbackProofWorkspace(") < manifestProof.indexOf("run(\"git\", ["));
 
   for (const consumer of ["proof-slice", "manifest-proof"]) {
     const boundary = mkdtempSync(join(tmpdir(), `agtmai-${consumer}-early-custody-`));

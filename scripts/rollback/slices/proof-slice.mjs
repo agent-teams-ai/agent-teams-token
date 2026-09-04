@@ -1,11 +1,4 @@
 import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-} from "node:fs";
-import { join } from "node:path";
-
-import {
   assertExactCleanCandidate,
   assertExactDirectoryShape,
   assertGitStatusSnapshotEqual,
@@ -14,7 +7,6 @@ import {
   captureCleanupTreeSnapshot,
   captureGitStatusSnapshot,
   copyAndInstallOfflineEnvironment,
-  createCleanupHandle,
   gitExecutable,
   toolPath,
   trackedCandidateInventory,
@@ -34,12 +26,15 @@ import {
 import { manifestFingerprint } from "./manifest-proof.mjs";
 import { executeSliceGates } from "./proof-gates.mjs";
 import {
+  createRollbackProofWorkspace,
+  failRollbackProofWorkspace,
+} from "./proof-workspace.mjs";
+import {
   repositoryRoot,
   rollbackTemporaryRoot,
 } from "./config.mjs";
 import {
   assertRollbackWorkspaceHandle,
-  createRollbackWorkspaceHandle,
 } from "./workspace-handle.mjs";
 import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
 
@@ -77,40 +72,35 @@ export function proveSlice({
 
 function createSliceContext(input) {
   const group = input.manifest.sliceId;
-  const temporaryParent = mkdtempSync(join(rollbackTemporaryRoot, "agtmai-rollback-" + group + "-"));
-  chmodSync(temporaryParent, 0o700);
-  const cleanupHandle = createCleanupHandle(temporaryParent, {
+  const workspace = createRollbackProofWorkspace({
     temporaryRoot: rollbackTemporaryRoot,
     targetPrefix: "agtmai-rollback-" + group + "-",
-    allowedEntries: ["checkout", "gate-tmp"],
   });
-  const checkout = join(temporaryParent, "checkout");
-  const gateTemporaryDirectory = join(temporaryParent, "gate-tmp");
-  mkdirSync(checkout, { mode: 0o700 });
-  mkdirSync(gateTemporaryDirectory, { mode: 0o700 });
-  const workspaceHandle = createRollbackWorkspaceHandle(checkout, gateTemporaryDirectory);
-  const workspaceIdentity = assertRollbackWorkspaceHandle(workspaceHandle, checkout);
-  const record = {
-    sliceId: group,
-    manifestSha256: manifestFingerprint(input.manifest),
-    manifest: input.manifestArtifact,
-    candidateSha: input.candidateSha,
-    status: "preparing",
-    cleanup: { status: "pending", device: cleanupHandle.device, inode: cleanupHandle.inode },
-    workspaceIdentity,
-  };
-  input.recorder.update((document) => {
-    document.slices.push(record);
-  });
-  return {
-    ...input,
-    checkout,
-    cleanupHandle,
-    gateTemporaryDirectory,
-    group,
-    record,
-    workspaceHandle,
-  };
+  try {
+    const record = {
+      sliceId: group,
+      manifestSha256: manifestFingerprint(input.manifest),
+      manifest: input.manifestArtifact,
+      candidateSha: input.candidateSha,
+      status: "preparing",
+      cleanup: {
+        status: "pending",
+        device: workspace.cleanupHandle.device,
+        inode: workspace.cleanupHandle.inode,
+      },
+      workspaceIdentity: workspace.workspaceIdentity,
+    };
+    input.recorder.update((document) => {
+      document.slices.push(record);
+    });
+    return { ...input, ...workspace, group, record };
+  } catch (error) {
+    failRollbackProofWorkspace(
+      workspace,
+      error,
+      "slice context construction and finalization both failed for " + group,
+    );
+  }
 }
 
 function prepareSlicePreState(context) {
