@@ -54,7 +54,7 @@ const CLEANUP_TARGET_PREFIX_ALLOWLIST = new Set([
   "agtmai-rollback-hashes-deployment-plan-",
   "agtmai-rollback-hashes-slither-",
 ]);
-const CLEANUP_ALLOWED_TOP_LEVEL = new Set(["checkout", "gate-tmp", "payload"]);
+const CLEANUP_ALLOWED_TOP_LEVEL = new Set(["checkout", "gate-tmp", "payload", "wrapper"]);
 const cleanupTreeSnapshots = new WeakMap();
 
 export function createCleanupHandle(path, policy) {

@@ -38,7 +38,7 @@ export function preflightCleanupTree(handle, state) {
   return Object.freeze({
     entries: Object.freeze(entries.map((entry) => {
       const identity = lstatDescriptorChild(handle.descriptor, entry);
-      if (entry !== "payload" && !identity.isDirectory()) {
+      if (!["payload", "wrapper"].includes(entry) && !identity.isDirectory()) {
         throw new Error("ROLLBACK_CLEANUP_TOP_LEVEL_TYPE_UNSAFE path=" + entry);
       }
       return preflightEntry(handle.descriptor, entry, entry, 1, {

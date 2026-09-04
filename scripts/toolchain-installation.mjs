@@ -1,16 +1,11 @@
 import { execFileSync } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   lstatSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
-  renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   assertPreparedArtifactAuthority,
   inspectInstallationInventory,
@@ -19,11 +14,6 @@ import {
   provenanceFile,
 } from "./toolchain-archive.mjs";
 import {
-  abandonCleanupHandle,
-  assertCapturedCleanupTreeSnapshot,
-  captureCleanupTreeSnapshot,
-  cleanupIdentityBoundDirectory,
-  createCleanupHandle,
   updateCleanupTreeSnapshot,
 } from "./rollback/runtime/cleanup.mjs";
 import {
@@ -34,6 +24,7 @@ import {
   parseToolchainProvenance,
   serializeToolchainProvenance,
 } from "./toolchain-provenance.mjs";
+import { publishPreparedInstallation } from "./toolchain-publication.mjs";
 
 const unknown = "unknown";
 
@@ -214,31 +205,6 @@ export function installPreparedArtifact({
     executeVersionChecks(prepared.source, artifact);
   }
   assertPreparedArtifactAuthority(prepared, { name, platform, artifact });
-  atomicPublish({
-    name,
-    tool,
-    artifact,
-    prepared,
-    destination,
-    platform,
-    toolsRoot,
-    lock,
-    onPublishBoundary,
-  });
-}
-
-function atomicPublish({
-  name,
-  tool,
-  artifact,
-  prepared,
-  destination,
-  platform,
-  toolsRoot,
-  lock,
-  onPublishBoundary,
-}) {
-  let backup;
   writeFileSync(join(prepared.source, provenanceFile), serializeToolchainProvenance({
     tool: name,
     version: tool.version,
@@ -248,52 +214,26 @@ function atomicPublish({
     files: prepared.files,
   }), { mode: 0o644 });
   updateCleanupTreeSnapshot(prepared.cleanupHandle);
-  try {
-    if (existsSync(destination)) {
-      const root = mkdtempSync(join(toolsRoot, ".install-backup-"));
-      backup = {
-        root,
-        payload: join(root, "payload"),
-        handle: createCleanupHandle(root, {
-          temporaryRoot: toolsRoot,
-          targetPrefix: ".install-backup-",
-          allowedEntries: ["payload"],
-        }),
-      };
-      captureCleanupTreeSnapshot(backup.handle);
-      renameSync(destination, backup.payload);
-      updateCleanupTreeSnapshot(backup.handle, { allowAddedEntries: ["payload"] });
-      onPublishBoundary?.("after-backup", { backup: backup.root, destination });
-    }
-    renameSync(prepared.source, destination);
-    updateCleanupTreeSnapshot(prepared.cleanupHandle, prepared.source === join(prepared.stageRoot, "payload")
-      ? { allowRemovedEntries: ["payload"] }
-      : {});
-    if (name === "node") {writeTrustedNodeWrapper({ lock, toolsRoot, platform });}
-    if (name === "pnpm") {writePnpmWrapper({ lock, toolsRoot, platform });}
-    if (backup) {
-      onPublishBoundary?.("before-backup-cleanup", { backup: backup.root, destination });
-      cleanupPrivatePublication(backup.handle);
-      backup = undefined;
-    }
-  } catch (error) {
-    if (backup && !existsSync(destination) && existsSync(backup.payload)) {
-      assertCapturedCleanupTreeSnapshot(backup.handle);
-      renameSync(backup.payload, destination);
-      updateCleanupTreeSnapshot(backup.handle, { allowRemovedEntries: ["payload"] });
-      cleanupPrivatePublication(backup.handle);
-      backup = undefined;
-    }
-    if (backup) {
-      if (!backup.handle.closed) {abandonCleanupHandle(backup.handle);}
-      backup = undefined;
-    }
-    throw error;
-  }
-}
-
-function cleanupPrivatePublication(handle) {
-  cleanupIdentityBoundDirectory(handle);
+  const wrapper = name === "node"
+    ? { target: join(toolsRoot, "bin", "node"), contents: trustedNodeWrapper(lock, platform) }
+    : name === "pnpm"
+      ? { target: join(toolsRoot, "bin", "pnpm"), contents: pnpmWrapper(lock, platform) }
+      : undefined;
+  publishPreparedInstallation({
+    prepared,
+    destination,
+    toolsRoot,
+    wrapper,
+    onPublishBoundary,
+    validateDestination() {
+      const authority = inspectAuthority({
+        name, tool, artifact, platform, destination, prepared,
+      });
+      if (!authority.ok) {
+        throw new Error("TOOLCHAIN_PUBLISHED_AUTHORITY_INVALID reason=" + authority.code);
+      }
+    },
+  });
 }
 
 function trustedNode(toolsRoot) {
@@ -361,26 +301,9 @@ function trustedNodeWrapper(lock, platform) {
   ].filter(Boolean);
   const keys = trustedNodeEnvironmentKeys.filter((key) =>
     !["LANG", "LC_ALL", "PATH", "TZ"].includes(key));
-  return `#!/bin/bash\nset -euo pipefail\ntoken_node_source=\${BASH_SOURCE[0]}\nif [[ "$token_node_source" == */* ]]; then\n  token_node_directory=\${token_node_source%/*}\n  [[ -n "$token_node_directory" ]] || token_node_directory=/\nelse\n  token_node_directory=.\nfi\ntoken_node_tools_root=$(CDPATH= cd -- "$token_node_directory/.." && pwd -P)\ntoken_node_git_root=$(pwd -P)\ntoken_node_private_root=$(/usr/bin/mktemp -d /tmp/agtmai-node-environment.XXXXXX)\n/bin/chmod 700 "$token_node_private_root"\nfor token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n  /bin/mkdir -m 700 "$token_node_private_root/$token_node_private_name"\ndone\ntoken_node_cleanup_private() {\n  local token_node_cleanup_status=0\n  for token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n    /bin/rmdir "$token_node_private_root/$token_node_private_name" 2>/dev/null || token_node_cleanup_status=1\n  done\n  /bin/rmdir "$token_node_private_root" 2>/dev/null || token_node_cleanup_status=1\n  return "$token_node_cleanup_status"\n}\ntrap 'token_node_cleanup_private || true' EXIT HUP INT TERM\ntoken_node_environment=(/usr/bin/env -i HOME="$token_node_private_root/home" TMPDIR="$token_node_private_root/tmp" XDG_CACHE_HOME="$token_node_private_root/xdg-cache" XDG_CONFIG_HOME="$token_node_private_root/xdg-config" XDG_DATA_HOME="$token_node_private_root/xdg-data" XDG_RUNTIME_DIR="$token_node_private_root/xdg-runtime" NODE_DISABLE_COMPILE_CACHE=1 NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null LANG=C LC_ALL=C TZ=UTC PATH="$token_node_tools_root/${directories.join(`:$token_node_tools_root/`)}:/usr/local/bin:/usr/bin:/bin:/usr/lib/git-core" GCM_INTERACTIVE=never GIT_ASKPASS=/bin/false GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=6 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null GIT_CONFIG_KEY_2=core.attributesFile GIT_CONFIG_VALUE_2=/dev/null GIT_CONFIG_KEY_3=credential.helper GIT_CONFIG_VALUE_3= GIT_CONFIG_KEY_4=credential.interactive GIT_CONFIG_VALUE_4=never GIT_CONFIG_KEY_5=safe.directory GIT_CONFIG_VALUE_5="$token_node_git_root" GIT_NO_REPLACE_OBJECTS=1 GIT_SSH_COMMAND=/bin/false GIT_TERMINAL_PROMPT=0 SSH_ASKPASS=/bin/false)\nunset token_node_git_root\nfor token_node_key in ${keys.join(" ")}; do\n  if [[ -v $token_node_key ]]; then\n    token_node_environment+=("$token_node_key=\${!token_node_key}")\n  fi\ndone\nset +e\n"\${token_node_environment[@]}" "$token_node_tools_root/${nodeDirectory}/bin/node" "$@"\ntoken_node_status=$?\nset -e\ntrap - EXIT HUP INT TERM\nif ! token_node_cleanup_private; then\n  printf 'TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=%s\\n' "$token_node_private_root" >&2\n  token_node_status=1\nfi\nexit "$token_node_status"\n`;
+  return `#!/bin/bash\nset -euo pipefail\ntoken_node_source=\${BASH_SOURCE[0]}\nif [[ "$token_node_source" == */* ]]; then\n  token_node_directory=\${token_node_source%/*}\n  [[ -n "$token_node_directory" ]] || token_node_directory=/\nelse\n  token_node_directory=.\nfi\ntoken_node_tools_root=$(CDPATH= cd -- "$token_node_directory/.." && pwd -P)\ntoken_node_git_root=$(pwd -P)\ntoken_node_private_root=$(/usr/bin/mktemp -d /tmp/agtmai-node-environment.XXXXXX)\n/bin/chmod 700 "$token_node_private_root"\nfor token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n  /bin/mkdir -m 700 "$token_node_private_root/$token_node_private_name"\ndone\ntoken_node_cleanup_private() {\n  local token_node_cleanup_status=0\n  for token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n    /bin/rmdir "$token_node_private_root/$token_node_private_name" 2>/dev/null || token_node_cleanup_status=1\n  done\n  /bin/rmdir "$token_node_private_root" 2>/dev/null || token_node_cleanup_status=1\n  return "$token_node_cleanup_status"\n}\ntrap 'token_node_cleanup_private || true' EXIT HUP INT TERM\ntoken_node_environment=(/usr/bin/env -i HOME="$token_node_private_root/home" TMPDIR="$token_node_private_root/tmp" XDG_CACHE_HOME="$token_node_private_root/xdg-cache" XDG_CONFIG_HOME="$token_node_private_root/xdg-config" XDG_DATA_HOME="$token_node_private_root/xdg-data" XDG_RUNTIME_DIR="$token_node_private_root/xdg-runtime" NODE_DISABLE_COMPILE_CACHE=1 NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null LANG=C LC_ALL=C TZ=UTC PATH="$token_node_tools_root/${directories.join(`:$token_node_tools_root/`)}:/usr/local/bin:/usr/bin:/bin:/usr/lib/git-core" GCM_INTERACTIVE=never GIT_ASKPASS=/bin/false GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=6 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null GIT_CONFIG_KEY_2=core.attributesFile GIT_CONFIG_VALUE_2=/dev/null GIT_CONFIG_KEY_3=credential.helper GIT_CONFIG_VALUE_3= GIT_CONFIG_KEY_4=credential.interactive GIT_CONFIG_VALUE_4=never GIT_CONFIG_KEY_5=safe.directory GIT_CONFIG_VALUE_5="$token_node_git_root" GIT_NO_REPLACE_OBJECTS=1 GIT_SSH_COMMAND=/bin/false GIT_TERMINAL_PROMPT=0 SSH_ASKPASS=/bin/false)\nunset token_node_git_root\nfor token_node_key in ${keys.join(" ")}; do\n  if [[ -n \${!token_node_key+x} ]]; then\n    token_node_environment+=("$token_node_key=\${!token_node_key}")\n  fi\ndone\nset +e\n"\${token_node_environment[@]}" "$token_node_tools_root/${nodeDirectory}/bin/node" "$@"\ntoken_node_status=$?\nset -e\ntrap - EXIT HUP INT TERM\nif ! token_node_cleanup_private; then\n  printf 'TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=%s\\n' "$token_node_private_root" >&2\n  token_node_status=1\nfi\nexit "$token_node_status"\n`;
 }
 
-function writeTrustedNodeWrapper({ lock, toolsRoot, platform }) {
-  writeWrapper(join(toolsRoot, "bin", "node"), trustedNodeWrapper(lock, platform));
-}
-
-function writePnpmWrapper({ lock, toolsRoot, platform }) {
-  writeWrapper(join(toolsRoot, "bin", "pnpm"), pnpmWrapper(lock, platform));
-}
-
-function writeWrapper(target, contents) {
-  const bin = dirname(target);
-  const part = `${target}.part`;
-  mkdirSync(bin, { recursive: true });
-  rmSync(part, { force: true });
-  writeFileSync(part, contents, { mode: 0o755 });
-  chmodSync(part, 0o755);
-  renameSync(part, target);
-}
 
 function executeVersionChecks(root, artifact) {
   return artifact.versionChecks.map((check) => {

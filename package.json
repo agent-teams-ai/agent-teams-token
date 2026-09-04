@@ -40,7 +40,7 @@
     "security:solidity:prepare-image": ".tools/bin/node tooling/security/slither/src/composition/prepare-image.ts",
     "solana:fixture:local": ".tools/bin/node scripts/solana/local-fixture.ts",
     "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built && pnpm --filter @agent-teams/supply test:built",
-    "test:linux-parity": ".tools/bin/node --test scripts/tests/root-entrypoint.test.mjs scripts/tests/toolchain.test.mjs scripts/tests/toolchain-hardening.test.mjs scripts/tests/tooling-boundaries.test.mjs scripts/tests/workflow.test.mjs && docker compose -f compose.yaml config --quiet",
+    "test:linux-parity": ".tools/bin/node --test scripts/tests/root-entrypoint.test.mjs scripts/tests/toolchain.test.mjs scripts/tests/toolchain-hardening.test.mjs scripts/tests/toolchain-publication-transaction.test.mjs scripts/tests/tooling-boundaries.test.mjs scripts/tests/workflow.test.mjs && docker compose -f compose.yaml config --quiet",
     "test:local-evm": "pnpm build && pnpm test:local-evm:built",
     "test:local-evm:built": ".tools/bin/node --test tooling/local-evm/tests/constructor.test.ts tooling/local-evm/tests/process.test.ts tooling/local-evm/tests/rpc.test.ts tooling/local-evm/tests/safe-fs.test.ts tooling/local-evm/tests/toolchain.test.ts tooling/local-evm/tests/verifier.adversarial.test.ts tooling/local-evm/tests/verify-cli.test.ts",
     "test:local-evm:integration": "pnpm build && .tools/bin/node --test tooling/local-evm/tests/runner.integration.test.ts",
