@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync, realpathSync } from "node:fs";
+import { constants, fstatSync, openSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { registerCustodyDescriptor } from "./custody.mjs";
+import { collectCustodyDescriptorCloseFailure, registerCustodyDescriptor } from "./custody.mjs";
+import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 export { custodyDescriptorChild as descriptorChild } from "./custody.mjs";
 
 const SAFE_PATH = /^[^\\\0]+$/u;
@@ -63,11 +64,16 @@ export function openDirectoryDescriptor(path, errorPrefix = "ROLLBACK_CLEANUP_NO
     path,
     constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
   );
-  const identity = fstatSync(descriptor, { bigint: true });
-  if (!identity.isDirectory()) {
-    closeSync(descriptor);
-    throw new Error(errorPrefix + " path=" + path);
+  try {
+    const identity = fstatSync(descriptor, { bigint: true });
+    if (!identity.isDirectory()) {
+      throw new Error(errorPrefix + " path=" + path);
+    }
+    registerCustodyDescriptor(descriptor, realpathSync(path), identity);
+    return descriptor;
+  } catch (error) {
+    const failures = [];
+    collectCustodyDescriptorCloseFailure(descriptor, failures);
+    throwDescriptorCloseFailures(failures, "ROLLBACK_DIRECTORY_OPEN_CLOSE_FAILED", error);
   }
-  registerCustodyDescriptor(descriptor, realpathSync(path), identity);
-  return descriptor;
 }
