@@ -61,5 +61,3 @@ export function writeExecutable(path, contents) {
   writeFileSync(path, contents);
   chmodSync(path, 0o755);
 }
-
-
