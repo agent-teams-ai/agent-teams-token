@@ -395,7 +395,7 @@ export function runSurvivorGate({
 }
 
 function combineRollbackFailures(first, second, message) {
-  return first === undefined ? second : new AggregateError([first, second], message);
+  return first === undefined ? second : new AggregateError([first, second], message, { cause: first });
 }
 
 export function finalizeRollbackTemporaryParent({
@@ -441,8 +441,20 @@ export function finalizeRollbackTemporaryParent({
       status: "failed",
       error: error instanceof Error ? error.message : String(error),
     };
-  } finally {
+  }
+  try {
     closeRollbackWorkspaceHandle(workspaceHandle);
+  } catch (error) {
+    cleanupFailure = combineRollbackFailures(
+      cleanupFailure,
+      error,
+      "rollback cleanup and workspace finalization both failed",
+    );
+    cleanup = {
+      ...cleanup,
+      status: "failed",
+      error: cleanupFailure instanceof Error ? cleanupFailure.message : String(cleanupFailure),
+    };
   }
   return { cleanup, cleanupFailure, primaryFailure: effectivePrimaryFailure };
 }

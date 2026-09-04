@@ -240,8 +240,10 @@ node scripts/rollback/prove-slices.mjs --validate-only \
 node --test scripts/tests/rollback-proof.test.mjs
 ```
 
-Root `pnpm check` includes the rollback proof. Consequently any job that keeps
-calling root `pnpm check` must also provide the pinned core and Solana caches,
+The complete Linux root gate is `pnpm check:linux`, which runs
+`rollback:preflight`, `check`, then `rollback:prove`. `pnpm check` alone includes
+rollback regressions, not the full proof. The complete Linux gate must provide
+the pinned core and Solana caches,
 the frozen workspace store and the preloaded pinned Slither image; omitting
 those prerequisites is a hard failure, not permission to skip the proof.
 
@@ -255,7 +257,7 @@ grafts, the `GIT_ALTERNATE_OBJECT_DIRECTORIES` environment channel and
 baseline ancestry and complete reachable objects with replacement processing
 disabled. CI then installs and verifies pinned Core and Solana prerequisites,
 the frozen workspace and preloaded Slither image, runs the non-pulling
-`--preflight-only` command before root gates, runs `pnpm check`, and reasserts
+`--preflight-only` command before root gates, runs `pnpm check:linux`, and reasserts
 complete history/clean head under `if: always()`. It validates a sealed proof
 and revalidates candidate inventory before the success-only proof upload;
 failure output uses a separately named diagnostic upload.

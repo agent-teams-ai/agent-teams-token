@@ -40,3 +40,8 @@ pnpm check:changed
 pnpm check:fast
 pnpm check
 ```
+
+For complete Linux E2E acceptance use `pnpm check:linux`, which performs
+the pinned-cache preflight, the root checks above and the full rollback proof.
+`pnpm check` alone is not rollback-proof evidence. Darwin's unavailable
+loaded-image binding must remain fail-closed, not bypassed for a green gate.

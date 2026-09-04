@@ -693,8 +693,9 @@ on the new exact SHA. Old reviews never prove a changed SHA.
   final-directory substitutions preserve the foreign identity and fail closed.
   A continuously scheduled same-UID peer racing the final separate Node syscall
   and a privileged peer are explicitly outside this local/test-only model.
-- Root `pnpm check` invokes cache/tool preflight before dependent gates and then
-  the rollback regressions/full proof. The existing `foundation-and-typescript`
+- The complete Linux root command is `pnpm check:linux`: it runs the cache/tool
+  preflight, then `pnpm check` (including rollback regressions), then the full
+  rollback proof. `pnpm check` alone does not prove rollback. The existing `foundation-and-typescript`
   CI job now checks out/asserts `$GITHUB_SHA`, establishes pinned Core/Solana
   tools plus the frozen workspace, prepares the pinned Slither image, runs the
   non-pulling `--preflight-only` verifier before root gates, reasserts complete

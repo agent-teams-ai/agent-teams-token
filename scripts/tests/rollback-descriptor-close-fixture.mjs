@@ -10,7 +10,7 @@ import {
   setDescriptorCloseImplementationForTest,
 } from "../rollback/runtime/descriptor-close.mjs";
 
-export function injectedUncertainClose(failureIndex) {
+export function injectedUncertainClose(failureSelector) {
   const calls = [];
   let reusedDescriptor;
   let invocation = 0;
@@ -19,7 +19,10 @@ export function injectedUncertainClose(failureIndex) {
     invocation += 1;
     calls.push(descriptor);
     closeSync(descriptor);
-    if (current === failureIndex) {
+    const fail = typeof failureSelector === "function"
+      ? failureSelector(current, descriptor)
+      : current === failureSelector;
+    if (fail) {
       // Earlier closes may have released lower descriptor numbers. Occupy
       // those holes temporarily so this case proves reuse of the exact FD.
       const lowerDescriptors = [];
