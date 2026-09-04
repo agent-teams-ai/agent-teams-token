@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -63,6 +63,66 @@ test("native helper performs exclusive rename and fails closed on an occupied ta
   } finally {
     await capability.close();
     await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("normal close rejects custody substitution and preserves the foreign successor", async () => {
+  let foreignCustody = "";
+  let ownedEvidence = "";
+  const capability = await createNativeNoReplaceCapability({
+    async beforeCleanup(custody) {
+      foreignCustody = custody;
+      ownedEvidence = `${custody}.owned-evidence`;
+      await rename(custody, ownedEvidence);
+      await mkdir(custody, { mode: 0o700 });
+      await writeFile(join(custody, "foreign-sentinel"), "preserve", { mode: 0o600 });
+    },
+  });
+  try {
+    await assert.rejects(
+      capability.close(),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "NO_REPLACE_CLEANUP_REJECTED",
+    );
+    assert.equal(await readFile(join(foreignCustody, "foreign-sentinel"), "utf8"), "preserve");
+    assert.ok((await readFile(join(ownedEvidence, "no-replace"))).length > 0);
+  } finally {
+    if (foreignCustody !== "") { await rm(foreignCustody, { recursive: true, force: true }); }
+    if (ownedEvidence !== "") { await rm(ownedEvidence, { recursive: true, force: true }); }
+  }
+});
+
+test("build-failure cleanup rejects custody substitution and preserves the foreign successor", async () => {
+  const previousCompiler = process.env.AGTMAI_CC_BINARY;
+  let foreignCustody = "";
+  let ownedEvidence = "";
+  process.env.AGTMAI_CC_BINARY = "/usr/bin/false";
+  try {
+    await assert.rejects(
+      createNativeNoReplaceCapability({
+        async afterBuildFailureBeforeCleanup(custody) {
+          foreignCustody = custody;
+          ownedEvidence = `${custody}.owned-evidence`;
+          await rename(custody, ownedEvidence);
+          await mkdir(custody, { mode: 0o700 });
+          await writeFile(join(custody, "foreign-sentinel"), "preserve", { mode: 0o600 });
+        },
+      }),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "NO_REPLACE_CLEANUP_REJECTED",
+    );
+    assert.equal(await readFile(join(foreignCustody, "foreign-sentinel"), "utf8"), "preserve");
+    assert.deepEqual(await readdir(ownedEvidence), []);
+  } finally {
+    if (previousCompiler === undefined) {
+      delete process.env.AGTMAI_CC_BINARY;
+    } else {
+      process.env.AGTMAI_CC_BINARY = previousCompiler;
+    }
+    if (foreignCustody !== "") { await rm(foreignCustody, { recursive: true, force: true }); }
+    if (ownedEvidence !== "") { await rm(ownedEvidence, { recursive: true, force: true }); }
   }
 });
 

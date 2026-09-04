@@ -392,6 +392,14 @@ test("post-rename READY sync uncertainty preserves target and READY", async () =
   );
 });
 
+test("READY replacement before final directory sync is uncertain and preserved", async () => {
+  await assertReadyReplacementPreserved("beforeFinalMarkerDirectorySync", "foreign-before-sync");
+});
+
+test("READY replacement after final directory sync is uncertain and preserved", async () => {
+  await assertReadyReplacementPreserved("afterFinalMarkerDirectorySync", "foreign-after-sync");
+});
+
 test("READY finalization cannot succeed before its post-rename directory sync", async () => {
   const parent = await canonicalTemporaryDirectory();
   let releaseSync: (() => void) | undefined;
@@ -469,6 +477,36 @@ test("cleanup rejects and preserves a foreign staging entry", async () => {
   assert.equal(await readFile(join(claim.path, "payload"), "utf8"), "owned");
   assert.equal(await readFile(join(claim.path, "foreign"), "utf8"), "preserve");
 });
+
+async function assertReadyReplacementPreserved(
+  hook: "beforeFinalMarkerDirectorySync" | "afterFinalMarkerDirectorySync",
+  foreign: string,
+): Promise<void> {
+  const parent = await canonicalTemporaryDirectory();
+  const ready = join(parent, "bundle", "READY");
+  const replaceReady = async (): Promise<void> => {
+    await rm(ready);
+    await writeFile(ready, foreign, { mode: 0o600 });
+  };
+  const claim = await claimOwnedOutputDirectory(parent, "bundle", {
+    noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename,
+    [hook]: replaceReady,
+  });
+  try {
+    await claim.writeExclusive("payload", Buffer.from("payload"));
+    await claim.publish();
+    await assert.rejects(
+      claim.finalizeReady("READY", Buffer.from("ready")),
+      (error: unknown) => error instanceof Error
+        && "code" in error
+        && error.code === "OUTPUT_PUBLICATION_UNCERTAIN",
+    );
+    assert.equal(await readFile(ready, "utf8"), foreign);
+    assert.equal(await readFile(join(parent, "bundle", "payload"), "utf8"), "payload");
+  } finally {
+    await claim.close();
+  }
+}
 
 async function canonicalTemporaryDirectory(): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), "deployment-output-")));

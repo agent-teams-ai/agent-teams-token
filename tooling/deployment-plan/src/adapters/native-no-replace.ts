@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
-import { constants } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { constants, type Stats } from "node:fs";
 import {
   chmod,
+  lstat,
   mkdtemp,
   open,
   readFile,
+  readdir,
   realpath,
-  rm,
+  rename,
+  rmdir,
+  unlink,
+  type FileHandle,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
@@ -25,6 +31,16 @@ interface ExecutableIdentity {
   readonly ctimeMs: number;
   readonly size: number;
   readonly sha256: `0x${string}`;
+}
+
+interface DirectoryIdentity {
+  readonly dev: number;
+  readonly ino: number;
+}
+
+export interface NativeNoReplaceFaultInjection {
+  readonly beforeCleanup?: (custody: string) => Promise<void>;
+  readonly afterBuildFailureBeforeCleanup?: (custody: string) => Promise<void>;
 }
 
 export interface ExecutableCustodyMetadata {
@@ -47,7 +63,9 @@ export interface NativeNoReplaceCapability {
 }
 
 /** Builds the audited helper in private custody and binds its exact executable bytes. */
-export async function createNativeNoReplaceCapability(): Promise<NativeNoReplaceCapability> {
+export async function createNativeNoReplaceCapability(
+  faultInjection: NativeNoReplaceFaultInjection = {},
+): Promise<NativeNoReplaceCapability> {
   if (process.platform !== "linux" && process.platform !== "darwin") {
     fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "native no-replace helper supports only Linux and macOS");
   }
@@ -67,6 +85,13 @@ export async function createNativeNoReplaceCapability(): Promise<NativeNoReplace
   );
   const custody = await realpath(await mkdtemp(join(tmpdir(), "agtmai-no-replace-")));
   await chmod(custody, 0o700);
+  const custodyMetadata = await lstat(custody);
+  assertPrivateCustodyDirectory(custodyMetadata, "NO_REPLACE_CUSTODY_UNSAFE");
+  const custodyIdentity = directoryIdentity(custodyMetadata);
+  const custodyHandle = await open(
+    custody,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
   const executable = join(custody, "no-replace");
   try {
     await runChild(compiler, [
@@ -111,14 +136,133 @@ export async function createNativeNoReplaceCapability(): Promise<NativeNoReplace
       async close(): Promise<void> {
         if (!closed) {
           closed = true;
-          await rm(custody, { recursive: true, force: true });
+          let cleanupError: unknown;
+          try {
+            await faultInjection.beforeCleanup?.(custody);
+            await cleanupCustody(
+              custody,
+              custodyIdentity,
+              custodyHandle,
+              new Map([["no-replace", builtIdentity]]),
+            );
+          } catch (error) {
+            cleanupError = error;
+          }
+          await custodyHandle.close();
+          if (cleanupError !== undefined) { throw cleanupError; }
         }
       },
     };
   } catch (error) {
-    await rm(custody, { recursive: true, force: true }).catch(() => {});
+    let cleanupError: unknown;
+    try {
+      await faultInjection.afterBuildFailureBeforeCleanup?.(custody);
+      await cleanupCustody(custody, custodyIdentity, custodyHandle, new Map());
+    } catch (caught) {
+      cleanupError = caught;
+    }
+    await custodyHandle.close().catch(() => {});
+    if (cleanupError !== undefined) { throw cleanupError; }
     throw error;
   }
+}
+
+async function cleanupCustody(
+  custody: string,
+  expectedDirectory: DirectoryIdentity,
+  custodyHandle: FileHandle,
+  expectedLeaves: ReadonlyMap<string, ExecutableIdentity>,
+): Promise<void> {
+  try {
+    await assertCustodyIdentity(custody, expectedDirectory, custodyHandle);
+    await assertCustodyLeaves(custody, expectedLeaves);
+    const quarantine = `${custody}.cleanup-${randomBytes(16).toString("hex")}`;
+    await rename(custody, quarantine);
+    await assertCustodyIdentity(quarantine, expectedDirectory, custodyHandle);
+    await assertCustodyLeaves(quarantine, expectedLeaves);
+    for (const [name, expected] of expectedLeaves) {
+      const leaf = join(quarantine, name);
+      const quarantinedLeaf = join(
+        quarantine,
+        `.${randomBytes(16).toString("hex")}.cleanup-leaf`,
+      );
+      assertSameExecutable(
+        await executableIdentity(leaf, "NO_REPLACE_CLEANUP_REJECTED"),
+        expected,
+        "NO_REPLACE_CLEANUP_REJECTED",
+      );
+      await rename(leaf, quarantinedLeaf);
+      assertSameExecutableObject(
+        await executableIdentity(quarantinedLeaf, "NO_REPLACE_CLEANUP_REJECTED"),
+        expected,
+        "NO_REPLACE_CLEANUP_REJECTED",
+      );
+      await unlink(quarantinedLeaf);
+    }
+    await rmdir(quarantine);
+  } catch (error) {
+    fail(
+      "NO_REPLACE_CLEANUP_REJECTED",
+      `native helper custody cleanup rejected; evidence preserved: ${errorMessage(error)}`,
+    );
+  }
+}
+
+async function assertCustodyIdentity(
+  path: string,
+  expected: DirectoryIdentity,
+  handle: FileHandle,
+): Promise<void> {
+  const metadata = await lstat(path);
+  assertPrivateCustodyDirectory(metadata, "NO_REPLACE_CLEANUP_REJECTED");
+  assertSameDirectory(metadata, expected, "NO_REPLACE_CLEANUP_REJECTED");
+  assertSameDirectory(await handle.stat(), expected, "NO_REPLACE_CLEANUP_REJECTED");
+}
+
+async function assertCustodyLeaves(
+  directory: string,
+  expectedLeaves: ReadonlyMap<string, ExecutableIdentity>,
+): Promise<void> {
+  const names = (await readdir(directory)).toSorted();
+  const expectedNames = [...expectedLeaves.keys()].toSorted();
+  if (names.length !== expectedNames.length
+    || names.some((name, index) => name !== expectedNames[index])) {
+    fail("NO_REPLACE_CLEANUP_REJECTED", "custody contains unauthenticated inventory");
+  }
+  for (const [name, expected] of expectedLeaves) {
+    assertSameExecutable(
+      await executableIdentity(join(directory, name), "NO_REPLACE_CLEANUP_REJECTED"),
+      expected,
+      "NO_REPLACE_CLEANUP_REJECTED",
+    );
+  }
+}
+
+function assertPrivateCustodyDirectory(metadata: Stats, code: string): void {
+  const expectedUid = process.getuid?.();
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()
+    || expectedUid === undefined || metadata.uid !== expectedUid
+    || (metadata.mode & 0o777) !== 0o700) {
+    fail(code, "native helper custody is not an owned private directory");
+  }
+}
+
+function directoryIdentity(metadata: Pick<Stats, "dev" | "ino">): DirectoryIdentity {
+  return { dev: metadata.dev, ino: metadata.ino };
+}
+
+function assertSameDirectory(
+  actual: Pick<Stats, "dev" | "ino">,
+  expected: DirectoryIdentity,
+  code: string,
+): void {
+  if (actual.dev !== expected.dev || actual.ino !== expected.ino) {
+    fail(code, "native helper custody identity changed");
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function isExecutableCustodySafe(
@@ -179,6 +323,21 @@ function assertSameExecutable(
     || actual.sha256 !== expected.sha256
   ) {
     fail(code, "native executable changed after identity verification");
+  }
+}
+
+function assertSameExecutableObject(
+  actual: ExecutableIdentity,
+  expected: ExecutableIdentity,
+  code: string,
+): void {
+  if (
+    actual.dev !== expected.dev
+    || actual.ino !== expected.ino
+    || actual.size !== expected.size
+    || actual.sha256 !== expected.sha256
+  ) {
+    fail(code, "native executable object or bytes changed after verification");
   }
 }
 

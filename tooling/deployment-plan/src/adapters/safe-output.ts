@@ -154,11 +154,8 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     }
     await this.assertStagingStable();
     await this.faultInjection.beforeStagingLeafOpen?.();
-    const file = await open(
-      join(this.path, name),
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
+    const file = await open(join(this.path, name),
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     let fileIdentity: FileIdentity;
     try {
       fileIdentity = fileIdentityOf(await file.stat());
@@ -228,10 +225,8 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       return this.target;
     } catch (error) {
       if (renamed) {
-        fail(
-          "OUTPUT_PUBLICATION_UNCERTAIN",
-          `published directory durability or identity is uncertain; target preserved: ${errorMessage(error)}`,
-        );
+        fail("OUTPUT_PUBLICATION_UNCERTAIN",
+          "published directory durability or identity is uncertain; target preserved: " + errorMessage(error));
       }
       throw error;
     }
@@ -252,11 +247,8 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     const pendingName = `.READY.pending-${randomBytes(16).toString("hex")}`;
     const pending = join(this.target, pendingName);
     const ready = join(this.target, name);
-    const file = await open(
-      pending,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
+    const file = await open(pending,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     let pendingIdentity: FileIdentity;
     try {
       await file.chmod(0o600);
@@ -288,16 +280,25 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
         throw error;
       }
       markerMayBePublished = true;
-      this.leaves.set(name, pendingIdentity);
+      const readyMetadata = await lstat(ready);
+      if (!readyMetadata.isFile() || readyMetadata.isSymbolicLink() || readyMetadata.nlink !== 1) {
+        fail("OUTPUT_READY_SUBSTITUTED", "READY is not the committed regular file");
+      }
+      assertSameIdentity(readyMetadata, pendingIdentity, "OUTPUT_READY_SUBSTITUTED");
+      if (readyMetadata.size !== pendingIdentity.size) {
+        fail("OUTPUT_READY_SUBSTITUTED", "READY size changed during commit");
+      }
+      const readyIdentity = fileIdentityOf(readyMetadata);
+      this.leaves.set(name, readyIdentity);
+      await this.assertPublishedReady(bytes, readyIdentity);
       await this.faultInjection.beforeFinalMarkerDirectorySync?.();
       await (this.faultInjection.finalMarkerDirectorySync?.() ?? this.stagingHandle.sync());
       await this.faultInjection.afterFinalMarkerDirectorySync?.();
+      await this.assertPublishedReady(bytes, readyIdentity);
     } catch (error) {
       if (markerMayBePublished) {
-        fail(
-          "OUTPUT_PUBLICATION_UNCERTAIN",
-          "READY durability is uncertain; target and READY preserved: " + errorMessage(error),
-        );
+        fail("OUTPUT_PUBLICATION_UNCERTAIN",
+          "READY durability is uncertain; target and READY preserved: " + errorMessage(error));
       }
       throw error;
     }
@@ -306,9 +307,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
   async assertStagingStable(): Promise<void> {
     await this.assertParentStable();
     await assertDirectoryIdentity(this.path, this.stagingIdentity, "OUTPUT_TARGET_SUBSTITUTED");
-    assertSameIdentity(
-      await this.stagingHandle.stat(), this.stagingIdentity, "OUTPUT_TARGET_SUBSTITUTED",
-    );
+    assertSameIdentity(await this.stagingHandle.stat(), this.stagingIdentity, "OUTPUT_TARGET_SUBSTITUTED");
   }
 
   private async assertParentStable(): Promise<void> {
@@ -319,9 +318,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
     const metadata = await lstat(this.parent);
     assertOwnedPrivateDirectory(metadata, "OUTPUT_PARENT_SUBSTITUTED");
     assertSameIdentity(metadata, this.parentIdentity, "OUTPUT_PARENT_SUBSTITUTED");
-    assertSameIdentity(
-      await this.parentHandle.stat(), this.parentIdentity, "OUTPUT_PARENT_SUBSTITUTED",
-    );
+    assertSameIdentity(await this.parentHandle.stat(), this.parentIdentity, "OUTPUT_PARENT_SUBSTITUTED");
   }
 
   async close(): Promise<void> {
@@ -334,15 +331,10 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       cleanupError = error;
     }
     const closed = await Promise.allSettled([this.stagingHandle.close(), this.parentHandle.close()]);
-    if (cleanupError !== undefined) {
-      throw cleanupError;
-    }
+    if (cleanupError !== undefined) { throw cleanupError; }
     const closeFailure = closed.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (closeFailure !== undefined) {
-      throw closeFailure.reason;
-    }
+      (result): result is PromiseRejectedResult => result.status === "rejected");
+    if (closeFailure !== undefined) { throw closeFailure.reason; }
   }
 
   private async cleanupStaging(): Promise<void> {
@@ -358,11 +350,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       `.${randomBytes(16).toString("hex")}.cleanup`,
     );
     await rename(this.path, quarantine);
-    await assertDirectoryIdentity(
-      quarantine,
-      this.stagingIdentity,
-      "OUTPUT_CLEANUP_SUBSTITUTED",
-    );
+    await assertDirectoryIdentity(quarantine, this.stagingIdentity, "OUTPUT_CLEANUP_SUBSTITUTED");
     await this.assertCleanupLeaves(quarantine);
     for (const [name, expected] of this.leaves) {
       const leaf = join(quarantine, name);
@@ -398,6 +386,7 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
       fail("OUTPUT_PUBLISHED_SUBSTITUTED", "published output is not the owned directory that was created");
     }
     assertSameIdentity(metadata, this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
+    assertSameIdentity(await this.stagingHandle.stat(), this.publishedTargetIdentity, "OUTPUT_PUBLISHED_SUBSTITUTED");
     const names = (await readdir(this.target)).toSorted();
     const expectedNames = [...expectedNamesInput].toSorted();
     if (names.length !== expectedNames.length || names.some((name, index) => name !== expectedNames[index])) {
@@ -409,6 +398,26 @@ class LocalClaimedOutputDirectory implements ClaimedOutputDirectory {
         fail("OUTPUT_ROLLBACK_LEAF_SUBSTITUTED", "published output tracked leaf was substituted");
       }
       assertSameFileIdentity(leaf, expected, "OUTPUT_ROLLBACK_LEAF_SUBSTITUTED");
+    }
+  }
+
+  private async assertPublishedReady(bytes: Uint8Array, expected: FileIdentity): Promise<void> {
+    await this.assertPublishedTreeUnchanged();
+    const ready = await open(join(this.target, "READY"), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const beforeRead = await ready.stat();
+      if (!beforeRead.isFile() || beforeRead.nlink !== 1) {
+        fail("OUTPUT_READY_SUBSTITUTED", "READY is not the committed regular file");
+      }
+      assertSameFileIdentity(beforeRead, expected, "OUTPUT_READY_SUBSTITUTED");
+      const actual = await ready.readFile();
+      assertSameFileIdentity(await ready.stat(), expected, "OUTPUT_READY_SUBSTITUTED");
+      await this.assertPublishedTreeUnchanged();
+      if (!actual.equals(Buffer.from(bytes))) {
+        fail("OUTPUT_READY_SUBSTITUTED", "READY bytes differ from the committed marker");
+      }
+    } finally {
+      await ready.close();
     }
   }
 
