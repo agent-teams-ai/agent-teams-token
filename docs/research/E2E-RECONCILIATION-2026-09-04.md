@@ -3,7 +3,79 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 14:04 UTC
+## Latest reconciliation: 14:22 UTC
+
+Fresh observation:101 is completed, output awaiting local consumption;
+102/103/104 are running/alive/productive, not merely launcher PIDs. Old-host
+duplicate cleanup removed11 pinned Node copies (~2.2GB nominal), verified
+archive retained, source/job/evidence untouched. Disk3.5 ->5.6GiB before new
+jobs; admission stayed unchanged and was rechecked before each launch.
+New jobs:102 PID1076903 medium,103 PID1079088 xhigh,104 PID1082039 xhigh;
+all priority, account-m, registry /var/data/agtmai-r212-resume-20260904-registry.
+Original user worktree dirty-path inventory and original plan SHA256 were
+rechecked unchanged at14:22. Details below describe their isolated candidates.
+
+Accepted integration code remains e723bc0d. New checkpoints below are isolated,
+unaccepted source candidates, not full E2E or public-network approval.
+
+- Slither96 recovered patches are now applied in /tmp/agtmai-slither-91-mac.
+  Main repaired the duplicated old lifecycle body/imports, kept image inspection
+  in the existing image-preflight module, and updated the exact environment
+  schema hash changed by91. Real child-process tests now allow Node startup
+  1.5seconds within a2second hard deadline rather than assuming50ms startup.
+  Exact candidate fb416ec111324cdc05663d6b00735a47c84d5e7a, parent4a0db1a3:
+  full Mac Slither130/130,0skips; TS7/scoped lint pass. First full run exposed
+  stale closure hash and two startup-timing failures; those results are not
+  silently relabeled green. Independent aggregate S7 review103 is prepared.
+- EVM100 is applied in /tmp/agtmai-evm-94-mac with bounded content/snapshot
+  revalidation and primary-error-preserving cleanup. Main corrected callback
+  types, a diagnostic expectation (snapshot mutation takes precedence over
+  size interpretation), and placed directory syncing/final teardown in their
+  concrete helper boundaries. Candidate1f4fc8d8cc7c7c8c119d827cce228443fbda52e3,
+  parentcfba: TS7/lint pass. Focused37tests had36pass and one cast chain-id
+  timeout; only that neighbour test was retried and passed1/1. New exact-source
+  actual Mac runner suite passes7/7,0skips,66.5seconds. Independent aggregate
+  N2 review104 is prepared. Root test:local-evm:built still needs registration
+  of the new cleanup.test.ts at integration; do not lose these regression tests.
+- Solana97 is applied in /tmp/agtmai-solana-97-mac, candidate
+  a2261b3675cdf4c2a49d6fed2c2bfe87586776f9 from e723. TS7/lint pass;
+  filesystem22total21pass1Linux-onlyskip. Main corrected canonical Darwin test
+  paths, an import shadow and a test expecting deletion of a live validator.
+  Confirmed remaining N2 gaps: parent/temp descriptors not held through
+  publication, captured temp assigned only after write, missing named-temp
+  check immediately before unlink, byte-only payload checks without original
+  inode identity, and missing post-READY validation. Writer102 owns those exact
+  gaps plus deterministic real-caller regressions. This checkpoint is not accepted.
+- Custody review99 returned AMEND on4c93: direct closeSync acquisition paths
+  still retry or leak on close failure, and actual apply-manifest/staging callers
+  can mask primary errors. Linux focused21/21 passes; expanded32 has5 inherited
+  TOOLCHAIN_GIT_LOCAL_CONFIG_UNAVAILABLE failures. Existing Mac32/32 is narrow
+  evidence, not closure. Writer101 is alive/productive on the old host, fixing
+  the complete confirmed production call paths, not just the new helper.
+- Old-host disk dropped to3.5GiB free while RAM stayed about11.6GiB available.
+  Admission correctly prevented102 before workspace/job creation. Main is
+  removing only explicitly listed duplicate pinned Node directories from
+  completed jobs89-100 after process/cwd checks; the verified archive is retained.
+  Sources, jobs, outputs, bundles and active101 are not cleanup targets.
+  Initial cleanup preflight stopped on an absent copy without deleting anything;
+  absent copies are now skipped explicitly.103/104 are queued behind the same
+  unchanged5GB disk admission guard, not yet claimed running in this snapshot.
+
+Verified new bundles (base -> exact candidate):
+- /tmp/agtmai-slither96-candidate.bundle,4a0 -> fb416,
+  SHA256e8eec4ecf7f02fd59653f3a55c267683bd7fd39c01967b82b8f27aff77f70d79.
+- /tmp/agtmai-evm100-candidate.bundle,cfba ->1f4f,
+  SHA25645d2b5bc4bc283eddab79af9ea7f70140f7bcd074c0490c3bdad1afc697cd5ca.
+- /tmp/agtmai-solana97-candidate.bundle,e723 ->a226,
+  SHA256c76506886dea05b35379194fa5bbaabc60f227d14e455a950bda077db2845171.
+
+New jobs use sol medium implementation / sol xhigh review, priority/fast,
+account-m, isolated exact-SHA clones. Do not duplicate a job just because its
+tools cannot write. Source-packet fallback is allowed, never sandbox bypass.
+The original-plan matrix, L5 owner decision and all full-platform/root/CI gates
+remain open as previously recorded. The original user worktree stays untouched.
+
+## Earlier reconciliation: 14:04 UTC
 
 Accepted integration code remains e723bc0df8efa867a78f8a4cd68e8862e95a18f2.
 Nothing from the new unaccepted drafts entered the main candidate. Original
