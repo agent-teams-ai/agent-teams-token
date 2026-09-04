@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   truncate,
@@ -21,6 +22,24 @@ import {
   readOwnedBoundedFile,
   readRegularFile,
 } from "../safe-fs.ts";
+
+test("initial publication rejects a symlink replacing its held parent", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-publication-parent-")));
+  const parent = join(root, "parent");
+  const displaced = join(root, "displaced");
+  await mkdir(parent, {mode: 0o700});
+  try {
+    await assert.rejects(publishInitialFile(join(parent, "config"), Buffer.from("owned"), 0o600, undefined, {
+      beforePublish: async () => {
+        await rename(parent, displaced);
+        await symlink(displaced, parent);
+      },
+    }), (cause: unknown) => cause instanceof Error && "code" in cause
+      && cause.code === "LOCAL_EVM_PUBLICATION_PARENT_CHANGED");
+    assert.equal((await lstat(parent)).isSymbolicLink(), true);
+    await assert.rejects(lstat(join(displaced, "config")), {code: "ENOENT"});
+  } finally {await rm(root, {recursive: true, force: true});}
+});
 
 const roots: string[] = [];
 after(async () => { await Promise.all(roots.map(async (root) => await rm(root, { recursive: true, force: true }))); });

@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { LocalEvmError } from "./model.ts";
+import { holdPublicationParent } from "./publication-parent.ts";
 
 import {
   assertPolicyInteger, assertRegularFile, assertSameFile, assertWithinBounds,
@@ -232,6 +233,7 @@ export async function publishInitialFile(
   await assertAbsent(absolute, "INITIAL_FILE");
   const temporary = `${absolute}.${process.pid}.${randomUUID()}.tmp`;
   await assertAbsent(temporary, "INITIAL_TEMP");
+  const parent = await holdPublicationParent(dirname(absolute));
   let handle: FileHandle | undefined;
   let created: RegularFileIdentity | undefined;
   try {
@@ -260,6 +262,7 @@ export async function publishInitialFile(
     }
     await assertExpectedBytes(handle, bytes, "INITIAL_FILE");
     await hooks.beforePublish?.();
+    await parent.assertReady();
     await assertAbsent(absolute, "INITIAL_FILE");
     assertSameFile(
       created,
@@ -296,10 +299,12 @@ export async function publishInitialFile(
       "INITIAL_FILE",
     );
     await syncDirectory(dirname(absolute));
+    await parent.assertReady();
   } finally {
-    await handle?.close();
-    if (created !== undefined) {
-      await unlinkIfOwnedTemporary(temporary, created);
+    try {await handle?.close();} finally {
+      try {
+        if (created !== undefined) {await unlinkIfOwnedTemporary(temporary, created);}
+      } finally {await parent.close();}
     }
   }
 }
@@ -317,6 +322,7 @@ export async function replaceObservedFile(
   const temporary = `${absolute}.${process.pid}.${randomUUID()}.tmp`;
   let handle: FileHandle | undefined;
   let created: RegularFileIdentity | undefined;
+  const parent = await holdPublicationParent(dirname(absolute));
   try {
     handle = await open(
       temporary,
@@ -343,6 +349,7 @@ export async function replaceObservedFile(
     }
     await assertExpectedBytes(handle, bytes, "UPDATED_FILE");
     await hooks.beforePublish?.();
+    await parent.assertReady();
     assertSameFile(
       expected,
       await lstat(absolute, {bigint: true}),
@@ -358,10 +365,12 @@ export async function replaceObservedFile(
       "UPDATED_FILE",
     );
     await syncDirectory(dirname(absolute));
+    await parent.assertReady();
   } finally {
-    await handle?.close();
-    if (created !== undefined) {
-      await unlinkIfOwnedTemporary(temporary, created);
+    try {await handle?.close();} finally {
+      try {
+        if (created !== undefined) {await unlinkIfOwnedTemporary(temporary, created);}
+      } finally {await parent.close();}
     }
   }
 }
