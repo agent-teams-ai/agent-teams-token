@@ -3,7 +3,7 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 18:04 UTC
+## Latest reconciliation: 18:01 UTC
 
 Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
 Recovery candidate advanced to `a7ed090094776e15136b97f7b5bb61cc91012475`,
