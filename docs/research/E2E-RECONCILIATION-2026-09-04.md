@@ -3,7 +3,103 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 15:45 UTC
+## Latest reconciliation: 16:14 UTC
+
+Accepted integration source remains `31e909f72d5470613d8875ed9266adb482ddff85`.
+Do not integrate the full recovery base on the strength of the following tests:
+120 still has other P1 findings and independent acceptance is pending.
+
+- Local recovery candidate is now committed as
+  `aeb721dba1f48b5fd630a2ae50e4adfed6e1fa42`, parent exact47fe823.
+  Scope: finalizer primary/cleanup/close ordering, four actual uncertain-close
+  regressions, Darwin authority regression, accurate Linux root-gate docs.
+  Nine files, +197/-17; tracked clean, only known node_modules symlink untracked.
+  Mac broader custody/cleanup/removal/finalization **67/67**, zero skips, 5.72s;
+  separate Darwin regression **1/1**; scoped lint and diff checks pass.
+- Ordinary pinned Linux verification (NOT a model worker) completed on oldhost
+  in new `/var/data/agtmai-custody127-linux.dNOAwL/source`. Exact-head validation
+  passed; **121/121 structural tests**, zero failures/skips, 255.06s, exit0;
+  source remained clean. No dependencies installed and no auth/network-chain
+  changes. Machine, resources, bundle and Node hashes were checked before use.
+  Candidate bundle requires47fe823; SHA256
+  `fff833075399f197723e0d703f52c6cb2abbc5e04af14418edf75fe2689f3eed`.
+  Detailed source/test/transport evidence and failed initial Mac setup are in
+  `RECOVERY-FINALIZATION-REGRESSION-2026-09-04.md`. The initial whole Mac run
+  36pass/77fail/8skip is retained, not rewritten as success. The shared linked
+  checkout's forbidden Git info/refs was preserved; the Linux verifier uses
+  a fresh standalone clone and canonical temporary root instead of weakening
+  authority checks. No local test session is still running.
+- Reviewer120's full result and correction to its overlay inference are saved
+  in `RECOVERY-FULL-BASE-CRITIQUE-2026-09-04.md`. Its P1 groups2-5 remain open:
+  evidence directory custody, partial log acquisition, other raw close sites,
+  partial proof construction. Architecture over-limit modules remain open.
+  Gate documentation and stale Darwin assertion are corrected in aeb721 only,
+  not yet in accepted source or the original dirty user checkout.
+- Main reviewed the complete recovered125 source proposal. It is NOTAPPLIED:
+  out-of-scope catch variable, repeated-stat uncertainty, weak directory-removal
+  assertions and unfinished ownership states must be fixed. Exact handoff is
+  `SLITHER-125-PROPOSAL-CRITIQUE-2026-09-04.md`; do not blindly apply that patch.
+  Solana abf837 still has no126 independent verdict. Both source lanes unchanged.
+- Hosted workers remain stopped:120 completed,125/126 quota blocked on account-m
+  (tv goog five), recorded reset11September11:19:36UTC. No duplicate jobs, auth
+  mutation, paid reset or account cycling. Future hosted workers remain fast:
+  sol medium writers, xhigh reviewers, priority. Next free registry job is127;
+  custody127 above is only an ordinary verifier, not a registered worker job.
+  Original `/Users/belief/dev/projects/agent-teams-token` dirt was rechecked and
+  preserved. No browser/report opened and no material files deleted this turn.
+
+Next: independent review of bounded aeb721 when capacity returns; meanwhile
+continue local recovery120 groups2-5 with nonoverlapping checkpoints. Slither125
+amendment, Solana review/actualAgave, R3-R8, realDocker/cgroup, upstream semantic
+merge and complete exact-head root/CI plus specialist/holistic reviews remain.
+Do not call 121 structural tests full cached rollback or whole E2E acceptance.
+
+## Earlier reconciliation: 16:05 UTC
+
+Accepted integration source is still `31e909f72d5470613d8875ed9266adb482ddff85`.
+No Slither, Solana or full recovery candidate is accepted or integrated.
+
+- Fresh 15:58 read-only observation: 120 completed; 125 and 126 are blocked
+  by quota. No worker is running. Account-m (tv goog five) is not scheduler
+  eligible; the recorded reset is 2026-09-11T11:19:36Z. Do not repeat launches,
+  modify auth/capacity, buy resets or use API-key fallback. Next hosted workers
+  remain fast/priority, sol medium writers and xhigh reviewers when available.
+- The complete 120 review is preserved in
+  `RECOVERY-FULL-BASE-CRITIQUE-2026-09-04.md`: five P1 groups and three P2 groups,
+  whole `f2d7ab918^..47fe823` base AMEND. Its 103/117 Linux run had 13 failures
+  from pre-existing root-owned `/tmp/.git` and one stale Darwin source assertion.
+  That foreign directory is not ours to remove. Accepted archive/Bash overlays
+  are not proof of the installation-transaction fix; the report prefix records
+  this correction to the reviewer's unsupported inference.
+- 125's complete source proposal was recovered from its earlier task-specific
+  assistant final and retained at `.tools/hosted-evidence/2026-09-04/recovered-125-final.md`.
+  It has not been applied, tested or accepted. Terminal JSON alone omits it.
+  126 left no assistant final/verdict; Solana `abf8377303d1b4628d032023904801c55e8125ef`
+  still needs independent review, not automatic acceptance after quota failure.
+- Main is applying a bounded local recovery correction in
+  `/tmp/agtmai-custody-76c-mac`, parent `47fe823a944292784868a3f80bb790cdbbd242f0`.
+  Four actual temporary-finalizer tests failed before the fix and now pass;
+  combined descriptor/production/temporary finalization is 18/18, zero skips.
+  Original proof, cleanup and terminal-close errors remain ordered; every owned
+  workspace descriptor receives one close attempt, including real close then
+  EINTR with immediate reuse. Post-removal close failure records failed cleanup
+  with its already-completed removal facts, not a misleading clean pass.
+  The Darwin regression now exercises the real platform authority function;
+  loaded-image binding remains fail-closed. Docs/AGENTS clarify the existing
+  complete Linux `pnpm check:linux` command without changing executable gates.
+  Scoped lint/diff checks pass. Full structural rollback suite is currently
+  running in a fresh disposable TMPDIR (local exec session 66118); do not edit
+  its source or claim its result until completion. Original user checkout stays
+  untouched. Local candidate is not yet committed or independently reviewed.
+
+Next: finish the current structural test, checkpoint this bounded candidate,
+then work through the remaining 120 findings. Preserve Slither/Solana candidate
+lineages. Full original scope in ORIGINAL-PLAN-INVARIANT-AUDIT remains open,
+including runtime authority/store, actual Agave/Docker, upstream reconciliation
+and exact-head full root/CI plus specialist and holistic review. No Mainnet,
+tokenomics, vesting, public RPC, real keys or spending is authorized here.
+
+## Earlier reconciliation: 15:45 UTC
 
 Accepted integration source remains31e909f72d5470613d8875ed9266adb482ddff85.
 ActualMac EVM86/86 stays valid only for its earlier accepted source.
