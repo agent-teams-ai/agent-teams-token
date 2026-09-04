@@ -5,6 +5,17 @@ It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
 ## Latest reconciliation: 14:56 UTC
 
+14:58 update:111 terminal, full23966-character output is preserved at
+.tools/hosted-evidence/2026-09-04/agtmai-r212-solana-amend111-20260904.latest-result.json,
+SHA256e42a9bcb3e2c1b60dc3debfb3337b2f64a0f6af9a9d8405afe4c0713a42d6123.
+It is an UNAPPLIED source patch, testsNOTRUN after first bwrap failure; the
+worker marked its own goal blocked across continuations, not the root goal.
+It explicitly requires one missing-packet fixture update at
+tooling/local-solana/tests/process.test.ts:23 from config string to capability.
+Next main must inspect/apply the full patch on exact80bb, adapt that actual
+fixture, run TS7/lint/focused tests, then independent review. Do not launch a
+duplicate implementation or claim111 tested/applied.112/113 are still alive.
+
 Accepted integration source is now31e909f72d5470613d8875ed9266adb482ddff85.
 This accepts the reviewed EVM N2 delta, NOT full original-plan E2E.
 
