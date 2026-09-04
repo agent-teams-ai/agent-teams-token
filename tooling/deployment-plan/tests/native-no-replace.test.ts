@@ -27,6 +27,10 @@ test("compiler custody permits only policy-approved executable identities", () =
     { expectedUid: 501, allowRootOwnedMultipleLinks: true },
   ), true);
   assert.equal(isExecutableCustodySafe(
+    { ...SAFE_EXECUTABLE, uid: 0, nlink: 3 },
+    { expectedUid: 501, allowRootOwnedMultipleLinks: false },
+  ), false);
+  assert.equal(isExecutableCustodySafe(
     { ...SAFE_EXECUTABLE, uid: 0, nlink: 3, mode: 0o100775 },
     { expectedUid: 501, allowRootOwnedMultipleLinks: true },
   ), false);
@@ -56,6 +60,19 @@ test("verified-path compiler fallback rejects a user-owned original path", async
     if (previous === undefined) { delete process.env.AGTMAI_CC_BINARY; }
     else { process.env.AGTMAI_CC_BINARY = previous; }
     await rm(dirname(compiler), { recursive: true, force: true });
+  }
+});
+
+test("Darwin verified-path compiler retains its acquisition custody policy", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const capability = await createNativeNoReplaceCapability();
+  try {
+    assert.match(capability.compilerSha256, /^0x[0-9a-f]{64}$/u);
+    assert.match(capability.executableSha256, /^0x[0-9a-f]{64}$/u);
+  } finally {
+    await capability.close();
+    await rm(capability.custodyPath, { recursive: true, force: true });
   }
 });
 

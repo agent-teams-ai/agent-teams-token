@@ -59,8 +59,7 @@ export interface NativeNoReplaceCapability {
 
 export function assertNativeNoReplacePlatform(platform: string): void {
   if (platform !== "linux" && platform !== "darwin") {
-    fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "native no-replace helper supports only Linux and macOS");
-  }
+    fail("OUTPUT_NO_REPLACE_UNAVAILABLE", "native no-replace helper supports only Linux and macOS"); }
 }
 
 export function nativeCompilerExecutionStrategy(platform: string): "snapshot-fd" | "verified-path" {
@@ -85,26 +84,21 @@ export async function createNativeNoReplaceCapability(
   let custody = "";
   try {
     const sourceBefore = await source.stat();
-    if (!sourceBefore.isFile() || sourceBefore.nlink !== 1) {
-      fail("NO_REPLACE_SOURCE_MISMATCH", "native helper source is not a single-link regular file");
-    }
+    if (!sourceBefore.isFile() || sourceBefore.nlink !== 1) { fail("NO_REPLACE_SOURCE_MISMATCH", "native helper source is not a single-link regular file"); }
     const sourceBytes = await readHeldBytes(source, sourceBefore.size);
     assertStableMetadata(await source.stat(), sourceBefore, "NO_REPLACE_SOURCE_MISMATCH");
-    if (sha256Hex(sourceBytes) !== SOURCE_SHA256) {
-      fail("NO_REPLACE_SOURCE_MISMATCH", "native no-replace helper source differs from its pinned digest");
-    }
+    if (sha256Hex(sourceBytes) !== SOURCE_SHA256) { fail("NO_REPLACE_SOURCE_MISMATCH", "native no-replace helper source differs from its pinned digest"); }
     await faultInjection.afterSourceRead?.(SOURCE);
 
     const configuredCompiler = process.env.AGTMAI_CC_BINARY ?? "/usr/bin/cc";
-    if (!isAbsolute(configuredCompiler)) {
-      fail("NO_REPLACE_COMPILER_UNSAFE", "AGTMAI_CC_BINARY must be an absolute path");
-    }
+    if (!isAbsolute(configuredCompiler)) { fail("NO_REPLACE_COMPILER_UNSAFE", "AGTMAI_CC_BINARY must be an absolute path"); }
     const strategy = nativeCompilerExecutionStrategy(process.platform);
     const compilerPath = await realpath(configuredCompiler);
     await assertTrustedCompilerPath(compilerPath);
+    const allowTrustedCompilerMultipleLinks = true;
     compilerOriginal = await open(compilerPath, constants.O_RDONLY | constants.O_NOFOLLOW);
     const compilerIdentity = await heldExecutableIdentity(
-      compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", true,
+      compilerOriginal, "NO_REPLACE_COMPILER_UNSAFE", allowTrustedCompilerMultipleLinks,
     );
     custody = await realpath(await mkdtemp(join(tmpdir(), "agtmai-no-replace-")));
     await chmod(custody, 0o700);
@@ -118,7 +112,8 @@ export async function createNativeNoReplaceCapability(
         compilerOriginal, compilerIdentity, custody, "compiler", "NO_REPLACE_COMPILER_UNSAFE",
       );
     } else {
-      compilerExecutable = { path: compilerPath, handle: compilerOriginal, identity: compilerIdentity };
+      compilerExecutable = { path: compilerPath, handle: compilerOriginal, identity: compilerIdentity,
+        allowRootOwnedMultipleLinks: allowTrustedCompilerMultipleLinks };
       compilerOriginal = undefined;
     }
     await faultInjection.afterCompilerSnapshot?.(compilerExecutable.path, compilerPath);
@@ -138,7 +133,7 @@ export async function createNativeNoReplaceCapability(
     });
     assertSameExecutableObject(
       await heldExecutableIdentity(
-        compilerOriginal ?? compilerExecutable.handle, "NO_REPLACE_COMPILER_UNSAFE", true,
+        compilerOriginal ?? compilerExecutable.handle, "NO_REPLACE_COMPILER_UNSAFE", allowTrustedCompilerMultipleLinks,
       ),
       compilerIdentity,
       "NO_REPLACE_COMPILER_SUBSTITUTED",
@@ -155,8 +150,7 @@ export async function createNativeNoReplaceCapability(
       custodyPath: custody,
       async rename(request: NoReplaceRenameRequest): Promise<void> {
         if (closed) {
-          fail("NO_REPLACE_CAPABILITY_CLOSED", "native no-replace capability is closed");
-        }
+          fail("NO_REPLACE_CAPABILITY_CLOSED", "native no-replace capability is closed"); }
         assertLeaf(request.sourceLeaf);
         assertLeaf(request.destinationLeaf);
         await faultInjection.beforeHelperSpawn?.(heldHelper.path);
@@ -211,6 +205,7 @@ interface HeldExecutable {
   readonly path: string;
   readonly handle: FileHandle;
   readonly identity: ExecutableIdentity;
+  readonly allowRootOwnedMultipleLinks: boolean;
 }
 
 async function snapshotExecutable(
@@ -247,7 +242,7 @@ async function openHeldExecutable(path: string, code: string): Promise<HeldExecu
   try {
     const identity = await heldExecutableIdentity(handle, code);
     assertSameExecutable(await executableIdentityAtPath(path, code), identity, code);
-    return { path, handle, identity };
+    return { path, handle, identity, allowRootOwnedMultipleLinks: false };
   } catch (error) {
     await handle.close();
     throw error;
@@ -394,13 +389,15 @@ async function waitForGroupExit(pid: number | undefined, limitMs: number): Promi
 
 async function assertExecutableReady(executable: HeldExecutable): Promise<void> {
   assertSameExecutableObject(
-    await heldExecutableIdentity(executable.handle, "NO_REPLACE_EXECUTABLE_SUBSTITUTED"),
+    await heldExecutableIdentity(executable.handle, "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
+      executable.allowRootOwnedMultipleLinks),
     executable.identity,
     "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
   );
   if (process.platform === "darwin") {
     assertSameExecutable(
-      await executableIdentityAtPath(executable.path, "NO_REPLACE_EXECUTABLE_SUBSTITUTED"),
+      await executableIdentityAtPath(executable.path, "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
+        executable.allowRootOwnedMultipleLinks),
       executable.identity,
       "NO_REPLACE_EXECUTABLE_SUBSTITUTED",
     );
@@ -438,9 +435,10 @@ export function isExecutableCustodySafe(
     && (metadata.mode & constants.S_IXUSR) !== 0;
 }
 
-async function executableIdentityAtPath(path: string, code: string): Promise<ExecutableIdentity> {
+async function executableIdentityAtPath(path: string, code: string,
+  allowRootOwnedMultipleLinks = false): Promise<ExecutableIdentity> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { return await heldExecutableIdentity(file, code); }
+  try { return await heldExecutableIdentity(file, code, allowRootOwnedMultipleLinks); }
   finally { await file.close(); }
 }
 
