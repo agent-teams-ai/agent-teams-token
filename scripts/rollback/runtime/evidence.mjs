@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import {
-  closeSync,
   constants,
   existsSync,
   mkdirSync,
@@ -15,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
+import { closeDescriptorOnce, throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 
 const EVIDENCE_ENVIRONMENT_KEYS = [
   "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY",
@@ -49,6 +49,21 @@ function selectedEnvironment(environment) {
       .filter((key) => environment[key] !== undefined)
       .map((key) => [key, String(environment[key])]),
   );
+}
+
+function closeCommandLogDescriptors(descriptors) {
+  const failures = [];
+  for (const descriptor of descriptors) {
+    if (!Number.isInteger(descriptor)) {
+      continue;
+    }
+    try {
+      closeDescriptorOnce(descriptor);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  return failures;
 }
 
 export class EvidenceRecorder {
@@ -94,15 +109,19 @@ export class EvidenceRecorder {
     const stdoutPath = resolveInside(this.directory, stdoutRelative);
     const stderrPath = resolveInside(this.directory, stderrRelative);
     mkdirSync(dirname(stdoutPath), { recursive: true, mode: 0o700 });
-    const stdoutDescriptor = openSync(stdoutPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-    const stderrDescriptor = openSync(stderrPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
     const startedAt = new Date();
     const started = Date.now();
+    let stdoutDescriptor;
+    let stderrDescriptor;
     let result;
-    const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
-      workingDirectory: options.cwd,
-    });
+    let invocation;
+    let primaryFailure;
     try {
+      stdoutDescriptor = openSync(stdoutPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      stderrDescriptor = openSync(stderrPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
+        workingDirectory: options.cwd,
+      });
       try {
         result = spawnSync(command, invocation.arguments, {
           cwd: options.cwd,
@@ -114,52 +133,72 @@ export class EvidenceRecorder {
       } catch (error) {
         result = { error, status: null, signal: null };
       }
-    } finally {
-      closeSync(stdoutDescriptor);
-      closeSync(stderrDescriptor);
+    } catch (error) {
+      primaryFailure = error;
     }
-    const stdout = readFileSync(stdoutPath);
-    const stderr = readFileSync(stderrPath);
-    const passed = !result.error && result.status === 0;
-    const entry = {
-      sequence: this.sequence,
-      group,
-      id,
-      phase: options.phase ?? "preparation",
-      command,
-      arguments: invocation.arguments,
-      cwd: options.cwd,
-      environment: selectedEnvironment(invocation.environment),
-      startedAt: startedAt.toISOString(),
-      durationMs: Date.now() - started,
-      exitCode: result.status,
-      signal: result.signal,
-      timedOut: result.error?.code === "ETIMEDOUT",
-      spawnError: result.error?.code ?? null,
-      status: passed ? "passed" : "failed",
-      stdout: {
-        path: stdoutRelative,
-        byteLength: stdout.length,
-        sha256: sha256(stdout),
-      },
-      stderr: {
-        path: stderrRelative,
-        byteLength: stderr.length,
-        sha256: sha256(stderr),
-      },
-    };
-    this.document.commands.push(entry);
-    this.flush();
-    if (!passed) {
-      const diagnostic = tail(stdout.toString("utf8") + "\n" + stderr.toString("utf8"), 80);
-      throw new Error(
+    // Disarm before attempting close: a rejected close may already have
+    // consumed the descriptor. Attempt all owners, never retry an FD number.
+    const descriptors = [stdoutDescriptor, stderrDescriptor];
+    stdoutDescriptor = undefined;
+    stderrDescriptor = undefined;
+    const finalizationFailures = closeCommandLogDescriptors(descriptors);
+    if (primaryFailure !== undefined) {
+      throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
+    }
+    const commandPassed = !result.error && result.status === 0;
+    if (!commandPassed) {
+      primaryFailure = new Error(
         "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
-        + " status=" + String(result.status) + " signal=" + String(result.signal)
-        + "\n" + diagnostic,
+        + " status=" + String(result.status) + " signal=" + String(result.signal),
         { cause: result.error },
       );
     }
-    return { stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), entry };
+    let recorded;
+    try {
+      const stdout = readFileSync(stdoutPath);
+      const stderr = readFileSync(stderrPath);
+      if (primaryFailure !== undefined) {
+        primaryFailure.message += "\n" + tail(stdout.toString("utf8") + "\n" + stderr.toString("utf8"), 80);
+      }
+      const entry = {
+        sequence: this.sequence,
+        group,
+        id,
+        phase: options.phase ?? "preparation",
+        command,
+        arguments: invocation.arguments,
+        cwd: options.cwd,
+        environment: selectedEnvironment(invocation.environment),
+        startedAt: startedAt.toISOString(),
+        durationMs: Date.now() - started,
+        exitCode: result.status,
+        signal: result.signal,
+        timedOut: result.error?.code === "ETIMEDOUT",
+        spawnError: result.error?.code ?? null,
+        status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
+        stdout: {
+          path: stdoutRelative,
+          byteLength: stdout.length,
+          sha256: sha256(stdout),
+        },
+        stderr: {
+          path: stderrRelative,
+          byteLength: stderr.length,
+          sha256: sha256(stderr),
+        },
+      };
+      this.document.commands.push(entry);
+      this.flush();
+      recorded = { stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), entry };
+    } catch (error) {
+      if (primaryFailure !== undefined || finalizationFailures.length > 0) {
+        finalizationFailures.push(error);
+      } else {
+        primaryFailure = error;
+      }
+    }
+    throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
+    return recorded;
   }
 
   stage(group, id, action, summarize = () => {}) {
