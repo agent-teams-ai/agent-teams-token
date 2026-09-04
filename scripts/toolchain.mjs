@@ -320,11 +320,12 @@ export function inspectInstallation({ name, tool, artifact, platform, destinatio
   }
   const fileKeys = Object.keys(provenance.files).toSorted();
   let canonicalFiles;
-  try { canonicalFiles = canonicalArchiveFileHashes({
-    artifact,
-    archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName),
-    paths: name === "pnpm" ? [...artifact.expectedFiles, "dist/pnpm.mjs"] : artifact.expectedFiles,
-  }); }
+  const authenticatedPaths = name === "pnpm" ? [...artifact.expectedFiles, "dist/pnpm.mjs"] : artifact.expectedFiles;
+  try { canonicalFiles = artifact.expectedFileSha256
+    ? Object.fromEntries(authenticatedPaths.map((path) => [path, artifact.expectedFileSha256[path]]))
+    : canonicalArchiveFileHashes({
+        artifact, archive: containedPath(join(toolsRoot, "downloads"), artifact.archiveName), paths: authenticatedPaths,
+      }); }
   catch { return { ok: false, code: "archive-provenance-unavailable", actualVersion: "unknown" }; }
   if (fileKeys.some((path) => provenance.files[path] !== canonicalFiles[path])) {
     return { ok: false, code: "provenance-mismatch", actualVersion: "unknown" };
@@ -458,31 +459,41 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
 }
 
 export function runPnpm({ lock, platform, toolsRoot, args }) {
-  assertSupported(lock, platform);
-  toolsRoot = canonicalizeTrustedPath(toolsRoot);
-  assertOwnedDirectoryChain(toolsRoot);
-  const nodeTool = lock.tools.node;
-  const nodeArtifact = nodeTool.platforms[platform];
+  assertSupported(lock, platform); toolsRoot = canonicalizeTrustedPath(toolsRoot); assertOwnedDirectoryChain(toolsRoot);
   const pnpmTool = lock.tools.pnpm;
-  for (const [name, tool, artifact] of [["node", nodeTool, nodeArtifact], ["pnpm", pnpmTool, pnpmTool]]) {
-    const installation = inspectInstallation({
-      name, tool, artifact, platform, destination: containedPath(toolsRoot, artifact.installDirectory), toolsRoot, lock,
-    });
-    if (!installation.ok) { throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`); }
+  const authenticatedPath = [containedPath(toolsRoot, "bin")];
+  for (const name of lock.coreTools) {
+    const tool = lock.tools[name]; const artifact = tool.platforms[platform];
+    const destination = containedPath(toolsRoot, artifact.installDirectory);
+    assertRunInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock });
+    if (name !== "node") {authenticatedPath.push(...executableDirectories(destination, artifact));}
   }
-  const pnpmHashes = canonicalArchiveFileHashes({
-    artifact: pnpmTool,
-    archive: containedPath(join(toolsRoot, "downloads"), pnpmTool.archiveName),
-    paths: [...pnpmTool.expectedFiles, "dist/pnpm.mjs"],
-  });
+  assertRunInstallation({ name: "pnpm", tool: pnpmTool, artifact: pnpmTool, platform,
+    destination: containedPath(toolsRoot, pnpmTool.installDirectory), toolsRoot, lock });
+  for (const name of lock.fixtureTools) {
+    const tool = lock.tools[name]; const artifact = tool.platforms[platform];
+    const destination = containedPath(toolsRoot, artifact.installDirectory);
+    if (!pathEntryExists(destination)) {continue;}
+    assertRunInstallation({ name, tool, artifact, platform, destination, toolsRoot, lock });
+    authenticatedPath.push(...executableDirectories(destination, artifact));
+  }
+  const pnpmHashes = canonicalArchiveFileHashes({ artifact: pnpmTool,
+    archive: containedPath(join(toolsRoot, "downloads"), pnpmTool.archiveName), paths: [...pnpmTool.expectedFiles, "dist/pnpm.mjs"] });
   return executeOpenedNode({
     node: pinnedNode(lock, toolsRoot, platform),
     script: { path: containedPath(containedPath(toolsRoot, pnpmTool.installDirectory), "dist/pnpm.mjs"), sha256: pnpmHashes["dist/pnpm.mjs"] },
-    args,
-    stdio: "inherit",
-    subprocessPath: [containedPath(toolsRoot, "bin")],
+    args, stdio: "inherit", subprocessPath: [...new Set(authenticatedPath)],
   });
 }
+
+function assertRunInstallation(options) {
+  const installation = inspectInstallation(options);
+  if (!installation.ok) {throw new Error(`TOOLCHAIN_RUN_INVALID tool=${options.name} reason=${installation.code}`);}
+}
+
+function executableDirectories(destination, artifact) {return [...new Set(artifact.versionChecks.map((check) => dirname(containedPath(destination, check.path))))];}
+
+function pathEntryExists(path) {try {lstatSync(path); return true;} catch (error) {if (error?.code === "ENOENT") {return false;} throw error;}}
 
 function assertSupported(lock, platform) {
   if (!lock.platforms.includes(platform)) {throw new Error(`TOOLCHAIN_UNSUPPORTED_PLATFORM platform=${platform}`);}

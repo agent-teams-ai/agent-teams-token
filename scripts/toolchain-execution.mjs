@@ -344,16 +344,6 @@ function removeInvocation(invocation, quiescent) {
   }
 }
 
-function groupExists(pgid) {
-  try {
-    process.kill(-pgid, 0);
-    return true;
-  } catch (error) {
-    if (error?.code === "ESRCH") {return false;}
-    throw error;
-  }
-}
-
 function signalGroup(pgid, signal) {
   try {process.kill(-pgid, signal);} catch (error) {if (error?.code !== "ESRCH") {throw error;}}
 }
@@ -371,11 +361,15 @@ function processGroupMembers(pgid) {
     }
     return members;
   }
-  const result = spawnSync("/bin/ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
+  if (process.platform !== "darwin") {throw typedError("TOOLCHAIN_PROCESS_GROUP_INSPECTION_FAILED");}
+  const result = spawnSync("/bin/ps", ["-axo", "pid=,pgid=,stat="], { encoding: "utf8" });
   if (result.status !== 0) {throw typedError("TOOLCHAIN_PROCESS_GROUP_INSPECTION_FAILED");}
-  return result.stdout.split("\n").map((line) => line.trim().split(/\s+/).map(Number))
-    .filter(([pid, group]) => pid > 0 && group === pgid).map(([pid]) => pid);
+  return result.stdout.split("\n").map((line) => line.trim().split(/\s+/))
+    .filter(([pid, group, state]) => Number(pid) > 0 && Number(group) === pgid && !state?.startsWith("Z"))
+    .map(([pid]) => Number(pid));
 }
+
+function groupHasLiveMembers(pgid) {return processGroupMembers(pgid).length > 0;}
 
 function signalProcess(pid, signal) {
   try {process.kill(pid, signal);} catch (error) {if (error?.code !== "ESRCH") {throw error;}}
@@ -397,8 +391,8 @@ function delay(milliseconds) {
 
 async function waitForGroupDisappearance(pgid, milliseconds) {
   const deadline = Date.now() + milliseconds;
-  while (groupExists(pgid) && Date.now() < deadline) {await delay(10);}
-  return !groupExists(pgid);
+  while (groupHasLiveMembers(pgid) && Date.now() < deadline) {await delay(10);}
+  return !groupHasLiveMembers(pgid);
 }
 
 function writeSupervisorStatus(fd, status) {
@@ -432,10 +426,10 @@ async function supervisorMain(encoded) {
       });
     });
     if (termination) {await termination;}
-    if (groupExists(child.pid)) {
+    if (groupHasLiveMembers(child.pid)) {
       signalGroup(child.pid, "SIGTERM");
       await delay(TERM_GRACE_MS);
-      if (groupExists(child.pid)) {signalGroup(child.pid, "SIGKILL");}
+      if (groupHasLiveMembers(child.pid)) {signalGroup(child.pid, "SIGKILL");}
     }
     const quiescent = await waitForGroupDisappearance(child.pid, KILL_GRACE_MS);
     writeSupervisorStatus(config.statusFd, {

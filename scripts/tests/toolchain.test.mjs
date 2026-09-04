@@ -22,6 +22,7 @@ import {
   assertDarwinMjsSnapshotEntrypointWorks,
   assertDarwinSnapshotBehavior,
   assertPrivateInvocationRejectsAmbientConfig,
+  assertProtectedPnpmResolvesAuthenticatedTools,
   assertTimedOutProcessGroupCannotWriteLate,
   makeFixture,
 } from "../toolchain-test-fixture.mjs";
@@ -71,6 +72,8 @@ test("Solana scope installs exact Agave and rejects a tampered inner binary", (c
     /TOOLCHAIN_INSTALL_INVALID tool=agave.*file-checksum:bin\/solana-test-validator/,
   );
 });
+
+test("protected pnpm resolves only authenticated core and optional fixture commands", assertProtectedPnpmResolvesAuthenticatedTools);
 
 test("canonicalizes the macOS system temp aliases but rejects attacker symlink roots", (context) => {
   if (process.platform === "darwin") {

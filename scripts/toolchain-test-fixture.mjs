@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolchain-execution.mjs";
 import { validateLock } from "./toolchain-lock-validation.mjs";
+import { fetchArtifacts, installArtifacts, runPnpm } from "./toolchain.mjs";
 import {
   artifact,
   coreTool,
@@ -22,7 +23,7 @@ function createArchives(root, artifacts) {
   mkdirSync(nodePayload, { recursive: true });
   writeExecutable(
     join(nodePayload, "node"),
-    "#!/bin/sh\nif [ \"$#\" -ge 2 ]; then echo '11.24.0'; else echo 'v24.20.0'; fi\n",
+    `#!/bin/sh\nif [ "\${1:-}" = --version ]; then echo 'v24.20.0'; else exec ${shellQuote(process.execPath)} "$@"; fi\n`,
   );
   const node = join(artifacts, "node-test.tar.gz");
   execFileSync("tar", ["-czf", node, "-C", join(root, "node-payload"), "node-test-linux-x64"]);
@@ -30,7 +31,11 @@ function createArchives(root, artifacts) {
   const foundryPayload = join(root, "foundry-payload", "foundry-test-linux-x64");
   mkdirSync(foundryPayload, { recursive: true });
   for (const command of ["forge", "cast", "anvil", "chisel"]) {
-    writeExecutable(join(foundryPayload, command), `#!/bin/sh\necho '${command} Version: 1.8.0'\n`);
+    writeExecutable(join(foundryPayload, command), [
+      "#!/bin/sh",
+      `if [ "\${1:-}" = --fixture-probe ]; then echo 'authenticated-${command}'; else echo '${command} Version: 1.8.0'; fi`,
+      "",
+    ].join("\n"));
   }
   const foundry = join(artifacts, "foundry-test.tar.gz");
   execFileSync("tar", ["-czf", foundry, "-C", join(root, "foundry-payload"), "foundry-test-linux-x64"]);
@@ -47,7 +52,11 @@ function createArchives(root, artifacts) {
     "spl-token": "spl-token-cli 5.6.1",
   };
   for (const [command, version] of Object.entries(agaveVersions)) {
-    writeExecutable(join(agavePayload, command), `#!/bin/sh\necho '${version}'\n`);
+    writeExecutable(join(agavePayload, command), [
+      "#!/bin/sh",
+      `if [ "\${1:-}" = --fixture-probe ]; then echo 'authenticated-${command}'; else echo '${version}'; fi`,
+      "",
+    ].join("\n"));
   }
   const agave = join(artifacts, "agave-test.tar.bz2");
   execFileSync("tar", ["-cjf", agave, "-C", join(root, "agave-payload"), "solana-release"]);
@@ -58,7 +67,22 @@ function createArchives(root, artifacts) {
   writeFileSync(join(pnpmPayload, "bin", "pnpm.cjs"), "process.stdout.write('11.24.0\\n');\n");
   writeFileSync(
     join(pnpmPayload, "dist", "pnpm.mjs"),
-    "// Runtime payload intentionally differs from the compatibility shim.\nprocess.stdout.write('11.24.0\\n');\n",
+    [
+      "// Runtime payload intentionally differs from the compatibility shim.",
+      "import { spawnSync } from 'node:child_process';",
+      "import { readFileSync } from 'node:fs';",
+      "if (process.argv[2] === '--version') { process.stdout.write('11.24.0\\n'); }",
+      "else {",
+      "  const directoryIndex = process.argv.indexOf('--dir');",
+      "  const runIndex = process.argv.indexOf('run');",
+      "  const directory = process.argv[directoryIndex + 1];",
+      "  const scriptName = process.argv[runIndex + 1];",
+      "  const script = JSON.parse(readFileSync(new URL('package.json', `file://${directory}/`))).scripts[scriptName];",
+      "  const result = spawnSync('/bin/sh', ['-c', script], { cwd: directory, env: process.env, stdio: 'inherit' });",
+      "  process.exitCode = result.status ?? 1;",
+      "}",
+      "",
+    ].join("\n"),
   );
   writeFileSync(join(pnpmPayload, "package.json"), '{"name":"pnpm","version":"11.24.0"}\n');
   const pnpm = join(artifacts, "pnpm-test.tgz");
@@ -137,6 +161,62 @@ export function makeFixture() {
       return 0;
     },
   };
+}
+
+export function assertProtectedPnpmResolvesAuthenticatedTools() {
+  const fixture = makeFixture();
+  const project = join(fixture.root, "protected-pnpm-project");
+  const hostile = join(fixture.root, "hostile-path");
+  const packagePath = join(project, "package.json");
+  const run = () => runPnpm({
+    lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot,
+    args: ["--dir", project, "run", "probe"],
+  });
+  const oldPath = process.env.PATH;
+  try {
+    fetchArtifacts({
+      lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot,
+      downloader: fixture.downloader,
+    });
+    installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
+    mkdirSync(project);
+    mkdirSync(hostile);
+    for (const command of ["forge", "anvil", "solc", "solana"]) {
+      writeExecutable(join(hostile, command), `#!/bin/sh\nprintf 'hostile-${command}\\n'\n`);
+    }
+    writeFileSync(packagePath, `${JSON.stringify({
+      name: "protected-pnpm-probe", private: true,
+      scripts: {
+        probe: "forge --fixture-probe > probe-output && anvil --fixture-probe >> probe-output && solc --version >> probe-output",
+      },
+    })}\n`);
+    process.env.PATH = hostile;
+    assert.equal(run(), 0);
+    assert.equal(
+      readFileSync(join(project, "probe-output"), "utf8"),
+      "authenticated-forge\nauthenticated-anvil\nVersion: 0.8.36+commit.8a079791.Linux.g++\n",
+    );
+
+    fetchArtifacts({
+      lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot,
+      downloader: fixture.downloader, scope: "solana",
+    });
+    installArtifacts({
+      lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true, scope: "solana",
+    });
+    writeFileSync(packagePath, `${JSON.stringify({
+      name: "protected-pnpm-probe", private: true,
+      scripts: { probe: "solana --fixture-probe > probe-output" },
+    })}\n`);
+    assert.equal(run(), 0);
+    assert.equal(readFileSync(join(project, "probe-output"), "utf8"), "authenticated-solana\n");
+
+    writeFileSync(join(fixture.toolsRoot, "agave-test-linux-x64", "bin", "solana"), "tampered\n");
+    assert.throws(run, /TOOLCHAIN_RUN_INVALID tool=agave reason=file-checksum:bin\/solana/);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 }
 
 function writePathSemanticPnpmFixture(root) {
