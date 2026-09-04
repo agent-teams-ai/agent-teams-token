@@ -43,10 +43,54 @@ const ready = {
   creationInputHash: hash,
 };
 
-test("duplicate JSON members are rejected at every nesting level", () => {
+test("strict JSON accepts only RFC 8259 whitespace and canonical integer tokens", () => {
+  const valid = parseJsonWithoutDuplicates(
+    Buffer.from(' \t\r\n{"value":200}\n'),
+  ) as Record<string, unknown>;
+  assert.equal(valid.value, 200);
+  assert.equal(Object.getPrototypeOf(valid), null);
+  for (const whitespace of ["\u00a0", "\u000b", "\u000c", "\u0085", "\u2028", "\ufeff"]) {
+    assert.throws(
+      () => parseJsonWithoutDuplicates(Buffer.from(`{${whitespace}"value":200}`)),
+      /malformed JSON/u,
+    );
+  }
+  for (const token of ["2e2", "200.0", "0200", "-0", "+200", "9007199254740992"]) {
+    assert.throws(
+      () => parseJsonWithoutDuplicates(Buffer.from(`{"value":${token}}`)),
+      /malformed JSON/u,
+    );
+  }
+});
+
+test("duplicate and prototype-named JSON members remain visible and fail closed", () => {
+  for (const source of ['{"x":1,"x":2}', '{"outer":{"x":1,"x":2}}']) {
+    assert.throws(() => parseJsonWithoutDuplicates(Buffer.from(source)), /duplicate/u);
+  }
+
+  const parsed = parseJsonWithoutDuplicates(
+    Buffer.from('{"__proto__":{"constructor":1},"prototype":2}'),
+  ) as Record<string, Record<string, unknown> | number>;
+  assert.equal(Object.getPrototypeOf(parsed), null);
+  assert.deepEqual(Object.keys(parsed), ["__proto__", "prototype"]);
+  const nested = Object.getOwnPropertyDescriptor(
+    parsed,
+    "__proto__",
+  )?.value as Record<string, unknown>;
+  assert.equal(Object.getPrototypeOf(nested), null);
+  assert.deepEqual(Object.keys(nested), ["constructor"]);
+
+  const planBytes = JSON.stringify(plan);
   assert.throws(
-    () => parseJsonWithoutDuplicates(Buffer.from('{"outer":{"x":1,"x":2}}')),
-    /duplicate/u,
+    () => parseStablePlan(Buffer.from(planBytes.replace("{", '{"__proto__":{},'))),
+    /unknown/u,
+  );
+  assert.throws(
+    () => parseStablePlan(Buffer.from(planBytes.replace(
+      '"identity":{',
+      '"identity":{"constructor":{},"prototype":{},"__proto__":{},',
+    ))),
+    /unknown/u,
   );
 });
 

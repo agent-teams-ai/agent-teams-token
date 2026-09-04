@@ -162,11 +162,11 @@ class Parser {
         return value;
       }
     }
-    const number = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/u.exec(this.source.slice(this.index));
+    const number = /^(?:0|[1-9][0-9]*)/u.exec(this.source.slice(this.index));
     if (number) {
       this.index += number[0].length;
       const parsed = Number(number[0]);
-      if (!Number.isFinite(parsed)) {
+      if (!Number.isSafeInteger(parsed)) {
         this.invalid();
       }
       return parsed;
@@ -176,7 +176,7 @@ class Parser {
 
   private object(): Record<string, unknown> {
     this.index += 1;
-    const result: Record<string, unknown> = {};
+    const result = Object.create(null) as Record<string, unknown>;
     const keys = new Set<string>();
     this.space();
     if (this.take("}")) {
@@ -245,7 +245,7 @@ class Parser {
   }
 
   private space(): void {
-    while (/\s/u.test(this.source[this.index] ?? "")) {
+    while (isJsonWhitespace(this.source[this.index])) {
       this.index += 1;
     }
   }
@@ -257,6 +257,10 @@ class Parser {
     return true;
   }
   private invalid(): never { fail("JSON_INVALID", `malformed JSON at byte ${this.index}`); }
+}
+
+function isJsonWhitespace(character: string | undefined): boolean {
+  return character === " " || character === "\t" || character === "\r" || character === "\n";
 }
 
 function object(value: unknown, code: string): Record<string, unknown> {

@@ -147,6 +147,55 @@ test("independent verification parses every raw input and ignores builder constr
   );
 });
 
+test("independent raw parsing rejects non-JSON whitespace and noncanonical numbers", () => {
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const verifyBuild = (source: string): void => independentlyVerify({
+    plan, quote, roots, expected: artifact,
+    artifactInputs: { ...artifactInputs, buildInfoBytes: Buffer.from(source) },
+    ready: readyFor(plan.planId), nowSeconds: 110n,
+  });
+  const build = Buffer.from(artifactInputs.buildInfoBytes).toString("utf8");
+
+  assert.doesNotThrow(() => verifyBuild(build));
+  for (const whitespace of ["\u00a0", "\u000b", "\u000c", "\u0085", "\u2028", "\ufeff"]) {
+    assert.throws(
+      () => verifyBuild(build.replace('"runs":200', `"runs"${whitespace}:200`)),
+      /malformed JSON/u,
+    );
+  }
+  for (const token of ["2e2", "200.0", "0200", "-0", "+200", "9007199254740992"]) {
+    assert.throws(
+      () => verifyBuild(build.replace('"runs":200', `"runs":${token}`)),
+      /malformed JSON/u,
+    );
+  }
+});
+
+test("independent raw parsing exposes duplicate and prototype-named members", () => {
+  const plan = buildStablePlan(artifact, roots);
+  const quote = buildFeeQuote(plan, observation, roots);
+  const verifyBuild = (source: string): void => independentlyVerify({
+    plan, quote, roots, expected: artifact,
+    artifactInputs: { ...artifactInputs, buildInfoBytes: Buffer.from(source) },
+    ready: readyFor(plan.planId), nowSeconds: 110n,
+  });
+  const build = Buffer.from(artifactInputs.buildInfoBytes).toString("utf8");
+
+  for (const source of [
+    build.replace("{", '{"solcVersion":"0.8.36",'),
+    build.replace('"optimizer":{', '"optimizer":{"runs":200,'),
+  ]) {
+    assert.throws(() => verifyBuild(source), /duplicate JSON member/u);
+  }
+  for (const source of [
+    build.replace("{", '{"__proto__":{},'),
+    build.replace('"optimizer":{', '"optimizer":{"constructor":{},"prototype":{},"__proto__":{},'),
+  ]) {
+    assert.throws(() => verifyBuild(source), /digest differs from trust root/u);
+  }
+});
+
 test("build provenance fields are bound to trust roots", () => {
   const boundRoots = {
     ...roots,
