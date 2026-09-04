@@ -18,6 +18,7 @@ import {
   custodyDescriptorChild as rollbackDescriptorChild,
   custodyDescriptorDirectory,
   registerCustodyDescriptor,
+  updateCustodyDescriptor,
 } from "../runtime/custody.mjs";
 
 import {
@@ -332,6 +333,11 @@ function stageRollbackRemovalUnchecked(quarantine, logicalPath, expectedKind, on
       fstatSync(planned.descriptor, { bigint: true }),
       logicalPath,
       { transition: true },
+    );
+    updateCustodyDescriptor(
+      planned.descriptor,
+      realpathSync(stagedPath),
+      staged,
     );
     if (expectedKind === "directory" && rollbackDirectoryHasEntries(planned.descriptor)) {
       throw new Error("ROLLBACK_FORBIDDEN_DIRECTORY_RESIDUE path=" + logicalPath);

@@ -180,8 +180,8 @@ test("held removal descriptors tolerate child staging metadata changes on a plan
   }
 });
 
-test("every removal-phase failure preserves forbidden residue and raw syscall identities", () => {
-  for (const mode of ["forbidden-residue", "raw-syscall"]) {
+test("staged removal custody authenticates its destination and preserves replacements", () => {
+  for (const mode of ["forbidden-residue", "raw-syscall", "replacement"]) {
     const temporaryRoot = temporaryDirectory("agtmai-rollback-removal-failure-root-");
     const temporaryParent = mkdtempSync(join(
       temporaryRoot,
@@ -222,17 +222,28 @@ test("every removal-phase failure preserves forbidden residue and raw syscall id
             staged = join(realpathSync(dirname(details.stagedPath)), basename(details.stagedPath));
             if (mode === "forbidden-residue") {
               writeFileSync(join(details.sourcePath, "foreign"), "foreign-survives\n");
+            } else if (mode === "raw-syscall") {
+              renameSync(details.sourcePath, rawOriginal);
             } else {
               renameSync(details.sourcePath, rawOriginal);
+              mkdirSync(details.sourcePath);
+              writeFileSync(
+                join(details.sourcePath, "replacement"),
+                "replacement-survives\n",
+              );
             }
           },
         }),
         (error) => {
           primaryFailure = error;
-          return mode === "forbidden-residue"
-            ? /ROLLBACK_REMOVAL_PHASE_FAILED.*ROLLBACK_FORBIDDEN_DIRECTORY_RESIDUE/u
-              .test(error.message)
-            : /ROLLBACK_REMOVAL_PHASE_FAILED.*ENOENT/u.test(error.message);
+          if (mode === "forbidden-residue") {
+            return /ROLLBACK_REMOVAL_PHASE_FAILED.*ROLLBACK_FORBIDDEN_DIRECTORY_RESIDUE/u
+              .test(error.message);
+          }
+          if (mode === "raw-syscall") {
+            return /ROLLBACK_REMOVAL_PHASE_FAILED.*ENOENT/u.test(error.message);
+          }
+          return /ROLLBACK_REMOVAL_SUBSTITUTED/u.test(error.message);
         },
       );
       const result = finalizeRollbackTemporaryParent({
@@ -244,9 +255,18 @@ test("every removal-phase failure preserves forbidden residue and raw syscall id
       assert.equal(result.cleanup.status, "preserved", mode);
       assert.equal(existsSync(temporaryParent), true, mode);
       if (mode === "forbidden-residue") {
+        assert.equal(existsSync(owned), false);
+        assert.equal(lstatSync(staged).isDirectory(), true);
         assert.equal(readFileSync(join(staged, "foreign"), "utf8"), "foreign-survives\n");
+      } else if (mode === "raw-syscall") {
+        assert.equal(lstatSync(rawOriginal).isDirectory(), true);
+        assert.equal(existsSync(staged), false);
       } else {
         assert.equal(lstatSync(rawOriginal).isDirectory(), true);
+        assert.equal(
+          readFileSync(join(owned, "replacement"), "utf8"),
+          "replacement-survives\n",
+        );
         assert.equal(existsSync(staged), false);
       }
     } finally {
