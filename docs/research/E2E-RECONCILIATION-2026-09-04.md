@@ -3,7 +3,83 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 15:28 UTC
+## Latest reconciliation: 15:45 UTC
+
+Accepted integration source remains31e909f72d5470613d8875ed9266adb482ddff85.
+ActualMac EVM86/86 stays valid only for its earlier accepted source.
+No Slither/Solana/recovery candidate from this turn is integrated.
+
+- Solana123 full patch was recovered from its task-specific assistant final
+  answer after exact session/cwd verification. Terminal JSON contained only
+  a blocked summary, not the promised patch. No auth/key/reasoning records
+  were exposed. Recovered source is preserved as
+  .tools/hosted-evidence/2026-09-04/recovered-123-finals.md, SHA256
+  5581a8d04574f7c9c376af239926ee1db86b4747e0d81db96892c9569bf87301.
+  Applied ONLY tooling/local-solana files; stale docs/PLAN hunk not applied.
+  New isolated candidateabf8377303d1b4628d032023904801c55e8125ef, parent6b877,
+  eightfiles+628/-68. Once-only descriptor finalization and typed committed/
+  uncertain publication errors avoid unsafe close retry and competing failure
+  publication. Separate monotonic validator termination follows kernel start
+  identity afterTERM while authenticating before every signal.
+  The publication semantics are a candidate requiring independent validation,
+  NOT an accepted relaxation of READY/CI/verifier guarantees.
+  MainMac six-file test set84total79pass5Linux-onlyskips,0fail,11.49s.
+  Main then added2 actualrunFixture committed/uncertain error scenarios;
+  runner13/13,0skips; original listener replacement test retained. One initial
+  lint error on AggregateError cause fixed by preserving caught publication
+  cause and original failure as first ordered error. TS7/lint/diffcheck pass.
+  No combined currentAgave or root gate claimed. Review126 runningPID2039219.
+  Bundle prerequisite6b877, SHA256
+  af89b732214ede4cf061b0b55b4f490980d21f46c3cb4e52520e39fab63cae94.
+- Slither122 AMEND exacte9292: P1 outer staging cleanup is after claimed
+  commit and can leave cleanREADY on overallfailure; P1 chmod/stat failure
+  before destination-entry registration can orphan READY; P2 READY close can
+  mask primary failure. ExistingMac141/141 did not cover those boundaries.
+ 125 source-patch writer launchedPID2022248 frome9292. Full source packet
+  supplied; deliverable is a complete patch proposal, not tool execution,
+  avoiding useless blocked-goal continuations when source packet is available.
+  No new125 patch applied yet. Review122 source-basedNOTRUN afterfirstbwrap.
+  ResultSHA2561a4024f0519c9b974f47a6560ae9c0d6ac2c091d177d999037b611fe4779ec90.
+- Custody120 remains running/alive on47fe, reviewing WHOLE filesystem/rollback
+  base. Do not extend118's narrowACCEPT to unacceptedf2d. No duplicate reviewer.
+- Planner121 finished read-only. Complete result is preserved in
+  MAIN-RECONCILIATION-PLAN-2026-09-04.md. Recommends exact upstream ancestry
+  merge after source lanes stabilize, preserving pins and source, importing
+  managed docs/ReviewRouter byte-exactly, semantically updating consumer-owned
+  document metadata and adding only exact docs-protocol0.2.0 lock entries.
+  No merge, install, workflowexecution, GitHubwrite or branch-protection change
+  performed. Suggested owner/process concerns remain advisory; do not invent
+  approval rituals for already-authorized in-scope zero-cost implementation.
+ 121 resultSHA2565a8baf77f39e4858f6f449d26d7358437e997e1d8fe9025430ffdfad8091c529.
+- Disk cleanup: removed six inactive duplicate Node directories from completed
+ 85/86/87/88/101/104, then13 exact old .bootstrap-node-part directories under
+  isolated toolchain-remediation10. Both preflights verified machine-id, real
+  paths, untracked status, current binary hash, retained pinned archive hash,
+  and no process/cwd/exe/open-FD/command references. Partial roots additionally
+  contained only the exact Node tree+same archive and were older than1hour.
+  Old10 registry was unknown, so no source/job was deleted or relabeled;
+  only proven inactive reconstructible tool temporary directories were removed.
+  Scripts /tmp/agtmai-clean-duplicate-node124.mjs and
+  /tmp/agtmai-clean-bootstrap-partials124b.mjs hold the explicit target lists.
+  Archive /var/data/agtmai-pinned-archive-cache-20260904.D9lVCp/
+  node-v24.20.0-linux-x64.tar.xz remains, SHA256
+  2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2.
+  User informed all removed tools are reconstructible. Source, jobs, evidence,
+  bundles, active102/103/105 tool copies and original checkout were preserved.
+  Disk rose to8.3GiB; fresh126 launch8.0GiB,12.2GiB RAM available,3.7GiB swap.
+- Latest15:44 observation120/125/126 allrunning/alive on oldhost, account-m,
+  sol xhigh reviewers/medium writer, allpriority/fast.5GB guard unchanged.
+  No active local test sessions remain. Isolated source repos trackedclean
+  with only their known development node_modules symlink untracked.
+  Automation remains five-minute heartbeat using this latest ledger.
+
+Next: consume120/125/126, apply safe accepted packets and focused tests.
+Finish full original scope: S5/S11/S13 and liveDocker/cgroup, SolanaAgave and
+L5/L6, R3-R8 and actualDarwin recovery, semanticmain merge, full exacthead
+root/CI plus four specialist and sequential holistic reviews. Full E2E is
+not complete and no production readiness is claimed.
+
+## Earlier reconciliation: 15:28 UTC
 
 Accepted integration source remains31e909f7, actualMac EVM86/86,0skips.
 No new Slither/Solana/recovery source is integrated.

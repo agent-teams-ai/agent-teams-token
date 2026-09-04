@@ -5,6 +5,13 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+15:45 UTC: Solanaabf837 candidate has79Mac pass/5Linux-onlyskips plus13/13
+runner cases, TS7/lint pass;126 independently reviews its publication semantics.
+Slither122 AMEND three uncovered publication failures ->writer125.120 still
+reviews full recovery base.121 main merge strategy is recorded, not applied.
+Removed only19 reconstructible inactive Node/staging copies, archive retained;
+oldhost8GiB free at latestlaunch.120/125/126 alive/fast; originalscope stillOPEN.
+
 15:28 UTC: custody118 ACCEPT47fe delta;120 now reviews whole recovery base.
 Slither e9292 passes141/141Mac,0skips, TS7/lint;122 independently reviews.
 Solana119 UNAPPLIED because uncertain close is retried;123 corrects it on6b877.

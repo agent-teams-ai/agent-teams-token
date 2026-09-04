@@ -2,6 +2,10 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest15:45: Solanaabf837 candidate79Mac pass/5Linux skips+runner13/13 ->126;
+Slither122AMEND3findings ->125;120 wholebase review.121 main merge plan
+recorded, not executed.19 inactive tool duplicates/partials removed safely;
+archive/source/evidence retained, oldhost8GiB free.120/125/126 alive/fast.
 Latest15:28:118 ACCEPT47fe delta ->120 wholebase review; Slither e9292
 141/141Mac under122; Solana119UNAPPLIED unsafe close retry ->123.121 main
 reconciliation planner. Fourjobs alive/fast, source31e909 unchanged.
