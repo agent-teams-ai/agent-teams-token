@@ -19,7 +19,7 @@ function inspect(path) {
   try {
     return lstatSync(path);
   } catch {
-    return undefined;
+    return;
   }
 }
 
@@ -36,13 +36,13 @@ function isWithin(parent, child, allowEqual = false) {
 }
 
 function canonicalAlias(absolute, platform) {
-  if (platform !== "darwin") return undefined;
+  if (platform !== "darwin") {return;}
   for (const [alias, target] of [["/var", "/private/var"], ["/tmp", "/private/tmp"]]) {
     if (isWithin(alias, absolute, true) && inspect(alias)?.isSymbolicLink() && trustedAliasTarget(alias, target)) {
       return target + absolute.slice(alias.length);
     }
   }
-  return undefined;
+  return;
 }
 
 export function canonicalizeTrustedPath(path, { platform = process.platform, hostPlatform: hostOs } = {}) {
@@ -96,6 +96,6 @@ export function assertOwnedDirectoryChain(path, { platform = process.platform, h
   for (const part of parts) {
     current = current === "/" ? "/" + part : join(current, part);
     const st = inspect(current);
-    if (st) assertDirectoryIdentity(current, absolute, platform, st);
+    if (st) {assertDirectoryIdentity(current, absolute, platform, st);}
   }
 }

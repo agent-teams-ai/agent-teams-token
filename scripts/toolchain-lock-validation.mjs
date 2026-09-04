@@ -1,7 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { validateExpectedFileHashes, validateFixtureToolShape, validateSecurityImage } from "./toolchain-policy.mjs";
 
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+function hasControlCharacter(value) {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
+}
 
 export function validateLock(lock) {
   if (lock.schemaVersion !== 2) {throw new Error("TOOLCHAIN_LOCK_SCHEMA expected=2");}
@@ -117,7 +122,7 @@ function validateVersionChecks(name, platform, artifact) {
 }
 
 function assertRelativePath(name, platform, value) {
-  if (typeof value !== "string" || value.length === 0 || CONTROL_CHARACTER.test(value)
+  if (typeof value !== "string" || value.length === 0 || hasControlCharacter(value)
     || value.includes("\\") || isAbsolute(value)) {
     throw new Error(`TOOLCHAIN_LOCK_RELATIVE_PATH tool=${name} platform=${platform}`);
   }
