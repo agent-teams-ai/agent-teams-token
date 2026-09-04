@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
   writeSync,
@@ -14,7 +15,7 @@ import { basename, dirname, join } from "node:path";
 import { validateLock } from "../toolchain.mjs";
 
 export function makeFixture() {
-  const root = mkdtempSync(join(tmpdir(), "agtmai-toolchain-test-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-toolchain-test-")));
   const artifacts = join(root, "artifacts");
   const toolsRoot = join(root, "tools");
   mkdirSync(artifacts);
@@ -23,7 +24,7 @@ export function makeFixture() {
   mkdirSync(nodePayload, { recursive: true });
   writeExecutable(
     join(nodePayload, "node"),
-    `#!/bin/sh\ncase "\${1:-}" in *pnpm.cjs) exec '${process.execPath}' "$@" ;; *) echo 'v24.20.0' ;; esac\n`,
+    `#!/bin/sh\nif [ "\${1:-}" = --version ]; then echo 'v24.20.0'; else exec '${process.execPath}' "$@"; fi\n`,
   );
   mkdirSync(join(dirname(nodePayload), "lib"));
   writeFileSync(join(dirname(nodePayload), "lib", "runtime-metadata.json"), '{"runtime":"fixture"}\n');

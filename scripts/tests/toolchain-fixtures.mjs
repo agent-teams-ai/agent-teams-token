@@ -8,6 +8,7 @@ export function brokenDownloader(_url, partFd) {
 export function artifact({ name, path, archive, installDirectory, expectedFiles, versionPath, pattern }) {
   return {
     url: `https://fixtures.invalid/${name}`,
+    installationAuthority: "pinned-archive-complete-tree-v1",
     checksumSource: "https://fixtures.invalid/checksums",
     sha256: digest(path),
     archive,
@@ -27,6 +28,7 @@ export function packageTool(version) {
 export function packageManagerTool(path) {
   return {
     scope: "genesis-core-package-manager",
+    installationAuthority: "pinned-archive-complete-tree-v1",
     version: "11.24.0",
     source: "https://fixtures.invalid/pnpm-test.tgz",
     sha256: digest(path),

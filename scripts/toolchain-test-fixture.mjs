@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -175,7 +175,7 @@ function fixtureLock(archives) {
 }
 
 export function makeFixture() {
-  const root = mkdtempSync(join(tmpdir(), "agtmai-toolchain-test-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-toolchain-test-")));
   const artifacts = join(root, "artifacts");
   const toolsRoot = join(root, "tools");
   mkdirSync(artifacts);
@@ -216,11 +216,20 @@ export function assertProtectedPnpmResolvesAuthenticatedTools() {
     writeFileSync(packagePath, `${JSON.stringify({
       name: "protected-pnpm-probe", private: true,
       scripts: {
-        probe: "forge --fixture-probe > probe-output && anvil --fixture-probe >> probe-output && solc --version >> probe-output",
+        probe: "forge --fixture-probe > probe-output && anvil --fixture-probe >> probe-output && solc --version >> probe-output && printf '%s' \"$PATH\" > path-output",
       },
     })}\n`);
     process.env.PATH = hostile;
     assert.equal(run(), 0);
+    const invocationPath = readFileSync(join(project, "path-output"), "utf8").split(":");
+    assert.equal(invocationPath.includes("/usr/local/bin"), false);
+    assert.equal(invocationPath.includes(join(fixture.toolsRoot, "bin")), true);
+    assert.equal(invocationPath.includes(hostile), false);
+    assert.equal(invocationPath.includes(join(fixture.toolsRoot, "foundry-test-linux-x64")), true);
+    const injectedCommand = join(fixture.toolsRoot, "bin", "unauthenticated-command");
+    writeExecutable(injectedCommand, "#!/bin/sh\nexit 0\n");
+    assert.throws(run, /TOOLCHAIN_WRAPPER_DIRECTORY_UNAUTHENTICATED/u);
+    unlinkSync(injectedCommand);
     assert.equal(
       readFileSync(join(project, "probe-output"), "utf8"),
       "authenticated-forge\nauthenticated-anvil\nVersion: 0.8.36+commit.8a079791.Linux.g++\n",

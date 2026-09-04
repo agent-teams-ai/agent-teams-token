@@ -7,6 +7,13 @@ import test from "node:test";
 
 import { cleanupPreparedPayload, prepareVerifiedPayload } from "../toolchain-archive.mjs";
 import { observeConsumerDescriptors } from "./rollback-consumer-close-fixture.mjs";
+import { registerArchiveSnapshotTests } from "./toolchain-archive-snapshot.test.mjs";
+import { registerInstallationFinalizationTests } from "./toolchain-installation-finalization.test.mjs";
+import { registerVersionBoundaryTests } from "./toolchain-version-boundary.test.mjs";
+
+registerArchiveSnapshotTests();
+registerInstallationFinalizationTests();
+registerVersionBoundaryTests();
 
 function archiveFixture() {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "agtmai-archive-finalization-")));

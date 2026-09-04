@@ -60,6 +60,7 @@ function validateFixtureTool(lock, name) {
 }
 
 function validatePackageManager(tool) {
+  validateInstallationAuthority("pnpm", "all", tool);
   if (
     tool?.scope !== "genesis-core-package-manager"
     || typeof tool.version !== "string"
@@ -87,6 +88,7 @@ function validateCoreTool(lock, name) {
 
 function validateArtifact(name, platform, artifact, { requireInnerHashes = false } = {}) {
   if (!artifact) {throw new Error(`TOOLCHAIN_LOCK_COVERAGE tool=${name} platform=${platform}`);}
+  validateInstallationAuthority(name, platform, artifact);
   if (!["executable", "tar.bz2", "tar.gz", "tar.xz"].includes(artifact.archive)) {
     throw new Error(`TOOLCHAIN_LOCK_ARCHIVE tool=${name} platform=${platform}`);
   }
@@ -109,6 +111,12 @@ function validateArtifact(name, platform, artifact, { requireInnerHashes = false
   validateVersionChecks(name, platform, artifact);
   if (/\b(?:latest|nightly|master|main)\b/i.test(`${artifact.url} ${artifact.installDirectory}`)) {
     throw new Error(`TOOLCHAIN_LOCK_FLOATING tool=${name} platform=${platform}`);
+  }
+}
+
+function validateInstallationAuthority(name, platform, artifact) {
+  if (artifact?.installationAuthority !== "pinned-archive-complete-tree-v1") {
+    throw new Error(`TOOLCHAIN_LOCK_INSTALLATION_AUTHORITY tool=${name} platform=${platform}`);
   }
 }
 

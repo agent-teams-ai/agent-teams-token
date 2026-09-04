@@ -8,6 +8,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   renameSync,
   rmSync,
 } from "node:fs";
@@ -23,6 +24,7 @@ import {
 import {
   cleanupPreparedPayload,
   prepareVerifiedPayload,
+  withPreparedPayload,
 } from "./toolchain-archive.mjs";
 import {
   inspectInstallation,
@@ -182,7 +184,7 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
       toolsRoot,
       missingCode: "TOOLCHAIN_OFFLINE_CACHE_MISS",
     });
-    try {
+    const message = withPreparedPayload(prepared, () => {
       const destination = containedPath(toolsRoot, artifact.installDirectory);
       assertOwnedDirectoryChain(destination, { platform: host });
       const present = inspectInstallation({
@@ -198,10 +200,7 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
         lock,
       });
       if (present.ok) {
-        process.stdout.write(
-          `INSTALL_PRESENT tool=${name} platform=${platform} version=${present.actualVersion} sha256=${artifact.sha256}\n`,
-        );
-        continue;
+        return `INSTALL_PRESENT tool=${name} platform=${platform} version=${present.actualVersion} sha256=${artifact.sha256}\n`;
       }
       installPreparedArtifact({
         name,
@@ -213,13 +212,12 @@ export function installArtifacts({ lock, platform, toolsRoot, offline, scope = "
         toolsRoot,
         lock,
       });
-      process.stdout.write(
+      return (
         `INSTALL_OK tool=${name} platform=${platform} version=${tool.version} sha256=${artifact.sha256}`
-        + `${present.code === "missing" ? "" : ` replaced=${present.code}`}\n`,
+        + `${present.code === "missing" ? "" : ` replaced=${present.code}`}\n`
       );
-    } finally {
-      cleanupPreparedPayload(prepared);
-    }
+    });
+    process.stdout.write(message);
   }
 }
 
@@ -252,7 +250,7 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
       toolsRoot,
       missingCode: "TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE",
     });
-    try {
+    const message = withPreparedPayload(prepared, () => {
       const destination = containedPath(toolsRoot, artifact.installDirectory);
       assertOwnedDirectoryChain(destination, { platform: host });
       const installation = inspectInstallation({
@@ -268,14 +266,13 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
         lock,
       });
       if (!installation.ok) {
-        throw new Error(`TOOLCHAIN_INSTALL_INVALID tool=${name} platform=${platform} reason=${installation.code}`);
+        throw new Error(`TOOLCHAIN_INSTALL_INVALID tool=${name} platform=${platform} reason=${installation.code}`, { cause: installation.cause });
       }
-      process.stdout.write(
-        `VERIFY_OK tool=${name} platform=${platform} version=${installation.actualVersion} sha256=${artifact.sha256}\n`,
+      return (
+        `VERIFY_OK tool=${name} platform=${platform} version=${installation.actualVersion} sha256=${artifact.sha256}\n`
       );
-    } finally {
-      cleanupPreparedPayload(prepared);
-    }
+    });
+    process.stdout.write(message);
   }
 }
 
@@ -299,7 +296,7 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
       return prepared;
     };
 
-    const authenticatedPath = [containedPath(toolsRoot, "bin")];
+    const authenticatedPath = [];
     for (const name of lock.coreTools) {
       const tool = lock.tools[name];
       const artifact = tool.platforms[platform];
@@ -314,6 +311,14 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
 
     const pnpmTool = lock.tools.pnpm;
     authenticate("pnpm", pnpmTool, pnpmTool);
+    // Both wrapper files were authenticated by the Node/pnpm inspections.
+    // Admit the directory only if there are no additional command names.
+    const wrapperDirectory = containedPath(toolsRoot, "bin");
+    assertOwnedDirectoryChain(wrapperDirectory);
+    if (JSON.stringify(readdirSync(wrapperDirectory).toSorted()) !== JSON.stringify(["node", "pnpm"])) {
+      throw new Error("TOOLCHAIN_WRAPPER_DIRECTORY_UNAUTHENTICATED");
+    }
+    authenticatedPath.push(wrapperDirectory);
     for (const name of lock.fixtureTools) {
       const tool = lock.tools[name];
       const artifact = tool.platforms[platform];
@@ -376,7 +381,7 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
   }
 
   const cleanupFailures = [];
-  for (const prepared of preparedAuthorities.reverse()) {
+  for (const prepared of preparedAuthorities.toReversed()) {
     try {cleanupPreparedPayload(prepared);}
     catch (error) {cleanupFailures.push(error);}
   }
@@ -400,27 +405,24 @@ function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, loc
     toolsRoot,
     missingCode: "TOOLCHAIN_PINNED_PAYLOAD_AUTHORITY_UNAVAILABLE",
   });
-  const installation = inspectInstallation({
-    name,
-    tool,
-    artifact,
-    authorityFiles: prepared.files,
-    authorityInventory: prepared.inventory,
-    authorityInventorySha256: prepared.inventorySha256,
-    platform,
-    destination,
-    toolsRoot,
-    lock,
-  });
-  if (!installation.ok) {
-    try {cleanupPreparedPayload(prepared);}
-    catch (cleanupError) {
-      throw new AggregateError(
-        [new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`), cleanupError],
-        `TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`,
-      );
+  try {
+    const installation = inspectInstallation({
+      name,
+      tool,
+      artifact,
+      authorityFiles: prepared.files,
+      authorityInventory: prepared.inventory,
+      authorityInventorySha256: prepared.inventorySha256,
+      platform,
+      destination,
+      toolsRoot,
+      lock,
+    });
+    if (!installation.ok) {
+      throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`, { cause: installation.cause });
     }
-    throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=${installation.code}`);
+  } catch (error) {
+    return withPreparedPayload(prepared, () => { throw error; });
   }
   return prepared;
 }

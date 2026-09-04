@@ -7,6 +7,21 @@ import { loadLock, validateLock } from "../toolchain.mjs";
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
+test("every downloadable artifact requires exact complete-tree authority", () => {
+  const original = loadLock(join(repositoryRoot, "tooling/toolchain.lock.json"));
+  for (const name of [...original.coreTools, ...original.fixtureTools, "pnpm"]) {
+    for (const platform of original.platforms) {
+      for (const value of [undefined, null, "", "pinned-archive-v0"]) {
+        const lock = structuredClone(original);
+        const artifact = name === "pnpm" ? lock.tools.pnpm : lock.tools[name].platforms[platform];
+        if (value === undefined) { delete artifact.installationAuthority; }
+        else { artifact.installationAuthority = value; }
+        assert.throws(() => validateLock(lock), /TOOLCHAIN_LOCK_INSTALLATION_AUTHORITY/u);
+      }
+    }
+  }
+});
+
 test("committed lock schema covers Core, Solana fixture and future tools separately", () => {
   const lock = loadLock(join(repositoryRoot, "tooling/toolchain.lock.json"));
   assert.deepEqual(lock.platforms, ["darwin-arm64", "linux-x64"]);

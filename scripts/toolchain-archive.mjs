@@ -13,6 +13,7 @@ import {
   readlinkSync,
   readSync,
   readdirSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -32,6 +33,7 @@ import {
 import { throwDescriptorCloseFailures } from "./rollback/runtime/descriptor-close.mjs";
 import { allowlistedChildEnvironment } from "./toolchain-environment.mjs";
 import { toolchainProvenanceFile } from "./toolchain-provenance.mjs";
+import { canonicalizeTrustedPath } from "./toolchain-paths.mjs";
 
 export const completeTreeAuthority = "pinned-archive-complete-tree-v1";
 export const provenanceFile = toolchainProvenanceFile;
@@ -63,8 +65,8 @@ function openVerifiedArchive({ name, platform, artifact, archive, missingCode })
   try {
     descriptor = openSync(archive, constants.O_RDONLY | constants.O_NOFOLLOW);
     const identity = fstatSync(descriptor, { bigint: true });
-    if (!identity.isFile()) {
-      throw new Error(`TOOLCHAIN_ARCHIVE_UNSAFE tool=${name} platform=${platform} reason=not-regular-file`);
+    if (!identity.isFile() || identity.nlink !== 1n) {
+      throw new Error(`TOOLCHAIN_ARCHIVE_UNSAFE tool=${name} platform=${platform} reason=not-single-link-regular-file`);
     }
     const actual = sha256Descriptor(descriptor, identity.size);
     if (actual !== artifact.sha256) {
@@ -85,6 +87,7 @@ function openVerifiedArchive({ name, platform, artifact, archive, missingCode })
 function sameArchiveIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode
     && left.uid === right.uid && left.gid === right.gid && left.size === right.size
+    && left.nlink === right.nlink
     && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs
     && left.isFile() === right.isFile();
 }
@@ -235,10 +238,14 @@ export function prepareVerifiedPayload({
   onArchiveVerified,
   onCleanupBoundary,
 }) {
+  // Resolve only the trusted host aliases before allocating custody. Arbitrary
+  // symlink ancestors still fail closed in canonicalizeTrustedPath.
+  toolsRoot = canonicalizeTrustedPath(toolsRoot);
   const stageRoot = mkdtempSync(join(toolsRoot, ".install-part-"));
   const cleanupHandle = createPreparationCleanupHandle(stageRoot, toolsRoot);
   const staged = join(stageRoot, "payload");
   let verified;
+  let snapshot;
   let prepared;
   let primaryFailure;
   let internalTreeUpdateAllowed = false;
@@ -246,16 +253,36 @@ export function prepareVerifiedPayload({
     mkdirSync(staged);
     captureCleanupTreeSnapshot(cleanupHandle);
     verified = openVerifiedArchive({ name, platform, artifact, archive, missingCode });
+    internalTreeUpdateAllowed = true;
+    const snapshotPath = join(staged, ".archive-snapshot");
+    copyDescriptor(verified.descriptor, verified.identity.size, snapshotPath);
+    snapshot = openSync(snapshotPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const snapshotIdentity = fstatSync(snapshot, { bigint: true });
+    if (!snapshotIdentity.isFile() || snapshotIdentity.nlink !== 1n
+      || sha256Descriptor(snapshot, snapshotIdentity.size) !== artifact.sha256) {
+      throw new Error("TOOLCHAIN_ARCHIVE_SNAPSHOT_UNVERIFIED");
+    }
+    unlinkSync(snapshotPath);
+    if (fstatSync(snapshot, { bigint: true }).nlink !== 0n) {
+      throw new Error("TOOLCHAIN_ARCHIVE_SNAPSHOT_LINKED");
+    }
+    if (fstatSync(snapshot, { bigint: true }).size !== snapshotIdentity.size
+      || sha256Descriptor(snapshot, snapshotIdentity.size) !== artifact.sha256) {
+      throw new Error("TOOLCHAIN_ARCHIVE_SNAPSHOT_UNVERIFIED");
+    }
+    updateCleanupTreeSnapshot(cleanupHandle);
+    internalTreeUpdateAllowed = false;
     onArchiveVerified?.({ archive, descriptor: verified.descriptor });
+    assertArchiveStable({ name, platform, artifact, archive, verified });
     assertCapturedCleanupTreeSnapshot(cleanupHandle);
     internalTreeUpdateAllowed = true;
     if (artifact.archive === "executable") {
       const target = join(staged, artifact.expectedFiles[0]);
       mkdirSync(dirname(target), { recursive: true });
-      copyDescriptor(verified.descriptor, verified.identity.size, target);
+      copyDescriptor(snapshot, snapshotIdentity.size, target);
       chmodSync(target, 0o755);
     } else {
-      extractDescriptor(verified.descriptor, artifact, staged);
+      extractDescriptor(snapshot, artifact, staged);
     }
     assertArchiveStable({ name, platform, artifact, archive, verified });
     const source = artifact.archive === "executable" ? staged : installationSource(staged);
@@ -292,6 +319,7 @@ export function prepareVerifiedPayload({
   const closingArchive = verified?.descriptor;
   verified = undefined;
   const failures = [];
+  collectCustodyDescriptorCloseFailure(snapshot, failures);
   collectCustodyDescriptorCloseFailure(closingArchive, failures);
   if (primaryFailure !== undefined || failures.length > 0) {
     discardFailedPreparation(
@@ -339,6 +367,21 @@ export function cleanupPreparedPayload(prepared, options = {}) {
     throw new Error("TOOLCHAIN_CLEANUP_HANDLE_REQUIRED");
   }
   return cleanupIdentityBoundDirectory(prepared.cleanupHandle, options);
+}
+
+export function withPreparedPayload(prepared, action) {
+  let result;
+  let primaryFailure;
+  try { result = action(); }
+  catch (error) { primaryFailure = error; }
+  const failures = [];
+  try { cleanupPreparedPayload(prepared); }
+  catch (error) { failures.push(error); }
+  if (failures.length > 0 && primaryFailure === undefined && result?.ok === false) {
+    primaryFailure = result.cause ?? new Error(`TOOLCHAIN_INSPECTION_FAILED reason=${result.code} actual=${result.actualVersion}`);
+  }
+  throwDescriptorCloseFailures(failures, "TOOLCHAIN_PAYLOAD_FINALIZATION_FAILED", primaryFailure);
+  return result;
 }
 
 export function assertPreparedArtifactAuthority(prepared, { name, platform, artifact }) {
