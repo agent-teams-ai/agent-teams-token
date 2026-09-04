@@ -5,6 +5,12 @@ it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
 
+15:12 UTC: custody47fe passes50/50Mac,0skips+lint, reviewed by118. Slither114
+patch is deliberately UNAPPLIED: unsafe recursive cleanup/silent errors go to117.
+Solana116 confirms prior fixes but AMEND leaves twoP2s: postREADY close failure
+and dying-validator reclaim transition;119 owns them. Linux73/74,0skips, notgreen.
+Automation now reads the newest ledger for jobs/SHA instead of stale snapshots.
+
 15:05 UTC: Solana6b8770c7 passes69Mac tests with5Linux-onlyskips, TS7/lint;
 111 plus main READY-link rollback and actual config fixtures, underreview116.
 Slither112 AMEND found late-cancellation falseREADY, owned by114. Custody113

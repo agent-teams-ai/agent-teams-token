@@ -3,7 +3,56 @@
 This ledger records observed local/hosted state, not final acceptance.
 It does not approve tokenomics, vesting, governance, CCIP or public networks.
 
-## Latest reconciliation: 15:05 UTC
+## Latest reconciliation: 15:12 UTC
+
+Accepted integration source is still31e909f7, actualMac EVM86/86,0skips.
+No new isolated Slither/Solana/recovery source is integrated here.
+
+- Custody115 source packet applied in /tmp/agtmai-custody-76c-mac. Main fixed
+  four test roots to realpathSync: initialMac6/9 failed because /var spelling
+  did not match captured/private paths, so injected replacements never ran.
+  Correctedfocused9/9, then expanded50/50,0skips,58.84seconds, lint/diffcheck
+  passed. Current candidate47fe823a944292784868a3f80bb790cdbbd242f0,
+  parent7437,2files+112/-5. Ancestor acquisition now checks stable object
+  kind/dev/ino/mode/uid/gid; owned target still checks complete metadata.
+  Separate reviewer118 launched PID1626045 on exact47fe.
+  Bundle /tmp/agtmai-custody115-candidate.bundle prerequisite7437, SHA256
+  49fed1fdc67c1149d714ea7cece3fede206f5d7965d7d012879d8b1ac66e5171.
+  Worker115 JSON SHA256c3922e86387ff00e73701db742088164d719c99631dbcd1e00da0445bc65a8e2.
+- Slither114 returned a full source patch, testsNOTRUN afterbwrap, NOTAPPLIED.
+  Main rejected its new recursive failed-output cleanup based only on root
+  identity, because it can delete a foreign child; it also silently swallows
+  cleanup errors and leaves cancellation duringREADY/postwrite awaits unchecked.
+ 117 is a new boundedwriter fromunchangedb74e, PID1610590, revising114 with
+  captured owned-entry cleanup, primary+secondary errors, latecommit checks and
+  actual barrier/foreignsuccessor regressions. Generic prior fault coverage
+  mustremain; no general native cleanup platform requested.
+ 114 JSON SHA256ad709a7046f49f0a377c590d177e95200203dbfd98e54f5e5142f243489d0637.
+- Solana116 AMEND exact6b877: all previous config-at-use, finalnamedreadback,
+  failedREADYlink, foreignsuccessor and supervisor validation closures verified.
+  Remaining P2: withPublicationParent descriptor-close failure AFTER READY
+  makes actualpublish/publishFailure reject with ownREADYstillpresent. Independent
+  realstoreprobe demonstratedthis. Other inheritedP2: afterSIGTERM validator
+  canceaseauthenticating before/procreportsexit, causingSOLANA_RECLAIM_IDENTITY.
+  Linuxfocused74total73pass1fail,0skips,~10seconds; failureisreclaimtransition.
+ 119 nowownsONLY these2findings from6b877, launchedPID1644196. Do not
+  reinterpret lostidentityas permissiontosignal anotherPID, weakeninitialauth,
+  swallowcloseerrors orpromiseimpossibleatomicunlink. FullcurrentAgave remainsopen.
+ 116 result preserved in .tools/hosted-evidence/2026-09-04/
+  agtmai-r212-solana-review116-20260904.latest-result.json.
+- Active lanes are117 Slitherwriter,118 custodyreviewer,119 Solanawriter,
+  allpriority/fast, mediumimplementation/xhighreview on oldhostaccount-m.
+  Machine-idandadmissionchecked eachlaunch; latest~9.4GiBdisk,~11.8GiBavailable
+  RAM/~4GiBfreeswap. No tools unpacked, no service/auth/sandboxchanges.
+  Automation remains5minACTIVE/failed_runs_only but nowusesa durableprompt:
+  always readthislatestledger forcurrentSHA/jobs, not mutable embedded snapshots.
+  Originaluserworktree remainsuntouched. Fullscopeaudit requirements stayopen.
+
+Next: consume117/118/119, applyreviewedpackets andfocusedplatformtests, then
+complete wholebase/recoveryauthority, actualAgave/Docker, mainreconciliation
+and exactheadfullroot/CI/specialist/holistic gates. No fullacceptance isclaimed.
+
+## Earlier reconciliation: 15:05 UTC
 
 Accepted integration source remains31e909f7 (actualMac EVM86/86,0skips).
 The previous turn made source/evidence progress; this continuation also

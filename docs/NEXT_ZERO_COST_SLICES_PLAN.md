@@ -2,6 +2,9 @@
 
 Status as of 2026-09-04: NOT FULLY ACCEPTED. The 2026-08-29 local acceptance
 below is historical evidence, not a green result for the current candidate.
+Latest15:12: custody47fe Mac50/50 under118; Slither114UNAPPLIED ->117 safer
+latecancelpublication; Solana116AMEND ->119 postREADYfinalization/reclaimP2s.
+No new fullacceptance. Read latest reconciliation for exactcurrentevidence.
 Latest15:05: Solana6b87769pass5Linux-onlyskip+TS7/lint under116; Slither112
 AMEND latecancelREADY ->114; custody113 ACCEPT7437delta but inherited
 ancestor-metadata P1 ->115.114/115/116 alive/fast. Full E2E stillOPEN.
