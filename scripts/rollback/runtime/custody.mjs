@@ -1,5 +1,4 @@
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -142,17 +141,20 @@ function flags(kind, write = false) {
 
 function openDirectoryRecord(path) {
   const identity = custodyIdentity(lstatSync(path, { bigint: true }));
-  const descriptor = openSync(path, flags("directory"));
+  let descriptor = openSync(path, flags("directory"));
   try {
     if (identity.kind !== "directory") {
       throw new Error("ROLLBACK_CUSTODY_NOT_DIRECTORY");
     }
     assertCustodyIdentity(identity, fstatSync(descriptor, { bigint: true }));
     assertCustodyIdentity(identity, lstatSync(path, { bigint: true }));
-    return { canonicalPath: path, descriptor, identity };
+    const result = { canonicalPath: path, descriptor, identity };
+    descriptor = undefined;
+    return result;
   } catch (error) {
-    closeSync(descriptor);
-    throw error;
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors([closing], "ROLLBACK_CUSTODY_ACQUISITION_CLOSE_FAILED", error);
   }
 }
 
@@ -171,10 +173,13 @@ function ancestorsOf(path) {
     }
     return records;
   } catch (error) {
-    for (const record of records.toReversed()) {
-      closeSync(record.descriptor);
-    }
-    throw error;
+    const descriptors = records.toReversed().map((record) => record.descriptor);
+    records.length = 0;
+    closeCustodyDescriptors(
+      descriptors,
+      "ROLLBACK_CUSTODY_ACQUISITION_CLOSE_FAILED",
+      error,
+    );
   }
 }
 
@@ -238,13 +243,17 @@ export function createDirectoryCustody(requestedPath, options = {}) {
     }
     return handle;
   } catch (error) {
-    if (target !== undefined) {
-      closeSync(target.descriptor);
-    }
-    for (const ancestor of ancestors.toReversed()) {
-      closeSync(ancestor.descriptor);
-    }
-    throw error;
+    const descriptors = [
+      target?.descriptor,
+      ...ancestors.toReversed().map((ancestor) => ancestor.descriptor),
+    ];
+    target = undefined;
+    ancestors.length = 0;
+    closeCustodyDescriptors(
+      descriptors,
+      "ROLLBACK_CUSTODY_ACQUISITION_CLOSE_FAILED",
+      error,
+    );
   }
 }
 
@@ -311,20 +320,7 @@ export function closeDirectoryCustody(handle) {
   ];
   state.descriptor = undefined;
   state.ancestors = [];
-  const failures = [];
-  const close = (descriptor) => {
-    try {
-      // close(2) may have released the descriptor even when it reports EINTR;
-      // never retry and risk closing a subsequently reused descriptor number.
-      closeCustodyDescriptor(descriptor);
-    } catch (error) {
-      failures.push(error);
-    }
-  };
-  for (const descriptor of descriptors) {
-    close(descriptor);
-  }
-  throwDescriptorCloseFailures(failures, "ROLLBACK_CUSTODY_CLOSE_FAILED");
+  closeCustodyDescriptors(descriptors, "ROLLBACK_CUSTODY_CLOSE_FAILED");
 }
 
 export function registerCustodyDescriptor(descriptor, canonicalPath, identity) {
@@ -345,6 +341,53 @@ export function closeCustodyDescriptor(descriptor) {
   forgetCustodyDescriptor(descriptor);
   closeDescriptorOnce(descriptor);
 }
+
+export function collectCustodyDescriptorCloseFailure(descriptor, failures) {
+  if (!Number.isInteger(descriptor)) {
+    return;
+  }
+  try {
+    closeCustodyDescriptor(descriptor);
+  } catch (error) {
+    failures.push(error);
+  }
+}
+
+export function closeCustodyDescriptors(descriptors, message, primaryFailure) {
+  const failures = [];
+  for (const descriptor of descriptors) {
+    collectCustodyDescriptorCloseFailure(descriptor, failures);
+  }
+  throwDescriptorCloseFailures(failures, message, primaryFailure);
+}
+
+export function retainCustodyDescriptor(descriptor, message, validate) {
+  try {
+    validate(descriptor);
+    const result = descriptor;
+    descriptor = undefined;
+    return result;
+  } catch (error) {
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors([closing], message, error);
+  }
+}
+
+export function useCustodyDescriptor(descriptor, message, action) {
+  let result;
+  let primaryFailure;
+  try {
+    result = action(descriptor);
+  } catch (error) {
+    primaryFailure = error;
+  }
+  const closing = descriptor;
+  descriptor = undefined;
+  closeCustodyDescriptors([closing], message, primaryFailure);
+  return result;
+}
+
 export function updateCustodyDescriptor(descriptor, canonicalPath, identity) {
   const previous = descriptorRecords.get(descriptor);
   if (previous === undefined) {
@@ -405,16 +448,19 @@ export function openCustodyEntry(descriptor, component, options = {}) {
   if (!["directory", "file"].includes(before.kind)) {
     throw new Error("ROLLBACK_CUSTODY_ENTRY_TYPE_UNSAFE component=" + component);
   }
-  const held = openSync(path, flags(before.kind, options.write === true));
+  let held = openSync(path, flags(before.kind, options.write === true));
   try {
     assertCustodyIdentity(before, fstatSync(held, { bigint: true }));
     assertCustodyIdentity(before, lstatSync(path, { bigint: true }));
     registerCustodyDescriptor(held, join(parent.canonicalPath, component), before);
     assertCustodyDescriptor(descriptor);
-    return { descriptor: held, identity: before, path };
+    const result = { descriptor: held, identity: before, path };
+    held = undefined;
+    return result;
   } catch (error) {
-    closeSync(held);
-    throw error;
+    const closing = held;
+    held = undefined;
+    closeCustodyDescriptors([closing], "ROLLBACK_CUSTODY_ENTRY_CLOSE_FAILED", error);
   }
 }
 

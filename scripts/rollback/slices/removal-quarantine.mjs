@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -15,14 +14,14 @@ import {
   assertCustodyDescriptor,
   assertCustodyIdentity,
   assertCustodyStableObject,
+  closeCustodyDescriptors,
+  collectCustodyDescriptorCloseFailure,
   custodyDescriptorChild as rollbackDescriptorChild,
   custodyDescriptorDirectory,
-  forgetCustodyDescriptor,
   registerCustodyDescriptor,
   updateCustodyDescriptor,
 } from "../runtime/custody.mjs";
 import {
-  closeDescriptorOnce,
   throwDescriptorCloseFailures,
 } from "../runtime/descriptor-close.mjs";
 
@@ -145,8 +144,6 @@ function createRollbackRemovalQuarantineUnchecked(root, manifest, options) {
     if (!identity.isDirectory() || (identity.mode & 0o777n) !== 0o700n
       || String(identity.uid) !== String(process.getuid())
       || String(identity.dev) !== String(workspace.quarantineIdentity.dev)) {
-      closeSync(descriptor);
-      descriptor = undefined;
       throw new Error("ROLLBACK_REMOVAL_QUARANTINE_UNSAFE path=" + created);
     }
     registerCustodyDescriptor(descriptor, realpathSync(created), identity);
@@ -165,10 +162,13 @@ function createRollbackRemovalQuarantineUnchecked(root, manifest, options) {
     descriptor = undefined;
     return result;
   } catch (error) {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
-    throw error;
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors(
+      [closing],
+      "ROLLBACK_REMOVAL_QUARANTINE_CLOSE_FAILED",
+      error,
+    );
   }
 }
 
@@ -205,6 +205,8 @@ export function snapshotRollbackRemovalPlan(quarantine, plan) {
 function snapshotRollbackRemovalIdentity(quarantine, logicalPath, expectedKind) {
   const parent = openRollbackRemovalParent(quarantine, logicalPath);
   let descriptor;
+  let result;
+  let primaryFailure;
   try {
     const sourcePath = rollbackDescriptorChild(parent.descriptor, parent.name);
     const identity = lstatSync(sourcePath, { bigint: true });
@@ -225,52 +227,72 @@ function snapshotRollbackRemovalIdentity(quarantine, logicalPath, expectedKind) 
       logicalPath,
     );
     registerCustodyDescriptor(descriptor, realpathSync(sourcePath), identity);
-    const result = { descriptor, identity, kind };
-    descriptor = undefined;
-    return result;
-  } finally {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
-    closeSync(parent.descriptor);
+    result = { descriptor, identity, kind };
+  } catch (error) {
+    primaryFailure = error;
   }
+  const failures = [];
+  const parentDescriptor = parent.descriptor;
+  parent.descriptor = undefined;
+  collectCustodyDescriptorCloseFailure(parentDescriptor, failures);
+  if (primaryFailure !== undefined || failures.length > 0) {
+    const retainedDescriptor = descriptor;
+    descriptor = undefined;
+    collectCustodyDescriptorCloseFailure(retainedDescriptor, failures);
+    throwDescriptorCloseFailures(
+      failures,
+      "ROLLBACK_REMOVAL_ACQUISITION_CLOSE_FAILED",
+      primaryFailure,
+    );
+  }
+  descriptor = undefined;
+  return result;
 }
 
-function closeRollbackRemovalDescriptor(planned) {
-  if (Number.isInteger(planned?.descriptor)) {
-    const descriptor = planned.descriptor;
-    planned.descriptor = undefined;
-    forgetCustodyDescriptor(descriptor);
-    closeDescriptorOnce(descriptor);
+function takeRollbackRemovalDescriptors(plannedIdentities) {
+  const descriptors = [];
+  if (!(plannedIdentities instanceof Map)) {
+    return descriptors;
   }
+  for (const planned of plannedIdentities.values()) {
+    if (Number.isInteger(planned?.descriptor)) {
+      descriptors.push(planned.descriptor);
+      planned.descriptor = undefined;
+    }
+  }
+  return descriptors;
 }
 
 function closeRollbackRemovalDescriptors(plannedIdentities, primaryFailure) {
-  if (!(plannedIdentities instanceof Map)) {
-    if (primaryFailure !== undefined) {
-      throw primaryFailure;
-    }
-    return;
-  }
-  const failures = [];
-  for (const planned of plannedIdentities.values()) {
-    try {
-      closeRollbackRemovalDescriptor(planned);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  throwDescriptorCloseFailures(
-    failures,
+  closeCustodyDescriptors(
+    takeRollbackRemovalDescriptors(plannedIdentities),
     "ROLLBACK_REMOVAL_DESCRIPTOR_CLOSE_FAILED",
     primaryFailure,
   );
 }
 
-export function closeRollbackRemovalPlan(quarantine) {
+function takeRollbackRemovalPlan(quarantine) {
   const plannedIdentities = quarantine.plannedIdentities;
   quarantine.plannedIdentities = undefined;
-  closeRollbackRemovalDescriptors(plannedIdentities);
+  return plannedIdentities;
+}
+
+export function closeRollbackRemovalPlan(quarantine, primaryFailure) {
+  closeRollbackRemovalDescriptors(takeRollbackRemovalPlan(quarantine), primaryFailure);
+}
+
+export function closeRollbackRemovalQuarantine(quarantine, primaryFailure) {
+  const descriptors = takeRollbackRemovalDescriptors(takeRollbackRemovalPlan(quarantine));
+  const quarantineDescriptor = quarantine.descriptor;
+  quarantine.descriptor = undefined;
+  if (Number.isInteger(quarantineDescriptor)) {
+    descriptors.push(quarantineDescriptor);
+  }
+  closeCustodyDescriptors(
+    descriptors,
+    "ROLLBACK_REMOVAL_QUARANTINE_CLOSE_FAILED",
+    primaryFailure,
+  );
 }
 
 export function stageRollbackRemoval(quarantine, logicalPath, expectedKind, onBoundary) {
@@ -287,6 +309,7 @@ function stageRollbackRemovalUnchecked(quarantine, logicalPath, expectedKind, on
     throw new Error("ROLLBACK_REMOVAL_PLAN_MISSING path=" + logicalPath);
   }
   const parent = openRollbackRemovalParent(quarantine, logicalPath);
+  let primaryFailure;
   try {
     const sourcePath = rollbackDescriptorChild(parent.descriptor, parent.name);
     const before = lstatSync(sourcePath, { bigint: true });
@@ -354,13 +377,21 @@ function stageRollbackRemovalUnchecked(quarantine, logicalPath, expectedKind, on
     }
     assertRollbackWorkspaceHandle(quarantine.workspaceHandle, quarantine.rootPath);
     quarantine.logicalPaths.push(logicalPath);
-  } finally {
-    try {
-      closeRollbackRemovalDescriptor(planned);
-    } finally {
-      closeSync(parent.descriptor);
-    }
+  } catch (error) {
+    primaryFailure = error;
   }
+  const failures = [];
+  const plannedDescriptor = planned.descriptor;
+  planned.descriptor = undefined;
+  collectCustodyDescriptorCloseFailure(plannedDescriptor, failures);
+  const parentDescriptor = parent.descriptor;
+  parent.descriptor = undefined;
+  collectCustodyDescriptorCloseFailure(parentDescriptor, failures);
+  throwDescriptorCloseFailures(
+    failures,
+    "ROLLBACK_REMOVAL_STAGE_CLOSE_FAILED",
+    primaryFailure,
+  );
 }
 
 function openRollbackRemovalParent(quarantine, logicalPath) {
@@ -373,9 +404,9 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
     custodyDescriptorDirectory(quarantine.rootDescriptor),
     constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
   );
-  registerCustodyDescriptor(
-    descriptor, quarantine.workspaceHandle.checkoutPath, fstatSync(descriptor, { bigint: true }));
   try {
+    registerCustodyDescriptor(
+      descriptor, quarantine.workspaceHandle.checkoutPath, fstatSync(descriptor, { bigint: true }));
     for (const component of components.slice(0, -1)) {
       const candidate = rollbackDescriptorChild(descriptor, component);
       const before = lstatSync(candidate, { bigint: true });
@@ -384,7 +415,7 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
         || String(before.uid) !== quarantine.owner) {
         throw new Error("ROLLBACK_REMOVAL_ANCESTOR_UNSAFE path=" + logicalPath);
       }
-      const next = openSync(
+      let next = openSync(
         candidate,
         constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
       );
@@ -395,17 +426,34 @@ function openRollbackRemovalParent(quarantine, logicalPath) {
           logicalPath,
         );
       } catch (error) {
-        closeSync(next);
-        throw error;
+        const closing = next;
+        next = undefined;
+        closeCustodyDescriptors(
+          [closing],
+          "ROLLBACK_REMOVAL_ACQUISITION_CLOSE_FAILED",
+          error,
+        );
       }
       registerCustodyDescriptor(next, realpathSync(candidate), before);
-      closeSync(descriptor);
+      const previous = descriptor;
       descriptor = next;
+      next = undefined;
+      closeCustodyDescriptors(
+        [previous],
+        "ROLLBACK_REMOVAL_TRAVERSAL_CLOSE_FAILED",
+      );
     }
-    return { descriptor, name: components.at(-1) };
+    const result = { descriptor, name: components.at(-1) };
+    descriptor = undefined;
+    return result;
   } catch (error) {
-    closeSync(descriptor);
-    throw error;
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors(
+      [closing],
+      "ROLLBACK_REMOVAL_TRAVERSAL_CLOSE_FAILED",
+      error,
+    );
   }
 }
 

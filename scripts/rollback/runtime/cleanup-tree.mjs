@@ -1,5 +1,4 @@
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -17,10 +16,13 @@ import { basename } from "node:path";
 
 import {
   assertCustodyDescriptor,
+  closeCustodyDescriptors,
   custodyDescriptorChild as descriptorChild,
   custodyDescriptorDirectory,
   registerCustodyDescriptor,
+  retainCustodyDescriptor,
   updateCustodyDescriptor,
+  useCustodyDescriptor,
 } from "./custody.mjs";
 
 const CLEANUP_MAX_DEPTH = 128;
@@ -74,7 +76,10 @@ function preflightEntry(parentDescriptor, name, logicalPath, depth, context) {
     });
   }
   const descriptor = openDirectoryDescriptor(sourcePath);
-  try {
+  return useCustodyDescriptor(
+    descriptor,
+    "ROLLBACK_CLEANUP_TRAVERSAL_CLOSE_FAILED",
+    () => {
     assertSameIdentity(identity, fstatSync(descriptor, { bigint: true }), logicalPath);
     return Object.freeze({
       name,
@@ -84,9 +89,8 @@ function preflightEntry(parentDescriptor, name, logicalPath, depth, context) {
       children: Object.freeze(sortedDirectoryEntries(descriptor).map((child) =>
         preflightEntry(descriptor, child, logicalPath + "/" + child, depth + 1, context))),
     });
-  } finally {
-    closeSync(descriptor);
-  }
+    },
+  );
 }
 
 export function assertCleanupTreeSnapshot(rootDescriptor, snapshot) {
@@ -103,15 +107,17 @@ function assertCleanupEntrySnapshot(parentDescriptor, expected, logicalPath) {
     return;
   }
   const descriptor = openDirectoryDescriptor(sourcePath);
-  try {
-    assertSameIdentity(expected.identity, fstatSync(descriptor, { bigint: true }), logicalPath);
-    assertSnapshotDirectoryEntries(descriptor, expected.children, logicalPath);
-    for (const child of expected.children) {
-      assertCleanupEntrySnapshot(descriptor, child, logicalPath + "/" + child.name);
-    }
-  } finally {
-    closeSync(descriptor);
-  }
+  return useCustodyDescriptor(
+    descriptor,
+    "ROLLBACK_CLEANUP_TRAVERSAL_CLOSE_FAILED",
+    () => {
+      assertSameIdentity(expected.identity, fstatSync(descriptor, { bigint: true }), logicalPath);
+      assertSnapshotDirectoryEntries(descriptor, expected.children, logicalPath);
+      for (const child of expected.children) {
+        assertCleanupEntrySnapshot(descriptor, child, logicalPath + "/" + child.name);
+      }
+    },
+  );
 }
 
 function assertSnapshotDirectoryEntries(descriptor, expected, logicalPath) {
@@ -157,6 +163,7 @@ export function removeQuarantinedEntry({
   } else if (kind === "file") {
     heldDescriptor = openSync(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   }
+  let primaryFailure;
   try {
     if (heldDescriptor !== undefined) {
       assertSameIdentity(before, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
@@ -255,48 +262,61 @@ export function removeQuarantinedEntry({
       }
     }
     report.push({ path: logicalPath, kind });
-  } finally {
-    if (heldDescriptor !== undefined) {
-      closeSync(heldDescriptor);
-    }
+  } catch (error) {
+    primaryFailure = error;
   }
+  const closing = heldDescriptor;
+  heldDescriptor = undefined;
+  closeCustodyDescriptors(
+    [closing],
+    "ROLLBACK_CLEANUP_ENTRY_CLOSE_FAILED",
+    primaryFailure,
+  );
 }
 
 export function createCleanupQuarantine(handle) {
   const created = mkdtempSync(descriptorChild(handle.rootDescriptor, ".agtmai-rollback-cleanup-"));
   const name = basename(created);
-  const descriptor = openDirectoryDescriptor(descriptorChild(handle.rootDescriptor, name));
-  const identity = fstatSync(descriptor, { bigint: true });
-  assertDirectoryIdentity(
-    descriptorChild(handle.rootDescriptor, name),
-    identity,
-    "ROLLBACK_CLEANUP_QUARANTINE_IDENTITY_MISMATCH",
+  const descriptor = retainCustodyDescriptor(
+    openDirectoryDescriptor(descriptorChild(handle.rootDescriptor, name)),
+    "ROLLBACK_CLEANUP_QUARANTINE_CLOSE_FAILED",
+    (held) => {
+      const identity = fstatSync(held, { bigint: true });
+      assertDirectoryIdentity(
+        descriptorChild(handle.rootDescriptor, name),
+        identity,
+        "ROLLBACK_CLEANUP_QUARANTINE_IDENTITY_MISMATCH",
+      );
+      if ((identity.mode & 0o777n) !== 0o700n) {
+        throw new Error("ROLLBACK_CLEANUP_QUARANTINE_PERMISSIONS_UNSAFE");
+      }
+      if (String(identity.uid) !== String(process.getuid())) {
+        throw new Error("ROLLBACK_CLEANUP_QUARANTINE_OWNER_UNSAFE");
+      }
+    },
   );
-  if ((identity.mode & 0o777n) !== 0o700n) {
-    closeSync(descriptor);
-    throw new Error("ROLLBACK_CLEANUP_QUARANTINE_PERMISSIONS_UNSAFE");
-  }
-  if (String(identity.uid) !== String(process.getuid())) {
-    closeSync(descriptor);
-    throw new Error("ROLLBACK_CLEANUP_QUARANTINE_OWNER_UNSAFE");
-  }
   return { name, descriptor };
 }
 
 export function createStagingDirectory(quarantineDescriptor) {
   const name = "entries";
   mkdirSync(descriptorChild(quarantineDescriptor, name), { mode: 0o700 });
-  const descriptor = openDirectoryDescriptor(descriptorChild(quarantineDescriptor, name));
-  const identity = fstatSync(descriptor, { bigint: true });
-  assertDirectoryIdentity(
-    descriptorChild(quarantineDescriptor, name),
-    identity,
-    "ROLLBACK_CLEANUP_STAGING_IDENTITY_MISMATCH",
+  const descriptor = retainCustodyDescriptor(
+    openDirectoryDescriptor(descriptorChild(quarantineDescriptor, name)),
+    "ROLLBACK_CLEANUP_STAGING_CLOSE_FAILED",
+    (held) => {
+      const identity = fstatSync(held, { bigint: true });
+      assertDirectoryIdentity(
+        descriptorChild(quarantineDescriptor, name),
+        identity,
+        "ROLLBACK_CLEANUP_STAGING_IDENTITY_MISMATCH",
+      );
+      if ((identity.mode & 0o777n) !== 0o700n
+        || String(identity.uid) !== String(process.getuid())) {
+        throw new Error("ROLLBACK_CLEANUP_STAGING_PERMISSIONS_UNSAFE");
+      }
+    },
   );
-  if ((identity.mode & 0o777n) !== 0o700n || String(identity.uid) !== String(process.getuid())) {
-    closeSync(descriptor);
-    throw new Error("ROLLBACK_CLEANUP_STAGING_PERMISSIONS_UNSAFE");
-  }
   return { name, descriptor };
 }
 
@@ -355,17 +375,20 @@ export function sortedDirectoryEntries(descriptor) {
 }
 
 export function openDirectoryDescriptor(path) {
-  const descriptor = openSync(
-    path,
-    constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
+  return retainCustodyDescriptor(
+    openSync(
+      path,
+      constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
+    ),
+    "ROLLBACK_CLEANUP_ACQUISITION_CLOSE_FAILED",
+    (descriptor) => {
+      const identity = fstatSync(descriptor, { bigint: true });
+      if (!identity.isDirectory()) {
+        throw new Error("ROLLBACK_CLEANUP_NOT_DIRECTORY path=" + path);
+      }
+      registerCustodyDescriptor(descriptor, realpathSync(path), identity);
+    },
   );
-  const identity = fstatSync(descriptor, { bigint: true });
-  if (!identity.isDirectory()) {
-    closeSync(descriptor);
-    throw new Error("ROLLBACK_CLEANUP_NOT_DIRECTORY path=" + path);
-  }
-  registerCustodyDescriptor(descriptor, realpathSync(path), identity);
-  return descriptor;
 }
 
 function lstatDescriptorChild(descriptor, name) {

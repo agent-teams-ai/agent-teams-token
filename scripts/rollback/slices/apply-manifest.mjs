@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { closeSync } from "node:fs";
 
 import { basicRun, gitExecutable } from "../runtime/candidate.mjs";
 import { repositoryRoot } from "./config.mjs";
 import { requireArray, validateExactPath } from "./manifests.mjs";
 import {
-  closeRollbackRemovalPlan,
+  closeRollbackRemovalQuarantine,
   createRollbackRemovalQuarantine,
   orderedRemovableDirectories,
   removeOwnedEmptyDirectoriesWithQuarantine,
@@ -89,22 +88,22 @@ export function removeOwnedEmptyDirectories(root, manifest, options = {}) {
     () => orderedRemovableDirectories(manifest),
   );
   const quarantine = createRollbackRemovalQuarantine(root, manifest, options);
+  let result;
+  let primaryFailure;
   try {
     snapshotRollbackRemovalPlan(
       quarantine,
       orderedDirectories.map((path) => ({ path, kind: "directory" })),
     );
-    return removeOwnedEmptyDirectoriesWithQuarantine(root, manifest, quarantine, {
+    result = removeOwnedEmptyDirectoriesWithQuarantine(root, manifest, quarantine, {
       ...options,
       orderedDirectories,
     });
-  } finally {
-    try {
-      closeRollbackRemovalPlan(quarantine);
-    } finally {
-      closeSync(quarantine.descriptor);
-    }
+  } catch (error) {
+    primaryFailure = error;
   }
+  closeRollbackRemovalQuarantine(quarantine, primaryFailure);
+  return result;
 }
 
 export function applyManifest(root, manifest, options = {}) {
@@ -123,11 +122,15 @@ export function applyManifest(root, manifest, options = {}) {
     context.workspaceHandle,
     { holdDescriptors: true },
   );
+  let result;
+  let primaryFailure;
   try {
-    return applyManifestWithSharedPlan(context);
-  } finally {
-    closeRollbackSharedPlan(context.sharedPlan);
+    result = applyManifestWithSharedPlan(context);
+  } catch (error) {
+    primaryFailure = error;
   }
+  closeRollbackSharedPlan(context.sharedPlan, primaryFailure);
+  return result;
 }
 
 function validateApplyOptions(options) {
@@ -158,12 +161,16 @@ function applyManifestWithSharedPlan(context) {
     workspaceHandle: context.workspaceHandle,
     onBoundary: context.onBoundary,
   });
+  let result;
+  let primaryFailure;
   try {
     snapshotRollbackRemovalPlan(quarantine, removalPlan);
-    return applyManifestInQuarantine(context, quarantine);
-  } finally {
-    closeRemovalQuarantine(quarantine);
+    result = applyManifestInQuarantine(context, quarantine);
+  } catch (error) {
+    primaryFailure = error;
   }
+  closeRollbackRemovalQuarantine(quarantine, primaryFailure);
+  return result;
 }
 
 function applyManifestInQuarantine(context, quarantine) {
@@ -251,12 +258,4 @@ function rollbackApplicationReport(quarantine, directoryCleanup) {
       .update(Buffer.from(JSON.stringify(quarantinedPaths), "utf8"))
       .digest("hex"),
   };
-}
-
-function closeRemovalQuarantine(quarantine) {
-  try {
-    closeRollbackRemovalPlan(quarantine);
-  } finally {
-    closeSync(quarantine.descriptor);
-  }
 }

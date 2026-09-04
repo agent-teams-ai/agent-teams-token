@@ -1,6 +1,7 @@
 import { closeSync } from "node:fs";
 
 let closeDescriptorImplementation = closeSync;
+const descriptorCloseAggregates = new WeakSet();
 
 export function closeDescriptorOnce(descriptor) {
   closeDescriptorImplementation(descriptor);
@@ -28,9 +29,21 @@ export function throwDescriptorCloseFailures(failures, message, primaryFailure) 
     }
     return;
   }
-  throw new AggregateError(
-    primaryFailure === undefined ? failures : [primaryFailure, ...failures],
+  let cause = primaryFailure;
+  let errors = failures;
+  if (primaryFailure !== undefined) {
+    if (descriptorCloseAggregates.has(primaryFailure)) {
+      cause = primaryFailure.cause ?? primaryFailure;
+      errors = [...primaryFailure.errors, ...failures];
+    } else {
+      errors = [primaryFailure, ...failures];
+    }
+  }
+  const aggregate = new AggregateError(
+    errors,
     message,
-    primaryFailure === undefined ? undefined : { cause: primaryFailure },
+    cause === undefined ? undefined : { cause },
   );
+  descriptorCloseAggregates.add(aggregate);
+  throw aggregate;
 }

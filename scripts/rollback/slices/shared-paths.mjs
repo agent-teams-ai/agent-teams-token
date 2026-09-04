@@ -1,5 +1,4 @@
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -9,14 +8,10 @@ import {
 
 import { descriptorChild as rollbackDescriptorChild } from "../runtime/common.mjs";
 import {
+  closeCustodyDescriptors,
   custodyDescriptorDirectory,
-  forgetCustodyDescriptor,
   registerCustodyDescriptor,
 } from "../runtime/custody.mjs";
-import {
-  closeDescriptorOnce,
-  throwDescriptorCloseFailures,
-} from "../runtime/descriptor-close.mjs";
 import { validateExactPath } from "./manifests.mjs";
 import { rollbackWorkspaceState } from "./workspace-handle.mjs";
 
@@ -112,15 +107,21 @@ export function openRollbackSharedRoot(workspace, logicalPath) {
       logicalPath,
     );
     registerCustodyDescriptor(descriptor, workspace.checkoutPath, workspace.checkoutIdentity);
-    return descriptor;
+    const result = descriptor;
+    descriptor = undefined;
+    return result;
   } catch (error) {
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
-    }
-    if (error instanceof Error && error.message.includes("ROLLBACK_SHARED_PATH_")) {
-      throw error;
-    }
-    throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_ROOT_UNSAFE", logicalPath, error);
+    const primaryFailure = error instanceof Error
+      && error.message.includes("ROLLBACK_SHARED_PATH_")
+      ? error
+      : rollbackSharedPathError("ROLLBACK_SHARED_PATH_ROOT_UNSAFE", logicalPath, error);
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors(
+      [closing],
+      "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+      primaryFailure,
+    );
   }
 }
 
@@ -135,17 +136,10 @@ export function closeRollbackSharedPlan(plan, primaryFailure) {
   rollbackSharedPlanDescriptors.delete(plan);
   const closing = descriptors.toReversed();
   descriptors.length = 0;
-  const failures = [];
-  for (const descriptor of closing) {
-    forgetCustodyDescriptor(descriptor);
-    try {
-      closeDescriptorOnce(descriptor);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  throwDescriptorCloseFailures(
-    failures, "ROLLBACK_SHARED_PATH_CLOSE_FAILED", primaryFailure,
+  closeCustodyDescriptors(
+    closing,
+    "ROLLBACK_SHARED_PATH_CLOSE_FAILED",
+    primaryFailure,
   );
 }
 
@@ -186,21 +180,37 @@ function snapshotRollbackSharedPath(context) {
   const components = logicalPath.split("/");
   let descriptor = openRollbackSharedRoot(workspace, logicalPath);
   const ancestors = [];
+  let result;
+  let primaryFailure;
   try {
     for (const component of components.slice(0, -1)) {
       const next = snapshotRollbackSharedAncestor(descriptor, component, context);
       ancestors.push(Object.freeze({ component, identity: next.identity }));
-      closeSync(descriptor);
-      descriptor = next.descriptor;
+      const nextDescriptor = next.descriptor;
+      next.descriptor = undefined;
+      const previous = descriptor;
+      descriptor = nextDescriptor;
+      closeCustodyDescriptors(
+        [previous],
+        "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED",
+      );
     }
-    return {
+    result = {
       ancestors: Object.freeze(ancestors),
       final: snapshotRollbackSharedFinal(descriptor, components.at(-1), context),
       logicalPath,
     };
-  } finally {
-    closeSync(descriptor);
+  } catch (error) {
+    primaryFailure = error;
   }
+  const closing = descriptor;
+  descriptor = undefined;
+  closeCustodyDescriptors(
+    [closing],
+    "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED",
+    primaryFailure,
+  );
+  return result;
 }
 
 function snapshotRollbackSharedAncestor(descriptor, component, context) {
@@ -237,19 +247,21 @@ function snapshotRollbackSharedAncestor(descriptor, component, context) {
     next = undefined;
     return result;
   } catch (error) {
-    if (held !== undefined) {
-      closeSync(held);
-    }
-    if (next !== undefined) {
-      closeSync(next);
-    }
-    if (error instanceof Error && error.message.includes("ROLLBACK_SHARED_PATH_")) {
-      throw error;
-    }
-    throw rollbackSharedPathError(
-      "ROLLBACK_SHARED_PATH_ANCESTOR_UNSAFE",
-      logicalPath,
-      error,
+    const primaryFailure = error instanceof Error
+      && error.message.includes("ROLLBACK_SHARED_PATH_")
+      ? error
+      : rollbackSharedPathError(
+        "ROLLBACK_SHARED_PATH_ANCESTOR_UNSAFE",
+        logicalPath,
+        error,
+      );
+    const closing = [held, next];
+    held = undefined;
+    next = undefined;
+    closeCustodyDescriptors(
+      closing,
+      "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+      primaryFailure,
     );
   }
 }
@@ -272,21 +284,26 @@ function snapshotRollbackSharedFinal(descriptor, name, context) {
     }
     return Object.freeze({ identity, kind: "file" });
   } catch (error) {
-    if (held !== undefined) {
-      closeSync(held);
-    }
+    const closing = held;
+    held = undefined;
     if (error?.code === "ENOENT") {
+      closeCustodyDescriptors([closing], "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED");
       return Object.freeze({ kind: "absent" });
     }
-    if (error instanceof Error && error.message.includes("ROLLBACK_SHARED_PATH_")) {
-      throw error;
-    }
-    throw rollbackSharedPathError("ROLLBACK_SHARED_PATH_FINAL_UNSAFE", logicalPath, error);
+    const primaryFailure = error instanceof Error
+      && error.message.includes("ROLLBACK_SHARED_PATH_")
+      ? error
+      : rollbackSharedPathError("ROLLBACK_SHARED_PATH_FINAL_UNSAFE", logicalPath, error);
+    closeCustodyDescriptors(
+      [closing],
+      "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+      primaryFailure,
+    );
   }
 }
 
 function openHeldSharedDescriptor(candidate, identity, logicalPath, directory) {
-  const descriptor = openSync(candidate, rollbackSharedOpenFlags({ directory }));
+  let descriptor = openSync(candidate, rollbackSharedOpenFlags({ directory }));
   try {
     const captured = fstatSync(descriptor, { bigint: true });
     const assertIdentity = directory
@@ -295,10 +312,17 @@ function openHeldSharedDescriptor(candidate, identity, logicalPath, directory) {
     assertIdentity(identity, captured, logicalPath);
     assertIdentity(identity, lstatSync(candidate, { bigint: true }), logicalPath);
     registerCustodyDescriptor(descriptor, realpathSync(candidate), captured);
-    return descriptor;
+    const result = descriptor;
+    descriptor = undefined;
+    return result;
   } catch (error) {
-    closeSync(descriptor);
-    throw error;
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors(
+      [closing],
+      "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+      error,
+    );
   }
 }
 
@@ -339,30 +363,46 @@ export function openRollbackSharedParent(root, logicalPath, plan, workspaceHandl
         );
         registerCustodyDescriptor(next, realpathSync(candidate), before);
       } catch (error) {
-        if (next !== undefined) {
-          closeSync(next);
-        }
-        if (error instanceof Error && error.message.includes("ROLLBACK_SHARED_PATH_")) {
-          throw error;
-        }
-        throw rollbackSharedPathError(
-          "ROLLBACK_SHARED_PATH_ANCESTOR_UNSAFE",
-          logicalPath,
-          error,
+        const primaryFailure = error instanceof Error
+          && error.message.includes("ROLLBACK_SHARED_PATH_")
+          ? error
+          : rollbackSharedPathError(
+            "ROLLBACK_SHARED_PATH_ANCESTOR_UNSAFE",
+            logicalPath,
+            error,
+          );
+        const closing = next;
+        next = undefined;
+        closeCustodyDescriptors(
+          [closing],
+          "ROLLBACK_SHARED_PATH_ACQUISITION_CLOSE_FAILED",
+          primaryFailure,
         );
       }
-      closeSync(descriptor);
+      const previous = descriptor;
       descriptor = next;
+      next = undefined;
+      closeCustodyDescriptors(
+        [previous],
+        "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED",
+      );
     }
-    return {
+    const result = {
       descriptor,
       entry,
       name: components.at(-1),
       workspace,
     };
+    descriptor = undefined;
+    return result;
   } catch (error) {
-    closeSync(descriptor);
-    throw error;
+    const closing = descriptor;
+    descriptor = undefined;
+    closeCustodyDescriptors(
+      [closing],
+      "ROLLBACK_SHARED_PATH_TRAVERSAL_CLOSE_FAILED",
+      error,
+    );
   }
 }
 
