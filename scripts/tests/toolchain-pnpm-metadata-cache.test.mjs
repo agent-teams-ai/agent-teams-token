@@ -118,6 +118,11 @@ function registerPnpmOfflineMetadataTests() {
       const missing = pnpm(fixture, project, [...prefix, ...installArgs]);
       assert.notEqual(missing.status, 0);
       assert.match(missing.stdout + missing.stderr, /ERR_PNPM_NO_OFFLINE_META|ERR_PNPM_LOCKFILE_POLICY_VIOLATION/u);
+      assert.equal(fs.existsSync(join(project, "node_modules", packageName, "LIFECYCLE_RAN")), false);
+      // Policy verification races with pnpm's ignored-script install writes.
+      // A rejected install can leave .modules.yaml with install hoist patterns;
+      // fetch uses different patterns and would ask to purge it without a TTY.
+      fs.rmSync(join(project, "node_modules"), { recursive: true, force: true });
       fs.rmSync(cache, { recursive: true });
       fs.renameSync(`${cache}.held`, cache);
       succeeded(pnpm(fixture, project, [...prefix, "fetch", "--offline", "--frozen-lockfile", "--ignore-scripts"]));
