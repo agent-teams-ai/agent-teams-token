@@ -46,12 +46,12 @@
   ],
   "restoreFromBaseline": ["tooling/local-solana/src/README.md"],
   "reverseEdits": [
-    {"path": ".github/workflows/ci.yml", "beforeSha256": "03b6b396e5a821289d55ebfeee30386c55115180a9703d9441ab010f7ca06581", "afterSha256": "1334e558573897dbcf318e497ed791e9f55514d41f5aafdef126c986722c6a01"},
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "895869f90690239514424a810c530eb8b454442c8276d0e7a6b8f6b074fb3639", "afterSha256": "d1583760ebcec9fba6ae449044d7e0a959925b5f684849dd2a36b26c8753747c"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "27fcd867ac67bfc8d21ce8b430f998a041dd66793a5f0f9592da4d0a4940dc35", "afterSha256": "85f13b414dd52109cf426f0141aced65046ece052ba0780c541a55807722085c"},
     {"path": "package.json", "beforeSha256": "ccb94ad0b04fd3a898a9f2140a347a76eb0aa05913da206ac25321999eca8cf1", "afterSha256": "ddc318d814f73f89524f633eebfa347522f234bb2d3305fd55f48e1481f6423e"},
     {"path": "scripts/solana/local-fixture.ts", "beforeSha256": "6e0b5083a4e02d401680b07cb18a998aeeeddf6e1f8edce3bf761f8f2c419b39", "afterSha256": "absent"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "8ad750131da4b6333daead8f6f9e5c0a009d6cb4f4a9ee16b2fbe7f316ff4f46", "afterSha256": "b8ceabbf4766130d9fe2f5f686748ec3605f93034cdad1be25e11d9b91f8946a"},
-    {"path": "tooling/toolchain.lock.json", "beforeSha256": "d06b28038d4c16568709764a665b38d8ccce0edcf3b1769ef6ac95c7ff6685e0", "afterSha256": "8d6fde6f3e6983ac6220a9100b3a88487831cc6ae020c372cfb847912ece6920"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "fd6f1aaf4e464bea1e7a9dd0d1671a43aff1beae7438aae283db5ae49ddb29c5", "afterSha256": "7cfa7648755e07f5cf8ad9724293f27c9a01613859ea8e188eefe01611bce651"},
+    {"path": "tooling/toolchain.lock.json", "beforeSha256": "3424cc0be06c88139dee3e83d2d2b55ad2c4cbcec6177331856d255258fe15f9", "afterSha256": "b6df167cafa66b28b8886d3f995fd3df8439871a0cd2ce7bfa02e5e19daf96a1"},
     {"path": "tooling/local-solana/src/README.md", "beforeSha256": "absent", "afterSha256": "4971eb4a5960a0647170b1963fd750cf2c47233efb78f1e6c1120d781cf76331"}
   ],
   "sharedPaths": [

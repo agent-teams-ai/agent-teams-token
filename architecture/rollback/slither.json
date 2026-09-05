@@ -80,11 +80,11 @@
   ],
   "restoreFromBaseline": ["tooling/security/slither/src/README.md"],
   "reverseEdits": [
-    {"path": ".github/workflows/ci.yml", "beforeSha256": "03b6b396e5a821289d55ebfeee30386c55115180a9703d9441ab010f7ca06581", "afterSha256": "8fe36d0cc9df3440f76c51eb59103eac36b213e3f51430a1c573f12ba2eb4f52"},
+    {"path": ".github/workflows/ci.yml", "beforeSha256": "895869f90690239514424a810c530eb8b454442c8276d0e7a6b8f6b074fb3639", "afterSha256": "0e4c60a305e56e16e7f59de3db84b2d969621b46345489fc6311169550efdf70"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "27fcd867ac67bfc8d21ce8b430f998a041dd66793a5f0f9592da4d0a4940dc35", "afterSha256": "dc1255df4be5a23c5f7ea1252705c394e5abe97e8914a44ba22f064b1015ef39"},
     {"path": "package.json", "beforeSha256": "ccb94ad0b04fd3a898a9f2140a347a76eb0aa05913da206ac25321999eca8cf1", "afterSha256": "bb974a1d7de78a192d63cf8159a69a810dd121ae55833dd6fb746e67e70b2f63"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "8ad750131da4b6333daead8f6f9e5c0a009d6cb4f4a9ee16b2fbe7f316ff4f46", "afterSha256": "39a391dd9e9a7f788823e855021542a9302f657d1f144830503f130d27016b33"},
-    {"path": "tooling/toolchain.lock.json", "beforeSha256": "d06b28038d4c16568709764a665b38d8ccce0edcf3b1769ef6ac95c7ff6685e0", "afterSha256": "3d865bc1c78b349c4d1933ded474daf6b277fe45d1bd235e44e181c17512a7c7"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "fd6f1aaf4e464bea1e7a9dd0d1671a43aff1beae7438aae283db5ae49ddb29c5", "afterSha256": "24bcd3328d1be2313b4276c58e2c0a6777c1cf886d32ce0d1efca232412a03f7"},
+    {"path": "tooling/toolchain.lock.json", "beforeSha256": "3424cc0be06c88139dee3e83d2d2b55ad2c4cbcec6177331856d255258fe15f9", "afterSha256": "da852601a36582b3c5dd88001a1f3a68cde76c6932bc27562fdcc925f097932a"},
     {"path": "tooling/security/slither/src/README.md", "beforeSha256": "a275519a6e9968341abfb4f3c574d08021a851866e58af338b8217df17cddcb2", "afterSha256": "cf05a9ce47005c3d7d2b70afe601113e3ff306e60832fe587487c9044f99e750"}
   ],
   "sharedPaths": [
