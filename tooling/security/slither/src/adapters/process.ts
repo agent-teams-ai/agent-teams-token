@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { ProcessOptions, ProcessPort, ProcessResult } from "../application/ports.ts";
+import { assertNotCancelled, ProcessFailure } from "../application/cancellation.ts";
 
 // Complete JSON/base64 export of 64 MiB, including the 12-file framing allowance.
 const STDOUT_LIMIT = 4 * Math.ceil(64 * 1024 * 1024 / 3) + 12 * 256;
@@ -31,7 +32,13 @@ class Output {
 }
 
 export class OwnedProcess implements ProcessPort {
+  readonly signal?: AbortSignal;
+
+  constructor(signal?: AbortSignal) { this.signal = signal; }
+
   async run(command: string, args: readonly string[], timeoutMs: number, options: ProcessOptions = {}): Promise<ProcessResult> {
+    const signal = options.signal === null ? undefined : options.signal ?? this.signal;
+    assertNotCancelled(signal);
     if (process.platform !== "linux" && process.platform !== "darwin") {
       throw new Error("PROCESS_PLATFORM_UNSUPPORTED: requires POSIX process groups");
     }
@@ -47,14 +54,14 @@ export class OwnedProcess implements ProcessPort {
       stdio: ["ignore", "pipe", "pipe"],
     });
     return await new Promise<ProcessResult>((resolve, reject) => {
-      new ProcessRun(child, deadline, stopAt).start(resolve, reject);
+      new ProcessRun(child, deadline, stopAt, signal).start(resolve, reject);
     });
   }
 }
 
 class ProcessRun {
   private readonly child: ReturnType<typeof spawn> & { stdout: OutputStream; stderr: OutputStream };
-  private readonly deadline: number;
+  private deadline: number;
   private readonly stopAt: number;
   private readonly stdout = new Output();
   private readonly stderr = new Output();
@@ -69,32 +76,51 @@ class ProcessRun {
   private quiet = false;
   private settled = false;
   private timedOut = false;
+  private cancelled = false;
+  private stdoutComplete = true;
+  private observationDenial: unknown;
   private exitCode: number | null = null;
   private resolve: ((result: ProcessResult) => void) | undefined;
   private reject: ((error: unknown) => void) | undefined;
+  private readonly signal?: AbortSignal;
 
   constructor(
     child: ReturnType<typeof spawn> & { stdout: OutputStream; stderr: OutputStream },
     deadline: number,
     stopAt: number,
-  ) { this.child = child; this.deadline = deadline; this.stopAt = stopAt; }
+    signal?: AbortSignal,
+  ) { this.child = child; this.deadline = deadline; this.stopAt = stopAt; this.signal = signal; }
 
   start(resolve: (result: ProcessResult) => void, reject: (error: unknown) => void): void {
     this.resolve = resolve;
     this.reject = reject;
     this.child.stdout.on("data", this.onStdout);
     this.child.stderr.on("data", this.onStderr);
-    this.child.stdout.once("error", this.onError);
+    this.child.stdout.once("error", this.onStdoutError);
     this.child.stderr.once("error", this.onError);
     this.child.once("error", this.onError);
     this.child.once("exit", this.onExit);
     this.child.once("close", this.onClose);
     this.executionTimer = setTimeout(this.onTimeout, Math.max(0, Math.ceil(this.stopAt - performance.now())));
     this.deadlineTimer = setTimeout(this.onDeadline, Math.max(0, Math.ceil(this.deadline - performance.now())));
+    this.signal?.addEventListener("abort", this.onAbort, {once: true});
+    if (this.signal?.aborted) { this.onAbort(); }
   }
+
+  private readonly onAbort = (): void => {
+    if (this.cancelled || this.settled) { return; }
+    this.cancelled = true;
+    this.errors.unshift(this.signal!.reason);
+    this.deadline = Math.min(this.deadline, performance.now() + 250);
+    clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = setTimeout(this.onDeadline, Math.max(0, Math.ceil(this.deadline - performance.now())));
+    this.stop();
+    this.progress();
+  };
 
   private readonly onStdout = (chunk: Buffer): void => { this.capture(this.stdout, chunk, STDOUT_LIMIT, "stdout"); };
   private readonly onStderr = (chunk: Buffer): void => { this.capture(this.stderr, chunk, STDERR_LIMIT, "stderr"); };
+  private readonly onStdoutError = (error: Error): void => { this.stdoutComplete = false; this.onError(error); };
   private readonly onError = (error: Error): void => { this.errors.push(error); this.stop(); this.progress(); };
   private readonly onExit = (code: number | null): void => {
     this.exited = true;
@@ -112,15 +138,21 @@ class ProcessRun {
     this.timedOut = true;
     this.stop();
     if (!this.closed || !this.quiet || this.inspection !== undefined) {
-      this.errors.push(new Error("PROCESS_CLEANUP_UNCONFIRMED: deadline reached before group, pipes and reap were confirmed"));
+      this.errors.push(new Error("PROCESS_CLEANUP_UNCONFIRMED: deadline reached before group, pipes and reap were confirmed", {cause: this.observationDenial}));
     }
     this.finish();
   };
 
   private capture(output: Output, chunk: Buffer, limit: number, name: string): void {
-    if (this.errors.length !== 0) { return; }
+    if (this.errors.length !== 0) {
+      if (name === "stdout") { this.stdoutComplete = false; }
+      return;
+    }
     try { output.append(chunk, limit); }
-    catch (cause) { this.onError(new Error(`PROCESS_OUTPUT_LIMIT: ${name} capture failed`, { cause })); }
+    catch (cause) {
+      if (name === "stdout") { this.stdoutComplete = false; }
+      this.onError(new Error(`PROCESS_OUTPUT_LIMIT: ${name} capture failed`, { cause }));
+    }
     if (!this.stopped && performance.now() >= this.stopAt) { this.onTimeout(); }
   }
 
@@ -162,10 +194,16 @@ class ProcessRun {
     try {
       try { process.kill(-this.child.pid!, 0); }
       catch (cause) {
-        if (errorCode(cause) !== "ESRCH") { throw cause; }
-        this.quiet = true;
-        this.progress();
-        return;
+        if (errorCode(cause) === "ESRCH") {
+          this.quiet = true;
+          this.progress();
+          return;
+        }
+        // Darwin can deny the negative-PGID signal-0 observer after reap.
+        // EPERM is uncertainty, never absence: require the same bounded, fixed
+        // ps observation used for a present group. This never authorizes a kill.
+        if (errorCode(cause) !== "EPERM") { throw cause; }
+        this.observationDenial = cause;
       }
       this.inspection = execFile("/bin/ps", ["-axo", "pgid=,stat="], {
         env: { PATH: "/usr/bin:/bin", LC_ALL: "C" }, encoding: "utf8",
@@ -178,7 +216,7 @@ class ProcessRun {
           if (error !== null) { throw error; }
           this.quiet = !hasLiveGroup(stdout, this.child.pid!);
         } catch (cause) {
-          this.errors.push(new Error("PROCESS_GROUP_INSPECTION_FAILED: cleanup is unconfirmed", { cause }));
+          this.errors.push(new Error("PROCESS_GROUP_INSPECTION_FAILED: cleanup is unconfirmed", { cause: this.observationDenial === undefined ? cause : new AggregateError([this.observationDenial, cause], "signal-0 and ps observation failures") }));
           this.finish();
           return;
         }
@@ -196,20 +234,19 @@ class ProcessRun {
   private finish(): void {
     if (this.settled) { return; }
     this.settled = true;
+    this.signal?.removeEventListener("abort", this.onAbort);
     clearTimeout(this.executionTimer);
     clearTimeout(this.deadlineTimer);
     clearTimeout(this.pollTimer);
     this.disposeInspection();
     this.disposeChild();
-    if (this.errors.length !== 0) {
-      this.reject!(this.errors.length === 1 ? this.errors[0] : new AggregateError(this.errors, "PROCESS_FAILED: execution and cleanup errors"));
-      return;
-    }
     try {
       const stdout = this.stdout.text();
       const stderr = this.stderr.text();
-      this.resolve!({ exitCode: this.exitCode, stdout, stderr, timedOut: this.timedOut || performance.now() >= this.deadline });
-    } catch (cause) { this.reject!(cause); }
+      const result = { exitCode: this.exitCode, stdout, stderr, timedOut: this.timedOut || performance.now() >= this.deadline };
+      if (this.errors.length !== 0) { this.reject!(new ProcessFailure(this.errors, result, this.stdoutComplete && this.child.stdout.readableEnded)); }
+      else { this.resolve!(result); }
+    } catch (cause) { this.reject!(new AggregateError([...this.errors, cause], "PROCESS_FAILED: output finalization failed")); }
   }
 
   private disposeInspection(): void {
@@ -232,6 +269,7 @@ class ProcessRun {
     // retaining this run; normal completion removes every listener installed here.
     if (!this.closed) { drainLateErrors(this.child); }
     this.child.off("error", this.onError);
+    this.child.stdout.off("error", this.onStdoutError);
     for (const stream of [this.child.stdout, this.child.stderr]) {
       if (!stream.closed) { drainLateErrors(stream); }
       stream.off("error", this.onError);

@@ -1,8 +1,15 @@
 import type { AnalysisInput, FindingTriage, GateManifest, PolicyDecision, Suppression } from "../domain/model.ts";
 
 export interface ProcessResult { readonly exitCode: number | null; readonly stdout: string; readonly stderr: string; readonly timedOut: boolean }
-export interface ProcessOptions { readonly env?: NodeJS.ProcessEnv }
-export interface ProcessPort { run(command: string, args: readonly string[], timeoutMs: number, options?: ProcessOptions): Promise<ProcessResult> }
+export interface ProcessOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  /** null explicitly shields an owned acquisition/finalizer from work cancellation. */
+  readonly signal?: AbortSignal | null;
+}
+export interface ProcessPort {
+  readonly signal?: AbortSignal;
+  run(command: string, args: readonly string[], timeoutMs: number, options?: ProcessOptions): Promise<ProcessResult>;
+}
 
 export interface RepositoryStatePort {
   assertExactClean(candidateSha: string): Promise<void>;

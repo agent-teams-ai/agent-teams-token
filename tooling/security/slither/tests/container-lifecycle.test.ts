@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import fs, { chmod, readFile, rm } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
+import { getEventListeners } from "node:events";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { createContainerRunner } from "../src/adapters/container-runtime.ts";
-import type { ProcessPort, ProcessResult } from "../src/application/ports.ts";
+import type { ProcessOptions, ProcessPort, ProcessResult } from "../src/application/ports.ts";
+import { ProcessFailure, SlitherCancellation } from "../src/application/cancellation.ts";
+import { OwnedProcess } from "../src/adapters/process.ts";
 import { assertContainerResult } from "../src/adapters/container-result.ts";
 import { AUTHORIZE_ANALYSIS } from "../src/adapters/container-contract.ts";
 import { COMPLETION_READER, exportArguments } from "../src/adapters/container-export.ts";
@@ -95,7 +98,9 @@ interface LifecycleOptions {
   readonly output?: Readonly<Record<string, string>>;
   readonly exported?: ProcessResult;
   readonly fault?: "export-throw" | "crash" | "paused" | "pid-change" | "inspect" | "remove" | "remove-timeout" | "remove-throw" | "remove-identity" | "authorize" | "start";
-  readonly before?: (args: readonly string[]) => void;
+  readonly before?: (args: readonly string[]) => void | Promise<void>;
+  readonly signal?: AbortSignal;
+  readonly transport?: (args: readonly string[], result: ProcessResult, timeout: number, options?: ProcessOptions) => Promise<ProcessResult>;
 }
 
 function removal(fault: LifecycleOptions["fault"]): ProcessResult {
@@ -133,11 +138,11 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
     if (options.fault === "export-throw") {throw new Error("scripted export exception");}
     return options.exported ?? result(frame(options.output ?? {"slither.exit": "0\n"}));
   };
-  const port: ProcessPort = {run: async (command, args, timeout) => {
+  const scripted: ProcessPort = {run: async (command, args, timeout) => {
     assert.equal(command, "/usr/bin/docker");
     assert.ok(timeout > 0 && timeout <= 600_000);
     calls.push({args: [...args], timeout});
-    options.before?.(args);
+    await options.before?.(args);
     if (args[0] === "info") {return result(JSON.stringify({CgroupDriver: "systemd", CgroupVersion: "2"}));}
     if (args[0] === "create") {return result(`${lifecycleId}\n`);}
     if (args[0] === "rm") {assert.deepEqual(args, ["rm", "--force", lifecycleId]); return removal(options.fault);}
@@ -150,6 +155,10 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
     if (args[0] === "start") {started = true; return options.fault === "start" ? result("", {exitCode: 1}) : result(`${lifecycleId}\n`);}
     if (args[0] === "exec") {return execute(args);}
     throw new Error(`unexpected lifecycle command: ${args.join(" ")}`);
+  }};
+  const port: ProcessPort = {signal: options.signal, run: async (command, args, timeout, processOptions) => {
+    const response = await scripted.run(command, args, timeout, processOptions);
+    return options.transport ? await options.transport(args, response, timeout, processOptions) : response;
   }};
   return {output, calls, run: async () => await runContainerById(port, "/usr/bin/docker", ["create"], output, ["slither.exit"])};
 }
@@ -294,4 +303,113 @@ test("host authentication consumes the same deadline and retains the cleanup res
   await assert.rejects(run.run(), codeIs("CONTAINER_TIMEOUT"));
   assert.equal(run.calls.at(-1)?.timeout, 29_999);
   assert.equal(run.calls.at(-1)?.args[0], "rm");
+});
+
+function includesFailure(error: unknown, expected: unknown): boolean {
+  if (error === expected) { return true; }
+  if (error instanceof AggregateError && error.errors.some((entry: unknown) => includesFailure(entry, expected))) { return true; }
+  return error instanceof Error && error.cause !== undefined && includesFailure(error.cause, expected);
+}
+
+test("cancelled lifecycle starts no process and leaves no signal listeners", async (t) => {
+  const controller = new AbortController(); const reason = new SlitherCancellation("SIGTERM");
+  controller.abort(reason);
+  const run = await lifecycle(t, {signal: controller.signal});
+  await assert.rejects(run.run(), (error: unknown) => error === reason);
+  assert.deepEqual(run.calls, []);
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+});
+
+for (const point of ["create", "authorize", "completion", "export", "remove"] as const) {
+  test(`real child cancellation during ${point} settles custody and performs exact-ID cleanup`, async (t) => {
+    const controller = new AbortController(); const reason = new SlitherCancellation("SIGINT");
+    const processPort = new OwnedProcess(controller.signal);
+    let triggered = false;
+    const run = await lifecycle(t, {signal: controller.signal, transport: async (args, response, timeout, options) => {
+      const matches = point === "create" ? args[0] === "create" : point === "remove" ? args[0] === "rm" : point === "authorize" ? args[2] === "/bin/bash" : point === "completion" ? args[6] === COMPLETION_READER : isExport(args);
+      if (args[0] === "rm") { assert.equal(options?.signal, null, "cleanup is independently runnable"); }
+      if (!matches || triggered) { return response; }
+      triggered = true;
+      const timer = setTimeout(() => { controller.abort(reason); controller.abort(new SlitherCancellation("SIGTERM")); }, 100);
+      try {
+        // Real pipes and process reap. Acquisition deliberately returns its ID
+        // after cancellation; work deliberately waits for adapter termination.
+        const shielded = point === "create" || point === "remove";
+        return await processPort.run(process.execPath, ["-e", `setTimeout(() => {process.stdout.write(${JSON.stringify(response.stdout)});}, ${shielded ? 200 : 4000});`], Math.min(timeout, 5_000), options);
+      } finally { clearTimeout(timer); }
+    }});
+    const start = performance.now();
+    await assert.rejects(run.run(), (error: unknown) => includesFailure(error, reason));
+    assert.ok(performance.now() - start < 2_000);
+    assert.equal(triggered, true);
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+    assert.equal(run.calls.filter(({args}) => args[0] === "rm").length, 1);
+    if (point === "create") { assert.equal(run.calls.some(({args}) => args[0] === "start"), false); }
+    if (point === "completion") { assert.equal(run.calls.some(({args}) => isExport(args)), false); }
+    if (point !== "remove") { await assert.rejects(readFile(join(run.output, "slither.exit"))); }
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  });
+}
+
+for (const fault of ["remove", "remove-timeout", "remove-throw", "remove-identity"] as const) {
+  test(`cancellation plus ${fault} retains the original interruption before cleanup failure`, async (t) => {
+    const controller = new AbortController(); const reason = new SlitherCancellation("SIGTERM");
+    const run = await lifecycle(t, {signal: controller.signal, fault, before: (args) => {if (args[6] === COMPLETION_READER) {controller.abort(reason);}}});
+    await assert.rejects(run.run(), (error: unknown) => {
+      assert.ok(error instanceof Error && error.cause instanceof AggregateError);
+      assert.equal(error.cause.errors[0], reason);
+      assert.ok(error.cause.errors.length >= 2);
+      return true;
+    });
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+  });
+}
+
+test("cancellation with an invalid creation ID reports unknown ownership and never guesses a removal target", async (t) => {
+  const controller = new AbortController(); const reason = new SlitherCancellation("SIGTERM");
+  const run = await lifecycle(t, {signal: controller.signal, transport: async (args, response) => {
+    if (args[0] === "create") {controller.abort(reason); return result("owned-name-not-an-id\n");}
+    return response;
+  }});
+  await assert.rejects(run.run(), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /ownership is unknown/u);
+    assert.ok(includesFailure(error, reason));
+    return true;
+  });
+  assert.equal(run.calls.some(({args}) => args[0] === "rm" || args[0] === "start"), false);
+});
+
+for (const stdoutComplete of [true, false]) {
+  test(`failed create with ${stdoutComplete ? "complete" : "incomplete"} captured output preserves exact-ID authority`, async (t) => {
+    const controller = new AbortController(); const reason = new SlitherCancellation("SIGINT");
+    const processFailure = new Error("synthetic observer finalization failure");
+    const run = await lifecycle(t, {signal: controller.signal, transport: async (args, response) => {
+      if (args[0] === "create") {controller.abort(reason); throw new ProcessFailure([processFailure], response, stdoutComplete);}
+      return response;
+    }});
+    await assert.rejects(run.run(), (error: unknown) => includesFailure(error, reason) && includesFailure(error, processFailure));
+    assert.equal(run.calls.some(({args}) => args[0] === "rm"), stdoutComplete);
+    assert.equal(run.calls.some(({args}) => args[0] === "start"), false);
+  });
+}
+
+test("cancellation does not renew an exhausted lifecycle cleanup deadline", async (t) => {
+  let now = 0; t.mock.method(performance, "now", () => now);
+  const controller = new AbortController(); const reason = new SlitherCancellation("SIGTERM");
+  const run = await lifecycle(t, {signal: controller.signal, before: (args) => {
+    if (args[6] === COMPLETION_READER) { now = 599_000; controller.abort(reason); }
+  }});
+  await assert.rejects(run.run(), (error: unknown) => includesFailure(error, reason));
+  assert.deepEqual(run.calls.at(-1), {args: ["rm", "--force", lifecycleId], timeout: 1_000});
+});
+
+test("production completion followed by cancellation cannot start the next container lifecycle", async (t) => {
+  const controller = new AbortController(); const reason = new SlitherCancellation("SIGTERM");
+  const run = await lifecycle(t, {signal: controller.signal});
+  assert.deepEqual(await run.run(), {timedOut: false, exitCode: 0});
+  const calls = run.calls.length;
+  controller.abort(reason);
+  await assert.rejects(run.run(), (error: unknown) => error === reason);
+  assert.equal(run.calls.length, calls, "the fixture stage cannot even query the daemon");
 });

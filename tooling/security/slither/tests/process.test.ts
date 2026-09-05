@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import childProcess, { type ChildProcess } from "node:child_process";
+import { getEventListeners } from "node:events";
+import { ProcessFailure } from "../src/application/cancellation.ts";
 import { syncBuiltinESMExports } from "node:module";
 import { test, type TestContext } from "node:test";
 import { OwnedProcess } from "../src/adapters/process.ts";
@@ -34,10 +36,11 @@ function track(t: TestContext, setup?: (child: ChildProcess) => void): Fixture {
   t.after(async () => {
     t.mock.restoreAll();
     syncBuiltinESMExports();
-    const live = await liveGroups();
-    for (const pgid of fixture.groups) {
-      if (live.has(pgid)) {
-        try { realKill(-pgid, "SIGKILL"); } catch (error) { if (code(error) !== "ESRCH") { throw error; } }
+    for (const child of fixture.children) {
+      // Teardown can signal only a still-owned unreaped group leader. Never
+      // turn a ps row for a stored/reaped PGID into renewed kill authority.
+      if (child.pid !== undefined && fixture.groups.has(child.pid) && child.exitCode === null && child.signalCode === null) {
+        try { realKill(-child.pid, "SIGKILL"); } catch (error) { if (code(error) !== "ESRCH") { throw error; } }
       }
     }
     for (const child of fixture.children) {
@@ -391,4 +394,162 @@ test("termination targets its own new group while another synthetic group stays 
   assert.equal(neighbour.exitCode, null);
   assert.equal(neighbour.signalCode, null);
   assert.equal(realKill(neighbour.pid!, 0), true);
+});
+
+// Cancellation is a port capability, not an import-time global signal handler.
+test("already cancelled work cannot spawn; explicit cleanup remains independent", async (t) => {
+  const fixture = track(t);
+  const controller = new AbortController();
+  const reason = new Error("owned work interrupted");
+  controller.abort(reason);
+  const cancelled = new OwnedProcess(controller.signal);
+  await assert.rejects(cancelled.run(process.execPath, ["-e", "process.exit(0)"], 1_000), (error: unknown) => error === reason);
+  assert.equal(fixture.children.length, 0);
+  assert.deepEqual(await cancelled.run(process.execPath, ["-e", "process.stdout.write('cleanup')"], 1_000, {signal: null}), {exitCode: 0, stdout: "cleanup", stderr: "", timedOut: false});
+});
+
+test("cancellation kills and reaps the owned real tree once within finalization budget", async (t) => {
+  const controller = new AbortController();
+  const reason = new Error("owned work interrupted");
+  const fixture = track(t, (child) => {
+    child.stdout!.on("data", function ready(chunk: Buffer) {
+      if (chunk.toString().includes("parent-ready")) { child.stdout!.off("data", ready); controller.abort(reason); }
+    });
+  });
+  const killed: number[] = [];
+  t.mock.method(process, "kill", (pid: number, signal?: string | number): true => {
+    if (signal === "SIGKILL") { killed.push(pid); }
+    return realKill(pid, signal);
+  });
+  const start = performance.now();
+  await assert.rejects(new OwnedProcess(controller.signal).run(process.execPath, ["-e", treeScript("wait")], 5_000), (error: unknown) => errors(error).includes(reason));
+  assert.ok(performance.now() - start < 2_000);
+  assert.deepEqual(killed, [-fixture.children[0]!.pid!]);
+  await waitForQuiet(fixture);
+  assertReleased(fixture.children[0]!);
+});
+
+function deniedObservation(t: TestContext, fixture: Fixture, failureCode = "EPERM"): number[] {
+  const kills: number[] = [];
+  t.mock.method(process, "kill", (pid: number, signal?: string | number): true => {
+    if (signal === 0 && fixture.groups.has(-pid)) { throw Object.assign(new Error("synthetic observer denial"), {code: failureCode}); }
+    if (signal === "SIGKILL") { kills.push(pid); }
+    return realKill(pid, signal);
+  });
+  return kills;
+}
+
+test("EPERM signal-0 uncertainty resolves through real fixed ps after the owned child reaps", async (t) => {
+  const fixture = track(t);
+  const kills = deniedObservation(t, fixture);
+  let observations = 0;
+  t.mock.method(childProcess, "execFile", (...args: Parameters<typeof realExecFile>) => {
+    assert.equal(args[0], "/bin/ps");
+    assert.deepEqual(args[1], ["-axo", "pgid=,stat="]);
+    observations++;
+    return Reflect.apply(realExecFile, childProcess, args);
+  });
+  syncBuiltinESMExports();
+  const result = await port.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 800);
+  assert.equal(result.timedOut, true);
+  assert.ok(observations > 0);
+  assert.deepEqual(kills, [-fixture.children[0]!.pid!]);
+  assertReleased(fixture.children[0]!);
+});
+
+for (const [name, script] of [
+  ["empty", ""], ["nonzero", "process.exit(23)"],
+  ["malformed", "process.stdout.write('not a process table')"],
+  ["oversized", "process.stdout.write('x'.repeat(300000))"],
+  ["stalled", "setTimeout(()=>{},5000)"],
+] as const) {
+  test(`EPERM plus real ${name} observer preserves uncertainty without another group kill`, async (t) => {
+    const fixture = track(t);
+    substituteObserver(t, fixture, script);
+    const kills = deniedObservation(t, fixture);
+    const start = performance.now();
+    await assert.rejects(port.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 800), (error: unknown) => matches(error, /PROCESS_GROUP_INSPECTION_FAILED|PROCESS_CLEANUP_UNCONFIRMED/u));
+    assert.ok(performance.now() - start < 800 + SCHEDULING_ALLOWANCE);
+    assert.deepEqual(kills, [-fixture.children[0]!.pid!]);
+    assert.ok(fixture.children.length > 1);
+  });
+}
+
+test("a live or recycled PGID observation after EPERM never authorizes another kill", async (t) => {
+  const fixture = track(t);
+  const kills = deniedObservation(t, fixture);
+  t.mock.method(childProcess, "execFile", (...args: unknown[]): ChildProcess => {
+    const script = `process.stdout.write('${fixture.children[0]!.pid!} S\\n')`;
+    const observer = Reflect.apply(realExecFile, childProcess, [process.execPath, ["-e", script], args[2], args[3]]) as ChildProcess;
+    fixture.children.push(observer);
+    return observer;
+  });
+  syncBuiltinESMExports();
+  await assert.rejects(port.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 800), (error: unknown) => matches(error, /PROCESS_CLEANUP_UNCONFIRMED|PROCESS_GROUP_INSPECTION_FAILED/u));
+  assert.deepEqual(kills, [-fixture.children[0]!.pid!]);
+});
+
+test("non-EPERM observer syscall failures remain explicit failures", async (t) => {
+  const fixture = track(t);
+  deniedObservation(t, fixture, "EINVAL");
+  await assert.rejects(port.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 800), (error: unknown) => matches(error, /PROCESS_GROUP_INSPECTION_FAILED/u));
+});
+
+test("failed process finalization retains complete captured stdout for acquisition custody", async (t) => {
+  track(t);
+  t.mock.method(process, "kill", (pid: number, signal?: string | number): true => {
+    if (pid < 0 && signal === "SIGKILL") { throw Object.assign(new Error("synthetic actual group-kill denial"), {code: "EPERM"}); }
+    return realKill(pid, signal);
+  });
+  const id = "e".repeat(64);
+  await assert.rejects(port.run(process.execPath, ["-e", `process.stdout.write('${id}\\n')`], 2_000), (error: unknown) => {
+    assert.ok(error instanceof ProcessFailure);
+    assert.equal(error.result.stdout, `${id}\n`);
+    assert.equal(error.stdoutComplete, true);
+    assert.ok(matches(error, /PROCESS_GROUP_KILL_FAILED/u));
+    return true;
+  });
+});
+
+test("abort listeners are removed after success, interruption and independent cleanup", async (t) => {
+  const fixture = track(t);
+  const controller = new AbortController();
+  const owned = new OwnedProcess(controller.signal);
+  await owned.run(process.execPath, ["-e", "process.exit(0)"], 2_000);
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  const pending = owned.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 5_000);
+  controller.abort(new Error("interrupted"));
+  await assert.rejects(pending);
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  await owned.run(process.execPath, ["-e", "process.exit(0)"], 2_000, {signal: null});
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  await waitForQuiet(fixture);
+});
+
+test("stdout read failure cannot turn a captured ID prefix into complete acquisition authority", async (t) => {
+  const fixture = track(t, (child) => {
+    child.once("spawn", () => {child.stdout!.once("data", () => {child.stdout!.emit("error", new Error("synthetic stdout read failure"));});});
+  });
+  await assert.rejects(port.run(process.execPath, ["-e", `process.stdout.write('${"e".repeat(64)}\\n');setTimeout(()=>{},5000)`], 2_000), (error: unknown) => {
+    assert.ok(error instanceof ProcessFailure);
+    assert.equal(error.stdoutComplete, false);
+    return true;
+  });
+  await waitForQuiet(fixture);
+});
+
+test("complete stdout remains container-ID authority even when direct-child reap is unconfirmed", async (t) => {
+  track(t, (child) => {t.mock.method(child, "kill", () => false);});
+  t.mock.method(process, "kill", (pid: number, signal?: string | number): true => {
+    if (pid < 0 && signal === "SIGKILL") {throw Object.assign(new Error("synthetic kill denial"), {code: "EPERM"});}
+    return realKill(pid, signal);
+  });
+  const id = "f".repeat(64);
+  await assert.rejects(port.run(process.execPath, ["-e", `process.stdout.end('${id}\\n');setTimeout(()=>{},5000)`], 800), (error: unknown) => {
+    assert.ok(error instanceof ProcessFailure);
+    assert.equal(error.result.stdout, `${id}\n`);
+    assert.equal(error.stdoutComplete, true);
+    assert.ok(matches(error, /PROCESS_CLEANUP_UNCONFIRMED/u));
+    return true;
+  });
 });

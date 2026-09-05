@@ -1,6 +1,7 @@
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { ProcessPort } from "../application/ports.ts";
+import type { ProcessPort, ProcessResult } from "../application/ports.ts";
+import { assertNotCancelled, CANCELLATION_FINALIZATION_MS, ProcessFailure } from "../application/cancellation.ts";
 import { SlitherGateError } from "../domain/model.ts";
 import { AUTHORIZE_ANALYSIS } from "./container-contract.ts";
 import { COMPLETION_READER, exportArguments, receiveOutput, linuxOutputDirectoryPath, MAX_FILE_BYTES, MAX_TOTAL_BYTES, type OutputDirectoryPath } from "./container-export.ts";
@@ -34,58 +35,93 @@ export const runContainerById = createContainerRunner(linuxOutputDirectoryPath);
 /** Proves, exports and removes a container solely through its immutable ID. */
 export function createContainerRunner(directoryPath: OutputDirectoryPath) {
   return async (port: ProcessPort, dockerPath: string, createArguments: readonly string[], output: string, allowlist: readonly string[]): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> => {
-    const deadline = performance.now() + OVERALL_TIMEOUT_MS;
+    assertNotCancelled(port.signal);
+    let deadline = performance.now() + OVERALL_TIMEOUT_MS;
     const workDeadline = deadline - CLEANUP_RESERVE_MS;
-    const work = boundedPort(port, workDeadline);
-    const daemon = await work.run(dockerPath, ["info", "--format", "{{json .}}"], 30_000);
-    assertCgroupDaemon(daemon);
-    const created = await work.run(dockerPath, createArguments, 30_000);
-    const id = created.stdout.trim();
-    if (!CONTAINER_ID.test(id)) {throw new SlitherGateError("CONTAINER_ID_INVALID", "container engine did not return one immutable ID");}
-    const failures: unknown[] = [];
-    let analysisExit: number | null = null;
+    const cancel = (): void => { deadline = Math.min(deadline, performance.now() + CANCELLATION_FINALIZATION_MS); };
+    port.signal?.addEventListener("abort", cancel, {once: true});
     try {
-      if (created.exitCode !== 0 || created.timedOut) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container creation did not complete");}
-      await inspectContainer(work, dockerPath, id, false);
-      const started = await work.run(dockerPath, ["start", id], 30_000);
-      if (started.exitCode !== 0 || started.timedOut || started.stdout.trim() !== id) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container failed to start");}
-      const inspection = await inspectContainer(work, dockerPath, id, true);
-      if (inspection.State?.Paused !== false) {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container cannot authorize analysis while paused");}
-      await assertLiveCgroup(id, inspection);
-      const authorize = await work.run(dockerPath, ["exec", id, "/bin/bash", "-ceu", AUTHORIZE_ANALYSIS], 30_000);
-      if (authorize.exitCode !== 0 || authorize.timedOut) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container delegation authorization failed");}
-      const exitCode = await awaitCompletion(work, dockerPath, id);
-      analysisExit = exitCode;
-      await assertRetainedContainer(work, dockerPath, id, inspection);
-      // Docker cp cannot export tmpfs, even while paused. The isolated Python
-      // exec rejects live descendants and checks a coherent bounded snapshot.
-      const allowed = exitCode === 0 ? allowlist : [...allowlist, "failure.stage"];
-      const exported = await work.run(dockerPath, exportArguments(id, allowed, exitCode === 0), 30_000).catch((cause: unknown) => {
-        const failure = new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container-private export command failed");
-        failure.cause = cause;
+      const work = boundedPort(port, workDeadline);
+      const daemon = await work.run(dockerPath, ["info", "--format", "{{json .}}"], 30_000);
+      assertCgroupDaemon(daemon);
+      assertNotCancelled(port.signal);
+      // Creation is an acquisition: settle its bounded response even after a
+      // signal, so a late returned ID cannot escape custody. Never retry create.
+      let created: ProcessResult;
+      const failures: unknown[] = [];
+      try { created = await work.run(dockerPath, createArguments, 30_000, {signal: null}); }
+      catch (error) {
+        if (!(error instanceof ProcessFailure)) { throw error; }
+        if (!error.stdoutComplete) {
+          const unknown = new SlitherGateError("CONTAINER_ID_INVALID", "container creation output is incomplete; ownership and cleanup are unconfirmed");
+          unknown.cause = new AggregateError(interruptionFirst(port.signal, [error]), "creation failures");
+          throw unknown;
+        }
+        created = error.result;
+        failures.push(error);
+      }
+      const id = created.stdout.trim();
+      if (!CONTAINER_ID.test(id)) {
+        const unknown = new SlitherGateError("CONTAINER_ID_INVALID", "container creation ownership is unknown; no immutable ID was returned and cleanup cannot be confirmed");
+        unknown.cause = new AggregateError(interruptionFirst(port.signal, failures), "creation failures");
+        throw unknown;
+      }
+      let analysisExit: number | null = null;
+      try {
+        assertNotCancelled(port.signal);
+        if (failures.length !== 0) { throw failures[0]; }
+        if (created.exitCode !== 0 || created.timedOut) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container creation did not complete");}
+        await inspectContainer(work, dockerPath, id, false);
+        const started = await work.run(dockerPath, ["start", id], 30_000);
+        if (started.exitCode !== 0 || started.timedOut || started.stdout.trim() !== id) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container failed to start");}
+        const inspection = await inspectContainer(work, dockerPath, id, true);
+        if (inspection.State?.Paused !== false) {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container cannot authorize analysis while paused");}
+        await assertLiveCgroup(id, inspection);
+        const authorize = await work.run(dockerPath, ["exec", id, "/bin/bash", "-ceu", AUTHORIZE_ANALYSIS], 30_000);
+        if (authorize.exitCode !== 0 || authorize.timedOut) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container delegation authorization failed");}
+        const exitCode = await awaitCompletion(work, dockerPath, id);
+        analysisExit = exitCode;
+        await assertRetainedContainer(work, dockerPath, id, inspection);
+        // Docker cp cannot export tmpfs, even while paused. The isolated Python
+        // exec rejects live descendants and checks a coherent bounded snapshot.
+        const allowed = exitCode === 0 ? allowlist : [...allowlist, "failure.stage"];
+        const exported = await work.run(dockerPath, exportArguments(id, allowed, exitCode === 0), 30_000).catch((cause: unknown) => {
+          if (port.signal?.aborted) { throw cause; }
+          const failure = new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container-private export command failed");
+          failure.cause = cause;
+          throw failure;
+        });
+        if (exported.exitCode !== 0 || exported.timedOut || exported.stderr !== "") {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container-private output export failed");}
+        await assertRetainedContainer(work, dockerPath, id, inspection);
+        await receiveOutput(exported.stdout, output, allowed, exitCode === 0, directoryPath);
+        await authenticateTransferredOutput(output, allowed, exitCode === 0);
+        assertNotCancelled(port.signal);
+        assertTimeRemaining(workDeadline);
+      } catch (error) {
+        if (!failures.includes(error)) { failures.push(error); }
+      }
+      // A validated create response grants custody; failed inspection must not
+      // abandon it. Settle both outcomes before returning or throwing, preserving
+      // even an undefined primary rejection ahead of any cleanup failure.
+      try {
+        await removeContainer(boundedPort(port, deadline, true), dockerPath, id);
+      } catch (cleanup) {
+        const failure = new SlitherGateError("CONTAINER_FAILED", `container cleanup is unconfirmed${analysisExit === null ? "" : ` after analysis exit ${analysisExit}`}`);
+        failure.cause = new AggregateError(interruptionFirst(port.signal, [...failures, cleanup]), "container lifecycle and cleanup failures");
         throw failure;
-      });
-      if (exported.exitCode !== 0 || exported.timedOut || exported.stderr !== "") {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container-private output export failed");}
-      await assertRetainedContainer(work, dockerPath, id, inspection);
-      await receiveOutput(exported.stdout, output, allowed, exitCode === 0, directoryPath);
-      await authenticateTransferredOutput(output, allowed, exitCode === 0);
-      assertTimeRemaining(workDeadline);
-    } catch (error) {
-      failures.push(error);
-    }
-    // A validated create response grants custody; failed inspection must not
-    // abandon it. Settle both outcomes before returning or throwing, preserving
-    // even an undefined primary rejection ahead of any cleanup failure.
-    try {
-      await removeContainer(boundedPort(port, deadline), dockerPath, id);
-    } catch (cleanup) {
-      const failure = new SlitherGateError("CONTAINER_FAILED", `container cleanup is unconfirmed${analysisExit === null ? "" : ` after analysis exit ${analysisExit}`}`);
-      failure.cause = new AggregateError([...failures, cleanup], "container lifecycle and cleanup failures");
-      throw failure;
-    }
-    if (failures.length > 0) {throw failures[0];}
-    return {timedOut: false, exitCode: analysisExit};
+      }
+      if (port.signal?.aborted && failures.length !== 0) {
+        throw new AggregateError(interruptionFirst(port.signal, failures), "container lifecycle interrupted");
+      }
+      assertNotCancelled(port.signal);
+      if (failures.length > 0) {throw failures[0];}
+      return {timedOut: false, exitCode: analysisExit};
+    } finally { port.signal?.removeEventListener("abort", cancel); }
   };
+}
+
+function interruptionFirst(signal: AbortSignal | undefined, failures: readonly unknown[]): unknown[] {
+  return signal?.aborted ? [signal.reason, ...failures.filter((error) => error !== signal.reason)] : [...failures];
 }
 
 async function removeContainer(port: ProcessPort, dockerPath: string, id: string): Promise<void> {
@@ -99,11 +135,14 @@ function assertTimeRemaining(deadline: number): number {
   return remaining;
 }
 
-function boundedPort(port: ProcessPort, deadline: number): ProcessPort {
+function boundedPort(port: ProcessPort, deadline: number, cleanup = false): ProcessPort {
   return {run: async (command, args, timeoutMs, options) => {
+    const shielded = cleanup || options?.signal === null;
+    if (!shielded) { assertNotCancelled(port.signal); }
     const timeout = Math.min(timeoutMs, assertTimeRemaining(deadline));
     const commandDeadline = Math.min(deadline, performance.now() + timeout);
-    const result = await port.run(command, args, timeout, options);
+    const result = await port.run(command, args, timeout, {...options, signal: shielded ? null : options?.signal ?? port.signal});
+    if (!shielded) { assertNotCancelled(port.signal); }
     // Preserve a late create's ID for cleanup, but never accept late results.
     return {...result, timedOut: result.timedOut || performance.now() >= commandDeadline};
   }};
