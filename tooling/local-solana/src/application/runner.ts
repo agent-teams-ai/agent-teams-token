@@ -1,6 +1,6 @@
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, FIXTURE_AMOUNT_BASE_UNITS, LocalSolanaError, type FailurePhase, type FixtureObservations, type TransactionFact } from "../domain/model.ts";
 import { verifyObservations } from "./verifier.ts";
-import type { AuthorityTransactionPort, CliPort, CommandPort, PortAllocator, PortLease, RpcPort, RunStorePort, ToolResolverPort, ValidatorHandle, ValidatorPort } from "./ports.ts";
+import type { AuthorityTransactionPort, CliPort, CommandPort, PortAllocator, PortLease, RpcPort, RunStorePort, ToolLease, ToolPaths, ToolResolverPort, ValidatorHandle, ValidatorPort } from "./ports.ts";
 
 export interface FixtureDependencies {
   readonly tools: ToolResolverPort;
@@ -41,9 +41,12 @@ const systemReadinessTiming: ReadinessTiming = {
 interface CleanupResources {
   validator: Awaited<ReturnType<ValidatorPort["start"]>> | undefined;
   portLease: PortLease | undefined;
+  tools: ToolLease | undefined;
+  toolUsersUncertain: boolean;
 }
 
 interface CleanupTruth {
+  readonly errors: readonly unknown[];
   readonly validatorStopped: boolean;
   readonly portLeaseReleased: boolean;
   readonly privateDirectoryRemoved: boolean;
@@ -59,7 +62,7 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
   await deps.store.reclaimStale();
   ensureNotAborted(signal);
   const paths = await deps.store.create();
-  const resources: CleanupResources = { validator: undefined, portLease: undefined };
+  const resources: CleanupResources = { validator: undefined, portLease: undefined, tools: undefined, toolUsersUncertain: false };
   let mutationPhase: FailurePhase | undefined;
   let observations: FixtureObservations | undefined;
   let report: ReturnType<typeof verifyObservations> | undefined;
@@ -67,7 +70,8 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
   let failed = false;
   try {
     ensureNotAborted(signal);
-    const tools = await deps.tools.resolve();
+    const tools = await deps.tools.resolve({ run: paths, own: (lease) => { resources.tools = lease; }, signal });
+    ensureNotAborted(signal);
     const env = allowlistedEnvironment(deps.environment, paths.directory);
     const cliContext = { paths, tools, env, signal };
     const keys = await deps.cli.createKeys(cliContext);
@@ -131,37 +135,28 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
   } catch (cause) {
     failed = true;
     failure = cause;
+    resources.toolUsersUncertain ||= unconfirmedToolUser(cause);
   }
 
   try {
     const cleanup = await finalizeCleanup(resources, deps.store, paths);
     if (failed || !cleanupComplete(cleanup)) {
       const cause = failed ? failure : new LocalSolanaError("SOLANA_CLEANUP_INCOMPLETE", "bounded cleanup attempts were exhausted");
+      const errors = [cause, ...cleanup.errors];
       if (mutationPhase !== undefined) {
-        await deps.store.publishFailure(failureEvidence(mutationPhase, cause, cleanup));
+        try { await deps.store.publishFailure(failureEvidence(mutationPhase, cause, cleanup)); }
+        catch (publicationCause) { errors.push(publicationCause); }
       }
-      throw cause;
+      throw combinedFailure(errors);
     }
     try {
+      ensureNotAborted(signal);
       if (observations === undefined || report === undefined) { throw new LocalSolanaError("SOLANA_EVIDENCE_INCOMPLETE", "verified observations are absent after successful cleanup"); }
       return await deps.store.publish(observations, report);
     } catch (cause) {
       if (mutationPhase !== undefined) {
-        await deps.store.publishFailure({
-          schemaVersion: 1,
-          status: "FAILED",
-          failedPhase: mutationPhase,
-          diagnosticCode: cause instanceof LocalSolanaError ? cause.code : "SOLANA_UNEXPECTED_FAILURE",
-          mutationsMayHaveOccurred: true,
-          cleanupCompleted: true,
-          validatorStopped: true,
-          portLeaseReleased: true,
-          privateDirectoryRemoved: true,
-          publicNetwork: false,
-          realAssetCostUsd: 0,
-          secretsRetained: false,
-          productionApproved: false,
-        });
+        try { await deps.store.publishFailure(failureEvidence(mutationPhase, cause, cleanup)); }
+        catch (publicationCause) { throw combinedFailure([cause, publicationCause]); }
       }
       throw cause;
     }
@@ -172,21 +167,46 @@ export async function runFixture(deps: FixtureDependencies, externalSignal?: Abo
 }
 
 async function finalizeCleanup(resources: CleanupResources, store: RunStorePort, paths: Awaited<ReturnType<RunStorePort["create"]>>): Promise<CleanupTruth> {
-  for (let attempt = 0; attempt < CLEANUP_ATTEMPTS && resources.validator !== undefined; attempt += 1) {
-    try { await resources.validator.stop(); resources.validator = undefined; } catch {}
+  const errors: unknown[] = [];
+  await retryCleanup(async () => { await resources.validator?.stop(); resources.validator = undefined; }, errors);
+  await retryCleanup(async () => { await resources.portLease?.release(); resources.portLease = undefined; }, errors);
+  if (resources.tools !== undefined && resources.validator === undefined && !resources.toolUsersUncertain) {
+    try { await resources.tools.close(); resources.tools = undefined; } catch (cause) { errors.push(cause); }
   }
-  for (let attempt = 0; attempt < CLEANUP_ATTEMPTS && resources.portLease !== undefined; attempt += 1) {
-    try { await resources.portLease.release(); resources.portLease = undefined; } catch {}
+  if (resources.tools !== undefined) {
+    errors.push(new LocalSolanaError("SOLANA_TOOL_CLEANUP_INCOMPLETE", "authenticated snapshots retained because their close or users' termination is unconfirmed"));
   }
   let privateDirectoryRemoved = false;
-  for (let attempt = 0; attempt < CLEANUP_ATTEMPTS && !privateDirectoryRemoved; attempt += 1) {
-    try { await store.cleanup(paths); privateDirectoryRemoved = true; } catch {}
+  // Retain the private run record while its separately leased snapshots or
+  // tool users are uncertain. This also keeps the existing failure schema truthful.
+  if (resources.tools === undefined && !resources.toolUsersUncertain) {
+    await retryCleanup(async () => { await store.cleanup(paths); privateDirectoryRemoved = true; }, errors);
   }
   return {
-    validatorStopped: resources.validator === undefined,
+    errors,
+    validatorStopped: resources.validator === undefined && !resources.toolUsersUncertain,
     portLeaseReleased: resources.portLease === undefined,
     privateDirectoryRemoved,
   };
+}
+
+async function retryCleanup(action: () => Promise<void>, errors: unknown[]): Promise<void> {
+  for (let attempt = 0; attempt < CLEANUP_ATTEMPTS; attempt += 1) {
+    try { await action(); return; } catch (cause) { if (attempt === CLEANUP_ATTEMPTS - 1) { errors.push(cause); } }
+  }
+}
+
+function unconfirmedToolUser(cause: unknown): boolean {
+  if (cause instanceof AggregateError) { return cause.errors.some(unconfirmedToolUser); }
+  return cause instanceof LocalSolanaError && ["SOLANA_CHILD_STOP_TIMEOUT", "SOLANA_CHILD_IDENTITY"].includes(cause.code);
+}
+
+function primaryFailure(cause: unknown): unknown { return cause instanceof AggregateError && cause.errors.length > 0 ? primaryFailure(cause.errors[0]) : cause; }
+
+function combinedFailure(errors: readonly unknown[]): unknown {
+  if (errors.length === 1) { return errors[0]; }
+  const primary = errors[0];
+  return new AggregateError(errors, `${primary instanceof Error ? primary.message : "fixture failed"}; cleanup or failure publication remains incomplete`, { cause: primary });
 }
 
 function cleanupComplete(value: CleanupTruth): boolean {
@@ -194,11 +214,12 @@ function cleanupComplete(value: CleanupTruth): boolean {
 }
 
 function failureEvidence(phase: FailurePhase, cause: unknown, cleanup: CleanupTruth) {
+  const primary = primaryFailure(cause);
   return {
     schemaVersion: 1 as const,
     status: "FAILED" as const,
     failedPhase: phase,
-    diagnosticCode: cause instanceof LocalSolanaError ? cause.code : "SOLANA_UNEXPECTED_FAILURE",
+    diagnosticCode: primary instanceof LocalSolanaError ? primary.code : "SOLANA_UNEXPECTED_FAILURE",
     mutationsMayHaveOccurred: true as const,
     cleanupCompleted: cleanupComplete(cleanup),
     validatorStopped: cleanup.validatorStopped,
@@ -214,7 +235,7 @@ function failureEvidence(phase: FailurePhase, cause: unknown, cleanup: CleanupTr
 interface ValidatorStartContext {
   readonly deps: FixtureDependencies;
   readonly paths: Awaited<ReturnType<RunStorePort["create"]>>;
-  readonly tools: Awaited<ReturnType<ToolResolverPort["resolve"]>>;
+  readonly tools: ToolPaths;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   readonly genesisMint: string;
@@ -227,6 +248,7 @@ async function startValidatorWithPortRetry(context: ValidatorStartContext): Prom
     const portLease = await deps.ports.allocate();
     resources.portLease = portLease;
     try {
+      resources.toolUsersUncertain = true;
       const validator = await deps.validator.start({
         executable: tools.validator, ledger: paths.ledger, config: paths.config, genesisMint,
         tokenProgram: tools.tokenProgram, associatedTokenProgram: tools.associatedTokenProgram,
@@ -235,14 +257,25 @@ async function startValidatorWithPortRetry(context: ValidatorStartContext): Prom
         registerIdentity: async (identity) => await deps.store.registerValidator(paths, identity),
       });
       resources.validator = validator;
+      resources.toolUsersUncertain = false;
       return { validator, portLease };
     } catch (cause) {
-      await portLease.release();
-      resources.portLease = undefined;
+      // These adapter diagnostics are emitted before spawning or after its
+      // owned startup cleanup succeeds. Unknown failures retain the snapshots.
+      resources.toolUsersUncertain = !confirmedStartupCleanup(cause);
+      try { await portLease.release(); resources.portLease = undefined; }
+      catch (cleanupCause) { throw combinedFailure([cause, cleanupCause]); }
       if (!(cause instanceof LocalSolanaError) || cause.code !== "SOLANA_VALIDATOR_PORT_COLLISION" || attempt === 2) { throw cause; }
     }
   }
   throw new LocalSolanaError("SOLANA_VALIDATOR_PORT_RETRY", "validator port retry exhausted before mutation");
+}
+
+function confirmedStartupCleanup(cause: unknown): boolean {
+  return cause instanceof LocalSolanaError && [
+    "SOLANA_COMMAND_ABORTED", "SOLANA_VALIDATOR_ABSOLUTE", "SOLANA_VALIDATOR_IDENTITY",
+    "SOLANA_VALIDATOR_PORT_COLLISION", "SOLANA_VALIDATOR_EARLY_EXIT", "SOLANA_VALIDATOR_SUPERVISOR_TIMEOUT",
+  ].includes(cause.code);
 }
 
 export function allowlistedEnvironment(source: NodeJS.ProcessEnv, runDirectory: string): NodeJS.ProcessEnv {

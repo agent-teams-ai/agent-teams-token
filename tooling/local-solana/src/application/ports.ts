@@ -105,7 +105,14 @@ export interface CliPort {
   burn(context: CliExecutionContext, request: { readonly rpcUrl: string; readonly account: string }): Promise<string>;
 }
 
-export interface ToolResolverPort { resolve(): Promise<ToolPaths>; }
+/** Registered before acquisition; close only after every tool user has stopped. */
+export interface ToolLease { close(): Promise<void>; }
+export interface ToolResolutionRequest {
+  readonly run: Pick<RunPaths, "directory" | "directoryIdentity" | "rootIdentity">;
+  readonly own: (lease: ToolLease) => void;
+  readonly signal?: AbortSignal;
+}
+export interface ToolResolverPort { resolve(request: ToolResolutionRequest): Promise<ToolPaths>; }
 export interface PortLease {
   readonly rpcPort: number;
   readonly faucetPort: number;

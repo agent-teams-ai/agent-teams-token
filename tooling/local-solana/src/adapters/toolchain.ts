@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
-import { chmod, constants, lstat, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { LocalSolanaError } from "../domain/model.ts";
 import { object, string } from "./rpc-parsers.ts";
-import type { CommandPort, ToolPaths, ToolResolverPort } from "../application/ports.ts";
+import type { CommandPort, ToolPaths, ToolResolutionRequest, ToolResolverPort } from "../application/ports.ts";
+
+import { AuthenticatedToolSnapshots, stableRead, throwErrors } from "./tool-snapshots.ts";
 
 const EXPECTED_EXECUTABLES = ["bin/solana", "bin/solana-keygen", "bin/solana-test-validator", "bin/spl-token"] as const;
 
@@ -11,7 +12,7 @@ export class PinnedToolResolver implements ToolResolverPort {
   private readonly repositoryRoot: string;
   private readonly commands: CommandPort;
   public constructor(repositoryRoot: string, commands: CommandPort) { this.repositoryRoot = repositoryRoot; this.commands = commands; }
-  public async resolve(): Promise<ToolPaths> {
+  public async resolve(request: ToolResolutionRequest): Promise<ToolPaths> {
     const repositoryRoot = await trustedRepositoryRoot(this.repositoryRoot);
     const lock = object(JSON.parse((await stableRead(join(repositoryRoot, "tooling/toolchain.lock.json"))).toString("utf8")), "toolchain lock");
     const tools = object(lock.tools, "toolchain tools");
@@ -38,9 +39,28 @@ export class PinnedToolResolver implements ToolResolverPort {
       tokenProgram: { path: contained(repositoryRoot, string(token.path, "SPL Token program path"), "SOLANA_PROGRAM_PIN"), hash: token.sha256 },
       associatedTokenProgram: { path: contained(repositoryRoot, string(associated.path, "associated token program path"), "SOLANA_PROGRAM_PIN"), hash: associated.sha256 },
     };
-    const paths = await authenticatedSnapshots(install, sources);
-    await verifyVersions(paths, this.commands);
-    return paths;
+    assertSnapshotLocation(toolsRoot, request.run.directory);
+    const snapshots = new AuthenticatedToolSnapshots(request.run);
+    request.own(snapshots);
+    try {
+      const paths = await snapshots.create(sources, request.signal);
+      await verifyVersions(paths, this.commands, request.signal);
+      return paths;
+    } catch (cause) {
+      // A command adapter's unconfirmed stop must retain files still in use.
+      if (unconfirmedToolUser(cause)) { throw cause; }
+      const errors = [cause];
+      try { await snapshots.close(); } catch (cleanupCause) { errors.push(cleanupCause); }
+      throwErrors(errors, "authenticated snapshots could not be closed");
+      throw cause;
+    }
+  }
+}
+
+function assertSnapshotLocation(toolsRoot: string, runDirectory: string): void {
+  const location = relative(toolsRoot, resolve(dirname(runDirectory)));
+  if (location === "" || (!isAbsolute(location) && location !== ".." && !location.startsWith(`..${sep}`))) {
+    throw new LocalSolanaError("SOLANA_TOOL_SNAPSHOT_LOCATION", "authenticated snapshots must be outside the pinned tools tree");
   }
 }
 
@@ -86,51 +106,6 @@ function validExpectedHashes(value: unknown): boolean {
     && EXPECTED_EXECUTABLES.every((path) => typeof hashes[path] === "string" && /^[a-f0-9]{64}$/u.test(hashes[path] as string));
 }
 
-async function authenticatedSnapshots(
-  install: string,
-  sources: Record<keyof ToolPaths, { readonly path: string; readonly hash: unknown }>,
-): Promise<ToolPaths> {
-  const root = await mkdtemp(join(install, ".authenticated-tools-"));
-  await chmod(root, 0o700);
-  try {
-    const entries: Array<readonly [string, string]> = [];
-    for (const [name, source] of Object.entries(sources)) {
-      if (typeof source.hash !== "string" || !/^[a-f0-9]{64}$/u.test(source.hash)) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} hash pin is invalid`); }
-      const bytes = await stableRead(source.path);
-      const actual = createHash("sha256").update(bytes).digest("hex");
-      if (actual !== source.hash) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} binary hash mismatch`); }
-      const target = join(root, `${name}-${basename(source.path)}`);
-      await writeFile(target, bytes, { flag: "wx", mode: 0o700 });
-      await chmod(target, 0o500);
-      const snapshotHash = createHash("sha256").update(await stableRead(target)).digest("hex");
-      if (snapshotHash !== source.hash) { throw new LocalSolanaError("SOLANA_TOOL_HASH", `${name} authenticated snapshot changed`); }
-      entries.push([name, target]);
-    }
-    return Object.fromEntries(entries) as unknown as ToolPaths;
-  } catch (error) {
-    await rm(root, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-async function stableRead(path: string): Promise<Buffer> {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => {
-    throw new LocalSolanaError("SOLANA_TOOL_MISSING", "tool is absent or substituted");
-  });
-  try {
-    const before = await handle.stat();
-    if (!before.isFile() || before.nlink !== 1) { throw new LocalSolanaError("SOLANA_TOOL_MISSING", "tool is absent or substituted"); }
-    const bytes = await handle.readFile();
-    const after = await handle.stat();
-    const current = await lstat(path);
-    if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1
-      || before.dev !== after.dev || before.ino !== after.ino || before.dev !== current.dev || before.ino !== current.ino) {
-      throw new LocalSolanaError("SOLANA_TOOL_IDENTITY", "tool identity changed while it was read");
-    }
-    return bytes;
-  } finally { await handle.close(); }
-}
-
 async function assertDirectory(path: string, code: string): Promise<void> {
   const entry = await lstat(path).catch(() => null);
   if (!entry?.isDirectory() || entry.isSymbolicLink()) { throw new LocalSolanaError(code, "toolchain directory is absent or substituted"); }
@@ -157,11 +132,18 @@ export function hasAsciiControlCharacter(value: string): boolean {
   return false;
 }
 
-async function verifyVersions(paths: ToolPaths, commands: CommandPort): Promise<void> {
+async function verifyVersions(paths: ToolPaths, commands: CommandPort, signal?: AbortSignal): Promise<void> {
   const env = { HOME: "/nonexistent", LANG: "C", LC_ALL: "C", PATH: "" };
   const expectations = [[paths.solana, /^solana-cli 4\.2\.1 /u], [paths.keygen, /^solana-keygen 4\.2\.1 /u], [paths.validator, /^solana-test-validator 4\.2\.1 /u], [paths.splToken, /^spl-token-cli 5\.6\.1\s*$/u]] as const;
   for (const [path, expected] of expectations) {
-    const result = await commands.run(path, ["--version"], { env, timeoutMs: 10_000 });
+    if (signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "tool resolution interrupted"); }
+    const result = await commands.run(path, ["--version"], { env, timeoutMs: 10_000, signal });
+    if (signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "tool resolution interrupted"); }
     if (result.exitCode !== 0 || !expected.test(result.stdout)) { throw new LocalSolanaError("SOLANA_TOOL_VERSION", `${path.split("/").at(-1)} version mismatch`); }
   }
+}
+
+function unconfirmedToolUser(cause: unknown): boolean {
+  if (cause instanceof AggregateError) { return cause.errors.some(unconfirmedToolUser); }
+  return cause instanceof LocalSolanaError && ["SOLANA_CHILD_STOP_TIMEOUT", "SOLANA_CHILD_IDENTITY"].includes(cause.code);
 }
