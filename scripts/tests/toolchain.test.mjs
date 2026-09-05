@@ -34,7 +34,9 @@ import {
 } from "../toolchain-test-fixture.mjs";
 import { brokenDownloader, digest, writeExecutable } from "./toolchain-fixtures.mjs";
 import { registerToolchainAuthorityTests } from "./toolchain-authority.test.mjs";
+import { registerToolchainPathOwnershipTests } from "./toolchain-path-ownership.test.mjs";
 
+registerToolchainPathOwnershipTests();
 registerToolchainAuthorityTests();
 registerBootstrapTests();
 registerExecutionTests();

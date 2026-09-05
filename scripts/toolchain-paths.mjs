@@ -18,8 +18,9 @@ function trustedAliasTarget(alias, target) {
 function inspect(path) {
   try {
     return lstatSync(path);
-  } catch {
-    return;
+  } catch (error) {
+    if (error?.code === "ENOENT") {return;}
+    throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID", { cause: error });
   }
 }
 
@@ -60,42 +61,45 @@ export function canonicalizeTrustedPath(path, { platform = process.platform, hos
   return canonicalAlias(absolute, platform) ?? absolute;
 }
 
-function isMacTempHierarchyAncestor(current, managedPath, st) {
-  const folders = "/private/var/folders";
-  const depth = relative(folders, current).split(sep).filter(Boolean).length;
-  return isWithin(folders, current)
-    && isWithin(current, managedPath)
-    && depth <= 3
-    && st.uid === 0
-    && (st.mode & 0o022) === 0;
+function isSharedTemporaryRoot(current, platform, st, uid) {
+  return (current === "/tmp" || (platform === "darwin" && current === "/private/tmp"))
+    && (st.uid === 0 || st.uid === uid)
+    && (st.mode & 0o7777) === 0o1777;
 }
 
-function trustedSystemAncestor(current, absolute, platform, st) {
-  const known = ["/private", "/private/var", "/private/var/folders", "/private/tmp"];
-  return platform === "darwin"
-    && (known.includes(current) || isMacTempHierarchyAncestor(current, absolute, st));
-}
-
-function assertDirectoryIdentity(current, absolute, platform, st) {
-  const system = trustedSystemAncestor(current, absolute, platform, st);
-  const temp = current === "/tmp";
+function assertDirectoryIdentity(st, { sharedAncestor, temporaryRoot, uid }) {
   const writable = (st.mode & 0o022) !== 0;
-  if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1 || (writable && !system && !temp)) {
+  if (!st.isDirectory() || st.isSymbolicLink() || st.nlink < 1 || (writable && !temporaryRoot)) {
     throw new Error("TOOLCHAIN_DIRECTORY_IDENTITY_INVALID");
   }
-  if (typeof process.getuid === "function" && st.uid !== process.getuid() && current !== "/" && !system) {
+  if (uid !== undefined && st.uid !== uid && !(sharedAncestor && st.uid === 0)) {
     throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");
   }
 }
 
+// Only the leading shared prefix may belong to root. The requested directory
+// is managed, and entering a caller-owned directory makes every descendant
+// managed too. Callers check toolsRoot before downloads/install/bin/store/cache;
+// checking a child must never re-admit root ownership inside that owned tree.
+// Missing components are allowed only below an existing caller-owned directory.
 export function assertOwnedDirectoryChain(path, { platform = process.platform, hostPlatform: hostOs } = {}) {
   platform = selectedPlatform(platform, hostOs);
   const absolute = canonicalizeTrustedPath(path, { platform });
   const [root, parts] = pathParts(absolute);
+  const uid = process.getuid?.();
   let current = root;
+  let ownedTree = false;
   for (const part of parts) {
     current = current === "/" ? "/" + part : join(current, part);
     const st = inspect(current);
-    if (st) {assertDirectoryIdentity(current, absolute, platform, st);}
+    if (!st) {
+      if (!ownedTree) {throw new Error("TOOLCHAIN_DIRECTORY_OWNER_INVALID");}
+      continue;
+    }
+    const sharedAncestor = !ownedTree && current !== absolute;
+    const temporaryRoot = current !== absolute && (!ownedTree || uid === 0)
+      && isSharedTemporaryRoot(current, platform, st, uid);
+    assertDirectoryIdentity(st, { sharedAncestor, temporaryRoot, uid });
+    if (!temporaryRoot && st.uid === uid) {ownedTree = true;}
   }
 }
