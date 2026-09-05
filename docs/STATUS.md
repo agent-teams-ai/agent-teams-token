@@ -1,9 +1,55 @@
 # Project status
 
-Last reconciled: 2026-09-04. Earlier evidence below retains its original scope;
+Last reconciled: 2026-09-05. Earlier evidence below retains its original scope;
 it must not be read as a current exact-head full-gate pass.
 
 ## Current execution checkpoint
+
+This bounded correction uses clean base `ec980e345275285144b28135eb3793e1072128c8`.
+Root supplied the integration evidence below; it does not qualify the edited
+head. This checkpoint supersedes older current-state claims and job observations.
+
+- Proven on clean Linux `ab97c6b9f1aab20c0acbe740ad2a6692b90cacde`: the actual
+  production plus vulnerable Slither Docker gate and finalized validator passed,
+  exit 0/0 in 15.044s; 101 detectors, 11 visible findings, 0 blocking and
+  0 suppressed. Pins remain unchanged. Four actual Docker interruption cases
+  passed: SIGINT/SIGTERM at creation/completion, exit 130/143, each exact created
+  container absent afterward and no READY; no Docker result substitution.
+- Actual EVM process tests passed 23/23 on both Mac and Linux `ab97c6b9`, with
+  zero skips. The parent-publication worker passed 187/187 using synthetic
+  analysis inputs and protocol responses; that is simulated, not Docker evidence.
+- Root's full Mac Slither suite is not green: 622 total, 577 passed, 32 failed,
+  13 Linux-only skips. Of the failures, 31 new fixture failures came from the
+  `/tmp` versus `/private/tmp` seam identity and belong to a separate writer.
+  The one existing Python 5s timeout passed in isolation at 3.49s; that retry
+  does not convert the full run into a pass.
+- Solana focused Mac tests passed 53/53 with zero skips; typecheck and
+  Foundation 0.20.0 passed. Strict real Mac integration passed 4/4 with zero
+  skips in 109.440s: one mint/burn/negative-authority lifecycle and three rounds
+  of two separately spawned fixtures. These checks used the exact source bytes
+  immediately before the mechanical base commit, before this lint correction.
+  The pinned oxlint run reported two snapshot diagnostics, addressed here;
+  final exact-head qualification remains pending. Post-fixture offline bootstrap
+  verification was still running at dispatch; its result is not inferred.
+- The first full Linux `check:linux` stopped at correctly rejected leaked Solana
+  snapshots, before full root checks or rollback proof. Legacy copies were
+  authenticated and quarantined outside the installation without deletion.
+  The new explicit snapshot lifetime prevents that placement error; actual Linux
+  qualification of the new bytes is pending. See [the correction](PLAN.md) and
+  [publication contract](../tooling/security/slither/src/README.md).
+- Not proven for this candidate: full `check:linux`, sealed three-slice rollback
+  proof, final Mac/Linux sets, four specialist reviews followed by sequential
+  holistic review, fresh GitHub main semantic reconciliation and exact-head
+  GitHub CI. No PR exists; last observed main was
+  `370c3aac97e4b3ddc7fcc9ada762a050580d0f39`. Old-SHA results cannot qualify a new head.
+- The user's checkout was untouched. Public networks, real keys, broadcast,
+  token mechanics, fixed supply and allocations remain outside this work.
+  Existing production-only deferred scope below stays deferred. The full
+  [three-slice plan](NEXT_ZERO_COST_SLICES_PLAN.md) and its
+  [critique](research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md) remain intact;
+  root owns final qualification and subsequent status reconciliation.
+
+## Historical execution checkpoints (4 September)
 
 15:45 UTC: Solanaabf837 candidate has79Mac pass/5Linux-onlyskips plus13/13
 runner cases, TS7/lint pass;126 independently reviews its publication semantics.

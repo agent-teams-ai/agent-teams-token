@@ -49,7 +49,7 @@ export class AuthenticatedToolSnapshots implements ToolLease {
   public close(): Promise<void> {
     // A failed close is terminal: neither file descriptors nor uncertain objects
     // may be retried after an OS close could already have consumed ownership.
-    this.closing ??= Promise.resolve().then(() => { this.finalize(); });
+    this.closing ??= Promise.resolve().then(() => this.finalize());
     return this.closing;
   }
 

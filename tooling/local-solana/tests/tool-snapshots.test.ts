@@ -115,8 +115,8 @@ test("same-inode source mutation during reading is rejected before bytes are ret
   t.mock.method(promises, "open", async (...args: Parameters<typeof promises.open>) => {
     const handle = await open(...args);
     if (args[0] === value.source) {
-      t.mock.method(handle, "readFile", new Proxy(handle.readFile, { async apply(method, receiver, args) {
-        const bytes = await Reflect.apply(method, receiver, args); await promises.chmod(value.source, 0o700); return bytes;
+      t.mock.method(handle, "readFile", new Proxy(handle.readFile, { async apply(method, receiver, readArgs) {
+        const bytes = await Reflect.apply(method, receiver, readArgs); await promises.chmod(value.source, 0o700); return bytes;
       } }));
     }
     return handle;

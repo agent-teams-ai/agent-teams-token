@@ -43,18 +43,31 @@ The exact raw Slither status/JSON matrix is:
 - status `255`, `success=true`, no analysis errors, one or more findings:
   complete analysis under explicit `--fail-pedantic`, then policy;
 - status `255`, `success=false`, at least one analysis error: tool failure;
-- every other combination, including signal-derived `137`/`143`, is malformed
-  output and fails with gate exit `40`.
+- every other combination, including analyzer signal-derived `137`/`143`, is
+  malformed output and fails with gate exit `40`. Parent interruption is handled
+  separately: the first SIGINT/SIGTERM remains sticky at exit `130`/`143`.
 
 Gate exit classes are `0` clean, `20` policy findings,
 `30` tool failure, `40` malformed/incomplete analysis, and `50` environment
-failure. The composition boundary always tries to retain a sanitised failure
-envelope; raw Slither/build output stays in an owned temporary directory.
+failure. For non-cancelled failures the composition boundary tries to retain a
+sanitised failure envelope; cancellation does not publish a second failure
+envelope. Raw Slither/build output stays in an owned temporary directory.
 
 Analysis publication includes canonical sanitized `slither.json`,
 `slither-inventory.json`, detector inventory and status inputs plus every
 normalized identity/location/hash tuple. Publication is built and independently
-validated in disposable staging, then atomically renamed with READY last.
+validated in disposable staging. It exclusively reserves the destination
+directory, copies authenticated files in bounded chunks, then publishes an empty
+READY through a hardlink to the staging marker while its descriptor is held.
+Removing the staging link leaves READY with a single link; publication does not
+use an atomic directory rename. READY remains independently revocable through
+staging cleanup and CLI finalization, including cancellation during either phase.
+Successful finalization requires completed cleanup. Exact container-ID cleanup
+runs independently of cancellation. Foreign substitution or cleanup uncertainty
+preserves objects and reports failure; it cannot authorize broader deletion.
+This contract does not claim SIGKILL/host-crash recovery or race-free same-UID
+final identity-check and filesystem syscalls. See [the plan](../../../../docs/PLAN.md)
+and [scoped integration evidence](../../../../docs/STATUS.md).
 
 Immediately before artifact upload, CI independently reopens the finalized
 bundle and validates its exact variant, schema, raw inputs, READY marker,
