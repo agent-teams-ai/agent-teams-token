@@ -180,6 +180,9 @@ function pinnedRuntimeFixture() {
         version,
         platforms: { "linux-x64": artifact },
       },
+      pnpm: {
+        installDirectory: "pnpm-fixture",
+      },
     },
   };
   writeFileSync(join(root, "tooling/toolchain.lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
