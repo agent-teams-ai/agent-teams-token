@@ -5,6 +5,23 @@ import { SlitherGateError } from "../domain/model.ts";
 export interface ValidatedEnvironment { readonly repositoryRoot: string; readonly candidateSha: string; readonly output: string }
 
 export async function validateEnvironment(rootValue: string, shaValues: readonly (string | undefined)[], outputValue?: string): Promise<ValidatedEnvironment> {
+  const validated = await validateEnvironmentPaths(rootValue, shaValues, outputValue);
+  if ((await lstat(validated.output).catch(() => null)) !== null) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output already exists");}
+  return validated;
+}
+
+/** Read-only consumer contract; producers continue to require an absent output. */
+export async function validateEvidenceEnvironment(rootValue: string, shaValues: readonly (string | undefined)[], outputValue?: string): Promise<ValidatedEnvironment> {
+  const validated = await validateEnvironmentPaths(rootValue, shaValues, outputValue);
+  const info = await lstat(validated.output).catch(() => {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output is unavailable");});
+  const canonical = await realpath(validated.output).catch(() => {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output is unavailable");});
+  if (!info.isDirectory() || info.isSymbolicLink() || canonical !== validated.output) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output is not a canonical regular directory");}
+  // These path checks do not retain a directory handle. Independent bundle
+  // validation must reopen and validate the contents before accepting evidence.
+  return validated;
+}
+
+async function validateEnvironmentPaths(rootValue: string, shaValues: readonly (string | undefined)[], outputValue?: string): Promise<ValidatedEnvironment> {
   const candidates = [...new Set(shaValues.filter((value): value is string => typeof value === "string" && value.length > 0))];
   if (candidates.length !== 1 || !/^[0-9a-f]{40}$/u.test(candidates[0]!)) {throw new SlitherGateError("CANDIDATE_SHA_INVALID", "one exact candidate SHA is required");}
   if (!rootValue.startsWith("/") || rootValue.includes("\0")) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "repository path is invalid");}
@@ -17,7 +34,6 @@ export async function validateEnvironment(rootValue: string, shaValues: readonly
   const parent = await realpath(dirname(requestedOutput)).catch(() => {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence parent is unavailable");});
   const output = join(parent, leaf);
   if (isWithin(root, output)) {throw new SlitherGateError("EVIDENCE_INSIDE_REPOSITORY", "evidence path crosses the checkout boundary");}
-  if ((await lstat(output).catch(() => null)) !== null) {throw new SlitherGateError("ABSOLUTE_PATH_REQUIRED", "evidence output already exists");}
   return {repositoryRoot: root, candidateSha: candidates[0]!, output};
 }
 
