@@ -1,19 +1,104 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync, chownSync, copyFileSync, cpSync, lstatSync, mkdirSync, mkdtempSync,
-  renameSync, rmSync, symlinkSync, writeFileSync,
+  chmodSync, chownSync, copyFileSync, linkSync, lstatSync, mkdirSync, mkdtempSync,
+  readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { readVerifiedBytes } from "../toolchain-files.mjs";
 import { assertOwnedDirectoryChain, canonicalizeTrustedPath } from "../toolchain-paths.mjs";
 import { fetchArtifacts, installArtifacts, runPnpm, verifyCache } from "../toolchain.mjs";
 import { makeFixture } from "./toolchain-fixture.mjs";
 
 const ownerError = /TOOLCHAIN_DIRECTORY_OWNER_INVALID/u;
 const identityError = /TOOLCHAIN_DIRECTORY_IDENTITY_INVALID/u;
+const scriptsSource = dirname(dirname(fileURLToPath(import.meta.url)));
+
+function copyChildSource(source, destination, depth = 0, budget = { entries: 0 }) {
+  assert.ok(depth <= 16 && ++budget.entries <= 1024, "fixture source tree limit");
+  const original = lstatSync(source);
+  assert.ok(original.isDirectory() || (original.isFile() && original.nlink === 1),
+    "fixture source must contain only directories and single-link regular files");
+  const directory = original.isDirectory();
+  if (directory) {
+    mkdirSync(destination, { mode: 0o700 });
+    for (const name of readdirSync(source)) {
+      copyChildSource(join(source, name), join(destination, name), depth + 1, budget);
+    }
+  } else {
+    const { bytes } = readVerifiedBytes(source, { maximumBytes: 1024 * 1024 });
+    writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+    assert.deepEqual(readVerifiedBytes(destination).bytes, bytes);
+  }
+  const copied = lstatSync(destination);
+  const parent = lstatSync(dirname(destination));
+  assert.equal(copied.uid, process.getuid());
+  // Darwin and setgid directories allocate entries with the parent's group.
+  const inheritedGroup = process.platform === "darwin" || (parent.mode & 0o2000) !== 0;
+  assert.equal(copied.gid, inheritedGroup ? parent.gid : process.getegid());
+  assert.equal(copied.mode & 0o777, directory ? 0o700 : 0o600);
+  assert.ok(directory ? copied.isDirectory() : copied.isFile() && copied.nlink === 1);
+  assert.ok(copied.dev !== original.dev || copied.ino !== original.ino);
+  // Only exclusive, newly owned fixture entries become readable/traversable.
+  // No source links are copied, and the caller's umask never changes here.
+  chmodSync(destination, directory ? 0o755 : 0o644);
+}
+
+function assertSourceUnchanged(before, after) {
+  // Reads may update atime; identity and authority must remain unchanged.
+  for (const key of ["dev", "ino", "mode", "nlink", "uid", "gid", "size", "mtimeMs", "ctimeMs"]) {
+    assert.equal(after[key], before[key]);
+  }
+}
+
+function registerChildSourceTests() {
+  for (const mask of [0o022, 0o077]) {
+    test(`ownership: copied child source is readable with umask ${mask.toString(8)}`, (context) => {
+      const root = disposableRoot(context);
+      const destination = join(root, "scripts");
+      const names = ["", ...readdirSync(scriptsSource, { recursive: true })];
+      const before = names.map((name) => lstatSync(join(scriptsSource, name)));
+      const previous = process.umask(mask);
+      try {
+        copyChildSource(scriptsSource, destination);
+        assert.equal(process.umask(), mask);
+      } finally {process.umask(previous);}
+      assert.equal(lstatSync(root).mode & 0o7777, 0o700);
+      assert.deepEqual(readdirSync(destination, { recursive: true }).toSorted(), names.slice(1).toSorted());
+      for (const [index, name] of names.entries()) {
+        const source = join(scriptsSource, name);
+        const copied = lstatSync(join(destination, name));
+        const after = lstatSync(source);
+        assertSourceUnchanged(before[index], after);
+        assert.equal(copied.mode & 0o7777, before[index].isDirectory() ? 0o755 : 0o644);
+        if (before[index].isFile()) {
+          assert.deepEqual(readVerifiedBytes(join(destination, name)).bytes, readVerifiedBytes(source).bytes);
+        }
+      }
+      context.diagnostic(`verified ${names.length} source entries: directories=0755 files=0644; private parent=0700; bytes and source authority unchanged`);
+    });
+  }
+  for (const link of [symlinkSync, linkSync]) {
+    test(`ownership: child source rejects ${link.name} without changing private authority`, (context) => {
+      const root = disposableRoot(context);
+      const source = join(root, "source");
+      mkdirSync(source, { mode: 0o700 });
+      const sentinel = join(root, "sentinel");
+      writeFileSync(sentinel, "private source", { mode: 0o600 });
+      link(sentinel, join(source, "link"));
+      const before = lstatSync(sentinel);
+      const mask = process.umask();
+      assert.throws(() => copyChildSource(source, join(root, "copy")), /single-link regular files/u);
+      assert.equal(process.umask(), mask);
+      assert.equal(readFileSync(sentinel, "utf8"), "private source");
+      assertSourceUnchanged(before, lstatSync(sentinel));
+      assert.equal(lstatSync(root).mode & 0o7777, 0o700);
+    });
+  }
+}
 
 function uidOracle() {
   const uid = Number(execFileSync("/usr/bin/id", ["-u"], { encoding: "utf8" }).trim());
@@ -148,14 +233,13 @@ function rootOwnershipCases(root, uid) {
 
 function prepareRootChild(context) {
   const root = disposableRoot(context, "/tmp/agtmai-path-root-child-");
-  chmodSync(root, 0o755);
   const node = join(root, "node");
   copyFileSync(process.execPath, node);
   chmodSync(node, 0o755);
   // Execute only copied source and newly created synthetic state. The child
   // needs no access to the host worktree's private runtime or directories.
-  const scripts = dirname(dirname(fileURLToPath(import.meta.url)));
-  cpSync(scripts, join(root, "scripts"), { recursive: true });
+  copyChildSource(scriptsSource, join(root, "scripts"));
+  chmodSync(root, 0o755);
   return { root, node };
 }
 
@@ -205,6 +289,7 @@ export function runOwnershipChild({ uid, cases, managed, lock }) {
 }
 
 export function registerToolchainPathOwnershipTests() {
+  registerChildSourceTests();
   registerOwnedPathTests();
   registerDarwinPathTests();
   registerRootChildTest();
