@@ -277,21 +277,62 @@ function pnpmWrapper(lock, platform) {
   const template = pnpmWrapperTemplate(lock, platform);
   const withRejectedCacheOverride = template.replace(
     "    --store-dir|--store-dir=*",
-    "    --cache-dir|--cache-dir=*|--store-dir|--store-dir=*|--config.cache-dir=*|--config.store-dir=*|--config.ignore-pnpmfile=*",
+    "    --cache-dir|--cache-dir=*|--cacheDir|--cacheDir=*|--store-dir|--store-dir=*|--config.cache-dir|--config.cache-dir=*|--config.cacheDir|--config.cacheDir=*|--config.store-dir=*|--config.ignore-pnpmfile=*",
   );
-  const withPrivateStoreUmask = withRejectedCacheOverride.replace(
+  const withNormalizedCacheArguments = withRejectedCacheOverride.replace(
+    '  case "$token_pnpm_argument" in',
+    `  if [[ "$token_pnpm_argument" == -* ]]; then
+    token_pnpm_cache_key=$(LC_ALL=C /usr/bin/tr '[:upper:]_' '[:lower:]-' <<< "\${token_pnpm_argument%%=*}")
+    case "\${token_pnpm_cache_key//-/}" in
+      cachedir|config.cachedir|nocachedir|config.nocachedir)
+        printf 'TOOLCHAIN_PNPM_AUTHORITY_ARGUMENT_FORBIDDEN argument=%s\\n' "$token_pnpm_argument" >&2
+        exit 1 ;;
+    esac
+  fi
+  case "$token_pnpm_argument" in`,
+  );
+  const withPrivateStoreUmask = withNormalizedCacheArguments.replace(
     "unset token_pnpm_source token_pnpm_directory token_pnpm_argument token_pnpm_store_authority",
-    "umask 077\nunset token_pnpm_source token_pnpm_directory token_pnpm_argument token_pnpm_store_authority",
+    `umask 077\n${pnpmCacheGuard(platform)}\nunset token_pnpm_source token_pnpm_directory token_pnpm_argument token_pnpm_store_authority`,
   );
   const wrapper = withPrivateStoreUmask.replace(
     ' --store-dir="$token_pnpm_store" --ignore-pnpmfile',
-    ' --config.store-dir="$token_pnpm_store" --config.cache-dir=/dev/null --config.ignore-pnpmfile=true',
+    ' --config.store-dir="$token_pnpm_store" --config.cache-dir="$token_pnpm_cache" --config.ignore-pnpmfile=true',
   );
-  if (withRejectedCacheOverride === template || withPrivateStoreUmask === withRejectedCacheOverride
+  if (withRejectedCacheOverride === template || withNormalizedCacheArguments === withRejectedCacheOverride
+    || withPrivateStoreUmask === withNormalizedCacheArguments
     || wrapper === withPrivateStoreUmask) {
     throw new Error("TOOLCHAIN_PNPM_WRAPPER_AUTHORITY_TEMPLATE_INVALID");
   }
   return wrapper;
+}
+
+function pnpmCacheGuard(platform) {
+  const stat = platform === "darwin-arm64"
+    ? "/usr/bin/stat -f '%d|%i|%u|%Lp'"
+    : "/usr/bin/stat -c '%d|%i|%u|%a' --";
+  // Keep policy metadata with the selected store, including rollback stores.
+  // A separate child avoids pnpm store prune treating the package store as cache.
+  return `token_pnpm_store_identity=$(${stat} "$token_pnpm_store")
+token_pnpm_cache="$token_pnpm_store/metadata-cache"
+if [[ ! -e "$token_pnpm_cache" ]]; then
+  /bin/mkdir -m 700 "$token_pnpm_cache" || [[ -d "$token_pnpm_cache" ]]
+fi
+if [[ ! -d "$token_pnpm_cache" || -L "$token_pnpm_cache" || "$(CDPATH= cd -- "$token_pnpm_cache" && pwd -P)" != "$token_pnpm_cache" ]]; then
+  printf 'TOOLCHAIN_PNPM_CACHE_UNSAFE path=%s\\n' "$token_pnpm_cache" >&2
+  exit 1
+fi
+token_pnpm_cache_authority=$(${stat} "$token_pnpm_cache")
+token_pnpm_cache_unsafe=$(/usr/bin/find "$token_pnpm_cache" \\( ! -user "$(/usr/bin/id -u)" -o \\( -type d ! -perm 0700 \\) -o \\( -type f \\( ! -perm 0600 -o ! -links 1 \\) \\) -o \\( ! -type d ! -type f \\) \\) -print)
+if [[ -n "$token_pnpm_cache_unsafe" || "$(${stat} "$token_pnpm_cache")" != "$token_pnpm_cache_authority" ]]; then
+  printf 'TOOLCHAIN_PNPM_CACHE_UNSAFE path=%s\\n' "$token_pnpm_cache" >&2
+  exit 1
+fi
+if [[ "\${token_pnpm_cache_authority#*|*|}" != "$(/usr/bin/id -u)|700" || "$(${stat} "$token_pnpm_store")" != "$token_pnpm_store_identity" || -L "$token_pnpm_store" ]]; then
+  printf 'TOOLCHAIN_PNPM_CACHE_UNSAFE path=%s\\n' "$token_pnpm_cache" >&2
+  exit 1
+fi
+unset token_pnpm_store_identity token_pnpm_cache_authority token_pnpm_cache_unsafe`;
 }
 
 function trustedNodeWrapper(lock, platform) {

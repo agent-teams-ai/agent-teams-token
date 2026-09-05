@@ -285,6 +285,7 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
   const preparedAuthorities = [];
   let primaryFailure;
   let result;
+  let previousUmask;
   try {
     const authorities = new Map();
     const authenticate = (name, tool, artifact) => {
@@ -329,15 +330,10 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     }
 
     const store = containedPath(toolsRoot, "pnpm-store");
-    if (!existsSync(store)) {mkdirSync(store, { mode: 0o700 });}
-    chmodSync(store, 0o700);
-    assertOwnedDirectoryChain(store);
-    const storeIdentity = lstatSync(store);
-    if (!storeIdentity.isDirectory() || storeIdentity.isSymbolicLink()
-      || (storeIdentity.mode & 0o777) !== 0o700
-      || (typeof process.getuid === "function" && storeIdentity.uid !== process.getuid())) {
-      throw new Error("TOOLCHAIN_PNPM_STORE_UNSAFE");
-    }
+    const storeIdentity = preparePnpmDirectory(store, "STORE");
+    const cache = join(store, "metadata-cache");
+    const cacheIdentity = preparePnpmDirectory(cache, "CACHE");
+    assertPnpmCacheTree(cache);
 
     const nodeTool = lock.tools.node;
     const nodeArtifact = nodeTool.platforms[platform];
@@ -348,6 +344,11 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     if (pnpmEntrypointAuthority?.type !== "file") {
       throw new Error(`TOOLCHAIN_RUN_INVALID tool=pnpm reason=entry-missing:${pnpmEntrypoint}`);
     }
+    assertPnpmDirectoryIdentity(store, storeIdentity);
+    assertPnpmDirectoryIdentity(cache, cacheIdentity);
+    // Archive authentication (including nested Node checks) keeps the caller's
+    // umask: Darwin symlink modes depend on it. Only the invocation needs 077.
+    previousUmask = process.umask(0o077);
     result = executeOpenedNode({
       node: {
         path: containedPath(
@@ -366,7 +367,7 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
       args: [
         ...args,
         `--config.store-dir=${store}`,
-        "--config.cache-dir=/dev/null",
+        `--config.cache-dir=${cache}`,
         "--config.ignore-pnpmfile=true",
         "--config.userconfig=/dev/null",
         "--config.globalconfig=/dev/null",
@@ -378,6 +379,8 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     });
   } catch (error) {
     primaryFailure = error;
+  } finally {
+    if (previousUmask !== undefined) {process.umask(previousUmask);}
   }
 
   const cleanupFailures = [];
@@ -392,6 +395,46 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     );
   }
   return result;
+}
+
+function preparePnpmDirectory(path, kind) {
+  assertOwnedDirectoryChain(path);
+  try {mkdirSync(path, { mode: 0o700 });}
+  catch (error) {if (error?.code !== "EEXIST") {throw error;}}
+  assertOwnedDirectoryChain(path);
+  const identity = lstatSync(path);
+  if (!identity.isDirectory() || identity.isSymbolicLink()
+    || (identity.mode & 0o777) !== 0o700
+    || (typeof process.getuid === "function" && identity.uid !== process.getuid())) {
+    throw new Error(`TOOLCHAIN_PNPM_${kind}_UNSAFE`);
+  }
+  return identity;
+}
+
+function assertPnpmCacheTree(path) {
+  const entry = lstatSync(path);
+  if ((typeof process.getuid === "function" && entry.uid !== process.getuid())
+    || (entry.isDirectory() ? (entry.mode & 0o777) !== 0o700
+      : !entry.isFile() || entry.nlink !== 1 || (entry.mode & 0o777) !== 0o600)) {
+    throw new Error("TOOLCHAIN_PNPM_CACHE_UNSAFE");
+  }
+  if (entry.isDirectory()) {
+    for (const leaf of readdirSync(path)) {assertPnpmCacheTree(join(path, leaf));}
+  }
+  const current = lstatSync(path);
+  if (current.dev !== entry.dev || current.ino !== entry.ino || current.mode !== entry.mode
+    || current.uid !== entry.uid || current.nlink !== entry.nlink) {
+    throw new Error("TOOLCHAIN_PNPM_CACHE_UNSAFE");
+  }
+}
+
+function assertPnpmDirectoryIdentity(path, identity) {
+  assertOwnedDirectoryChain(path);
+  const current = lstatSync(path);
+  if (current.dev !== identity.dev || current.ino !== identity.ino
+    || current.mode !== identity.mode || current.uid !== identity.uid) {
+    throw new Error("TOOLCHAIN_PNPM_CACHE_UNSAFE");
+  }
 }
 
 function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, lock }) {
@@ -428,7 +471,8 @@ function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, loc
 }
 
 function assertPnpmArguments(args) {
-  const forbidden = args.find((argument) => /^(?:--agtmai-trusted-store=|--(?:cache-dir|store-dir|global-pnpmfile|pnpmfile|ignore-pnpmfile|config\.cache-dir|config\.store-dir|config\.ignore-pnpmfile|config\.userconfig|config\.globalconfig)(?:=|$))/u.test(argument));
+  const forbidden = args.find((argument) => /^(?:--agtmai-trusted-store=|--(?:store-dir|global-pnpmfile|pnpmfile|ignore-pnpmfile|config\.store-dir|config\.ignore-pnpmfile|config\.userconfig|config\.globalconfig)(?:=|$))/u.test(argument)
+    || /^-{1,2}(?:config\.)?(?:no[-_]*)?cache[-_]*dir(?:=|$)/iu.test(argument));
   if (forbidden !== undefined) {
     throw new Error(`TOOLCHAIN_PNPM_AUTHORITY_ARGUMENT_FORBIDDEN argument=${forbidden}`);
   }

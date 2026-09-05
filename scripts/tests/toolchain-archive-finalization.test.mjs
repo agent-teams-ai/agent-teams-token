@@ -10,10 +10,12 @@ import { observeConsumerDescriptors } from "./rollback-consumer-close-fixture.mj
 import { registerArchiveSnapshotTests } from "./toolchain-archive-snapshot.test.mjs";
 import { registerInstallationFinalizationTests } from "./toolchain-installation-finalization.test.mjs";
 import { registerVersionBoundaryTests } from "./toolchain-version-boundary.test.mjs";
+import { registerPnpmMetadataCacheTests } from "./toolchain-pnpm-metadata-cache.test.mjs";
 
 registerArchiveSnapshotTests();
 registerInstallationFinalizationTests();
 registerVersionBoundaryTests();
+registerPnpmMetadataCacheTests();
 
 function archiveFixture() {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "agtmai-archive-finalization-")));

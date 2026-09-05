@@ -287,6 +287,7 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
   fetchArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, downloader: fixture.downloader });
   installArtifacts({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true });
   const wrapper = join(fixture.toolsRoot, "bin", "pnpm");
+  const originalWrapper = readFileSync(wrapper, "utf8");
   writeFileSync(wrapper, "tampered-wrapper\n");
   assert.throws(
     () => verifyCache({ lock: fixture.lock, platform: "linux-x64", toolsRoot: fixture.toolsRoot, offline: true }),
@@ -299,7 +300,7 @@ test("tampered pnpm payload and wrapper are rejected and restored from verified 
   assert.match(wrapperText, /pnpm-test\/bin\/pnpm\.cjs/);
   assert.match(wrapperText, /--ignore-pnpmfile/u);
   assert.match(wrapperText, /--config\.store-dir="\$token_pnpm_store"/u);
-  assert.match(wrapperText, /--config\.cache-dir=\/dev\/null/u);
+  assert.equal(wrapperText, originalWrapper);
   assert.match(wrapperText, /--config\.ignore-pnpmfile=true/u);
   assert.match(wrapperText, /--config\.userconfig=\/dev\/null/u);
   assert.match(wrapperText, /\/usr\/bin\/stat -c '%u\|%a'/u);
