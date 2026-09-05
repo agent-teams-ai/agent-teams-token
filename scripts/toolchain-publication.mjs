@@ -303,6 +303,10 @@ export function publishPreparedInstallation({
     // the validated new installation and any remaining backup evidence.
     transaction.committed = true;
     if (transaction.backup !== undefined) {
+      onPublishBoundary?.("after-publication-commit", {
+        backup: transaction.backup.root,
+        destination,
+      });
       cleanupIdentityBoundDirectory(transaction.backup.handle);
       transaction.backup = undefined;
     }

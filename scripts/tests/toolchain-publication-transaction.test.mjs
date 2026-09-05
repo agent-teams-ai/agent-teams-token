@@ -330,14 +330,22 @@ test("backup cleanup failure after commit retains the validated installation", (
   const value = replacementFixture(context);
   const primary = new Error("TEST_BACKUP_CLEANUP_FAILED");
   const originalUnlink = fs.unlinkSync;
-  fs.unlinkSync = () => {
-    // Cleanup traverses held descriptors, so intercept its first unlink only
-    // after every publication boundary has completed.
-    throw primary;
+  let publicationCommitted = false;
+  fs.unlinkSync = (...arguments_) => {
+    if (publicationCommitted) {
+      throw primary;
+    }
+    return originalUnlink(...arguments_);
   };
   syncBuiltinESMExports();
   try {
-    assert.throws(() => installNode(value.fixture, value.replacement),
+    assert.throws(() => installNode(value.fixture, value.replacement, {
+      onPublishBoundary(stage) {
+        if (stage === "after-publication-commit") {
+          publicationCommitted = true;
+        }
+      },
+    }),
       (error) => error === primary || error.cause === primary
         || (error instanceof AggregateError && error.errors.includes(primary)));
   } finally {

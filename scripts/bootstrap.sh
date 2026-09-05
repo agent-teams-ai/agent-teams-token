@@ -268,8 +268,10 @@ token_assert_private_snapshot_fingerprint() {
   local token_mtime token_ctime token_links
   IFS='|' read -r token_device token_inode token_mode token_uid token_gid token_size \
     token_mtime token_ctime token_links <<<"$token_fingerprint"
-  [[ "$token_uid" == "$(/usr/bin/id -u)" && "$token_gid" == "$(/usr/bin/id -g)" ]] \
-    || return 1
+  # A private macOS temporary file can inherit wheel as its group even when it
+  # is owned by the caller. Group identity is not an authority boundary here:
+  # the exact 0400/0100 mode checks below grant no group permissions.
+  [[ "$token_uid" == "$(/usr/bin/id -u)" ]] || return 1
   case "$token_platform" in
     darwin-arm64) [[ "$token_mode" == 100400 ]] ;;
     linux-x64) [[ "$token_mode" == 8100 ]] ;;
