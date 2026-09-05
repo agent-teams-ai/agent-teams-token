@@ -33,6 +33,7 @@
     "tooling/deployment-plan/tests/domain.test.ts",
     "tooling/deployment-plan/tests/fixtures/forge-build-info-1.8.0-representative.json",
     "tooling/deployment-plan/tests/helpers/no-replace-directory-rename.ts",
+    "tooling/deployment-plan/tests/helpers/temporary-directory.ts",
     "tooling/deployment-plan/tests/native-no-replace.test.ts",
     "tooling/deployment-plan/tests/native-provenance-fixture.ts",
     "tooling/deployment-plan/tests/planner.test.ts",
