@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
+  opendirSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -179,6 +180,8 @@ export function assertRecoveryGitAuthority(workingDirectory) {
   const result = spawnSync("/usr/bin/git", [
     ...canonicalGitArguments,
     "-c", `safe.directory=${repository.worktree}`,
+    // A malformed marker must not fall through to another ancestor's config.
+    "--git-dir", repository.gitDirectory,
     "config", "--local", "--no-includes", "--null", "--list",
   ], {
     cwd: workingDirectory,
@@ -209,12 +212,13 @@ export function assertRecoveryGitAuthority(workingDirectory) {
 }
 
 function findRepositoryAuthority(workingDirectory) {
-  let candidate = realpathSync(workingDirectory);
+  const initialDirectory = realpathSync(workingDirectory);
+  let candidate = initialDirectory;
   const root = parse(candidate).root;
   while (true) {
     const dotGit = join(candidate, ".git");
-    if (existsSync(dotGit)) {
-      const entry = lstatSync(dotGit);
+    const entry = lstatSync(dotGit, { bigint: true, throwIfNoEntry: false });
+    if (entry && !isEmptyGitAncestor(dotGit, entry, candidate !== initialDirectory)) {
       let gitDirectory;
       if (entry.isDirectory() && !entry.isSymbolicLink()) {
         gitDirectory = realpathSync(dotGit);
@@ -233,6 +237,37 @@ function findRepositoryAuthority(workingDirectory) {
     }
     if (candidate === root) {return;}
     candidate = dirname(candidate);
+  }
+}
+
+function isEmptyGitAncestor(dotGit, entry, isAncestor) {
+  if (!isAncestor || !entry.isDirectory() || entry.isSymbolicLink()) {return false;}
+  // Git skips an empty ancestor .git directory and continues upward. Read at
+  // most one entry; never infer absence from a failed Git command or filesystem
+  // operation. Current-directory markers and gitdir pointers remain authority.
+  const directory = opendirSync(dotGit, { bufferSize: 1 });
+  let empty;
+  try {
+    empty = directory.readSync() === null;
+  } finally {
+    directory.closeSync();
+  }
+  const after = lstatSync(dotGit, { bigint: true });
+  if (["dev", "ino", "mode", "mtimeNs", "ctimeNs"].some((key) => entry[key] !== after[key])) {
+    throw new Error("TOOLCHAIN_GIT_DIRECTORY_UNSAFE");
+  }
+  if (empty) {assertNoBareGitAncestor(dirname(dotGit));}
+  // This is a pathname observation, not custody through the later Git spawn;
+  // concurrent hostile replacement after this check remains outside the trust boundary.
+  return empty;
+}
+
+function assertNoBareGitAncestor(candidate) {
+  const present = (name) => lstatSync(join(candidate, name), { throwIfNoEntry: false }) !== undefined;
+  // Git can also discover bare administration beside the empty .git marker.
+  // Such a layout is outside this non-repository exception, even if malformed.
+  if (present("HEAD") && (present("commondir") || (present("objects") && present("refs")))) {
+    throw new Error("TOOLCHAIN_GIT_DIRECTORY_UNSAFE");
   }
 }
 
