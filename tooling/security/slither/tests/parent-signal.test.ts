@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { makeTestDirectory } from "./test-directory.ts";
 
-const cli = resolve("tooling/security/slither/src/composition/cli.ts");
-const source = pathToFileURL(resolve("tooling/security/slither/src/") + "/").href;
+const cli = resolvePath("tooling/security/slither/src/composition/cli.ts");
+const source = pathToFileURL(resolvePath("tooling/security/slither/src/") + "/").href;
 const id = "d".repeat(64);
 
 type Phase = "validation" | "process" | "create" | "completion" | "export" | "cleanup" | "prepublication" | "happy";

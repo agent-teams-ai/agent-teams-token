@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join, resolve as resolvePath } from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import type { AnalysisInput, GateManifest, PolicyDecision } from "../src/domain/model.ts";
 import { writeCanonicalFixture } from "./evidence-canonical-fixture.ts";
 import { makeCompilerEvidence } from "./test-compiler-evidence.ts";
+import { makeTestDirectory } from "./test-directory.ts";
 
 const testBuild = makeCompilerEvidence("contract A {}\n");
 const bytecode = testBuild.compilerEvidence.creationBytecodeSha256;
@@ -16,9 +17,9 @@ const detectors = Array.from({ length: 101 }, (_, index) => `d-${index}`);
 const input: AnalysisInput = { success: true, findings: [], analyzedContracts: ["A"], analyzedSources: ["src/A.sol"], closure: [], detectorInventory: detectors, compiler: manifest.compiler, creationBytecodeSha256: bytecode, freshFoundryCreationBytecodeSha256: bytecode, analysisErrors: [], forgeBinarySha256: manifest.tools.forgeBinarySha256, solcBinarySha256: manifest.tools.solcBinarySha256, compilerEvidence: testBuild.compilerEvidence, fixtureProof: testBuild.fixtureProof };
 const decision: PolicyDecision = { category: "clean", exitCode: 0, blocking: [], visible: [], suppressed: [], errors: [] };
 
-const cli = resolve("tooling/security/slither/src/composition/cli.ts");
-const source = pathToFileURL(resolve("tooling/security/slither/src/") + "/").href;
-const schemas = resolve("tooling/security/slither");
+const cli = resolvePath("tooling/security/slither/src/composition/cli.ts");
+const source = pathToFileURL(resolvePath("tooling/security/slither/src/") + "/").href;
+const schemas = resolvePath("tooling/security/slither");
 type Phase = "acquisition" | "copy" | "validation" | "READY" | "staging-cleanup" | "staging-cleanup-return" | "return" | "finalization" | "happy";
 type Kind = "analysis" | "failure";
 
@@ -101,7 +102,7 @@ function preload(directory: string, result: unknown, phase: Phase, kind: Kind, c
 interface Message {kind: string; phase?: string; int: number; term: number; counts?: {analysis: number; ready: number; failure: number}}
 
 async function fixture(t: TestContext, phase: Phase, kind: Kind, cleanupFails = false) {
-  const directory = await mkdtemp("/tmp/slither-cli-publication-");
+  const directory = await makeTestDirectory("cli-publication-");
   const hashes = await writeCanonicalFixture(join(directory, "canonical"), manifest, input);
   const script = join(directory, "preload.mjs");
   await writeFile(script, preload(directory, {manifest: hashes.manifest, input, decision, configHash: hashes.config, policyHash: hashes.policy, triageHash: hashes.triage}, phase, kind, cleanupFails));

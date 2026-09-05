@@ -51,7 +51,7 @@ export async function main(): Promise<void> {
       try {
         await writeFailureEvidence({output, candidateSha: sha, category: failure.category, exitCode: failure.exitCode, stage: failure.stage, errorCode: code, schemaDirectory: `${root}/tooling/security/slither`, assertReadyPrecondition, publication});
         assertNotCancelled(cancellation.signal);
-      } catch (publicationError) { throw new AggregateError([error, publicationError], "gate and failure publication failed"); }
+      } catch (publicationError) { throw new AggregateError([error, publicationError], "gate and failure publication failed", {cause: publicationError}); }
       process.exitCode = failure.exitCode;
     }
   } catch (error) { failures.push(error); }

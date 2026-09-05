@@ -266,7 +266,7 @@ async function revokeHeldReady(ready: OwnedReady): Promise<void> {
 
 async function assertOwnedReady(ready: OwnedReady, allowMissing = false): Promise<boolean> {
   const current = await lstat(ready.path, {bigint: true}).catch((error: unknown) => {
-    if (allowMissing && isMissing(error)) { return undefined; }
+    if (allowMissing && isMissing(error)) { return; }
     throw error;
   });
   if (current === undefined) { return false; }

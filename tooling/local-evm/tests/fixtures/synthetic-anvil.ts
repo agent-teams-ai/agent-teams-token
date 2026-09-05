@@ -32,7 +32,7 @@ export async function syntheticAnvil(
         }),
         ...starts.map(async (pending) => {
           // startOwnedAnvil owns teardown when startup rejects.
-          const anvil = await pending.catch(() => undefined);
+          const anvil = await pending.catch(() => null);
           await anvil?.stop();
         }),
       ]);
@@ -128,7 +128,7 @@ async function boundedClose(closed: Promise<Error | undefined>): Promise<void> {
   try {
     const cause = await Promise.race([
       closed,
-      new Promise<never>((_, reject) => {timer = setTimeout(() => reject(new Error("synthetic runner did not close within 5000ms")), 5_000);}),
+      new Promise<never>((_resolve, reject) => {timer = setTimeout(() => reject(new Error("synthetic runner did not close within 5000ms")), 5_000);}),
     ]);
     if (cause) {throw cause;}
   } finally {

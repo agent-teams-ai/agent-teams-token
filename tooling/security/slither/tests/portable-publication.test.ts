@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import fs, { mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import fs, { mkdir, open, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { test, type TestContext } from "node:test";
@@ -7,6 +7,7 @@ import { SlitherCancellation } from "../src/application/ports.ts";
 import { ExclusiveDirectoryPublication, copyStableExclusive, writeEnvironmentFailure } from "../src/adapters/evidence.ts";
 import { schemaDirectory } from "./evidence-canonical-fixture.ts";
 import { testPublication } from "./test-publication.ts";
+import { makeTestDirectory } from "./test-directory.ts";
 
 const precondition = async (): Promise<void> => {};
 
@@ -17,7 +18,7 @@ async function afterDestinationSync<T>(action: () => Promise<void>, run: () => P
 }
 
 test("descriptor transfer remains bound to the opened source when its pathname is replaced", async () => {
-  const parent = await mkdtemp("/tmp/slither-descriptor-replace-");
+  const parent = await makeTestDirectory("descriptor-replace-");
   const source = join(parent, "source"); const destination = join(parent, "destination");
   try {
     await writeFile(source, "authenticated", {mode: 0o600});
@@ -28,7 +29,7 @@ test("descriptor transfer remains bound to the opened source when its pathname i
 });
 
 test("descriptor transfer rejects a destination collision without replacing or deleting it", async () => {
-  const parent = await mkdtemp("/tmp/slither-descriptor-collision-");
+  const parent = await makeTestDirectory("descriptor-collision-");
   const source = join(parent, "source"); const destination = join(parent, "destination");
   try {
     await writeFile(source, "authenticated", {mode: 0o600}); await writeFile(destination, "foreign", {mode: 0o600});
@@ -38,7 +39,7 @@ test("descriptor transfer rejects a destination collision without replacing or d
 });
 
 test("descriptor transfer rejects source mutation after copying", async () => {
-  const parent = await mkdtemp("/tmp/slither-descriptor-mutation-");
+  const parent = await makeTestDirectory("descriptor-mutation-");
   const source = join(parent, "source"); const destination = join(parent, "destination");
   try {
     await writeFile(source, "original", {mode: 0o600});
@@ -48,7 +49,7 @@ test("descriptor transfer rejects source mutation after copying", async () => {
 });
 
 test("publication accepts a stable parent alias and remains accessible through it", async () => {
-  const parent = await mkdtemp("/tmp/slither-publication-alias-"); const canonical = join(parent, "canonical"); const alias = join(parent, "alias");
+  const parent = await makeTestDirectory("publication-alias-"); const canonical = join(parent, "canonical"); const alias = join(parent, "alias");
   try {
     await mkdir(canonical); await symlink(canonical, alias); const output = join(alias, "bundle");
     await writeEnvironmentFailure({output, candidateSha: "d".repeat(40), stage: "image-preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory, assertReadyPrecondition: precondition, publication: testPublication()});
@@ -61,7 +62,7 @@ const originals = {lstat: fs.lstat, open: fs.open, readdir: fs.readdir, rm: fs.r
 type PublicationPhase = "acquisition" | "copy" | "validation" | "READY" | "staging-cleanup";
 
 async function publicationFixture(t: TestContext) {
-  const parent = await mkdtemp("/tmp/slither-publication-cancel-");
+  const parent = await makeTestDirectory("publication-cancel-");
   const output = join(parent, "bundle");
   const controller = new AbortController();
   const reason = new SlitherCancellation("SIGTERM");
