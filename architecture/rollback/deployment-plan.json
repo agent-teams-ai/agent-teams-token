@@ -54,7 +54,7 @@
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "27fcd867ac67bfc8d21ce8b430f998a041dd66793a5f0f9592da4d0a4940dc35", "afterSha256": "6c736e294a158ef0250c4c7e77ab6e05bf99b1dca5c80d85d5792b5758424aed"},
     {"path": "package.json", "beforeSha256": "ccb94ad0b04fd3a898a9f2140a347a76eb0aa05913da206ac25321999eca8cf1", "afterSha256": "319e61eb141155b044e166939b1d75909163f80988dd3e61de5ff7f46d83f14f"},
     {"path": "scripts/deployment/estimate-local.ts", "beforeSha256": "e0311b72412dc6af1adba470cb4145ea1f08bdd94d3983ae97717a8c85abdbdd", "afterSha256": "absent"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "078685f36cae49dcc708a72c5c6da8cfc0e76395175631da6385b525adb41c03", "afterSha256": "6a08a4f3eabf72e667bbe6989dc14cc0bf88ba2a84e32ccd36b5a769956c7edd"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "8ad750131da4b6333daead8f6f9e5c0a009d6cb4f4a9ee16b2fbe7f316ff4f46", "afterSha256": "da7e0bfcbf53bcdd87562fa2ca8a37cfa90047f1dc54fe5bb4114662aa8f4d9a"},
     {"path": "tooling/deployment-plan/src/README.md", "beforeSha256": "absent", "afterSha256": "e497a44eec3f9c82b7a859f799e8d39266e9b7b207da6b262b165badf0200f62"}
   ],
   "sharedPaths": [

@@ -301,7 +301,13 @@ test("clean-candidate CLI validates current hashes and rejects drift and unpinne
       "scripts/toolchain-provenance.mjs",
       "package.json",
     ]);
-    git(checkout, ["commit", "--quiet", "-m", "test: integrated rollback candidate"]);
+    git(checkout, [
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "test: integrated rollback candidate",
+    ]);
     let candidateSha = git(checkout, ["rev-parse", "HEAD"]).trim();
     mkdirSync(temporaryRoot, { mode: 0o700 });
     const environment = {

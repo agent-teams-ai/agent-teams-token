@@ -81,7 +81,7 @@
     {"path": ".github/workflows/ci.yml", "beforeSha256": "03b6b396e5a821289d55ebfeee30386c55115180a9703d9441ab010f7ca06581", "afterSha256": "8fe36d0cc9df3440f76c51eb59103eac36b213e3f51430a1c573f12ba2eb4f52"},
     {"path": "architecture/foundation/source-dependencies.yaml", "beforeSha256": "27fcd867ac67bfc8d21ce8b430f998a041dd66793a5f0f9592da4d0a4940dc35", "afterSha256": "dc1255df4be5a23c5f7ea1252705c394e5abe97e8914a44ba22f064b1015ef39"},
     {"path": "package.json", "beforeSha256": "ccb94ad0b04fd3a898a9f2140a347a76eb0aa05913da206ac25321999eca8cf1", "afterSha256": "bb974a1d7de78a192d63cf8159a69a810dd121ae55833dd6fb746e67e70b2f63"},
-    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "078685f36cae49dcc708a72c5c6da8cfc0e76395175631da6385b525adb41c03", "afterSha256": "846b9422b8490df537e7cd73b2a12b0c8714382ccc936176d4b2956958fcf8ab"},
+    {"path": "scripts/tests/workflow.test.mjs", "beforeSha256": "8ad750131da4b6333daead8f6f9e5c0a009d6cb4f4a9ee16b2fbe7f316ff4f46", "afterSha256": "39a391dd9e9a7f788823e855021542a9302f657d1f144830503f130d27016b33"},
     {"path": "tooling/toolchain.lock.json", "beforeSha256": "d06b28038d4c16568709764a665b38d8ccce0edcf3b1769ef6ac95c7ff6685e0", "afterSha256": "3d865bc1c78b349c4d1933ded474daf6b277fe45d1bd235e44e181c17512a7c7"},
     {"path": "tooling/security/slither/src/README.md", "beforeSha256": "a275519a6e9968341abfb4f3c574d08021a851866e58af338b8217df17cddcb2", "afterSha256": "cf05a9ce47005c3d7d2b70afe601113e3ff306e60832fe587487c9044f99e750"}
   ],
