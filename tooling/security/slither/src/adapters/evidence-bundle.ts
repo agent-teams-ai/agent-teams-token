@@ -310,15 +310,47 @@ async function deriveOneBuild(output:string,buildName:string,artifactName:string
   const buildBytes=await readStableOutputFile(join(output,buildName)); const artifactBytes=await readStableOutputFile(join(output,artifactName));
   const build=object(parseJsonWithoutDuplicateKeys(buildBytes.toString("utf8")),buildName); const input=object(build.input,"compiler input"); const settings=object(input.settings,"compiler settings");
   const optimizer=object(settings.optimizer,"optimizer"); const metadata=object(settings.metadata,"metadata"); const libraries=object(settings.libraries,"libraries"); const remappings=array(settings.remappings,"remappings").map(stringValue).toSorted();
-  if(build.solcVersion!=="0.8.36+commit.8a079791"||settings.evmVersion!=="paris"||optimizer.enabled!==true||optimizer.runs!==200||metadata.bytecodeHash!=="ipfs"||metadata.appendCBOR!==true||metadata.useLiteralContent!==false||settings.viaIR!==false||settings.experimental!==false||Object.keys(libraries).length!==0||JSON.stringify(remappings)!==JSON.stringify(["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])) {throw invalid("raw compiler settings differ from the pinned profile");}
+  if(settings.evmVersion!=="paris"||optimizer.enabled!==true||optimizer.runs!==200||metadata.bytecodeHash!=="ipfs"||metadata.appendCBOR!==true||metadata.useLiteralContent!==false||settings.viaIR!==false||settings.experimental!==false||Object.keys(libraries).length!==0||JSON.stringify(remappings)!==JSON.stringify(["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])) {throw invalid("raw compiler settings differ from the pinned profile");}
   const sources=object(input.sources,"compiler sources"); const sourceHashes=Object.entries(sources).map(([path,value])=>{assertStrictRelativePath(path); const source=object(value,"compiler source"); const content=stringValue(source.content); return {path,sha256:`sha256:${hex(content)}`};}).toSorted((a,b)=>a.path.localeCompare(b.path));
   const artifact=object(parseJsonWithoutDuplicateKeys(artifactBytes.toString("utf8")),artifactName); const abi=array(artifact.abi,"artifact ABI"); const bytecode=stringValue(object(artifact.bytecode,"artifact bytecode").object); const normalized=bytecode.startsWith("0x")?bytecode:`0x${bytecode}`;
   if(!/^0x(?:[0-9a-fA-F]{2})+$/u.test(normalized)) {throw invalid("artifact creation bytecode is malformed");}
   const contracts=object(object(build.output,"compiler output").contracts,"compiler contracts");
   const sourceOutput=object(contracts[sourceName],"source output"); const contractOutput=object(sourceOutput[contractName],"contract output");
+  assertRawCompilerIdentity(build, artifact, contracts, contractOutput);
   const evm=object(contractOutput.evm,"evm"); const fromBuild=stringValue(object(evm.bytecode,"build bytecode").object);
   if(Buffer.from(fromBuild.replace(/^0x/u,""),"hex").compare(Buffer.from(normalized.slice(2),"hex"))!==0) {throw invalid("artifact and build-info bytecode differ");}
   return {buildInfoSha256:`sha256:${hex(buildBytes)}`,compilerInputSha256:`sha256:${hex(JSON.stringify(input))}`,compilerSettingsSha256:`sha256:${hex(JSON.stringify(settings))}`,compilerInput:input,compilerSettings:settings,sourceHashes,artifactSha256:`sha256:${hex(artifactBytes)}`,abiSha256:`sha256:${hex(JSON.stringify(abi))}`,creationBytecode:normalized,creationBytecodeSha256:`sha256:${hex(Buffer.from(normalized.slice(2),"hex"))}`};
+}
+
+function assertRawCompilerIdentity(build: JsonObject, artifact: JsonObject, contracts: JsonObject, target: JsonObject): void {
+  // Independently reconstruct the pinned Forge format. Neither short version
+  // field nor the serialized evidence.tools.solc can supply the compiler commit.
+  if (build.solcVersion !== "0.8.36" || build.solcLongVersion !== "0.8.36") {throw invalid("raw Foundry compiler version fields differ from the captured format");}
+  for (const source of Object.values(contracts)) {
+    const outputs = object(source, "compiler source output");
+    if (Object.keys(outputs).length === 0) {throw invalid("compiler contract metadata is absent");}
+    for (const contract of Object.values(outputs)) {
+      readEmbeddedMetadata(object(contract, "compiler contract").metadata);
+    }
+  }
+  const artifactMetadata = object(artifact.metadata, "artifact compiler metadata");
+  assertEmbeddedCompiler(artifactMetadata);
+  // Foundry's object form loses NatSpec fields and normalizes remappings;
+  // compare complete raw metadata, and independently check the object's commit.
+  if (!deepEqual(readEmbeddedMetadata(artifact.rawMetadata), readEmbeddedMetadata(target.metadata))) {throw invalid("artifact and build-info compiler metadata differ");}
+}
+function readEmbeddedMetadata(value: unknown): JsonObject {
+  if (typeof value !== "string") {throw invalid("raw compiler metadata is absent or malformed");}
+  let parsed: unknown;
+  try {parsed = parseJsonWithoutDuplicateKeys(value);} catch {throw invalid("embedded compiler metadata is not unambiguous JSON");}
+  const metadata = object(parsed, "embedded compiler metadata");
+  assertEmbeddedCompiler(metadata);
+  return metadata;
+}
+function assertEmbeddedCompiler(metadata: JsonObject): void {
+  const compiler = object(metadata.compiler, "embedded compiler identity");
+  assertExactKeys(compiler, ["version"], "embedded compiler identity");
+  if (compiler.version !== "0.8.36+commit.8a079791") {throw invalid("embedded compiler identity differs from the exact pinned commit");}
 }
 
 async function readCanonicalTools(repositoryRoot: string, manifest: JsonObject): Promise<JsonObject> {

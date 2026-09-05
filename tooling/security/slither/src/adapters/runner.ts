@@ -38,9 +38,10 @@ interface ImageInspection {
   readonly Config?: { readonly Labels?: Record<string, unknown>; readonly Env?: readonly unknown[] };
 }
 interface OfficialImageEnvironment { readonly imagePath: string; readonly pythonPath: string }
-interface ForgeArtifact { readonly abi?: unknown; readonly bytecode?: { readonly object?: unknown } }
+interface ForgeArtifact { readonly abi?: unknown; readonly bytecode?: { readonly object?: unknown }; readonly metadata?: unknown; readonly rawMetadata?: unknown }
 interface BuildInfo {
   readonly solcVersion?: unknown;
+  readonly solcLongVersion?: unknown;
   readonly input?: { readonly sources?: Record<string, {readonly content?: unknown}>; readonly settings?: { readonly evmVersion?: unknown; readonly optimizer?: { readonly enabled?: unknown; readonly runs?: unknown }; readonly metadata?: { readonly bytecodeHash?: unknown; readonly appendCBOR?: unknown; readonly useLiteralContent?: unknown }; readonly viaIR?: unknown; readonly experimental?: unknown; readonly remappings?: unknown; readonly libraries?: unknown } };
   readonly output?: { readonly contracts?: Record<string, Record<string, { readonly evm?: { readonly bytecode?: { readonly object?: unknown } } }>> };
 }
@@ -410,12 +411,13 @@ async function safeCopyFile(source: string, destination: string): Promise<void> 
   await writeContainerReadableFile(destination, content);
 }
 
-async function parseCompiledOutput(output: string, sealed: SealedOutput, artifactName = "AGTMAIToken.json", sourceName = "src/features/token-genesis/AGTMAIToken.sol", contractName = "AGTMAIToken"): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string; evidence: AnalysisInput["compilerEvidence"] }> {
+export async function parseCompiledOutput(output: string, sealed: SealedOutput, artifactName = "AGTMAIToken.json", sourceName = "src/features/token-genesis/AGTMAIToken.sol", contractName = "AGTMAIToken"): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string; evidence: AnalysisInput["compilerEvidence"] }> {
   let artifactRaw: Buffer; let buildRaw: Buffer;
   try {artifactRaw=await requiredRaw(output,sealed,artifactName); buildRaw=await requiredRaw(output,sealed,"build-info.json");} catch {throw new SlitherGateError("BUILD_INFO_INVALID","compiler artifact or build-info is missing or unreadable");}
   const artifact=parseTypedJson(artifactRaw.toString("utf8"),"BUILD_INFO_INVALID","compiler artifact") as ForgeArtifact;
   const build=parseTypedJson(buildRaw.toString("utf8"),"BUILD_INFO_INVALID","compiler build-info") as BuildInfo;
-  const compiler=validateBuildCompiler(build); const artifactHex=artifact.bytecode?.object; const buildHex=build.output?.contracts?.[sourceName]?.[contractName]?.evm?.bytecode?.object;
+  const version=validateCompilerIdentity(build,artifact,sourceName,contractName);
+  const compiler=validateBuildCompiler(build,version); const artifactHex=artifact.bytecode?.object; const buildHex=build.output?.contracts?.[sourceName]?.[contractName]?.evm?.bytecode?.object;
   const artifactBytes=decodeCreationBytecode(artifactHex); const buildInfoBytes=decodeCreationBytecode(buildHex);
   if (!Array.isArray(artifact.abi)) {throw new SlitherGateError("BUILD_INFO_INVALID","compiler ABI is absent");}
   const sourceHashes=Object.entries(build.input?.sources ?? {}).map(([path,value])=>{assertManifestPath(path); if(typeof value.content!=="string") {throw new SlitherGateError("BUILD_INFO_INVALID","compiler source content is absent");} return {path,sha256:sha256(value.content)};}).toSorted((x,y)=>x.path.localeCompare(y.path));
@@ -423,14 +425,57 @@ async function parseCompiledOutput(output: string, sealed: SealedOutput, artifac
   const evidence={buildInfoSha256:sha256(buildRaw),compilerInputSha256:sha256(JSON.stringify(build.input)),compilerSettingsSha256:sha256(JSON.stringify(build.input?.settings)),compilerInput:build.input as Readonly<Record<string,unknown>>,compilerSettings:build.input?.settings as Readonly<Record<string,unknown>>,sourceHashes,artifactSha256:sha256(artifactRaw),abiSha256:sha256(JSON.stringify(artifact.abi)),creationBytecode:normalized,creationBytecodeSha256:sha256(artifactBytes),rawBuildInfo:buildRaw.toString("utf8"),rawArtifact:artifactRaw.toString("utf8")};
   return {compiler,artifactBytecode:sha256(artifactBytes),buildInfoBytecode:sha256(buildInfoBytes),evidence};
 }
-function validateBuildCompiler(build: BuildInfo): GateManifest["compiler"] {
+function compilerMetadataObject(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {throw new SlitherGateError("BUILD_INFO_INVALID", "compiler metadata is not an object");}
+  return value as Record<string, unknown>;
+}
+function embeddedCompilerVersion(metadata: Record<string, unknown>): GateManifest["compiler"]["version"] {
+  const compiler = compilerMetadataObject(metadata.compiler);
+  if (Object.keys(compiler).length !== 1 || compiler.version !== "0.8.36+commit.8a079791") {throw new SlitherGateError("BUILD_INFO_INVALID", "embedded compiler identity differs from the exact pinned commit");}
+  return compiler.version;
+}
+function parseCompilerMetadata(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== "string") {throw new SlitherGateError("BUILD_INFO_INVALID", "raw compiler metadata is absent or malformed");}
+  const metadata = compilerMetadataObject(parseTypedJson(raw, "BUILD_INFO_INVALID", "embedded compiler metadata"));
+  embeddedCompilerVersion(metadata);
+  return metadata;
+}
+function sameCompilerMetadata(left: unknown, right: unknown): boolean {
+  if (left === right) {return true;}
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object" || Array.isArray(left) !== Array.isArray(right)) {return false;}
+  const a = left as Record<string, unknown>; const b = right as Record<string, unknown>;
+  return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => Object.hasOwn(b, key) && sameCompilerMetadata(a[key], b[key]));
+}
+function validateCompilerIdentity(build: BuildInfo, artifact: ForgeArtifact, sourceName: string, contractName: string): GateManifest["compiler"]["version"] {
+  // Forge 1.8.0 emits the short release in BOTH build-info fields. The commit
+  // comes from every solc metadata document, alongside verifyVersions() and
+  // the authenticated mounted solc binary; it is never inferred from semver.
+  if (build?.solcVersion !== "0.8.36" || build.solcLongVersion !== "0.8.36") {throw new SlitherGateError("BUILD_INFO_INVALID", "Foundry compiler version fields differ from the captured format");}
+  const contracts = compilerMetadataObject(build.output?.contracts);
+  let target: Record<string, unknown> | undefined;
+  for (const [path, source] of Object.entries(contracts)) {
+    const outputs = compilerMetadataObject(source);
+    if (Object.keys(outputs).length === 0) {throw new SlitherGateError("BUILD_INFO_INVALID", "compiler contract metadata is absent");}
+    for (const [name, output] of Object.entries(outputs)) {
+      const metadata = parseCompilerMetadata(compilerMetadataObject(output).metadata);
+      if (path === sourceName && name === contractName) {target = metadata;}
+    }
+  }
+  const rawMetadata = parseCompilerMetadata(artifact?.rawMetadata);
+  // Forge's object metadata is a lossy representation (NatSpec/remappings).
+  // Its compiler identity must agree; the raw document binds the full metadata.
+  const version = embeddedCompilerVersion(compilerMetadataObject(artifact.metadata));
+  if (!target || !sameCompilerMetadata(rawMetadata, target)) {throw new SlitherGateError("BUILD_INFO_INVALID", "artifact and build-info compiler metadata differ");}
+  return version;
+}
+function validateBuildCompiler(build: BuildInfo, version: GateManifest["compiler"]["version"]): GateManifest["compiler"] {
   const settings = build.input?.settings;
-  if (!settings || build.solcVersion !== "0.8.36+commit.8a079791") {
+  if (!settings) {
     throw new SlitherGateError("BUILD_INFO_INVALID", "fresh build-info lacks compiler identity");
   }
   const remappings = stringArray(settings.remappings).toSorted();
   const profile: GateManifest["compiler"] = {
-    version: "0.8.36+commit.8a079791",
+    version,
     evmVersion: "paris",
     optimizerEnabled: true,
     optimizerRuns: 200,
@@ -445,7 +490,7 @@ function validateBuildCompiler(build: BuildInfo): GateManifest["compiler"] {
     ],
   };
   const observed = {
-    version: "0.8.36+commit.8a079791",
+    version,
     evmVersion: settings.evmVersion,
     optimizerEnabled: settings.optimizer?.enabled,
     optimizerRuns: settings.optimizer?.runs,
