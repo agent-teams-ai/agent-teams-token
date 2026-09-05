@@ -1,6 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
+# CI invokes this after env.sh restricts PATH to pinned tool directories.
 rollback_expected_sha=${1:?expected commit SHA is required}
 rollback_baseline_sha=${2:?baseline commit SHA is required}
 rollback_git=/usr/bin/git
