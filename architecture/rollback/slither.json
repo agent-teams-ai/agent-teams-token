@@ -57,6 +57,8 @@
     "tooling/security/slither/tests/fault-injection.test.ts",
     "tooling/security/slither/tests/fixtures/Vulnerable.sol",
     "tooling/security/slither/tests/fixtures/golden-bundle-input.v1.json",
+    "tooling/security/slither/tests/fixtures/slither-0.11.6-detectors.txt",
+    "tooling/security/slither/tests/fixtures/slither-0.11.6-production.json",
     "tooling/security/slither/tests/gate.test.ts",
     "tooling/security/slither/tests/image-preflight.test.ts",
     "tooling/security/slither/tests/manifest.test.ts",
