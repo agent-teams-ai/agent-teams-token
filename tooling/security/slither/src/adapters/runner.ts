@@ -386,7 +386,7 @@ async function closure(root: string, entries: readonly ClosureEntry[]): Promise<
 export async function verifyVersions(output: string, sealed?: SealedOutput): Promise<void> {
   const checks: [string, RegExp][] = [
     ["solc.version", /^solc, the solidity compiler commandline interface\s+Version: 0\.8\.36\+commit\.8a079791\.Linux\.g\+\+\s*$/u],
-    ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /^crytic-compile 0\.4\.2\s*$/u],
+    ["slither.version", /^0\.11\.6\s*$/u], ["crytic-compile.version", /^0\.4\.2\n?$/u],
   ];
   for (const [file, pattern] of checks) {
     let raw: Buffer;

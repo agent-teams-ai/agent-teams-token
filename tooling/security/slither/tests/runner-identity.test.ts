@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeCreationBytecode,
@@ -13,6 +13,7 @@ import {
   IMAGE_REVISION,
   PINNED_PYTHONPATH,
 } from "../src/adapters/container-contract.ts";
+import { makeTestDirectory } from "./test-directory.ts";
 
 const digest = "ghcr.io/trailofbits/eth-security-toolbox@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0";
 
@@ -93,11 +94,11 @@ test("Slither exit files accept only canonical 0 or 255 with an optional trailin
 
 
 test("solc version parser requires the exact pinned Linux.g++ suffix", async () => {
-  const root = await mkdtemp("/tmp/slither-version-");
+  const root = await makeTestDirectory("version-");
   try {
     await writeFile(join(root, "solc.version"), "solc, the solidity compiler commandline interface\nVersion: 0.8.36+commit.8a079791.Linux.g++\n");
     await writeFile(join(root, "slither.version"), "0.11.6\n");
-    await writeFile(join(root, "crytic-compile.version"), "crytic-compile 0.4.2\n");
+    await writeFile(join(root, "crytic-compile.version"), "0.4.2\n");
     await writeFile(join(root, "forge.version"), "forge Version: 1.8.0\n");
     await verifyVersions(root);
     for (const forged of ["Version: 0.8.36+commit.8a079791\n", "Version: 0.8.36+commit.deadbeef.Linux.g++\n", "Version: 0.8.36+commit.8a079791.Linux.g++-forged\n"]) {
@@ -105,4 +106,28 @@ test("solc version parser requires the exact pinned Linux.g++ suffix", async () 
       await assert.rejects(verifyVersions(root), { code: "TOOL_VERSION_MISMATCH" });
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("crytic-compile accepts the observed bare pinned CLI version and rejects contamination", async () => {
+  const root = await makeTestDirectory("crytic-version-");
+  try {
+    await writeFile(join(root, "solc.version"), "solc, the solidity compiler commandline interface\nVersion: 0.8.36+commit.8a079791.Linux.g++\n");
+    await writeFile(join(root, "slither.version"), "0.11.6\n");
+    await writeFile(join(root, "forge.version"), "forge Version: 1.8.0\nCommit SHA: 61ae26af36320d4fa1020f7db53785885e29eeb5\nBuild Timestamp: 2026-08-26T13:14:38.112964122Z (1787750078)\nBuild Profile: dist\n");
+    for (const raw of ["0.4.2\n", "0.4.2"]) {
+      await writeFile(join(root, "crytic-compile.version"), raw);
+      await verifyVersions(root);
+    }
+    for (const raw of [
+      "", "\n", "0.4.1\n", "0.4.20\n", "10.4.2\n", "0.4.2-dev\n", "0.4.2+build\n",
+      "crytic-compile 0.4.2\n", "Version: 0.4.2\n", " 0.4.2\n", "0.4.2 \n", "0.4.2\t\n",
+      "0.4.2\r\n", "0.4.2\n\n", "\n0.4.2\n", "0.4.2\n0.4.2\n", "0.4.2\nwarning\n",
+      "warning\n0.4.2\n", "0.4.2\0", "0.4.2\u2028", "0.4.2\u2029",
+    ]) {
+      await writeFile(join(root, "crytic-compile.version"), raw);
+      await assert.rejects(verifyVersions(root), { code: "TOOL_VERSION_MISMATCH" }, JSON.stringify(raw));
+    }
+    await rm(join(root, "crytic-compile.version"));
+    await assert.rejects(verifyVersions(root), { code: "TOOL_VERSION_MISMATCH" });
+  } finally {await rm(root, { recursive: true, force: true });}
 });
