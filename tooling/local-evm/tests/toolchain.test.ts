@@ -8,14 +8,42 @@ import { checkedForgeBuild, checkedSolcExecution, isSolcSpawnPermissionFailure }
 import {
   assertPinnedSolcSha256,
   assertPinnedSolcVersionOutput,
+  assertPinnedFoundrySha256,
   containsAsciiControlCharacter,
   isSecureSolcSnapshotMetadata,
+  pinnedFoundryBinaries,
   pinnedSolc,
 } from "../toolchain.ts";
 
 const repositoryRoot = realpathSync(resolve(import.meta.dirname, "../../.."));
 const platform = process.platform === "darwin" ? "darwin-arm64" : "linux-x64";
 const installed = join(repositoryRoot, ".tools", `solc-v0.8.36-${platform}`, "solc");
+
+test("Foundry capability accepts only the exact pinned installation and binary bytes", (context) => {
+  const binaries = pinnedFoundryBinaries(repositoryRoot);
+  assert.deepEqual(Object.keys(binaries).toSorted(), ["anvil", "cast", "forge"]);
+  for (const [key, value] of Object.entries(binaries)) {
+    assert.equal(value, join(repositoryRoot, ".tools", `foundry-v1.8.0-${platform}`, key));
+  }
+
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-foundry-decoy-")));
+  context.after(() => rmSync(root, {recursive: true, force: true}));
+  const marker = join(root, "called");
+  const decoy = join(root, "forge");
+  const decoyBytes = Buffer.from(`#!/bin/sh\nprintf x > ${JSON.stringify(marker)}\necho 'forge Version: 1.8.0'\n`);
+  writeFileSync(decoy, decoyBytes, {mode: 0o700});
+  for (const value of [undefined, "forge", decoy, join(repositoryRoot, "..", "forge")]) {
+    assert.throws(
+      () => pinnedFoundryBinaries(repositoryRoot, {...process.env, AGTMAI_FORGE_BINARY: value}),
+      hasCode("LOCAL_EVM_FOUNDRY_BINARY_PATH_INVALID"),
+    );
+  }
+  assert.throws(
+    () => assertPinnedFoundrySha256(decoyBytes, "0".repeat(64), "forge"),
+    hasCode("LOCAL_EVM_FOUNDRY_CHECKSUM_MISMATCH"),
+  );
+  assert.equal(existsSync(marker), false, "same-version decoy receives zero calls");
+});
 
 test("local EVM build selects an authenticated snapshot inside caller-owned custody", {
   skip: existsSync(installed) ? false : "pinned solc is not installed",

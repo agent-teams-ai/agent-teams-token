@@ -40,6 +40,10 @@ test("committed lock schema covers Core, Solana fixture and future tools separat
       lock.tools.foundry.platforms[platform].versionChecks.map(({ name }) => name),
       ["forge", "cast", "anvil", "chisel"],
     );
+    assert.deepEqual(
+      Object.keys(lock.tools.foundry.platforms[platform].expectedFileSha256),
+      lock.tools.foundry.platforms[platform].expectedFiles,
+    );
   }
   assert.equal(lock.tools.agave.scope, "local-solana-fixture");
   assert.equal(lock.tools.agave.version, "4.2.1");

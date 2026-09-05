@@ -87,7 +87,7 @@ function createArchives(root, artifacts) {
   writeFileSync(join(pnpmPayload, "package.json"), '{"name":"pnpm","version":"11.24.0"}\n');
   const pnpm = join(artifacts, "pnpm-test.tgz");
   execFileSync("tar", ["-czf", pnpm, "-C", join(root, "pnpm-payload"), "package"]);
-  return { agave, agavePayload, agaveVersions, foundry, node, pnpm, solc };
+  return { agave, agavePayload, agaveVersions, foundry, foundryPayload, node, pnpm, solc };
 }
 
 function fixtureLock(archives) {
@@ -105,6 +105,10 @@ function fixtureLock(archives) {
       pattern: "^solana-cli 4\\.2\\.1 .*client:Agave\\)$",
     }),
   };
+  definitions.foundry.expectedFileSha256 = Object.fromEntries(
+    ["forge", "cast", "anvil", "chisel"]
+      .map((name) => [name, digest(join(archives.foundryPayload, name))]),
+  );
   definitions.agave.versionChecks = Object.keys(archives.agaveVersions).map((name) => ({
     name,
     path: `bin/${name}`,

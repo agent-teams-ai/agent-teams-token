@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LocalSolanaError } from "../domain/model.ts";
 import type { CommandPort, CommandResult, ValidatorHandle, ValidatorIdentity, ValidatorPort, ValidatorStartRequest } from "../application/ports.ts";
-import { assertValidatorRpcListener, authenticateValidatorIdentity, processStartIdentity } from "./process-identity.ts";
+import { assertValidatorRpcListener, authenticateValidatorIdentity, processStartIdentity, validatorIdentityAuthenticationFailures } from "./process-identity.ts";
 
 export class NodeCommandAdapter implements CommandPort {
   public async run(executable: string, args: readonly string[], options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}): Promise<CommandResult> {
@@ -77,7 +77,24 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       await waitFor(() => (validatorPid !== undefined && immutableIdentity !== undefined) || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000);
       if (validatorPid === undefined || immutableIdentity === undefined) { throw startupFailure(validatorExit, output, request); }
       const expectedExecutable = await realpath(request.executable); const expectedLedger = await realpath(request.ledger);
-      if (immutableIdentity.pid !== validatorPid || immutableIdentity.executable !== expectedExecutable || immutableIdentity.ledger !== expectedLedger || immutableIdentity.bindAddress !== "127.0.0.1" || immutableIdentity.rpcPort !== request.rpcPort || !await authenticateValidatorIdentity(immutableIdentity, request.leaseToken)) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "supervisor did not provide the expected immutable validator identity"); }
+      const liveAuthenticationFailures = await validatorIdentityAuthenticationFailures(
+        immutableIdentity,
+        request.leaseToken,
+      );
+      const identityMismatches = [
+        immutableIdentity.pid !== validatorPid ? "pid" : undefined,
+        immutableIdentity.executable !== expectedExecutable ? "executable" : undefined,
+        immutableIdentity.ledger !== expectedLedger ? "ledger" : undefined,
+        immutableIdentity.bindAddress !== "127.0.0.1" ? "bind-address" : undefined,
+        immutableIdentity.rpcPort !== request.rpcPort ? "rpc-port" : undefined,
+        ...liveAuthenticationFailures.map((failure) => `live-${failure}`),
+      ].filter((value): value is string => value !== undefined);
+      if (identityMismatches.length > 0) {
+        throw new LocalSolanaError(
+          "SOLANA_VALIDATOR_IDENTITY",
+          `supervisor immutable validator identity mismatch: ${identityMismatches.join(",")}`,
+        );
+      }
       await boundedRegistration(request.registerIdentity(immutableIdentity), request.signal, 5_000);
       let acknowledged = false;
       const acknowledgement = (message: unknown): void => { if ((message as { readonly type?: unknown } | null)?.type === "acknowledged") { acknowledged = true; changed(); } };

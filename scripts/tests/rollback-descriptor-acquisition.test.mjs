@@ -325,6 +325,7 @@ test("custody acquisition attempts target and every ancestor after middle close 
   const target = join(boundary, "not-private");
   const sibling = join(boundary, "ordinary-sibling");
   mkdirSync(target, { mode: 0o755 });
+  chmodSync(target, 0o755);
   const restoreBoundary = setCustodyDirectoryAcquisitionBoundaryForTest(({ path }) => {
     if (path === boundary) {
       mkdirSync(sibling);

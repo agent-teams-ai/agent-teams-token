@@ -82,7 +82,9 @@ function validateCoreTool(lock, name) {
     throw new Error(`TOOLCHAIN_LOCK_TOOL tool=${name}`);
   }
   for (const platform of lock.platforms) {
-    validateArtifact(name, platform, tool.platforms?.[platform]);
+    validateArtifact(name, platform, tool.platforms?.[platform], {
+      requireInnerHashes: name === "foundry",
+    });
   }
 }
 

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import test from "node:test";
+import { ownedTemporaryDirectory } from "./helpers/temporary-directory.ts";
 import { runUnsignedPlanner } from "../src/composition/index.ts";
+import { pinnedFoundryBinaries } from "../../local-evm/toolchain.ts";
 
+const repositoryRoot = await realpath(resolvePath(import.meta.dirname, "../../.."));
 const anvilBinary = process.env.AGTMAI_ANVIL_BINARY;
 const forgeBinary = process.env.AGTMAI_FORGE_BINARY;
 const solcBinary = process.env.AGTMAI_SOLC_BINARY;
@@ -29,9 +31,7 @@ test(
       child = started.child;
       const { rpcUrl } = started;
       await waitUntilReady(rpcUrl);
-      outputParent = await realpath(
-        await mkdtemp(join(tmpdir(), "deployment-plan-anvil-")),
-      );
+      outputParent = await ownedTemporaryDirectory("deployment-plan-anvil-");
       const result = await runUnsignedPlanner({
         rpcUrl,
         buildInfoPath: build.buildInfoPath,
@@ -157,17 +157,20 @@ function requireCompleteConfiguration(): E2eBinaries {
     anvilBinary && forgeBinary && solcBinary,
     "Anvil E2E requires AGTMAI_ANVIL_BINARY, AGTMAI_FORGE_BINARY, and AGTMAI_SOLC_BINARY together",
   );
-  return { anvil: anvilBinary, forge: forgeBinary, solc: solcBinary };
+  const foundry = pinnedFoundryBinaries(repositoryRoot);
+  return { anvil: foundry.anvil, forge: foundry.forge, solc: solcBinary };
 }
 
 async function freshForgeBuild(forge: string, solc: string): Promise<FreshBuild> {
-  const directory = await mkdtemp(join(tmpdir(), "deployment-plan-forge-"));
+  const directory = await ownedTemporaryDirectory("deployment-plan-forge-");
   const output = join(directory, "out");
   const cache = join(directory, "cache");
   const buildInfo = join(directory, "build-info");
   try {
     await runProcess(forge, [
       "build",
+      "--offline",
+      "--no-auto-detect",
       "--root",
       resolvePath("contracts/evm"),
       "--use",
@@ -181,7 +184,7 @@ async function freshForgeBuild(forge: string, solc: string): Promise<FreshBuild>
       buildInfo,
       "--no-lint",
       "src/features/token-genesis/AGTMAIToken.sol",
-    ], 60_000);
+    ], {environment: await privateFoundryEnvironment(directory), timeoutMs: 60_000});
     const buildInfoFiles = (await readdir(buildInfo)).filter((name) => name.endsWith(".json"));
     assert.equal(
       buildInfoFiles.length,
@@ -199,15 +202,32 @@ async function freshForgeBuild(forge: string, solc: string): Promise<FreshBuild>
   }
 }
 
+async function privateFoundryEnvironment(root: string): Promise<NodeJS.ProcessEnv> {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, name] of [
+    ["HOME", "home"],
+    ["XDG_CACHE_HOME", "xdg-cache"],
+    ["XDG_CONFIG_HOME", "xdg-config"],
+    ["XDG_DATA_HOME", "xdg-data"],
+    ["XDG_RUNTIME_DIR", "xdg-runtime"],
+  ] as const) {
+    const path = join(root, name);
+    await mkdir(path, {mode: 0o700});
+    environment[key] = path;
+  }
+  return environment;
+}
+
 async function runProcess(
   binary: string,
   arguments_: string[],
-  timeoutMs = 15_000,
-  shutdownGraceMs = 1_000,
+  options: {readonly environment?: NodeJS.ProcessEnv; readonly shutdownGraceMs?: number; readonly timeoutMs?: number} = {},
 ): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const shutdownGraceMs = options.shutdownGraceMs ?? 1_000;
   const child = spawn(binary, arguments_, {
     stdio: ["ignore", "ignore", "pipe"],
-    env: {},
+    env: options.environment ?? {},
   });
   let standardError = "";
   child.stderr?.setEncoding("utf8");
@@ -384,7 +404,7 @@ test("process execution timeout is bounded", async () => {
     runProcess(process.execPath, [
       "-e",
       "setInterval(()=>{},1000)",
-    ], 100, 50),
+    ], {timeoutMs: 100, shutdownGraceMs: 50}),
     /timed out/u,
   );
 });

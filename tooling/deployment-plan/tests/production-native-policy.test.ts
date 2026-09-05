@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readdir } from "node:fs/promises";
 import test from "node:test";
 import { nativeNoReplaceEvidence, nativePublication } from "./native-provenance-fixture.ts";
 import { artifactInputs, approvedArtifact, roots as fixtureRoots } from "./raw-artifact-fixture.ts";
@@ -11,6 +9,7 @@ import type { DeploymentRpc, RpcMethod } from "../src/application/ports.ts";
 import { buildFeeQuote, buildStablePlan, type QuoteObservation } from "../src/application/builder.ts";
 import { publishReadyLast, verifyBundle } from "../src/composition/index.ts";
 import { canonicalJson, sha256Hex } from "../src/domain/identity.ts";
+import { ownedTemporaryDirectory } from "./helpers/temporary-directory.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
 const roots = { ...fixtureRoots, maximumHeadLag: "2" } as const;
@@ -34,7 +33,7 @@ const observation: QuoteObservation = {
 
 test("matching synthetic native evidence fails all production verification entrypoints", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-policy-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-policy-");
   const plan = buildStablePlan(approvedArtifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const evidence = syntheticEvidence();

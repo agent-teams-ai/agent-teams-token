@@ -60,6 +60,9 @@ token_env_main() {
       return 1
     fi
   done
+  export AGTMAI_ANVIL_BINARY="$token_env_foundry/anvil"
+  export AGTMAI_FORGE_BINARY="$token_env_foundry/forge"
+  export AGTMAI_SOLC_BINARY="$token_env_solc/solc"
   export PATH="$token_env_node:$token_env_foundry:$token_env_solc:$token_env_agave:$token_env_package_bin"
   unset -f token_env_main 2>/dev/null || unfunction token_env_main 2>/dev/null || true
   return 0

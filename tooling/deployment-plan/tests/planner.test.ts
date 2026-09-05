@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { runUnsignedPlanner, type PlannerInput } from "../src/composition/index.ts";
@@ -9,6 +8,7 @@ import type { TrustRoots } from "../src/application/ports.ts";
 import { canonicalBuildInfoSha256, portableCompilerInputSha256 } from "../src/adapters/artifact.ts";
 import { sha256Hex } from "../src/domain/identity.ts";
 import { parseNativeNoReplaceEvidence, parseReadyMarker } from "../src/adapters/strict-json.ts";
+import { ownedTemporaryDirectory } from "./helpers/temporary-directory.ts";
 
 const source = "contract X {}";
 const settings = {
@@ -155,8 +155,8 @@ async function prepare(rpcUrl: string, bundleName: string): Promise<{
   readonly input: PlannerInput;
   readonly outputParent: string;
 }> {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "deployment-planner-run-")));
-  const outputParent = await realpath(await mkdtemp(join(tmpdir(), "deployment-planner-output-")));
+  const directory = await ownedTemporaryDirectory("deployment-planner-run-");
+  const outputParent = await ownedTemporaryDirectory("deployment-planner-output-");
   const paths = {
     buildInfoPath: join(directory, "build.json"),
     artifactPath: join(directory, "artifact.json"),

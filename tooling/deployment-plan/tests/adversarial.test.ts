@@ -1,7 +1,6 @@
 import { nativePublication, nativeVerification } from "./native-provenance-fixture.ts";
 import assert from "node:assert/strict";
-import { link, mkdir, mkdtemp, readdir, realpath, rename, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { link, mkdir, readdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import type { ApprovedArtifact } from "../src/adapters/artifact.ts";
@@ -14,6 +13,7 @@ import { publishReadyLast, verifyBundle } from "../src/composition/index.ts";
 import { computePlanId, deriveCreateAddress, sha256Hex } from "../src/domain/identity.ts";
 import { main as estimateLocalMain } from "../../../scripts/deployment/estimate-local.ts";
 import { testOnlyNoReplaceDirectoryRename } from "./helpers/no-replace-directory-rename.ts";
+import { ownedTemporaryDirectory } from "./helpers/temporary-directory.ts";
 
 const hash = `0x${"a".repeat(64)}` as const;
 const roots = { ...fixtureRoots, maximumHeadLag: "2" } as const;
@@ -228,7 +228,7 @@ test("standalone verification rejects coherent non-local trust roots", () => {
 
 test("expiry at the final pre-publication check leaves no target or staging bundle", async (context) => {
   context.mock.method(Date, "now", () => 170_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-expiry-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-expiry-");
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   await assert.rejects(
@@ -247,7 +247,7 @@ test("expiry at the final pre-publication check leaves no target or staging bund
 
 test("READY-last verifies held bytes and detects live estimate drift", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-test-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-test-");
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const publication = await publishReadyLast({ ...nativePublication,
@@ -285,7 +285,7 @@ test("READY-last verifies held bytes and detects live estimate drift", async (co
 
 test("same-plan quote substitution cannot replace the held approved quote", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-quote-swap-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-quote-swap-");
   const plan = buildStablePlan(artifact, roots);
   const originalQuote = buildFeeQuote(plan, observation, roots);
   const replacementQuote = buildFeeQuote(plan, { ...observation, gasEstimate: "150" }, roots);
@@ -323,7 +323,7 @@ test("same-plan quote substitution cannot replace the held approved quote", asyn
 
 test("final-directory replacement before verification fails closed", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-directory-swap-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-directory-swap-");
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
@@ -342,7 +342,7 @@ test("final-directory replacement before verification fails closed", async (cont
 for (const substitutedName of ["READY", "deployment-plan.v2.json", "native-no-replace-evidence.v1.json"] as const) {
   test(`${substitutedName} substitution at the final verification boundary fails closed`, async (context) => {
     context.mock.method(Date, "now", () => 120_000);
-    const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-final-leaf-")));
+    const parent = await ownedTemporaryDirectory("deployment-plan-final-leaf-");
     const plan = buildStablePlan(artifact, roots);
     const quote = buildFeeQuote(plan, observation, roots);
     const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
@@ -374,7 +374,7 @@ for (const substitutedName of ["READY", "deployment-plan.v2.json", "native-no-re
 for (const mutation of ["missing", "symlink", "hardlink"] as const) {
   test(`${mutation} native evidence is rejected by the held publication verifier`, async (context) => {
     context.mock.method(Date, "now", () => 120_000);
-    const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-native-leaf-")));
+    const parent = await ownedTemporaryDirectory("deployment-plan-native-leaf-");
     const plan = buildStablePlan(artifact, roots);
     const quote = buildFeeQuote(plan, observation, roots);
     const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
@@ -396,7 +396,7 @@ for (const mutation of ["missing", "symlink", "hardlink"] as const) {
 
 test("an extra bundle leaf is rejected", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-extra-leaf-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-extra-leaf-");
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
@@ -408,7 +408,7 @@ test("an extra bundle leaf is rejected", async (context) => {
 
 test("verification rejects an expected quote digest mismatch", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-digest-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-digest-");
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });
@@ -424,7 +424,7 @@ test("verification rejects an expected quote digest mismatch", async (context) =
 
 test("legacy leaf names cannot be verified through a publication capability", async (context) => {
   context.mock.method(Date, "now", () => 120_000);
-  const parent = await realpath(await mkdtemp(join(tmpdir(), "deployment-plan-legacy-")));
+  const parent = await ownedTemporaryDirectory("deployment-plan-legacy-");
   const plan = buildStablePlan(artifact, roots);
   const quote = buildFeeQuote(plan, observation, roots);
   const publication = await publishReadyLast({ ...nativePublication, parent, bundleName: "bundle", plan, quote, roots, expected: artifact, artifactInputs, outputFaultInjection: { noReplaceDirectoryRename: testOnlyNoReplaceDirectoryRename } });

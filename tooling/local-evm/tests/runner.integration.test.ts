@@ -9,10 +9,12 @@ import type { Readable } from "node:stream";
 import { privateRunRoot, runLocalEvm } from "../runner.ts";
 import { existsSync, linkSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { authenticateProcess, processStartIdentity } from "../process.ts";
+import { pinnedFoundryBinaries } from "../toolchain.ts";
 
 const repositoryRoot = realpathSync(resolvePath(import.meta.dirname, "../../.."));
 const runnerPath = join(repositoryRoot, "scripts/genesis/local-evm.ts");
 const privateRoot = privateRunRoot(repositoryRoot);
+const foundryBinaries = pinnedFoundryBinaries(repositoryRoot);
 const generatedReports = new Set<string>();
 const activeChildren = new Set<ChildProcessByStdio<null, Readable, Readable>>();
 
@@ -29,6 +31,7 @@ test("runner rejects every solc replacement class before each execution", {timeo
       const marker = join(root, "decoy-called");
       await assert.rejects(runLocalEvm({
         repositoryRoot,
+        foundryBinaries,
         solcLifecycleHook(point, solc): void {
           if (point !== phase) {return;}
           const decoy = join(root, "decoy-solc");

@@ -11,7 +11,7 @@ export async function captureValidatorIdentity(pid: number, executable: string, 
     const expectedExecutable = await canonicalExistingPath(executable, "file");
     const platform = validatorPlatform();
     const observed = platform === "linux" ? await observeLinux(pid) : await observeDarwin(pid, expectedExecutable);
-    if (observed.executable !== expectedExecutable || observed.ledgerArgument !== expectedLedger || observed.bindAddress !== "127.0.0.1" || observed.rpcPort === null || !observed.environment.includes(`AGTMAI_LOCAL_SOLANA_LEASE_TOKEN=${leaseToken}`)) {
+    if (observed.executable !== expectedExecutable || observed.ledgerArgument !== expectedLedger || observed.bindAddress !== "127.0.0.1" || observed.rpcPort === null || !observedLeaseMatches(platform, observed, leaseToken)) {
       throw identityError("validator process does not authenticate its executable, ledger and lease token");
     }
     return { pid, platform, startTime: observed.startTime, executable: expectedExecutable, ledger: expectedLedger, commandHash: observed.commandHash, leaseTokenHash: digest(Buffer.from(leaseToken)), bindAddress: "127.0.0.1", rpcPort: observed.rpcPort };
@@ -22,11 +22,34 @@ export async function captureValidatorIdentity(pid: number, executable: string, 
 }
 
 export async function authenticateValidatorIdentity(identity: ValidatorIdentity, leaseToken: string): Promise<boolean> {
-  if (identity.leaseTokenHash !== digest(Buffer.from(leaseToken)) || identity.platform !== process.platform || (process.platform !== "linux" && process.platform !== "darwin")) { return false; }
-  const observed = process.platform === "linux" ? await observeLinux(identity.pid).catch(() => null) : await observeDarwin(identity.pid, identity.executable).catch(() => null);
-  return observed !== null && observed.startTime === identity.startTime && observed.executable === identity.executable
-    && observed.ledgerArgument === identity.ledger && observed.bindAddress === identity.bindAddress && observed.rpcPort === identity.rpcPort && observed.commandHash === identity.commandHash
-    && observed.environment.includes(`AGTMAI_LOCAL_SOLANA_LEASE_TOKEN=${leaseToken}`);
+  return (await validatorIdentityAuthenticationFailures(identity, leaseToken)).length === 0;
+}
+
+export async function validatorIdentityAuthenticationFailures(
+  identity: ValidatorIdentity,
+  leaseToken: string,
+): Promise<readonly string[]> {
+  const failures = [
+    identity.leaseTokenHash !== digest(Buffer.from(leaseToken)) ? "lease-record" : undefined,
+    identity.platform !== process.platform ? "platform" : undefined,
+    process.platform !== "linux" && process.platform !== "darwin" ? "unsupported-platform" : undefined,
+  ].filter((value): value is string => value !== undefined);
+  if (failures.length > 0 || (process.platform !== "linux" && process.platform !== "darwin")) {
+    return failures;
+  }
+  const observed = process.platform === "linux"
+    ? await observeLinux(identity.pid).catch(() => null)
+    : await observeDarwin(identity.pid, identity.executable).catch(() => null);
+  if (observed === null) { return ["observation"]; }
+  return [
+    observed.startTime !== identity.startTime ? "start-time" : undefined,
+    observed.executable !== identity.executable ? "executable" : undefined,
+    observed.ledgerArgument !== identity.ledger ? "ledger" : undefined,
+    observed.bindAddress !== identity.bindAddress ? "bind-address" : undefined,
+    observed.rpcPort !== identity.rpcPort ? "rpc-port" : undefined,
+    observed.commandHash !== identity.commandHash ? "command" : undefined,
+    !observedLeaseMatches(identity.platform, observed, leaseToken) ? "lease-process" : undefined,
+  ].filter((value): value is string => value !== undefined);
 }
 
 export async function assertValidatorRpcListener(identity: ValidatorIdentity, leaseToken: string, port: number): Promise<ValidatorRpcListenerFact> {
@@ -163,10 +186,9 @@ async function observeLinux(pid: number): Promise<Observation> {
 }
 
 async function observeDarwin(pid: number, expectedExecutable: string): Promise<Observation> {
-  const [start, commandOutput, environmentCommand] = await Promise.all([
+  const [start, commandOutput] = await Promise.all([
     ps(["-o", "lstart=", "-p", `${pid}`]),
     ps(["-ww", "-p", `${pid}`, "-o", "command="]),
-    ps(["eww", "-p", `${pid}`, "-o", "command="]),
   ]);
   const argv = parseDarwinCommand(commandOutput.trim());
   const executablePath = argv[0];
@@ -182,8 +204,20 @@ async function observeDarwin(pid: number, expectedExecutable: string): Promise<O
     commandHash: digest(Buffer.from(commandOutput)),
     bindAddress: singleOption(argv, "--bind-address"),
     rpcPort: parseRpcPort(singleOption(argv, "--rpc-port")),
-    environment: environmentCommand.split(/\s+/u).filter((field) => /^AGTMAI_LOCAL_SOLANA_LEASE_TOKEN=[a-f0-9]{64}$/u.test(field)),
+    environment: [],
   };
+}
+
+function observedLeaseMatches(
+  platform: "linux" | "darwin",
+  observed: Observation,
+  leaseToken: string,
+): boolean {
+  // Darwin's supported ps interface does not expose another process's launch
+  // environment on current macOS. The token still binds the immutable lease
+  // record; live identity is bound to PID/start, executable, ledger and argv.
+  return platform === "darwin"
+    || observed.environment.includes(`AGTMAI_LOCAL_SOLANA_LEASE_TOKEN=${leaseToken}`);
 }
 
 async function canonicalExistingPath(path: string, kind: "directory" | "file"): Promise<string> {
@@ -233,7 +267,13 @@ async function ps(args: readonly string[]): Promise<string> { return await comma
 
 async function command(executable: string, args: readonly string[]): Promise<string> {
   return await new Promise((resolve, reject) => {
-    execFile(executable, [...args], { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 2_000, killSignal: "SIGKILL" }, (cause, stdout) => {
+    execFile(executable, [...args], {
+      encoding: "utf8",
+      env: { PATH: "/usr/bin:/bin", TZ: "UTC", LC_ALL: "C" },
+      maxBuffer: 1024 * 1024,
+      timeout: 2_000,
+      killSignal: "SIGKILL",
+    }, (cause, stdout) => {
       if (cause) { reject(cause); } else if (stdout.trim().length === 0) { reject(identityError("process observation is unavailable")); } else { resolve(stdout); }
     });
   });

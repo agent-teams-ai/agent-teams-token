@@ -1,4 +1,4 @@
-import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { validateExternalTempRoot } from "./validated-environment.ts";
 import { dirname, join } from "node:path";
@@ -12,6 +12,7 @@ import { assertSuppressionShape, parseTypedJson } from "./policy-shape.ts";
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
 import { parseDetectorInventory, parseSlitherInventory, parseSlitherJson } from "./slither-json.ts";
 import { runContainerById } from "./container-runtime.ts";
+import { ensureContainerReadableDirectory, readStableRegularFile, writeContainerReadableFile } from "./container-input.ts";
 import {
   dockerCreateArguments, dockerVulnerableFixtureCreateArguments, FIXTURE_OUTPUT_FILES, PRODUCTION_OUTPUT_FILES,
   IMAGE,
@@ -69,7 +70,8 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
   const inputDirectory = join(scratch, "input");
   const rawOutput = join(scratch, "raw");
   await chmod(scratch, 0o700);
-  await mkdir(inputDirectory, { mode: 0o755 });
+  await mkdir(inputDirectory, { mode: 0o700 });
+  await chmod(inputDirectory, 0o755);
   await mkdir(rawOutput, { mode: 0o700 });
   try {
     const productionClosure = [...manifest.sources, ...manifest.config, manifest.detectorInventory];
@@ -77,10 +79,9 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
       await copyPinned(repositoryRoot, inputDirectory, entry);
     }
     const targetsPath = join(inputDirectory, "tooling/security/slither/targets.txt");
-    await writeFile(
+    await writeContainerReadableFile(
       targetsPath,
       `${manifest.targets.map(({ path }) => path.replace(/^contracts\/evm\//u, "")).join("\n")}\n`,
-      { mode: 0o444, flag: "wx" },
     );
     const before = await closure(repositoryRoot, productionClosure);
     const result = await runContainerById(processPort, dockerPath, dockerCreateArguments({ input: inputDirectory, forge: forgePath, solc: solcPath, ...imageEnvironment }), rawOutput, PRODUCTION_OUTPUT_FILES);
@@ -137,12 +138,14 @@ interface VulnerableFixtureRequest {
 async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): Promise<AnalysisInput["fixtureProof"]> {
   const input = join(request.scratch, "fixture-input");
   const output = join(request.scratch, "fixture-output");
-  await mkdir(join(input, "contracts/evm/src"), { recursive: true, mode: 0o755 });
-  await mkdir(join(input, "tooling/security/slither"), { recursive: true, mode: 0o755 });
+  await mkdir(input, { mode: 0o700 });
+  await chmod(input, 0o755);
+  await ensureContainerReadableDirectory(input, "contracts/evm/src");
+  await ensureContainerReadableDirectory(input, "tooling/security/slither");
   await mkdir(output, { mode: 0o700 });
   const fixtureBytes = await readConfinedStableFile(request.repositoryRoot, request.fixture.source.path, "vulnerable fixture");
   if (sha256(fixtureBytes) !== request.fixture.source.sha256) {throw new SlitherGateError("VULNERABLE_FIXTURE_NOT_BLOCKED", "vulnerable fixture source pin differs");}
-  await writeFile(join(input, "contracts/evm/src/Vulnerable.sol"), fixtureBytes, {mode: 0o444, flag: "wx"});
+  await writeContainerReadableFile(join(input, "contracts/evm/src/Vulnerable.sol"), fixtureBytes);
   await safeCopyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"));
   await safeCopyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"));
   const result = await runContainerById(request.processPort, request.dockerPath, dockerVulnerableFixtureCreateArguments({ input, forge: request.forgePath, solc: request.solcPath, ...request.imageEnvironment }), output, FIXTURE_OUTPUT_FILES);
@@ -374,13 +377,8 @@ const safePathList = (value: string): boolean => value.split(":").every((entry) 
 async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
   assertManifestPath(entry.path); const content = await readConfinedStableFile(root, entry.path, entry.path);
   if (sha256(content) !== entry.sha256) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input differs: ${entry.path}`);}
-  const target = join(destination, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 }); await writeFile(target, content, { mode: 0o444, flag: "wx" });
-}
-async function readStableRegularFile(path: string, label: string): Promise<Buffer> {
-  const before = await lstat(path, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input is not an unlinked regular file: ${label}`);}
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== before.ino || opened.dev !== before.dev || opened.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);} const content = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input changed while reading: ${label}`);} return content; } finally { await handle.close(); }
+  await ensureContainerReadableDirectory(destination, dirname(entry.path));
+  await writeContainerReadableFile(join(destination, entry.path), content);
 }
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
   return await Promise.all(entries.map(async ({ path }) => { assertManifestPath(path); return { path, sha256: sha256(await readConfinedStableFile(root, path, path)) }; }));
@@ -409,8 +407,9 @@ export async function verifyVersions(output: string, sealed?: SealedOutput): Pro
 }
 async function safeCopyFile(source: string, destination: string): Promise<void> {
   const content = await readStableRegularFile(source, "vulnerable fixture input");
-  await writeFile(destination, content, { mode: 0o444, flag: "wx" });
+  await writeContainerReadableFile(destination, content);
 }
+
 async function parseCompiledOutput(output: string, sealed: SealedOutput, artifactName = "AGTMAIToken.json", sourceName = "src/features/token-genesis/AGTMAIToken.sol", contractName = "AGTMAIToken"): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string; evidence: AnalysisInput["compilerEvidence"] }> {
   let artifactRaw: Buffer; let buildRaw: Buffer;
   try {artifactRaw=await requiredRaw(output,sealed,artifactName); buildRaw=await requiredRaw(output,sealed,"build-info.json");} catch {throw new SlitherGateError("BUILD_INFO_INVALID","compiler artifact or build-info is missing or unreadable");}

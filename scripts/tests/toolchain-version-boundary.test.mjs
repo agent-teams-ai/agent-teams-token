@@ -22,7 +22,7 @@ export function registerVersionBoundaryTests() {
     const marker = join(fixture.root, "store-authorized");
     // Stop at the handoff to Node: this regression exercises the shell store
     // admission boundary, while separate tests authenticate both wrappers.
-    fs.writeFileSync(join(bin, "node"), `#!/bin/sh\nprintf authorized > '${marker}'\n`, { mode: 0o755 });
+    fs.writeFileSync(join(bin, "node"), `#!/bin/sh\n/bin/mkdir '${store}/created-by-child'\nprintf authorized > '${marker}'\n`, { mode: 0o755 });
     for (const competitor of ["private-directory", "writable-directory", "symlink", "absent"]) {
       fs.rmSync(store, { recursive: true, force: true });
       fs.rmSync(marker, { force: true });
@@ -46,6 +46,9 @@ export function registerVersionBoundaryTests() {
       const result = spawnSync(wrapperPath, ["--version"], { encoding: "utf8" });
       assert.equal(result.status, competitor === "private-directory" ? 0 : 1, result.stderr);
       assert.equal(fs.existsSync(marker), competitor === "private-directory");
+      if (competitor === "private-directory") {
+        assert.equal(fs.statSync(join(store, "created-by-child")).mode & 0o777, 0o700);
+      }
     }
   });
 

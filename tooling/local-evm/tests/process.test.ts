@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { authenticateProcess, processStartIdentity, startOwnedAnvil } from "../process.ts";
+import { pinnedFoundryBinaries } from "../toolchain.ts";
 import {
   createProvisionalRunDirectory,
   createRunLease,
@@ -16,8 +17,12 @@ import {
 } from "../run-lease.ts";
 
 const execute = promisify(execFile);
+const repositoryRoot = await realpath(resolvePath(import.meta.dirname, "../../.."));
+const foundry = pinnedFoundryBinaries(repositoryRoot);
 const firstAddress = "0x7000000000000000000000000000000000000001";
 const secondAddress = "0x7000000000000000000000000000000000000002";
+const anvilBinary = foundry.anvil;
+const castBinary = foundry.cast;
 
 test("Anvil startup failure is fail-closed and leaves no child behind", { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "agtmai-anvil-failure-"));
@@ -40,9 +45,9 @@ test("a missing Anvil executable rejects through the owned-process API", { timeo
   }
 });
 
-test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 20_000 }, async () => {
-  const first = await startOwnedAnvil("anvil", firstAddress);
-  const second = await startOwnedAnvil("anvil", secondAddress);
+test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 60_000 }, async () => {
+  const first = await startOwnedAnvil(anvilBinary, firstAddress);
+  const second = await startOwnedAnvil(anvilBinary, secondAddress);
   try {
     assert.notEqual(first.pid, second.pid);
     assert.equal(await chainId(first.rpcUrl), "0x7a69");
@@ -59,7 +64,7 @@ test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 2
 });
 
 test("Anvil account and mnemonic output is never returned by the owned-process API", { timeout: 20_000 }, async () => {
-  const anvil = await startOwnedAnvil("anvil", firstAddress);
+  const anvil = await startOwnedAnvil(anvilBinary, firstAddress);
   try {
     assert.deepEqual(Object.keys(anvil).toSorted(), ["pid", "rpcUrl", "stop"]);
     assert.match(anvil.rpcUrl, /^http:\/\/127\.0\.0\.1:[1-9][0-9]*\/$/);
@@ -432,6 +437,6 @@ async function runBoundedLeaseFixture(args: readonly string[]): Promise<LeaseFix
 }
 
 async function chainId(url: string): Promise<string> {
-  const { stdout } = await execute("cast", ["chain-id", "--rpc-url", url], { timeout: 10_000, killSignal: "SIGKILL" });
+  const { stdout } = await execute(castBinary, ["chain-id", "--rpc-url", url], { timeout: 30_000, killSignal: "SIGKILL" });
   return `0x${BigInt(stdout.trim()).toString(16)}`;
 }

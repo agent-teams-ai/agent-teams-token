@@ -180,10 +180,10 @@ test("solidity job selects pinned solc for format/build/unit/fuzz/invariants/gas
   assert.match(commands, /\.\/dev bootstrap install --offline/);
   assert.match(commands, /\.\/dev bootstrap verify --offline/);
   assert.match(commands, /forge fmt --check/);
-  assert.match(commands, /forge build --sizes --use "\$token_solc"/);
-  assert.match(commands, /FOUNDRY_PROFILE=ci forge test --no-match-path 'test\/invariant\/\*\*' --use "\$token_solc"/);
-  assert.match(commands, /FOUNDRY_PROFILE=ci forge test --match-path 'test\/invariant\/\*\*' --use "\$token_solc"/);
-  assert.match(commands, /forge test --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits/);
+  assert.match(commands, /forge build --offline --no-auto-detect --sizes --use "\$token_solc"/);
+  assert.match(commands, /FOUNDRY_PROFILE=ci forge test --offline --no-auto-detect --no-match-path 'test\/invariant\/\*\*' --use "\$token_solc"/);
+  assert.match(commands, /FOUNDRY_PROFILE=ci forge test --offline --no-auto-detect --match-path 'test\/invariant\/\*\*' --use "\$token_solc"/);
+  assert.match(commands, /forge test --offline --no-auto-detect --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits/);
   assert.doesNotMatch(commands, /foundryup|solc-select|latest/);
 });
 

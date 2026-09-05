@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
 import {
-  chmod, link, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm,
+  chmod, link, mkdir, open, readFile, readdir, realpath, rename, rm,
   symlink, writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { ownedTemporaryDirectory } from "./helpers/temporary-directory.ts";
 import { acceptedCustodyCanonicalPath } from "../src/adapters/native-custody.ts";
 import {
   assertNativeNoReplacePlatform,
@@ -461,5 +461,5 @@ async function openDirectory(path: string): Promise<Awaited<ReturnType<typeof op
 }
 
 async function canonicalTemporaryDirectory(): Promise<string> {
-  return realpath(await mkdtemp(join(tmpdir(), "native-no-replace-test-")));
+  return ownedTemporaryDirectory("native-no-replace-test-");
 }

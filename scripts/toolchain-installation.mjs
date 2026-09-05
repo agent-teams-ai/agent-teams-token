@@ -279,11 +279,16 @@ function pnpmWrapper(lock, platform) {
     "    --store-dir|--store-dir=*",
     "    --cache-dir|--cache-dir=*|--store-dir|--store-dir=*|--config.cache-dir=*|--config.store-dir=*|--config.ignore-pnpmfile=*",
   );
-  const wrapper = withRejectedCacheOverride.replace(
+  const withPrivateStoreUmask = withRejectedCacheOverride.replace(
+    "unset token_pnpm_source token_pnpm_directory token_pnpm_argument token_pnpm_store_authority",
+    "umask 077\nunset token_pnpm_source token_pnpm_directory token_pnpm_argument token_pnpm_store_authority",
+  );
+  const wrapper = withPrivateStoreUmask.replace(
     ' --store-dir="$token_pnpm_store" --ignore-pnpmfile',
     ' --config.store-dir="$token_pnpm_store" --config.cache-dir=/dev/null --config.ignore-pnpmfile=true',
   );
-  if (withRejectedCacheOverride === template || wrapper === withRejectedCacheOverride) {
+  if (withRejectedCacheOverride === template || withPrivateStoreUmask === withRejectedCacheOverride
+    || wrapper === withPrivateStoreUmask) {
     throw new Error("TOOLCHAIN_PNPM_WRAPPER_AUTHORITY_TEMPLATE_INVALID");
   }
   return wrapper;

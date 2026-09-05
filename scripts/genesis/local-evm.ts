@@ -3,10 +3,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { asError } from "../../tooling/local-evm/model.ts";
 import { runLocalEvm } from "../../tooling/local-evm/runner.ts";
+import { pinnedFoundryBinaries } from "../../tooling/local-evm/toolchain.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 try {
-  const result = await runLocalEvm({ repositoryRoot: root });
+  const result = await runLocalEvm({
+    repositoryRoot: root,
+    foundryBinaries: pinnedFoundryBinaries(root),
+  });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch (cause) {
   const error = asError(cause);

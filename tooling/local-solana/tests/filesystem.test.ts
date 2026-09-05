@@ -87,7 +87,7 @@ test("private roots reject symlinks and permissive directories", async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-hostile-")); const target = join(boundary, "target"); await mkdir(target, { mode: 0o700 });
   try {
     const linked = join(boundary, "linked"); await symlink(target, linked); await assert.rejects(ensurePrivateRoot(linked), /SOLANA_DIRECTORY_UNSAFE/u);
-    const open = join(boundary, "open"); await mkdir(open, { mode: 0o755 }); await assert.rejects(ensurePrivateRoot(open), /SOLANA_DIRECTORY_UNSAFE/u);
+    const open = join(boundary, "open"); await mkdir(open, { mode: 0o755 }); await chmod(open, 0o755); await assert.rejects(ensurePrivateRoot(open), /SOLANA_DIRECTORY_UNSAFE/u);
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
 

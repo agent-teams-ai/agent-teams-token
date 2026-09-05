@@ -114,6 +114,7 @@ test("the full plan names every genuine common and strict survivor gate", () => 
     "utf8",
   );
   assert.match(runner, /--offline/u);
+  assert.match(runner, /--no-auto-detect/u);
   assert.match(runner, /AGTMAI_SOLANA_REAL_TESTS_REQUIRED: "1"/u);
   assert.match(runner, /GITHUB_SHA: rollbackSha/u);
   assert.match(runner, /\["security:solidity"\]/u);

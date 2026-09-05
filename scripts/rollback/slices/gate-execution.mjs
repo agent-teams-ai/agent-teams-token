@@ -242,11 +242,13 @@ export function runCommonGates(root, recorder, group, tools, environment) {
     timeout: 120_000,
   });
   recorder.run(group, "forge-build", tools.forge, [
-    "build", "--sizes", "--use", tools.solc,
+    "build", "--offline", "--no-auto-detect", "--sizes", "--use", tools.solc,
   ], { cwd: contracts, env: environment, phase: "gate", timeout: 300_000 });
   const foundryEnvironment = { ...environment, FOUNDRY_PROFILE: "ci" };
   recorder.run(group, "forge-unit-fuzz", tools.forge, [
     "test",
+    "--offline",
+    "--no-auto-detect",
     "--no-match-path",
     "test/invariant/**",
     "--use",
@@ -254,6 +256,8 @@ export function runCommonGates(root, recorder, group, tools, environment) {
   ], { cwd: contracts, env: foundryEnvironment, phase: "gate", timeout: 600_000 });
   recorder.run(group, "forge-invariants", tools.forge, [
     "test",
+    "--offline",
+    "--no-auto-detect",
     "--match-path",
     "test/invariant/**",
     "--use",
@@ -261,6 +265,8 @@ export function runCommonGates(root, recorder, group, tools, environment) {
   ], { cwd: contracts, env: foundryEnvironment, phase: "gate", timeout: 600_000 });
   recorder.run(group, "forge-gas-size", tools.forge, [
     "test",
+    "--offline",
+    "--no-auto-detect",
     "--gas-report",
     "--match-test",
     "testWorstCase32AllocationsFitsLocalBlockAndCodeLimits",

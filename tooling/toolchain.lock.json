@@ -100,6 +100,12 @@
           "installDirectory": "foundry-v1.8.0-darwin-arm64",
           "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["forge", "cast", "anvil", "chisel"],
+          "expectedFileSha256": {
+            "forge": "ba5ac7ccd77ad3cacb9eef3d18b8b0ab7c16de2c4050c613a71ce9b7874d75d3",
+            "cast": "0f9621d496f145c60f761fa4232bc3801251210fa12cd9b75095f4e2d4026611",
+            "anvil": "baf2a5cd277f478906217737565fae50ec6c5fa4ffb6f57025b8ec16efe88a9d",
+            "chisel": "7c9300c33b125e3d4a3aea5e5ac77ff357e603cbd53cba8670d479e71bf6e7d4"
+          },
           "versionChecks": [
             {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
             {"name": "cast", "path": "cast", "args": ["--version"], "pattern": "^cast Version: 1\\.8\\.0(?:$|\\n)"},
@@ -116,6 +122,12 @@
           "installDirectory": "foundry-v1.8.0-linux-x64",
           "installationAuthority": "pinned-archive-complete-tree-v1",
           "expectedFiles": ["forge", "cast", "anvil", "chisel"],
+          "expectedFileSha256": {
+            "forge": "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f",
+            "cast": "b59c2db2c53abe0cae7fb8ef2c78c9603e0b9f5fc600e9cb6d5294a6628b9ff8",
+            "anvil": "3144d22206af1df0f109ce7045837e56b5b354e269b4ba8f979786ee90471020",
+            "chisel": "0346e7c7a58f9755560b1816aefe92f7740b6daaad46243301822c02b9e01381"
+          },
           "versionChecks": [
             {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
             {"name": "cast", "path": "cast", "args": ["--version"], "pattern": "^cast Version: 1\\.8\\.0(?:$|\\n)"},

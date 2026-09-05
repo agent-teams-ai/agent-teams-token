@@ -11,11 +11,12 @@ import { encodeAllocationCommitment, readApprovedManifest } from "../manifest.ts
 import { APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type DeploymentReport, type LocalManifest, type VerificationInput } from "../model.ts";
 import type { RpcClient } from "../rpc.ts";
 import { reconstructRuntime, verifyLocalDeployment, writeEvidence } from "../verifier.ts";
-import { pinnedSolc } from "../toolchain.ts";
+import { pinnedFoundryBinaries, pinnedSolc } from "../toolchain.ts";
 import { deriveCreateAddress, encodeCreateAddressPreimage, parseTransactionNonce } from "../create-address.ts";
 
 const execute = promisify(execFile);
 const repositoryRoot = await realpath(resolve(import.meta.dirname, "../../.."));
+const forgeBinary = pinnedFoundryBinaries(repositoryRoot).forge;
 const targetAddress = "0x18b25cf46bcf833a5b6155cc9ece3875c75703db" as const;
 const deployerAddress = "0x9000000000000000000000000000000000000008" as const;
 const transactionHash = `0x${"12".repeat(32)}` as const;
@@ -35,13 +36,14 @@ before(async () => {
   manifest = JSON.parse(await readFile(manifestSource, "utf8")) as LocalManifest;
   const forgeOut = join(suiteRoot, "forge-out");
   const forgeBuildInfo = join(suiteRoot, "forge-build-info");
+  const forgeEnvironment = await privateFoundryEnvironment(suiteRoot);
   const solcCustody = join(suiteRoot, "solc-custody");
   await mkdir(solcCustody, { mode: 0o700 });
   const solc = pinnedSolc(repositoryRoot, await realpath(solcCustody));
   try {
     solc.assertReady();
-    await execute("forge", ["build", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", solc.path], {
-      cwd: join(repositoryRoot, "contracts/evm"), timeout: 120_000, killSignal: "SIGKILL",
+    await execute(forgeBinary, ["build", "--offline", "--no-auto-detect", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", solc.path], {
+      cwd: join(repositoryRoot, "contracts/evm"), env: forgeEnvironment, timeout: 120_000, killSignal: "SIGKILL",
     });
     solc.assertReady();
   } finally {solc.close();}
@@ -60,6 +62,22 @@ before(async () => {
 }, { timeout: 120_000 });
 
 after(async () => { await rm(suiteRoot, { recursive: true, force: true }); }, { timeout: 30_000 });
+
+async function privateFoundryEnvironment(root: string): Promise<NodeJS.ProcessEnv> {
+  const environment = {...process.env};
+  for (const [key, name] of [
+    ["HOME", "forge-home"],
+    ["XDG_CACHE_HOME", "forge-xdg-cache"],
+    ["XDG_CONFIG_HOME", "forge-xdg-config"],
+    ["XDG_DATA_HOME", "forge-xdg-data"],
+    ["XDG_RUNTIME_DIR", "forge-xdg-runtime"],
+  ] as const) {
+    const path = join(root, name);
+    await mkdir(path, {mode: 0o700});
+    environment[key] = path;
+  }
+  return environment;
+}
 
 async function writeApprovedFixture(compiledRoot: string): Promise<string> {
   const source = {

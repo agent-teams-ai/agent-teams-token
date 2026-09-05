@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { claimOwnedOutputDirectory } from "../src/adapters/safe-output.ts";
 import { testOnlyNoReplaceDirectoryRename } from "./helpers/no-replace-directory-rename.ts";
+import { ownedTemporaryDirectory } from "./helpers/temporary-directory.ts";
 
 test("output claim requires a canonical owned 0700 parent", async () => {
   const base = await canonicalTemporaryDirectory();
@@ -529,5 +529,5 @@ function assertQuarantineOnly(names: readonly string[]): void {
   assert.equal(names.length, 1); assert.match(names[0] ?? "", /^\.[0-9a-f]{32}\.cleanup$/u); }
 
 async function canonicalTemporaryDirectory(): Promise<string> {
-  return realpath(await mkdtemp(join(tmpdir(), "deployment-output-")));
+  return ownedTemporaryDirectory("deployment-output-");
 }

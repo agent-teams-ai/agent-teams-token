@@ -157,10 +157,10 @@ jobs:
           source ../../scripts/env.sh
           token_solc="$PWD/../../.tools/solc-v0.8.36-linux-x64/solc"
           forge fmt --check
-          forge build --sizes --use "$token_solc"
-          FOUNDRY_PROFILE=ci forge test --no-match-path 'test/invariant/**' --use "$token_solc"
-          FOUNDRY_PROFILE=ci forge test --match-path 'test/invariant/**' --use "$token_solc"
-          forge test --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits --use "$token_solc" -vvvv
+          forge build --offline --no-auto-detect --sizes --use "$token_solc"
+          FOUNDRY_PROFILE=ci forge test --offline --no-auto-detect --no-match-path 'test/invariant/**' --use "$token_solc"
+          FOUNDRY_PROFILE=ci forge test --offline --no-auto-detect --match-path 'test/invariant/**' --use "$token_solc"
+          forge test --offline --no-auto-detect --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits --use "$token_solc" -vvvv
       - name: Assert gates kept the exact checkout clean
         shell: bash
         run: scripts/assert-clean-head.sh "$GITHUB_SHA"

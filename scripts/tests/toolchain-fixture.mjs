@@ -71,6 +71,7 @@ export function makeFixture() {
   const definitions = fixtureArtifacts({
     nodeArchive,
     foundryArchive,
+    foundryPayload,
     solcArchive,
     agaveArchive,
     agavePayload,
@@ -89,7 +90,7 @@ export function makeFixture() {
   };
 }
 
-function fixtureArtifacts({ nodeArchive, foundryArchive, solcArchive, agaveArchive, agavePayload, agaveVersions }) {
+function fixtureArtifacts({ nodeArchive, foundryArchive, foundryPayload, solcArchive, agaveArchive, agavePayload, agaveVersions }) {
   const definitions = {
     node: artifact({ name: "node-test.tar.gz", path: nodeArchive, archive: "tar.gz", installDirectory: "node-test-linux-x64", expectedFiles: ["bin/node"], versionPath: "bin/node", pattern: "^v24\\.20\\.0$" }),
     foundry: artifact({ name: "foundry-test.tar.gz", path: foundryArchive, archive: "tar.gz", installDirectory: "foundry-test-linux-x64", expectedFiles: ["forge", "cast", "anvil", "chisel"], versionPath: "forge", pattern: "^forge Version: 1\\.8\\.0$" }),
@@ -104,6 +105,10 @@ function fixtureArtifacts({ nodeArchive, foundryArchive, solcArchive, agaveArchi
       pattern: "^solana-cli 4\\.2\\.1 .*client:Agave\\)$",
     }),
   };
+  definitions.foundry.expectedFileSha256 = Object.fromEntries(
+    ["forge", "cast", "anvil", "chisel"]
+      .map((name) => [name, digest(join(foundryPayload, name))]),
+  );
   definitions.agave.versionChecks = Object.keys(agaveVersions).map((name) => ({
     name,
     path: `bin/${name}`,

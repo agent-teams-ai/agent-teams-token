@@ -3,7 +3,7 @@ import test from "node:test";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:net";
-import { assertValidatorRpcListener, captureValidatorIdentity, parseDarwinLsofListener } from "../src/adapters/process-identity.ts";
+import { assertValidatorRpcListener, authenticateValidatorIdentity, captureValidatorIdentity, parseDarwinLsofListener } from "../src/adapters/process-identity.ts";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,7 +156,13 @@ test("RPC listener acceptance is bound to the immutable validator PID and fails 
 test("validator capture canonicalizes a ledger path alias", { skip: process.platform === "linux" || process.platform === "darwin" ? false : "native process identity unsupported" }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "agtmai-validator-alias-")); const ledger = join(directory, "ledger"); const alias = join(directory, "ledger-alias"); await mkdir(ledger); await symlink(ledger, alias); const token = "d".repeat(64);
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "--", "--ledger", alias, "--bind-address", "127.0.0.1", "--rpc-port", "30001"], { env: { ...process.env, AGTMAI_LOCAL_SOLANA_LEASE_TOKEN: token }, stdio: "ignore" });
-  try { await once(child, "spawn"); const childPid = child.pid; assert.ok(childPid); const identity = await captureValidatorIdentity(childPid, process.execPath, ledger, token); assert.equal(identity.ledger, await realpath(ledger)); }
+  try {
+    await once(child, "spawn"); const childPid = child.pid; assert.ok(childPid);
+    const identity = await captureValidatorIdentity(childPid, process.execPath, ledger, token);
+    assert.equal(identity.ledger, await realpath(ledger));
+    assert.equal(await authenticateValidatorIdentity(identity, token), true);
+    assert.equal(await authenticateValidatorIdentity(identity, "f".repeat(64)), false);
+  }
   finally { child.kill("SIGKILL"); await once(child, "close"); await rm(directory, { recursive: true, force: true }); }
 });
 

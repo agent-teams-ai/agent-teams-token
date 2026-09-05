@@ -21,6 +21,29 @@ const PLATFORM_SHA256 = {
   "linux-x64": "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6",
 } as const;
 
+const FOUNDRY_SHA256 = {
+  "darwin-arm64": {
+    anvil: "baf2a5cd277f478906217737565fae50ec6c5fa4ffb6f57025b8ec16efe88a9d",
+    cast: "0f9621d496f145c60f761fa4232bc3801251210fa12cd9b75095f4e2d4026611",
+    chisel: "7c9300c33b125e3d4a3aea5e5ac77ff357e603cbd53cba8670d479e71bf6e7d4",
+    forge: "ba5ac7ccd77ad3cacb9eef3d18b8b0ab7c16de2c4050c613a71ce9b7874d75d3",
+  },
+  "linux-x64": {
+    anvil: "3144d22206af1df0f109ce7045837e56b5b354e269b4ba8f979786ee90471020",
+    cast: "b59c2db2c53abe0cae7fb8ef2c78c9603e0b9f5fc600e9cb6d5294a6628b9ff8",
+    chisel: "0346e7c7a58f9755560b1816aefe92f7740b6daaad46243301822c02b9e01381",
+    forge: "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f",
+  },
+} as const;
+
+export interface FoundryBinaries {
+  readonly anvil: string;
+  readonly cast: string;
+  readonly forge: string;
+}
+
+type FoundryBinaryName = keyof FoundryBinaries;
+
 export interface PinnedSolc {
   readonly path: string;
   assertReady(): void;
@@ -69,6 +92,63 @@ export function pinnedSolc(repositoryRoot: string, custodyDirectory: string): Pi
   } finally {
     closeSync(custodyFd);
   }
+}
+
+export function pinnedFoundryBinaries(
+  repositoryRoot: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): FoundryBinaries {
+  const root = canonicalCallerPath(repositoryRoot, "LOCAL_EVM_REPOSITORY_PATH", "repository root");
+  const platform = supportedPlatform();
+  const lock = parseFoundryLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
+  const install = contained(root, `.tools/${lock.installDirectory}`, "LOCAL_EVM_FOUNDRY_LOCK");
+  const anvil = environment.AGTMAI_ANVIL_BINARY;
+  const forge = environment.AGTMAI_FORGE_BINARY;
+  if (anvil !== join(install, "anvil")) {
+    throw new LocalEvmError("LOCAL_EVM_FOUNDRY_BINARY_PATH_INVALID", "anvil must identify the exact repository-pinned installation");
+  }
+  if (forge !== join(install, "forge")) {
+    throw new LocalEvmError("LOCAL_EVM_FOUNDRY_BINARY_PATH_INVALID", "forge must identify the exact repository-pinned installation");
+  }
+  return authenticateFoundryBinaries(root, {anvil, cast: join(install, "cast"), forge});
+}
+
+export function authenticateFoundryBinaries(
+  repositoryRoot: string,
+  supplied: FoundryBinaries,
+): FoundryBinaries {
+  const root = canonicalCallerPath(repositoryRoot, "LOCAL_EVM_REPOSITORY_PATH", "repository root");
+  const platform = supportedPlatform();
+  const lock = parseFoundryLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
+  const install = contained(root, `.tools/${lock.installDirectory}`, "LOCAL_EVM_FOUNDRY_LOCK");
+  const authenticated = {} as Record<FoundryBinaryName, string>;
+  for (const name of ["anvil", "cast", "forge"] as const) {
+    const expected = join(install, name);
+    if (supplied[name] !== expected) {
+      throw new LocalEvmError("LOCAL_EVM_FOUNDRY_BINARY_PATH_INVALID", `${name} must identify the exact repository-pinned installation`);
+    }
+    assertPinnedFoundryFile(expected, lock.hashes[name], name);
+    authenticated[name] = expected;
+  }
+  return Object.freeze(authenticated) as FoundryBinaries;
+}
+
+export function pinnedFoundryBinary(
+  repositoryRoot: string,
+  binaries: FoundryBinaries,
+  name: FoundryBinaryName,
+): string {
+  const root = canonicalCallerPath(repositoryRoot, "LOCAL_EVM_REPOSITORY_PATH", "repository root");
+  const platform = supportedPlatform();
+  const lock = parseFoundryLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
+  const install = contained(root, `.tools/${lock.installDirectory}`, "LOCAL_EVM_FOUNDRY_LOCK");
+  for (const tool of ["anvil", "cast", "forge"] as const) {
+    if (binaries[tool] !== join(install, tool)) {
+      throw new LocalEvmError("LOCAL_EVM_FOUNDRY_BINARY_PATH_INVALID", `${tool} must identify the exact repository-pinned installation`);
+    }
+  }
+  assertPinnedFoundryFile(binaries[name], lock.hashes[name], name);
+  return binaries[name];
 }
 
 function heldPinnedSolc(path: string, fd: number, identity: Stats, expectedBytes: Buffer, expectedSha256: string): PinnedSolc {
@@ -181,6 +261,50 @@ function parseLock(bytes: Buffer, platform: keyof typeof PLATFORM_SHA256): { rea
     throw new LocalEvmError("LOCAL_EVM_SOLC_LOCK", "solc platform lock must match the exact 0.8.36 artifact and SHA-256");
   }
   return { installDirectory, sha256 };
+}
+
+function parseFoundryLock(bytes: Buffer, platform: keyof typeof PLATFORM_SHA256): {
+  readonly hashes: Readonly<Record<keyof (typeof FOUNDRY_SHA256)[typeof platform], string>>;
+  readonly installDirectory: string;
+} {
+  const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+  const lock = record(parsed, "LOCAL_EVM_TOOLCHAIN_LOCK");
+  const tools = record(lock.tools, "LOCAL_EVM_TOOLCHAIN_LOCK");
+  const foundry = record(tools.foundry, "LOCAL_EVM_FOUNDRY_LOCK");
+  const platforms = record(foundry.platforms, "LOCAL_EVM_FOUNDRY_LOCK");
+  const artifact = record(platforms[platform], "LOCAL_EVM_FOUNDRY_LOCK");
+  const installDirectory = string(artifact.installDirectory, "LOCAL_EVM_FOUNDRY_LOCK");
+  const hashes = record(artifact.expectedFileSha256, "LOCAL_EVM_FOUNDRY_LOCK");
+  const expectedHashes = FOUNDRY_SHA256[platform];
+  const hashesMatch = Object.entries(expectedHashes)
+    .every(([name, digest]) => hashes[name] === digest)
+    && Object.keys(hashes).length === Object.keys(expectedHashes).length;
+  if (foundry.version !== "1.8.0" || foundry.commit !== "61ae26af36320d4fa1020f7db53785885e29eeb5"
+    || installDirectory !== `foundry-v1.8.0-${platform}`
+    || JSON.stringify(artifact.expectedFiles) !== JSON.stringify(["forge", "cast", "anvil", "chisel"])
+    || !hashesMatch) {
+    throw new LocalEvmError("LOCAL_EVM_FOUNDRY_LOCK", "Foundry platform lock must match the exact 1.8.0 binary inventory");
+  }
+  return {hashes: expectedHashes, installDirectory};
+}
+
+function assertPinnedFoundryFile(path: string, expectedSha256: string, name: FoundryBinaryName): void {
+  const bytes = stableRead(path);
+  const metadata = lstatSync(path);
+  if ((metadata.mode & 0o111) === 0) {
+    throw new LocalEvmError("LOCAL_EVM_FOUNDRY_CHECKSUM_MISMATCH", `${name} differs from the repository-pinned archive inventory`);
+  }
+  assertPinnedFoundrySha256(bytes, expectedSha256, name);
+}
+
+export function assertPinnedFoundrySha256(
+  bytes: Uint8Array,
+  expectedSha256: string,
+  name: FoundryBinaryName,
+): void {
+  if (createHash("sha256").update(bytes).digest("hex") !== expectedSha256) {
+    throw new LocalEvmError("LOCAL_EVM_FOUNDRY_CHECKSUM_MISMATCH", `${name} differs from the repository-pinned archive inventory`);
+  }
 }
 
 function stableRead(path: string): Buffer {
