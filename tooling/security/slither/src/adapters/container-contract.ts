@@ -8,9 +8,21 @@ export const COMMON_OUTPUT_FILES = ["crytic-compile.version", "detectors.txt", "
 export const PRODUCTION_OUTPUT_FILES = ["AGTMAIToken.json", "build-info.json", ...COMMON_OUTPUT_FILES, "slither-inventory.exit", "slither-inventory.json"] as const;
 export const FIXTURE_OUTPUT_FILES = ["Vulnerable.json", "build-info.json", ...COMMON_OUTPUT_FILES] as const;
 
+// Both rendezvous exist before authorization, even if PID 1 is still starting.
+export const AUTHORIZE_ANALYSIS = "umask 077; mkfifo -m 0600 /work/gate-completion /work/gate-hold; /usr/bin/touch /work/host-authorized";
+const retainOutputOnExit = [
+  "gate_status=$?", "trap - EXIT", "set -e",
+  "test -p /work/gate-completion", "test -p /work/gate-hold",
+  "printf \"SLITHER_COMPLETED_V1 %s\\n\" \"$gate_status\" > /work/gate-completion",
+  // A shell builtin retains tmpfs until exact-ID removal. Completion is an
+  // analysis exit record, never policy acceptance or a claim of immutability.
+  "IFS= read -r gate_reap < /work/gate-hold", "exit 125",
+].join("; ");
+
 const securityPrelude = [
   "set -euo pipefail", "umask 077", "mkdir -m 0700 /work/gate-output",
   "printf '%s\\n' container-execution > /work/gate-output/failure.stage", "while test ! -e /work/host-authorized; do sleep 0.05; done",
+  `trap '${retainOutputOnExit}' EXIT`,
   "test \"$(id -u):$(id -g)\" = 1000:1000", "test ! -e /var/run/docker.sock", "test ! -w /input", "test ! -w /",
   "test \"$(readlink /proc/self/ns/pid)\" = \"$(readlink /proc/1/ns/pid)\"",
   "grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status", "test \"$(ulimit -n)\" = 256",
