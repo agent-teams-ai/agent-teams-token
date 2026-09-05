@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import type { BigIntStats } from "node:fs";
-import { chmod, constants, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, type BigIntStats } from "node:fs";
+import { constants, link, lstat, open, readdir, realpath, rmdir, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { AnalysisInput, GateErrorCode, GateManifest, PolicyDecision } from "../domain/model.ts";
 import { SlitherGateError } from "../domain/model.ts";
+import { assertNotCancelled } from "../application/ports.ts";
 import { classifyGateFailure } from "../application/failure.ts";
 import { sha256 } from "./fingerprint.ts";
 import { IMAGE, IMAGE_REVISION } from "./container-contract.ts";
@@ -56,7 +57,7 @@ type EnvironmentFailureRequest = Omit<FailureEvidenceRequest, "category" | "exit
 
 export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise<void> {
   const { output, candidateSha, manifest, input, decision, hashes } = request;
-  await publish(output, async (staging) => {
+  await publish(output, async (write) => {
     const suppressed = new Set(decision.suppressed.map(({ fingerprint }) => fingerprint));
     const blocking = new Set(decision.blocking.map(({ fingerprint }) => fingerprint));
     const findings = input.findings.map((finding) => ({
@@ -81,22 +82,22 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
     const serialized = stable(evidence);
     await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, "evidence-report.schema.v1.json"));
     assertAnalysisEvidenceSemantics(evidence);
-    await writeFile(join(staging, "evidence.json"), serialized, { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "summary.md"), renderAnalysisSummary(evidence), { mode: 0o600, flag: "wx" });
+    await write("evidence.json", serialized);
+    await write("summary.md", renderAnalysisSummary(evidence));
     const rawFindings = input.findings.map((finding) => ({
       detectorId: finding.detectorId, impact: finding.impact, confidence: finding.confidence,
       identity: finding.identity, path: finding.location.path, start: finding.location.start,
       length: finding.location.length, sourceHash: finding.location.sourceHash,
       snippetHash: finding.location.snippetHash,
     }));
-    await writeFile(join(staging, "build-info.json"), input.compilerEvidence.rawBuildInfo, { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "artifact.json"), input.compilerEvidence.rawArtifact, { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "fixture-build-info.json"), input.fixtureProof.rawBuildInfo, { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "fixture-artifact.json"), input.fixtureProof.rawArtifact, { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "slither.json"), stable({ schemaVersion: 1, success: input.success, errors: input.analysisErrors, findings: rawFindings }), { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "slither-inventory.json"), stable({ schemaVersion: 1, success: input.success, contracts: input.analyzedContracts, sources: input.analyzedSources, errors: input.analysisErrors }), { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "detector-inventory.json"), stable({ schemaVersion: 1, detectors: input.detectorInventory }), { mode: 0o600, flag: "wx" });
-    await writeFile(join(staging, "slither-status.json"), stable({ schemaVersion: 1, analysisExit: input.findings.length === 0 ? 0 : 255, inventoryExit: 0 }), { mode: 0o600, flag: "wx" });
+    await write("build-info.json", input.compilerEvidence.rawBuildInfo);
+    await write("artifact.json", input.compilerEvidence.rawArtifact);
+    await write("fixture-build-info.json", input.fixtureProof.rawBuildInfo);
+    await write("fixture-artifact.json", input.fixtureProof.rawArtifact);
+    await write("slither.json", stable({ schemaVersion: 1, success: input.success, errors: input.analysisErrors, findings: rawFindings }));
+    await write("slither-inventory.json", stable({ schemaVersion: 1, success: input.success, contracts: input.analyzedContracts, sources: input.analyzedSources, errors: input.analysisErrors }));
+    await write("detector-inventory.json", stable({ schemaVersion: 1, detectors: input.detectorInventory }));
+    await write("slither-status.json", stable({ schemaVersion: 1, analysisExit: input.findings.length === 0 ? 0 : 255, inventoryExit: 0 }));
     await request.assertReadyPrecondition();
   }, async (staging) => await validateFinalizedEvidenceBundle({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory, canonicalDirectory: request.canonicalDirectory }), READY_EVIDENCE_FILES, request.publication);
 }
@@ -121,8 +122,8 @@ export async function writeFailureEvidence(request: FailureEvidenceRequest): Pro
   const name = `${category}.json`;
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
   await assertSerializedAgainstSchema(serialized, join(request.schemaDirectory, `${category}.schema.v1.json`));
-  await publish(output, async (staging) => {
-    await writeFile(join(staging, name), serialized, { mode: 0o600, flag: "wx" });
+  await publish(output, async (write) => {
+    await write(name, serialized);
     await request.assertReadyPrecondition();
   }, async (staging) => await validateFinalizedEvidenceBundle({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory }), ["READY", name], request.publication);
 }
@@ -135,29 +136,161 @@ function executionIdentity(): Record<string, string> {
   return { platform: "linux/amd64", event: process.env.GITHUB_EVENT_NAME ?? "local", repository: process.env.GITHUB_REPOSITORY ?? "local", workflow: process.env.GITHUB_WORKFLOW ?? "local", job: process.env.GITHUB_JOB ?? "local", runId: process.env.GITHUB_RUN_ID ?? "local", runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "1" };
 }
 
-export interface PublicationCapability { publishNoReplace(staging: string, output: string, expectedEntries: readonly string[]): Promise<void> }
+export interface PublicationCapability {
+  readonly signal?: AbortSignal;
+  publishNoReplace(staging: string, output: string, expectedEntries: readonly string[]): Promise<void>;
+  /** Independent of work cancellation; retains authority through caller finalization. */
+  revoke?(): Promise<void>;
+  finalize?(): Promise<void>;
+}
 
-/** Production publication reserves the destination atomically and copies READY last. */
+interface OwnedReady {
+  readonly path: string;
+  readonly identity: BigIntStats;
+  readonly directories: readonly AncestorIdentity[];
+}
+
+/** READY is provisional through staging cleanup and the invocation's final check. */
 export class ExclusiveDirectoryPublication implements PublicationCapability {
+  readonly signal?: AbortSignal;
+  private ready?: OwnedReady;
+  private copied: ReadonlyMap<string, BigIntStats> = new Map();
+
+  constructor(signal?: AbortSignal) { this.signal = signal; }
+
   async publishNoReplace(staging: string, output: string, expectedEntries: readonly string[]): Promise<void> {
-    const parent = dirname(output); const ancestors = await ancestorIdentities(parent); const before = await directoryIdentity(parent, "publication parent");
+    const failures: unknown[] = [];
+    try { await this.copyAndMark(staging, output, expectedEntries); }
+    catch (error) { failures.push(error); }
+    if (failures.length !== 0 || this.signal?.aborted) {
+      try { await this.revoke(); } catch (error) { failures.push(error); }
+      throwPublicationFailures(failures, this.signal);
+    }
+  }
+
+  private async copyAndMark(staging: string, output: string, expectedEntries: readonly string[]): Promise<void> {
+    assertNotCancelled(this.signal);
+    const ancestors = await ancestorIdentities(dirname(output));
     const staged = await directoryIdentity(staging, "publication staging");
     if ((staged.mode & 0o777n) !== 0o700n || staged.uid !== BigInt(process.getuid?.() ?? -1)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging ownership is unsafe");}
     const entries = (await readdir(staging)).toSorted(); const expected = [...expectedEntries].toSorted();
     if (new Set(expected).size !== expected.length || JSON.stringify(entries) !== JSON.stringify(expected) || !entries.includes("READY")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging contains missing or foreign entries");}
-    await mkdir(output, {mode: 0o700});
-    const published = await directoryIdentity(output, "publication output");
-    await assertSameDirectory(parent, before, "publication parent");
-    for (const entryName of entries.filter((entry) => entry !== "READY")) {await copyStableExclusive(join(staging, entryName), join(output, entryName));}
-    await assertSameDirectory(staging, staged, "publication staging");
-    const publishedEntries=(await readdir(output)).toSorted(); const expectedPublished=entries.filter((entry)=>entry!=="READY").toSorted();
-    if(JSON.stringify(publishedEntries)!==JSON.stringify(expectedPublished)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication output contains foreign entries");}
-    for(const entryName of publishedEntries){const info=await lstat(join(output,entryName),{bigint:true});if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1n||info.uid!==published.uid||(info.mode&0o777n)!==0o600n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication entry identity is unsafe");}}
-    await assertSameDirectory(parent, before, "publication parent");
+    assertNotCancelled(this.signal);
     await assertAncestorIdentities(ancestors);
-    await writeFile(join(output, "READY"), "", {mode: 0o600, flag: "wx"});
-    await assertSameDirectory(output, published, "publication output");
+    assertNotCancelled(this.signal);
+    const published = reserveOutput(output);
+    const directories = [{path: output, identity: published}, ...ancestors];
+    assertNotCancelled(this.signal);
+    const copied = new Map<string, BigIntStats>();
+    for (const entryName of entries.filter((entry) => entry !== "READY")) {
+      await assertAncestorIdentities(directories);
+      copied.set(entryName, await copyStableExclusive(join(staging, entryName), join(output, entryName), this.signal));
+    }
+    await assertSameDirectory(staging, staged, "publication staging");
+    await assertPublishedEntries(output, copied, this.signal);
+    await assertAncestorIdentities(directories);
+    assertNotCancelled(this.signal);
+    this.copied = copied;
+    await this.markReady(staging, output, directories);
+    await assertOwnedReady(this.ready!);
+    await assertAncestorIdentities(directories);
+    assertNotCancelled(this.signal);
   }
+
+  private async markReady(staging: string, output: string, directories: readonly AncestorIdentity[]): Promise<void> {
+    const source = join(staging, "READY"); const path = join(output, "READY");
+    const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const failures: unknown[] = [];
+    let identity: BigIntStats | undefined;
+    let linked = false;
+    try {
+      identity = await handle.stat({bigint: true});
+      assertSafePublicationEntry(identity, BigInt(process.getuid?.() ?? -1));
+      if (identity.size !== 0n || !sameSourceIdentity(identity, await lstat(source, {bigint: true}))) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging READY changed");}
+      await assertAncestorIdentities(directories);
+      assertNotCancelled(this.signal);
+      // Acquire identity BEFORE making READY visible. link is exclusive; the
+      // held descriptor still proves custody if any subsequent stat/close fails.
+      await link(source, path);
+      linked = true;
+      assertNotCancelled(this.signal);
+      await assertHeldReady({path: source, identity, directories: []});
+      await unlink(source);
+      this.ready = {path, identity: await handle.stat({bigint: true}), directories};
+      assertSafePublicationEntry(this.ready.identity, identity.uid);
+      await assertOwnedReady(this.ready);
+    } catch (error) { failures.push(error); }
+    if (linked && (failures.length !== 0 || this.signal?.aborted)) {
+      try { await revokeHeldReady({path, identity: identity!, directories}); } catch (error) { failures.push(error); }
+      try { await revokeHeldReady({path: source, identity: identity!, directories: []}); } catch (error) { failures.push(error); }
+      this.ready = undefined;
+    }
+    try { await handle.close(); } catch (error) { failures.push(error); }
+    throwPublicationFailures(failures, this.signal);
+  }
+
+  /** Validate again after staging/caller cleanup, without surrendering revocation. */
+  async finalize(): Promise<void> {
+    assertNotCancelled(this.signal);
+    const ready = this.ready;
+    if (ready === undefined) { return; }
+    await assertAncestorIdentities(ready.directories);
+    await assertPublishedEntries(dirname(ready.path), new Map([...this.copied, ["READY", ready.identity]]), this.signal);
+    await assertAncestorIdentities(ready.directories);
+    assertNotCancelled(this.signal);
+  }
+
+  async revoke(): Promise<void> {
+    const ready = this.ready;
+    this.ready = undefined;
+    if (ready === undefined) { return; }
+    await assertAncestorIdentities(ready.directories);
+    if (!await assertOwnedReady(ready, true)) { return; }
+    // Portable pathname unlink has an accepted same-UID final-syscall race.
+    // Never remove a directory or a marker whose identity was substituted.
+    await assertAncestorIdentities(ready.directories);
+    await unlink(ready.path);
+  }
+}
+
+/** The open source descriptor prevents inode reuse while link/unlink settles. */
+async function assertHeldReady(ready: OwnedReady): Promise<void> {
+  const current = await lstat(ready.path, {bigint: true});
+  if (!sameFileIdentity(ready.identity, current)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "READY identity changed; revocation is unconfirmed");}
+}
+async function revokeHeldReady(ready: OwnedReady): Promise<void> {
+  await assertAncestorIdentities(ready.directories);
+  try { await assertHeldReady(ready); } catch (error) { if (isMissing(error)) { return; } throw error; }
+  await unlink(ready.path);
+}
+
+async function assertOwnedReady(ready: OwnedReady, allowMissing = false): Promise<boolean> {
+  const current = await lstat(ready.path, {bigint: true}).catch((error: unknown) => {
+    if (allowMissing && isMissing(error)) { return undefined; }
+    throw error;
+  });
+  if (current === undefined) { return false; }
+  if (!sameSourceIdentity(ready.identity, current)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "READY identity changed; revocation is unconfirmed");}
+  return true;
+}
+
+async function assertPublishedEntries(output: string, copied: ReadonlyMap<string, BigIntStats>, signal?: AbortSignal): Promise<void> {
+  const actual = (await readdir(output)).toSorted();
+  if (JSON.stringify(actual) !== JSON.stringify([...copied.keys()].toSorted())) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "publication output contains foreign entries");}
+  for (const name of actual) {
+    assertNotCancelled(signal);
+    const current = await lstat(join(output, name), {bigint: true});
+    if (!sameSourceIdentity(copied.get(name)!, current)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "publication entry changed");}
+  }
+  assertNotCancelled(signal);
+}
+
+function isMissing(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }
+
+function throwPublicationFailures(failures: readonly unknown[], signal?: AbortSignal): void {
+  const errors = signal?.aborted ? [signal.reason, ...failures.filter((error) => error !== signal.reason)] : [...failures];
+  if (errors.length === 1) { throw errors[0]; }
+  if (errors.length > 1) { throw new AggregateError(errors, `${errors[0] instanceof Error ? errors[0].message : "publication failed"}; publication finalization failed`); }
 }
 
 interface AncestorIdentity {readonly path:string;readonly identity:DirectoryIdentity}
@@ -165,34 +298,50 @@ async function ancestorIdentities(path:string):Promise<AncestorIdentity[]>{const
 async function assertAncestorIdentities(values:readonly AncestorIdentity[]):Promise<void>{for(const value of values) {await assertSameDirectory(value.path,value.identity,"publication ancestor");}}
 interface DirectoryIdentity {readonly dev: bigint; readonly ino: bigint; readonly uid: bigint; readonly mode: bigint}
 async function directoryIdentity(path: string, label: string): Promise<DirectoryIdentity> {
-  const info = await lstat(path, {bigint: true});
+  return checkedDirectoryIdentity(await lstat(path, {bigint: true}), label);
+}
+function checkedDirectoryIdentity(info: BigIntStats, label: string): DirectoryIdentity {
   if (!info.isDirectory() || info.isSymbolicLink()) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", `${label} identity is invalid`);}
   return {dev: info.dev, ino: info.ino, uid: info.uid, mode: info.mode};
 }
+function reserveOutput(output: string): DirectoryIdentity {
+  // No asynchronous handoff may adopt a substituted directory after mkdir.
+  // These adjacent syscalls retain the accepted same-UID final-syscall race.
+  mkdirSync(output, {mode: 0o700});
+  return checkedDirectoryIdentity(lstatSync(output, {bigint: true}), "publication output");
+}
 async function assertSameDirectory(path: string, expected: DirectoryIdentity, label: string): Promise<void> {const value=await directoryIdentity(path,label); if(value.dev!==expected.dev || value.ino!==expected.ino || value.uid!==expected.uid || value.mode!==expected.mode) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", `${label} changed`);}}
-export async function copyStableExclusive(source: string, destination: string): Promise<void> {
-  const before=await lstat(source,{bigint:true}); if(!before.isFile() || before.isSymbolicLink() || before.nlink!==1n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry is unsafe");}
-  const handle=await open(source,constants.O_RDONLY|constants.O_NOFOLLOW);
+export async function copyStableExclusive(source: string, destination: string, signal?: AbortSignal): Promise<BigIntStats> {
+  assertNotCancelled(signal);
+  const before = await lstat(source, {bigint: true});
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging entry is unsafe");}
+  const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let destinationHandle: Awaited<ReturnType<typeof open>> | undefined;
+  let retainedPath: BigIntStats | undefined;
+  const failures: unknown[] = [];
   try {
-    const opened=await handle.stat({bigint:true});
-    if(!sameSourceIdentity(before,opened)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");}
-    const destinationHandle=await open(destination,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
-    try {
-      await destinationHandle.chmod(0o600);
-      const created=await destinationHandle.stat({bigint:true});
-      assertSafePublicationEntry(created, BigInt(process.getuid?.()??-1));
-      const copiedDigest=await transferAndDigest(handle,destinationHandle);
-      await destinationHandle.sync();
-      const afterTransfer=await handle.stat({bigint:true});
-      if(!sameSourceIdentity(opened,afterTransfer)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");}
-      const stableDigest=await digestDescriptor(handle);
-      const afterDigest=await handle.stat({bigint:true});
-      if(!sameSourceIdentity(opened,afterDigest)||copiedDigest!==stableDigest) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","staging entry changed");}
-      const retained=await destinationHandle.stat({bigint:true});
-      const retainedPath=await lstat(destination,{bigint:true});
-      assertRetainedPublicationEntry(created, retained, retainedPath, opened.size);
-    } finally {await destinationHandle.close();}
-  } finally {await handle.close();}
+    const opened = await handle.stat({bigint: true});
+    if (!sameSourceIdentity(before, opened)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging entry changed");}
+    assertNotCancelled(signal);
+    destinationHandle = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    await destinationHandle.chmod(0o600);
+    const created = await destinationHandle.stat({bigint: true});
+    assertSafePublicationEntry(created, BigInt(process.getuid?.() ?? -1));
+    const copiedDigest = await transferAndDigest(handle, destinationHandle, signal);
+    await destinationHandle.sync();
+    const afterTransfer = await handle.stat({bigint: true});
+    if (!sameSourceIdentity(opened, afterTransfer)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging entry changed");}
+    const stableDigest = await digestDescriptor(handle, signal);
+    const afterDigest = await handle.stat({bigint: true});
+    if (!sameSourceIdentity(opened, afterDigest) || copiedDigest !== stableDigest) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging entry changed");}
+    const retained = await destinationHandle.stat({bigint: true});
+    retainedPath = await lstat(destination, {bigint: true});
+    assertRetainedPublicationEntry(created, retained, retainedPath, opened.size);
+  } catch (error) { failures.push(error); }
+  try { await destinationHandle?.close(); } catch (error) { failures.push(error); }
+  try { await handle.close(); } catch (error) { failures.push(error); }
+  throwPublicationFailures(failures, signal);
+  return retainedPath!;
 }
 
 function assertSafePublicationEntry(entry: BigIntStats, expectedUid: bigint): void {
@@ -206,19 +355,105 @@ function assertRetainedPublicationEntry(created: BigIntStats, retained: BigIntSt
 
 function sameFileIdentity(left:{dev:bigint;ino:bigint},right:{dev:bigint;ino:bigint}):boolean{return left.dev===right.dev&&left.ino===right.ino;}
 function sameSourceIdentity(left:{dev:bigint;ino:bigint;mode:bigint;nlink:bigint;uid:bigint;gid:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint},right:{dev:bigint;ino:bigint;mode:bigint;nlink:bigint;uid:bigint;gid:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint}):boolean{return sameFileIdentity(left,right)&&left.mode===right.mode&&left.nlink===right.nlink&&left.uid===right.uid&&left.gid===right.gid&&left.size===right.size&&left.mtimeNs===right.mtimeNs&&left.ctimeNs===right.ctimeNs;}
-async function transferAndDigest(source:Awaited<ReturnType<typeof open>>,destination:Awaited<ReturnType<typeof open>>):Promise<string>{
-  const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;
-  while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) {break;}hash.update(buffer.subarray(0,bytesRead));let written=0;while(written<bytesRead){const result=await destination.write(buffer,written,bytesRead-written);if(result.bytesWritten===0) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","publication write made no progress");}written+=result.bytesWritten;}position+=bytesRead;}
+async function transferAndDigest(source: Awaited<ReturnType<typeof open>>, destination: Awaited<ReturnType<typeof open>>, signal?: AbortSignal): Promise<string> {
+  const hash = createHash("sha256"); const buffer = Buffer.allocUnsafe(64 * 1024); let position = 0;
+  while (true) {
+    assertNotCancelled(signal);
+    const {bytesRead} = await source.read(buffer, 0, buffer.length, position);
+    if (bytesRead === 0) { break; }
+    hash.update(buffer.subarray(0, bytesRead));
+    let written = 0;
+    while (written < bytesRead) {
+      assertNotCancelled(signal);
+      const result = await destination.write(buffer, written, bytesRead - written);
+      if (result.bytesWritten === 0) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "publication write made no progress");}
+      written += result.bytesWritten;
+    }
+    position += bytesRead;
+  }
   return hash.digest("hex");
 }
-async function digestDescriptor(source:Awaited<ReturnType<typeof open>>):Promise<string>{const hash=createHash("sha256");const buffer=Buffer.allocUnsafe(64*1024);let position=0;while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,position);if(bytesRead===0) {break;}hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;}return hash.digest("hex");}
-async function publish(output: string, build: (staging: string) => Promise<void>, finalize: (staging: string) => Promise<void>, expectedEntries: readonly string[], publication: PublicationCapability): Promise<void> {
+async function digestDescriptor(source: Awaited<ReturnType<typeof open>>, signal?: AbortSignal): Promise<string> {
+  const hash = createHash("sha256"); const buffer = Buffer.allocUnsafe(64 * 1024); let position = 0;
+  while (true) {
+    assertNotCancelled(signal);
+    const {bytesRead} = await source.read(buffer, 0, buffer.length, position);
+    if (bytesRead === 0) { break; }
+    hash.update(buffer.subarray(0, bytesRead)); position += bytesRead;
+  }
+  return hash.digest("hex");
+}
+async function writeStaged(staging: string, name: string, value: string, files: Map<string, BigIntStats>): Promise<void> {
+  const handle = await open(join(staging, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  const failures: unknown[] = [];
+  try {
+    files.set(name, await handle.stat({bigint: true}));
+    await handle.writeFile(value);
+  } catch (error) { failures.push(error); }
+  try { files.set(name, await handle.stat({bigint: true})); } catch (error) { failures.push(error); }
+  try { await handle.close(); } catch (error) { failures.push(error); }
+  throwPublicationFailures(failures);
+}
+
+async function cleanupStaging(staging: string, identity: DirectoryIdentity, files: ReadonlyMap<string, BigIntStats>): Promise<void> {
+  await assertSameDirectory(staging, identity, "publication staging");
+  const failures: unknown[] = [];
+  for (const name of await readdir(staging)) {
+    try {
+      const owned = files.get(name);
+      const current = await lstat(join(staging, name), {bigint: true});
+      if (!owned || !sameSourceIdentity(owned, current)) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging entry changed; cleanup is unconfirmed");}
+      await assertSameDirectory(staging, identity, "publication staging");
+      await unlink(join(staging, name));
+    } catch (error) { failures.push(error); }
+  }
+  throwPublicationFailures(failures);
+  await assertSameDirectory(staging, identity, "publication staging");
+  // Nonrecursive removal cannot consume a foreign entry arriving after checks.
+  await rmdir(staging);
+}
+
+async function publicationOutput(output: string, publication: PublicationCapability): Promise<string> {
   if (!publication || !output.startsWith("/") || output.includes("\0") || output.endsWith("/") || output.split("/").includes("..")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "fresh absolute output and publication capability are required");}
   const leaf=basename(output);
   if(leaf.length===0||leaf==="."||leaf===".."||leaf.includes("/")||leaf.includes("\\")) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output basename is unsafe");}
   const parent=await realpath(dirname(output)).catch(() => {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","output parent is unavailable");});
   const canonicalOutput=join(parent,leaf);
   if((await lstat(canonicalOutput).catch(()=>null))!==null) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE","fresh absolute output and publication capability are required");}
-  const staging=await mkdtemp(join(parent, `.${leaf}.staging-`)); await chmod(staging,0o700);
-  try {await build(staging); await writeFile(join(staging,"READY"),"",{mode:0o600,flag:"wx"}); await finalize(staging); await publication.publishNoReplace(staging,canonicalOutput,expectedEntries);} finally {const info=await lstat(staging).catch(()=>null); if(info?.isDirectory()&&!info.isSymbolicLink()) {await rm(staging,{recursive:true,force:true});}}
+  return canonicalOutput;
+}
+
+async function publish(output: string, build: (write: (name: string, value: string) => Promise<void>) => Promise<void>, finalize: (staging: string) => Promise<void>, expectedEntries: readonly string[], publication: PublicationCapability): Promise<void> {
+  const canonicalOutput = await publicationOutput(output, publication);
+  const parent = dirname(canonicalOutput); const leaf = basename(canonicalOutput);
+  assertNotCancelled(publication.signal);
+  const staging = mkdtempSync(join(parent, `.${leaf}.staging-`));
+  const failures: unknown[] = [];
+  let staged: DirectoryIdentity | undefined;
+  const files = new Map<string, BigIntStats>();
+  try {
+    chmodSync(staging, 0o700);
+    staged = checkedDirectoryIdentity(lstatSync(staging, {bigint: true}), "publication staging");
+    assertNotCancelled(publication.signal);
+    const write = async (name: string, value: string): Promise<void> => {
+      assertNotCancelled(publication.signal);
+      await assertSameDirectory(staging, staged!, "publication staging");
+      await writeStaged(staging, name, value, files);
+    };
+    await build(write);
+    await write("READY", "");
+    await finalize(staging);
+    assertNotCancelled(publication.signal);
+    await publication.publishNoReplace(staging, canonicalOutput, expectedEntries);
+  } catch (error) { failures.push(error); }
+  try {
+    if (staged !== undefined) {
+      await cleanupStaging(staging, staged, files);
+    }
+  } catch (error) { failures.push(error); }
+  try { if (failures.length === 0) { await publication.finalize?.(); } } catch (error) { failures.push(error); }
+  if (failures.length !== 0 || publication.signal?.aborted) {
+    try { await publication.revoke?.(); } catch (error) { failures.push(error); }
+  }
+  throwPublicationFailures(failures, publication.signal);
 }

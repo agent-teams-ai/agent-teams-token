@@ -7,7 +7,7 @@ import { validateEnvironment } from "../adapters/validated-environment.ts";
 import { executeGate } from "../application/gate.ts";
 import { classifyGateFailure } from "../application/failure.ts";
 import { SlitherGateError } from "../domain/model.ts";
-import { assertNotCancelled, SlitherCancellation } from "../application/cancellation.ts";
+import { assertNotCancelled, SlitherCancellation } from "../application/ports.ts";
 
 /** Scoped to an invocation; importing the composition installs no listeners. */
 export async function main(): Promise<void> {
@@ -19,6 +19,9 @@ export async function main(): Promise<void> {
   const onTerm = (): void => { interrupt("SIGTERM"); };
   process.on("SIGINT", onInt);
   process.on("SIGTERM", onTerm);
+  const publication = new ExclusiveDirectoryPublication(cancellation.signal);
+  const failures: unknown[] = [];
+  const priorFailures: unknown[] = [];
   let validated: Awaited<ReturnType<typeof validateEnvironment>> | undefined;
   try {
     validated = await validateEnvironment(process.env.SLITHER_REPOSITORY_ROOT ?? process.cwd(), [process.env.GITHUB_SHA, process.env.SLITHER_CANDIDATE_SHA], process.env.SLITHER_EVIDENCE_DIRECTORY);
@@ -38,29 +41,47 @@ export async function main(): Promise<void> {
         return await runGate({repositoryRoot: root, processPort, forgePath: process.env.SLITHER_FORGE_PATH ?? "", solcPath: process.env.SLITHER_SOLC_PATH ?? "", dockerPath});
       }});
       assertNotCancelled(cancellation.signal);
-      await writeReadyEvidence({output, candidateSha: sha, manifest: result.manifest, input: result.input, decision: result.decision, hashes: {config: result.configHash, policy: result.policyHash}, triageHash: result.triageHash, schemaDirectory: `${root}/tooling/security/slither`, assertReadyPrecondition, publication: new ExclusiveDirectoryPublication()});
+      await writeReadyEvidence({output, candidateSha: sha, manifest: result.manifest, input: result.input, decision: result.decision, hashes: {config: result.configHash, policy: result.policyHash}, triageHash: result.triageHash, schemaDirectory: `${root}/tooling/security/slither`, assertReadyPrecondition, publication});
       assertNotCancelled(cancellation.signal);
       process.exitCode = result.decision.exitCode;
     } catch (error) {
       if (cancellation.signal.aborted) { throw error; }
+      priorFailures.push(error);
       const code = error instanceof SlitherGateError ? error.code : "UNEXPECTED_ENVIRONMENT_FAILURE"; const failure = classifyGateFailure(code);
-      await writeFailureEvidence({output, candidateSha: sha, category: failure.category, exitCode: failure.exitCode, stage: failure.stage, errorCode: code, schemaDirectory: `${root}/tooling/security/slither`, assertReadyPrecondition, publication: new ExclusiveDirectoryPublication()});
-      assertNotCancelled(cancellation.signal);
+      try {
+        await writeFailureEvidence({output, candidateSha: sha, category: failure.category, exitCode: failure.exitCode, stage: failure.stage, errorCode: code, schemaDirectory: `${root}/tooling/security/slither`, assertReadyPrecondition, publication});
+        assertNotCancelled(cancellation.signal);
+      } catch (publicationError) { throw new AggregateError([error, publicationError], "gate and failure publication failed"); }
       process.exitCode = failure.exitCode;
     }
-  } catch (error) {
-    if (cancellation.signal.aborted) {
-      const reason = cancellation.signal.reason as SlitherCancellation;
-      process.stderr.write(`${reason.message}\n`);
-      if (hasAdditionalFailure(error, reason)) { process.stderr.write("SLITHER_CANCELLED_FINALIZATION: additional lifecycle failure; cleanup may be unconfirmed\n"); }
-      process.exitCode = reason.exitCode;
-      return;
-    }
-    const code = error instanceof SlitherGateError ? error.code : "UNEXPECTED_ENVIRONMENT_FAILURE";
-    process.stderr.write(`SLITHER_GATE_FAILED ${code}\n`); process.exitCode = classifyGateFailure(code).exitCode;
+  } catch (error) { failures.push(error); }
+  try {
+    if (failures.length === 0) { await publication.finalize(); }
+  } catch (error) { failures.push(error); }
+  try {
+    if (failures.length !== 0 || cancellation.signal.aborted) { await publication.revoke(); }
+  } catch (error) { failures.push(error); }
+  // Final commit boundary: all awaited publication/staging finalization is done.
+  // The last cancellation check, status selection and listener removal below are
+  // synchronous. READY is revocable until here, not after a committed invocation.
+  try {
+    reportInvocation(failures, priorFailures, cancellation.signal);
   } finally {
     process.off("SIGINT", onInt);
     process.off("SIGTERM", onTerm);
+  }
+}
+
+function reportInvocation(failures: readonly unknown[], priorFailures: readonly unknown[], signal: AbortSignal): void {
+  if (signal.aborted) {
+    const reason = signal.reason as SlitherCancellation;
+    process.stderr.write(`${reason.message}\n`);
+    if ([...priorFailures, ...failures].some((error) => hasAdditionalFailure(error, reason))) { process.stderr.write("SLITHER_CANCELLED_FINALIZATION: additional lifecycle failure; cleanup may be unconfirmed\n"); }
+    process.exitCode = reason.exitCode;
+  } else if (failures.length !== 0) {
+    const error = failures[0];
+    const code = error instanceof SlitherGateError ? error.code : "UNEXPECTED_ENVIRONMENT_FAILURE";
+    process.stderr.write(`SLITHER_GATE_FAILED ${code}\n`); process.exitCode = classifyGateFailure(code).exitCode;
   }
 }
 

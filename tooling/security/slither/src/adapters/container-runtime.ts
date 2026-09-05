@@ -1,7 +1,7 @@
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ProcessPort, ProcessResult } from "../application/ports.ts";
-import { assertNotCancelled, CANCELLATION_FINALIZATION_MS, ProcessFailure } from "../application/cancellation.ts";
+import { assertNotCancelled, CANCELLATION_FINALIZATION_MS, ProcessFailure } from "../application/ports.ts";
 import { SlitherGateError } from "../domain/model.ts";
 import { AUTHORIZE_ANALYSIS } from "./container-contract.ts";
 import { COMPLETION_READER, exportArguments, receiveOutput, linuxOutputDirectoryPath, MAX_FILE_BYTES, MAX_TOTAL_BYTES, type OutputDirectoryPath } from "./container-export.ts";
@@ -45,40 +45,13 @@ export function createContainerRunner(directoryPath: OutputDirectoryPath) {
       const daemon = await work.run(dockerPath, ["info", "--format", "{{json .}}"], 30_000);
       assertCgroupDaemon(daemon);
       assertNotCancelled(port.signal);
-      // Creation is an acquisition: settle its bounded response even after a
-      // signal, so a late returned ID cannot escape custody. Never retry create.
-      let created: ProcessResult;
-      const failures: unknown[] = [];
-      try { created = await work.run(dockerPath, createArguments, 30_000, {signal: null}); }
-      catch (error) {
-        if (!(error instanceof ProcessFailure)) { throw error; }
-        if (!error.stdoutComplete) {
-          const unknown = new SlitherGateError("CONTAINER_ID_INVALID", "container creation output is incomplete; ownership and cleanup are unconfirmed");
-          unknown.cause = new AggregateError(interruptionFirst(port.signal, [error]), "creation failures");
-          throw unknown;
-        }
-        created = error.result;
-        failures.push(error);
-      }
-      const id = created.stdout.trim();
-      if (!CONTAINER_ID.test(id)) {
-        const unknown = new SlitherGateError("CONTAINER_ID_INVALID", "container creation ownership is unknown; no immutable ID was returned and cleanup cannot be confirmed");
-        unknown.cause = new AggregateError(interruptionFirst(port.signal, failures), "creation failures");
-        throw unknown;
-      }
+      const {created, id, failures} = await acquireContainer(work, port.signal, dockerPath, createArguments);
       let analysisExit: number | null = null;
       try {
         assertNotCancelled(port.signal);
         if (failures.length !== 0) { throw failures[0]; }
         if (created.exitCode !== 0 || created.timedOut) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container creation did not complete");}
-        await inspectContainer(work, dockerPath, id, false);
-        const started = await work.run(dockerPath, ["start", id], 30_000);
-        if (started.exitCode !== 0 || started.timedOut || started.stdout.trim() !== id) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container failed to start");}
-        const inspection = await inspectContainer(work, dockerPath, id, true);
-        if (inspection.State?.Paused !== false) {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container cannot authorize analysis while paused");}
-        await assertLiveCgroup(id, inspection);
-        const authorize = await work.run(dockerPath, ["exec", id, "/bin/bash", "-ceu", AUTHORIZE_ANALYSIS], 30_000);
-        if (authorize.exitCode !== 0 || authorize.timedOut) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container delegation authorization failed");}
+        const inspection = await startContainer(work, dockerPath, id);
         const exitCode = await awaitCompletion(work, dockerPath, id);
         analysisExit = exitCode;
         await assertRetainedContainer(work, dockerPath, id, inspection);
@@ -118,6 +91,43 @@ export function createContainerRunner(directoryPath: OutputDirectoryPath) {
       return {timedOut: false, exitCode: analysisExit};
     } finally { port.signal?.removeEventListener("abort", cancel); }
   };
+}
+
+async function startContainer(work: ProcessPort, dockerPath: string, id: string): Promise<ContainerInspection> {
+  await inspectContainer(work, dockerPath, id, false);
+  const started = await work.run(dockerPath, ["start", id], 30_000);
+  if (started.exitCode !== 0 || started.timedOut || started.stdout.trim() !== id) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container failed to start");}
+  const inspection = await inspectContainer(work, dockerPath, id, true);
+  if (inspection.State?.Paused !== false) {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container cannot authorize analysis while paused");}
+  await assertLiveCgroup(id, inspection);
+  const authorize = await work.run(dockerPath, ["exec", id, "/bin/bash", "-ceu", AUTHORIZE_ANALYSIS], 30_000);
+  if (authorize.exitCode !== 0 || authorize.timedOut) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container delegation authorization failed");}
+  return inspection;
+}
+
+async function acquireContainer(work: ProcessPort, signal: AbortSignal | undefined, dockerPath: string, createArguments: readonly string[]): Promise<{created: ProcessResult; id: string; failures: unknown[]}> {
+  // Creation is an acquisition: settle its bounded response even after a
+  // signal, so a late returned ID cannot escape custody. Never retry create.
+  let created: ProcessResult;
+  const failures: unknown[] = [];
+  try { created = await work.run(dockerPath, createArguments, 30_000, {signal: null}); }
+  catch (error) {
+    if (!(error instanceof ProcessFailure)) { throw error; }
+    if (!error.stdoutComplete) {
+      const unknown = new SlitherGateError("CONTAINER_ID_INVALID", "container creation output is incomplete; ownership and cleanup are unconfirmed");
+      unknown.cause = new AggregateError(interruptionFirst(signal, [error]), "creation failures");
+      throw unknown;
+    }
+    created = error.result;
+    failures.push(error);
+  }
+  const id = created.stdout.trim();
+  if (!CONTAINER_ID.test(id)) {
+    const unknown = new SlitherGateError("CONTAINER_ID_INVALID", "container creation ownership is unknown; no immutable ID was returned and cleanup cannot be confirmed");
+    unknown.cause = new AggregateError(interruptionFirst(signal, failures), "creation failures");
+    throw unknown;
+  }
+  return {created, id, failures};
 }
 
 function interruptionFirst(signal: AbortSignal | undefined, failures: readonly unknown[]): unknown[] {

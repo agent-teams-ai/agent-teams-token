@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { ProcessOptions, ProcessPort, ProcessResult } from "../application/ports.ts";
-import { assertNotCancelled, ProcessFailure } from "../application/cancellation.ts";
+import { assertNotCancelled, ProcessFailure } from "../application/ports.ts";
 
 // Complete JSON/base64 export of 64 MiB, including the 12-file framing allowance.
 const STDOUT_LIMIT = 4 * Math.ceil(64 * 1024 * 1024 / 3) + 12 * 256;

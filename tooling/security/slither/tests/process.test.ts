@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import childProcess, { type ChildProcess } from "node:child_process";
-import { getEventListeners } from "node:events";
 import { ProcessFailure } from "../src/application/cancellation.ts";
 import { syncBuiltinESMExports } from "node:module";
 import { test, type TestContext } from "node:test";
@@ -396,18 +395,6 @@ test("termination targets its own new group while another synthetic group stays 
   assert.equal(realKill(neighbour.pid!, 0), true);
 });
 
-// Cancellation is a port capability, not an import-time global signal handler.
-test("already cancelled work cannot spawn; explicit cleanup remains independent", async (t) => {
-  const fixture = track(t);
-  const controller = new AbortController();
-  const reason = new Error("owned work interrupted");
-  controller.abort(reason);
-  const cancelled = new OwnedProcess(controller.signal);
-  await assert.rejects(cancelled.run(process.execPath, ["-e", "process.exit(0)"], 1_000), (error: unknown) => error === reason);
-  assert.equal(fixture.children.length, 0);
-  assert.deepEqual(await cancelled.run(process.execPath, ["-e", "process.stdout.write('cleanup')"], 1_000, {signal: null}), {exitCode: 0, stdout: "cleanup", stderr: "", timedOut: false});
-});
-
 test("cancellation kills and reaps the owned real tree once within finalization budget", async (t) => {
   const controller = new AbortController();
   const reason = new Error("owned work interrupted");
@@ -509,21 +496,6 @@ test("failed process finalization retains complete captured stdout for acquisiti
     assert.ok(matches(error, /PROCESS_GROUP_KILL_FAILED/u));
     return true;
   });
-});
-
-test("abort listeners are removed after success, interruption and independent cleanup", async (t) => {
-  const fixture = track(t);
-  const controller = new AbortController();
-  const owned = new OwnedProcess(controller.signal);
-  await owned.run(process.execPath, ["-e", "process.exit(0)"], 2_000);
-  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
-  const pending = owned.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 5_000);
-  controller.abort(new Error("interrupted"));
-  await assert.rejects(pending);
-  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
-  await owned.run(process.execPath, ["-e", "process.exit(0)"], 2_000, {signal: null});
-  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
-  await waitForQuiet(fixture);
 });
 
 test("stdout read failure cannot turn a captured ID prefix into complete acquisition authority", async (t) => {

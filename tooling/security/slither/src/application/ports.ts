@@ -1,5 +1,8 @@
 import type { AnalysisInput, FindingTriage, GateManifest, PolicyDecision, Suppression } from "../domain/model.ts";
 
+// Cancellation crosses boundaries through this declared application entrypoint.
+export { assertNotCancelled, CANCELLATION_FINALIZATION_MS, ProcessFailure, SlitherCancellation } from "./cancellation.ts";
+
 export interface ProcessResult { readonly exitCode: number | null; readonly stdout: string; readonly stderr: string; readonly timedOut: boolean }
 export interface ProcessOptions {
   readonly env?: NodeJS.ProcessEnv;

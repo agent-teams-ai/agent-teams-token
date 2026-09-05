@@ -59,7 +59,7 @@ function preload(directory: string, phase: Phase, cleanupFails: boolean): string
       await analysis.run(); return {decision: {exitCode: 0}};
     }}});
     mock.module(source + 'adapters/evidence.ts', {namedExports: {
-      ExclusiveDirectoryPublication: class {},
+      ExclusiveDirectoryPublication: class { async revoke() {} async finalize() {} },
       writeReadyEvidence: async (request) => {
         await note(['publication']);
         if (phase === 'prepublication') {notify({kind: 'ready'}); await wait(250);}
@@ -103,8 +103,8 @@ function preload(directory: string, phase: Phase, cleanupFails: boolean): string
 }
 
 async function groupRows(pgid: number): Promise<string[]> {
-  const stdout = await new Promise<string>((resolveOutput, reject) => {
-    execFile("/bin/ps", ["-axo", "pid=,pgid=,stat="], {env: {PATH: "/usr/bin:/bin", LC_ALL: "C"}, timeout: 1_000, maxBuffer: 1024 * 1024, killSignal: "SIGKILL"}, (error, output) => error ? reject(error) : resolveOutput(output));
+  const stdout = await new Promise<string>((resolve, reject) => {
+    execFile("/bin/ps", ["-axo", "pid=,pgid=,stat="], {env: {PATH: "/usr/bin:/bin", LC_ALL: "C"}, timeout: 1_000, maxBuffer: 1024 * 1024, killSignal: "SIGKILL"}, (error, output) => error ? reject(error) : resolve(output));
   });
   return stdout.trim().split("\n").filter((row) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/u.exec(row);
@@ -142,7 +142,7 @@ async function fixture(t: TestContext, phase: Phase, cleanupFails = false) {
       assert.equal(child.exitCode, null, `CLI exited before fixture readiness: ${stderr}`);
       assert.equal(child.signalCode, null);
       assert.ok(performance.now() < deadline, `CLI fixture readiness timed out: ${stderr}`);
-      await new Promise<void>((resolveWait) => {setTimeout(resolveWait, 10);});
+      await new Promise<void>((resolve) => {setTimeout(resolve, 10);});
     }
   };
   return {child, closed, directory, awaitReady, messages, stderr: () => stderr, stdout: () => stdout};
@@ -157,7 +157,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       assert.equal(run.child.kill(signal), true);
       // A second catchable signal cannot bypass the already owned finalizer.
       if (["validation", "create", "cleanup", "prepublication"].includes(phase)) {
-        await new Promise<void>((resolveWait) => {setTimeout(resolveWait, 30);});
+        await new Promise<void>((resolve) => {setTimeout(resolve, 30);});
         assert.equal(run.child.kill(signal === "SIGINT" ? "SIGTERM" : "SIGINT"), true);
       }
       const [exitCode, exitSignal] = await run.closed;
