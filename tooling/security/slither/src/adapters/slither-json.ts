@@ -89,7 +89,7 @@ async function parseFinding(
   repositoryRoot: string,
 ): Promise<Finding> {
   const detector = object(rawDetector, `detector[${index}]`);
-  if (Object.keys(detector).some((key) => !["check", "impact", "confidence", "description", "markdown", "elements"].includes(key))) {throw new SlitherGateError("MALFORMED_JSON", "detector contains unexpected fields");}
+  validateDetectorMetadata(detector);
   const detectorId = string(detector.check, "check");
   const impact = parseImpact(detector.impact);
   const confidence = string(detector.confidence, "confidence");
@@ -113,6 +113,35 @@ async function parseFinding(
     location,
   };
   return { ...base, fingerprint: findingFingerprint(base) };
+}
+
+function validateDetectorMetadata(detector: JsonObject): void {
+  const fields = ["check", "impact", "confidence", "description", "markdown", "elements", "id", "first_markdown_element", "reference"];
+  if (Object.keys(detector).some((key) => !fields.includes(key))) {
+    throw new SlitherGateError("MALFORMED_JSON", "detector contains unexpected fields");
+  }
+  for (const key of ["description", "markdown"]) {
+    if (key in detector) {string(detector[key], key);}
+  }
+  // These optional Slither 0.11.6 fields are display metadata only. Never use
+  // the analyzer id or Markdown link to derive our fingerprint or source path.
+  if ("id" in detector && !/^[a-f0-9]{64}$/u.test(string(detector.id, "id"))) {
+    throw new SlitherGateError("MALFORMED_JSON", "id must be a lowercase SHA256 hex string");
+  }
+  if ("reference" in detector && !/^https:\/\/github\.com\/crytic\/slither\/wiki\/Detector-Documentation#[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(string(detector.reference, "reference"))) {
+    throw new SlitherGateError("MALFORMED_JSON", "reference must be an official detector documentation link");
+  }
+  if ("first_markdown_element" in detector) {validateMarkdownElement(detector.first_markdown_element);}
+}
+
+function validateMarkdownElement(value: unknown): void {
+  const link = string(value, "first_markdown_element");
+  const match = /^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.sol#L([1-9]\d*)(?:-L([1-9]\d*))?$/u.exec(link);
+  const start = Number(match?.[1]);
+  const end = Number(match?.[2] ?? match?.[1]);
+  if (!match || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
+    throw new SlitherGateError("MALFORMED_JSON", "first_markdown_element must be a relative Solidity link with an ordered line range");
+  }
 }
 
 function parseImpact(value: unknown): Impact {
@@ -151,19 +180,76 @@ function findingPath(mapping: JsonObject): string {
 }
 
 export function parseDetectorInventory(raw: string): readonly string[] {
-  const lines = raw.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.length > 0);
-  const row = /^\|\s*(\d+)\s*\|\s*`?([a-z0-9-]+)`?\s*\|/u;
-  if (lines.length === 0) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is empty");}
-  const rows = lines.map((line) => row.exec(line)).filter((m): m is RegExpExecArray => m !== null);
-  if (rows.length !== lines.length) {
-    const header = /^\|?\s*Detector\s*\|/u.test(lines[0] ?? "");
-    const separator = /^\|?[\s:-]+\|/u.test(lines[1] ?? "");
-    if (!(header && separator && rows.length === lines.length - 2)) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory grammar is invalid");}
-  }
-  const numbers = rows.map((m) => Number(m[1]));
-  if (numbers.some((n, i) => n !== i + 1)) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory numbering is not contiguous");}
-  const ids = rows.map((m) => m[2]!); if (new Set(ids).size !== ids.length) {throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", "detector inventory is duplicated");}
+  const lines = raw.split(/\r?\n/u);
+  if (lines.at(-1) === "") {lines.pop();}
+  const pretty = lines[0]?.startsWith("+") === true;
+  const rows = pretty ? prettyTableRows(lines) : markdownTableRows(lines);
+  if (rows.length === 0) {invalidInventory("detector inventory is empty");}
+  const ids = rows.map((cells, index) => {
+    if (cells.length !== rows[0]!.length || cells[0] !== String(index + 1)) {
+      invalidInventory("detector inventory numbering or row shape is invalid");
+    }
+    const id = pretty ? cells[1]! : cells[1]!.replace(/^`([a-z0-9-]+)`$/u, "$1");
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id)
+      || !IMPACTS.includes(cells.at(-2) as Impact)
+      || !["High", "Medium", "Low"].includes(cells.at(-1)!)) {
+      invalidInventory("detector inventory row values are invalid");
+    }
+    return id;
+  });
+  if (new Set(ids).size !== ids.length) {invalidInventory("detector inventory is duplicated");}
   return ids.toSorted();
+}
+
+function prettyTableRows(lines: readonly string[]): string[][] {
+  // Exact column widths and row count of the pinned 0.11.6 --list-detectors
+  // PrettyTable. The caller still compares every normalized id to the manifest.
+  const widths = [5, 31, 113, 15, 12];
+  const border = `+${widths.map((width) => "-".repeat(width)).join("+")}+`;
+  if (lines.length !== 105 || lines[0] !== border || lines[2] !== border || lines.at(-1) !== border) {
+    invalidInventory("Slither 0.11.6 detector table borders or row count are invalid");
+  }
+  const header = prettyTableCells(lines[1]!, widths);
+  if (header.join("|") !== "Num|Check|What it Detects|Impact|Confidence") {
+    invalidInventory("Slither 0.11.6 detector table header is invalid");
+  }
+  return lines.slice(3, -1).map((line) => prettyTableCells(line, widths));
+}
+
+function prettyTableCells(line: string, widths: readonly number[]): string[] {
+  const cells = inventoryCells(line);
+  const expected = `|${cells.map((cell, index) => ` ${cell.padEnd((widths[index] ?? 2) - 2)} `).join("|")}|`;
+  if (cells.length !== widths.length || line !== expected || line.length !== 182) {
+    invalidInventory("Slither 0.11.6 detector table column layout is invalid");
+  }
+  return cells;
+}
+
+function markdownTableRows(lines: readonly string[]): string[][] {
+  const rows = lines.map(inventoryCells);
+  if (rows[0]?.[0] === "Detector") {
+    const header = rows.shift()!;
+    const separator = rows.shift();
+    const labels = header.length === 4 ? "Detector|Check|Impact|Confidence" : "Detector|Check|What it Detects|Impact|Confidence";
+    if (header.join("|") !== labels || separator?.length !== header.length
+      || separator.some((cell) => !/^:?-{3,}:?$/u.test(cell)) || rows[0]?.length !== header.length) {
+      invalidInventory("Markdown detector table header or separator is invalid");
+    }
+  }
+  return rows;
+}
+
+function inventoryCells(line: string): string[] {
+  const parts = line.split("|");
+  if (parts.shift() !== "" || parts.pop() !== "" || ![4, 5].includes(parts.length)
+    || parts.some((cell) => !/^[ -~]+$/u.test(cell) || cell.trim().length === 0)) {
+    invalidInventory("detector inventory row grammar is invalid");
+  }
+  return parts.map((cell) => cell.trim());
+}
+
+function invalidInventory(message: string): never {
+  throw new SlitherGateError("DETECTOR_INVENTORY_INVALID", message);
 }
 
 async function readStableSource(root: string, relative: string): Promise<Buffer> {
