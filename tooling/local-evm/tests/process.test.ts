@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { test } from "node:test";
 import { authenticateProcess, processStartIdentity, startOwnedAnvil } from "../process.ts";
 import { pinnedFoundryBinaries } from "../toolchain.ts";
+import { assertPayloadStopped, syntheticAnvil, waitForJson } from "./fixtures/synthetic-anvil.ts";
 import {
   createProvisionalRunDirectory,
   createRunLease,
@@ -24,16 +25,11 @@ const secondAddress = "0x7000000000000000000000000000000000000002";
 const anvilBinary = foundry.anvil;
 const castBinary = foundry.cast;
 
-test("Anvil startup failure is fail-closed and leaves no child behind", { timeout: 20_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "agtmai-anvil-failure-"));
-  const pidPath = join(directory, "pid");
-  const executable = join(directory, "fail-anvil.sh");
-  await writeFile(executable, `#!/bin/sh\nprintf '%s' "$$" > '${pidPath}'\nexit 17\n`, { mode: 0o700 });
-  await chmod(executable, 0o700);
-  await assert.rejects(startOwnedAnvil(executable, firstAddress), /exited before listening/);
-  const pid = Number(await readFile(pidPath, "utf8"));
+test("Anvil startup failure is fail-closed and leaves no child behind", { timeout: 20_000 }, async (context) => {
+  const fixture = await syntheticAnvil(context, "exit");
+  await assert.rejects(fixture.start(firstAddress), /exited before listening/);
+  const {pid} = await fixture.payload();
   assert.equal(processExists(pid), false);
-  await rm(directory, { recursive: true, force: true });
 });
 
 test("a missing Anvil executable rejects through the owned-process API", { timeout: 20_000 }, async () => {
@@ -73,30 +69,28 @@ test("Anvil account and mnemonic output is never returned by the owned-process A
   } finally { await anvil.stop(); }
 });
 
-test("concurrent stop callers share cleanup through forced termination", { timeout: 20_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "agtmai-anvil-concurrent-stop-"));
-  const executable = join(directory, "stubborn-anvil.mjs");
-  await writeFile(executable, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nprocess.stdout.write('Listening on 127.0.0.1:18545\\n');\nsetInterval(() => {}, 1000);\n", { mode: 0o700 });
-  await chmod(executable, 0o700);
-  try {
-    const anvil = await startOwnedAnvil(executable, firstAddress);
-    const first = anvil.stop();
-    const second = anvil.stop();
-    assert.equal(first, second);
-    await Promise.all([first, second]);
-    assert.equal(processExists(anvil.pid), false);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+test("concurrent stop callers share cleanup through forced termination", { timeout: 20_000 }, async (context) => {
+  const fixture = await syntheticAnvil(context, "stubborn");
+  const anvil = await fixture.start(firstAddress);
+  const payload = await fixture.payload();
+  assert.equal(anvil.pid, payload.pid, "the owned PID must be the actual Node payload");
+  const beforeStop = performance.now();
+  const first = anvil.stop();
+  const second = anvil.stop();
+  assert.equal(first, second);
+  assert.deepEqual(await waitForJson(fixture.signalPath), {pid: payload.pid});
+  assert.equal(processExists(payload.pid), true, "the payload must really ignore SIGTERM");
+  await Promise.all([first, second]);
+  assert(performance.now() - beforeStop >= 5_000, "forced termination must wait for the SIGTERM grace period");
+  assert.equal(processExists(anvil.pid), false);
+  assert.equal(processExists(payload.pid), false);
 });
 
-test("control-channel EOF before registration acknowledgement terminates Anvil", {timeout: 20_000}, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "agtmai-anvil-handshake-"));
-  const executable = join(directory, "fake-anvil.mjs");
-  const harness = join(directory, "runner.mjs");
+test("control-channel EOF before registration acknowledgement terminates Anvil", {timeout: 20_000}, async (context) => {
+  const fixture = await syntheticAnvil(context);
+  const {directory, executable} = fixture;
   const identityPath = join(directory, "identity.json");
-  await writeFile(executable, "#!/usr/bin/env node\nprocess.stdout.write('Listening on 127.0.0.1:18545\\n');\nsetInterval(() => {}, 1000);\n", {mode: 0o700});
-  await writeFile(harness, [
+  const runner = await fixture.runner([
     `import {writeFile} from "node:fs/promises";`,
     `import {startOwnedAnvil} from ${JSON.stringify(new URL("../process.ts", import.meta.url).href)};`,
     `await startOwnedAnvil(${JSON.stringify(executable)}, ${JSON.stringify(firstAddress)}, async (identity) => {`,
@@ -104,24 +98,47 @@ test("control-channel EOF before registration acknowledgement terminates Anvil",
     `  await new Promise(() => {});`,
     `});`,
   ].join("\n"));
-  const runner = spawn(process.execPath, [harness], {stdio: "ignore"});
-  const runnerClosed = new Promise<void>((resolve) => {runner.once("close", () => resolve());});
-  try {
-    let identity: {pid: number; processStart: string} | undefined;
-    for (let attempt = 0; attempt < 200 && !identity; attempt += 1) {
-      try {identity = JSON.parse(await readFile(identityPath, "utf8")) as typeof identity;}
-      catch {await delay(25);}
-    }
-    assert(identity, "supervisor must publish the exact child identity before acknowledgement");
-    assert.equal(await authenticateProcess(identity), "owned");
-    runner.kill("SIGKILL");
-    await runnerClosed;
-    for (let attempt = 0; attempt < 200 && await authenticateProcess(identity) === "owned"; attempt += 1) {await delay(25);}
-    assert.notEqual(await authenticateProcess(identity), "owned");
-  } finally {
-    if (runner.exitCode === null && runner.signalCode === null) {runner.kill("SIGKILL"); await runnerClosed;}
-    await rm(directory, {recursive: true, force: true});
-  }
+  const identity = await waitForJson<{pid: number; processStart: string}>(identityPath);
+  const payload = await fixture.payload();
+  assert.equal(identity.pid, payload.pid, "registration must identify the actual Node payload");
+  assert.equal(await authenticateProcess(identity), "owned");
+  await runner.kill();
+  await assertPayloadStopped(payload.pid);
+  assert.notEqual(await authenticateProcess(identity), "owned");
+});
+
+test("synthetic Anvil startup timeout reaps the actual payload", {timeout: 20_000}, async (context) => {
+  const fixture = await syntheticAnvil(context, "silent");
+  await assert.rejects(fixture.start(firstAddress), /did not publish its private listening address/);
+  const payload = await fixture.payload();
+  assert.equal(processExists(payload.pid), false);
+});
+
+test("synthetic Anvil registration failure reaps the actual payload", {timeout: 20_000}, async (context) => {
+  const fixture = await syntheticAnvil(context);
+  const failure = new Error("registration rejected");
+  await assert.rejects(fixture.start(firstAddress, async (identity) => {
+    assert.equal(identity.pid, (await fixture.payload()).pid);
+    throw failure;
+  }), (cause: unknown) => cause === failure);
+  assert.equal(processExists((await fixture.payload()).pid), false);
+});
+
+test("synthetic forced termination preserves a neighbouring payload", {timeout: 20_000}, async (context) => {
+  const fixture = await syntheticAnvil(context, "stubborn");
+  const neighbourFixture = await syntheticAnvil(context);
+  const anvil = await fixture.start(firstAddress);
+  const neighbour = await neighbourFixture.start(secondAddress);
+  assert.equal(anvil.pid, (await fixture.payload()).pid);
+  assert.equal(neighbour.pid, (await neighbourFixture.payload()).pid);
+  assert.notEqual(anvil.pid, neighbour.pid);
+  const identity = {pid: neighbour.pid, processStart: await processStartIdentity(neighbour.pid)};
+  await anvil.stop();
+  assert.equal(processExists(anvil.pid), false);
+  assert.equal(processExists(neighbour.pid), true);
+  assert.equal(await authenticateProcess(identity), "owned");
+  await neighbour.stop();
+  assert.equal(processExists(neighbour.pid), false);
 });
 
 test("stale-run recovery fails closed instead of signaling a process from a stale identity read", { timeout: 20_000 }, async () => {
