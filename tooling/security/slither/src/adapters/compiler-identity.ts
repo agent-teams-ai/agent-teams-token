@@ -53,13 +53,20 @@ export function validateCompilerIdentity(build: BuildInfo, artifact: ForgeArtifa
   if (!target || !sameCompilerMetadata(rawMetadata, target)) {throw new SlitherGateError("BUILD_INFO_INVALID", "artifact and build-info compiler metadata differ");}
   return version;
 }
-export function validateBuildCompiler(build: BuildInfo, version: GateManifest["compiler"]["version"]): GateManifest["compiler"] {
+export type FixtureCompilerProfile = Omit<GateManifest["compiler"], "remappings"> & { readonly remappings: readonly [] };
+export function validateBuildCompiler(build: BuildInfo, version: GateManifest["compiler"]["version"]): GateManifest["compiler"];
+export function validateBuildCompiler(build: BuildInfo, version: GateManifest["compiler"]["version"], scope: "vulnerable-fixture"): FixtureCompilerProfile;
+export function validateBuildCompiler(build: BuildInfo, version: GateManifest["compiler"]["version"], scope?: "vulnerable-fixture"): GateManifest["compiler"] | FixtureCompilerProfile {
   const settings = build.input?.settings;
   if (!settings) {
     throw new SlitherGateError("BUILD_INFO_INVALID", "fresh build-info lacks compiler identity");
   }
-  const remappings = stringArray(settings.remappings).toSorted();
-  const profile: GateManifest["compiler"] = {
+  if (scope !== undefined && scope !== "vulnerable-fixture") {throw new SlitherGateError("BUILD_INFO_INVALID", "unsupported compiler scope");}
+  // The isolated input has no library tree. Missing remappings and an explicit
+  // empty array denote that profile; null, objects and strings never do.
+  const remappings = scope === "vulnerable-fixture" && !Object.hasOwn(settings, "remappings")
+    ? [] : stringArray(settings.remappings).toSorted();
+  const common = {
     version,
     evmVersion: "paris",
     optimizerEnabled: true,
@@ -69,11 +76,13 @@ export function validateBuildCompiler(build: BuildInfo, version: GateManifest["c
     useLiteralContent: false,
     viaIR: false,
     experimental: false,
-    remappings: [
+  } as const;
+  const profile: GateManifest["compiler"] | FixtureCompilerProfile = scope === "vulnerable-fixture"
+    ? { ...common, remappings: [] }
+    : { ...common, remappings: [
       "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
       "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/",
-    ],
-  };
+    ] };
   const observed = {
     version,
     evmVersion: settings.evmVersion,
@@ -92,8 +101,7 @@ export function validateBuildCompiler(build: BuildInfo, version: GateManifest["c
   return profile;
 }
 function stringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? value
-    : [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {throw new SlitherGateError("COMPILER_SETTINGS_MISMATCH", "compiler remappings are not an array of strings");}
+  return value;
 }
 const isEmptyRecord = (value: unknown): boolean => value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;

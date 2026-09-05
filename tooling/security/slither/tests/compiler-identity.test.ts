@@ -8,7 +8,8 @@ import { writeReadyEvidence } from "../src/adapters/evidence.ts";
 import { sha256 } from "../src/adapters/fingerprint.ts";
 import { parseCompiledOutput, parseGateManifest } from "../src/adapters/runner.ts";
 import { parseSlitherJson } from "../src/adapters/slither-json.ts";
-import type { AnalysisInput, FindingTriage } from "../src/domain/model.ts";
+import type { AnalysisInput, FindingTriage, GateManifest } from "../src/domain/model.ts";
+import type { CompiledOutput } from "../src/adapters/compiler-output.ts";
 import { makeCompilerEvidence } from "./test-compiler-evidence.ts";
 import { makeTestDirectory } from "./test-directory.ts";
 import { testPublication } from "./test-publication.ts";
@@ -33,7 +34,9 @@ const parse = (value: string): Json => object(JSON.parse(value));
 const contracts = (build: Json): Json[] => Object.values(object(object(build.output).contracts)).flatMap((source) => Object.values(object(source)).map(object));
 const target = (build: Json): Json => object(object(object(object(build.output).contracts)[sourceName]).AGTMAIToken);
 
-async function compiled(directory: string, pair: Pair = captured, fixture = false): ReturnType<typeof parseCompiledOutput> {
+async function compiled(directory: string, pair?: Pair, fixture?: false): Promise<CompiledOutput<GateManifest["compiler"]>>;
+async function compiled(directory: string, pair: Pair, fixture: true): Promise<CompiledOutput>;
+async function compiled(directory: string, pair: Pair = captured, fixture = false): Promise<CompiledOutput> {
   await mkdir(directory, { recursive: true });
   const artifactName = fixture ? "Vulnerable.json" : "AGTMAIToken.json";
   const entries = await Promise.all(([ ["build-info.json", pair.build], [artifactName, pair.artifact] ] as const).map(async ([name, raw]) => {
@@ -43,7 +46,7 @@ async function compiled(directory: string, pair: Pair = captured, fixture = fals
     return [name, { dev: info.dev, ino: info.ino, size: info.size, mtimeNs: info.mtimeNs, sha256: sha256(raw) }] as const;
   }));
   return fixture
-    ? await parseCompiledOutput(directory, new Map(entries), artifactName, "src/Vulnerable.sol", "Vulnerable")
+    ? await parseCompiledOutput(directory, new Map(entries), { scope: "vulnerable-fixture", fixture: makeCompilerEvidence("unused\n").vulnerableFixture })
     : await parseCompiledOutput(directory, new Map(entries));
 }
 

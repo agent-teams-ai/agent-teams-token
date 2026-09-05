@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { IMPACTS, SlitherGateError } from "../domain/model.ts";
-import { assertRawCompilerIdentity } from "./evidence-compiler-identity.ts";
+import { deriveCompiler } from "./evidence-compiler-output.ts";
 import { classifyGateFailure, isGateErrorCode } from "../application/failure.ts";
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
 
@@ -106,7 +106,11 @@ async function deriveRawBundle(output: string, directory: string, schemaDirector
   assertRawFindingSources(findings, canonicalInputs.manifest);
   const policies = await readCanonicalPolicies(canonicalDirectory, canonicalSchemaDirectory, findings);
   const tools = await readCanonicalTools(canonicalInputs.repositoryRoot, canonicalInputs.manifest);
-  const builds = await deriveCompiler(output, canonicalInputs.manifest);
+  const builds = deriveCompiler(
+    await readStableOutputFile(join(output, "build-info.json")), await readStableOutputFile(join(output, "artifact.json")),
+    await readStableOutputFile(join(output, "fixture-build-info.json")), await readStableOutputFile(join(output, "fixture-artifact.json")),
+    canonicalInputs.manifest,
+  );
   return {
     manifest: canonicalInputs.manifest,
     findings,
@@ -294,33 +298,6 @@ function deriveTriage(findings: readonly JsonObject[], suppressed: ReadonlySet<s
     .map((finding) => stringValue(finding.fingerprint));
   if (!same([...triaged], lowerVisible)) {throw invalid("canonical triage does not exactly cover visible lower findings");}
   return triaged;
-}
-
-async function deriveCompiler(output: string, manifest: JsonObject): Promise<{compiler: JsonObject; fixture: JsonObject}> {
-  const target=object(array(manifest.targets,"manifest targets")[0],"manifest target");
-  const compiler=await deriveOneBuild(output,"build-info.json","artifact.json",stringValue(target.path).replace(/^contracts\/evm\//u,""),stringValue(target.contract));
-  const vulnerable=object(manifest.vulnerableFixture,"vulnerable fixture"); const fixtureSource=object(vulnerable.source,"vulnerable fixture source");
-  const fixtureBuild=await deriveOneBuild(output,"fixture-build-info.json","fixture-artifact.json","src/Vulnerable.sol","Vulnerable");
-  if (compiler.creationBytecodeSha256 !== `sha256:${manifest.creationBytecodeSha256}` || fixtureBuild.creationBytecodeSha256 !== `sha256:${vulnerable.creationBytecodeSha256}` || !array(fixtureBuild.sourceHashes,"fixture source hashes").some((item)=>{const entry=object(item,"fixture source hash");return entry.path==="src/Vulnerable.sol"&&entry.sha256===`sha256:${fixtureSource.sha256}`;})) {throw invalid("compiler creation bytecode differs from manifest pins");}
-  const expectedSources=new Map(array(manifest.sources,"manifest sources").map((item)=>{const entry=object(item,"source"); return [stringValue(entry.path).replace(/^contracts\/evm\//u,""),`sha256:${entry.sha256}`] as const;}));
-  const observed=array(compiler.sourceHashes,"compiler source hashes").map((item)=>object(item,"source hash"));
-  if(observed.length!==expectedSources.size || observed.some((entry)=>expectedSources.get(stringValue(entry.path))!==entry.sha256)) {throw invalid("compiler per-source hashes differ from the pinned closure");}
-  return {compiler,fixture:{sourceSha256:`sha256:${fixtureSource.sha256}`,buildInfoSha256:fixtureBuild.buildInfoSha256,artifactSha256:fixtureBuild.artifactSha256,abiSha256:fixtureBuild.abiSha256,creationBytecodeSha256:fixtureBuild.creationBytecodeSha256}};
-}
-async function deriveOneBuild(output:string,buildName:string,artifactName:string,sourceName:string,contractName:string):Promise<JsonObject>{
-  const buildBytes=await readStableOutputFile(join(output,buildName)); const artifactBytes=await readStableOutputFile(join(output,artifactName));
-  const build=object(parseJsonWithoutDuplicateKeys(buildBytes.toString("utf8")),buildName); const input=object(build.input,"compiler input"); const settings=object(input.settings,"compiler settings");
-  const optimizer=object(settings.optimizer,"optimizer"); const metadata=object(settings.metadata,"metadata"); const libraries=object(settings.libraries,"libraries"); const remappings=array(settings.remappings,"remappings").map(stringValue).toSorted();
-  if(settings.evmVersion!=="paris"||optimizer.enabled!==true||optimizer.runs!==200||metadata.bytecodeHash!=="ipfs"||metadata.appendCBOR!==true||metadata.useLiteralContent!==false||settings.viaIR!==false||settings.experimental!==false||Object.keys(libraries).length!==0||JSON.stringify(remappings)!==JSON.stringify(["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])) {throw invalid("raw compiler settings differ from the pinned profile");}
-  const sources=object(input.sources,"compiler sources"); const sourceHashes=Object.entries(sources).map(([path,value])=>{assertStrictRelativePath(path); const source=object(value,"compiler source"); const content=stringValue(source.content); return {path,sha256:`sha256:${hex(content)}`};}).toSorted((a,b)=>a.path.localeCompare(b.path));
-  const artifact=object(parseJsonWithoutDuplicateKeys(artifactBytes.toString("utf8")),artifactName); const abi=array(artifact.abi,"artifact ABI"); const bytecode=stringValue(object(artifact.bytecode,"artifact bytecode").object); const normalized=bytecode.startsWith("0x")?bytecode:`0x${bytecode}`;
-  if(!/^0x(?:[0-9a-fA-F]{2})+$/u.test(normalized)) {throw invalid("artifact creation bytecode is malformed");}
-  const contracts=object(object(build.output,"compiler output").contracts,"compiler contracts");
-  const sourceOutput=object(contracts[sourceName],"source output"); const contractOutput=object(sourceOutput[contractName],"contract output");
-  assertRawCompilerIdentity(build, artifact, contracts, contractOutput);
-  const evm=object(contractOutput.evm,"evm"); const fromBuild=stringValue(object(evm.bytecode,"build bytecode").object);
-  if(Buffer.from(fromBuild.replace(/^0x/u,""),"hex").compare(Buffer.from(normalized.slice(2),"hex"))!==0) {throw invalid("artifact and build-info bytecode differ");}
-  return {buildInfoSha256:`sha256:${hex(buildBytes)}`,compilerInputSha256:`sha256:${hex(JSON.stringify(input))}`,compilerSettingsSha256:`sha256:${hex(JSON.stringify(settings))}`,compilerInput:input,compilerSettings:settings,sourceHashes,artifactSha256:`sha256:${hex(artifactBytes)}`,abiSha256:`sha256:${hex(JSON.stringify(abi))}`,creationBytecode:normalized,creationBytecodeSha256:`sha256:${hex(Buffer.from(normalized.slice(2),"hex"))}`};
 }
 
 async function readCanonicalTools(repositoryRoot: string, manifest: JsonObject): Promise<JsonObject> {

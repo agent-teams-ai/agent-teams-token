@@ -7,8 +7,9 @@ import type { GateAnalysis, ProcessPort } from "../application/ports.ts";
 import type { AnalysisInput, ClosureEntry, DetectorInventoryDocument, FindingTriage, GateErrorCode, GateManifest, Suppression } from "../domain/model.ts";
 import { parseCompilerProfile, SlitherGateError } from "../domain/model.ts";
 import { sha256 } from "./fingerprint.ts";
-import type { BuildInfo, ForgeArtifact } from "./compiler-identity.ts";
-import { validateBuildCompiler, validateCompilerIdentity } from "./compiler-identity.ts";
+import type { FixtureCompilerProfile } from "./compiler-identity.ts";
+import type { CompiledOutput, VulnerableCompilerRequest } from "./compiler-output.ts";
+import { compilerArtifactName, parseCompilerOutput } from "./compiler-output.ts";
 import { assertContainerResult } from "./container-result.ts";
 import { assertSuppressionShape, parseTypedJson } from "./policy-shape.ts";
 import { assertSerializedAgainstSchema, parseJsonWithoutDuplicateKeys } from "./json-schema.ts";
@@ -157,7 +158,7 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
   }
   const decision = evaluateVulnerableFixture(parsed.findings, request.fixture.source.sha256);
   if (decision.exitCode !== 20) {throw new SlitherGateError("VULNERABLE_FIXTURE_NOT_BLOCKED", "real pinned Slither fixture must produce policy exit 20");}
-  const compiled = await parseCompiledOutput(output, outputSeal, "Vulnerable.json", "src/Vulnerable.sol", "Vulnerable");
+  const compiled = await parseCompiledOutput(output, outputSeal, { scope: "vulnerable-fixture", fixture: request.fixture });
   if (compiled.artifactBytecode !== request.fixture.creationBytecodeSha256 || compiled.buildInfoBytecode !== request.fixture.creationBytecodeSha256) {throw new SlitherGateError("VULNERABLE_FIXTURE_NOT_BLOCKED", "vulnerable fixture build pin differs");}
   return {sourceSha256: sha256(fixtureBytes), buildInfoSha256: compiled.evidence.buildInfoSha256, artifactSha256: compiled.evidence.artifactSha256, abiSha256: compiled.evidence.abiSha256, creationBytecodeSha256: compiled.artifactBytecode, rawBuildInfo: compiled.evidence.rawBuildInfo, rawArtifact: compiled.evidence.rawArtifact};
 }
@@ -406,26 +407,15 @@ async function safeCopyFile(source: string, destination: string): Promise<void> 
   await writeContainerReadableFile(destination, content);
 }
 
-export async function parseCompiledOutput(output: string, sealed: SealedOutput, artifactName = "AGTMAIToken.json", sourceName = "src/features/token-genesis/AGTMAIToken.sol", contractName = "AGTMAIToken"): Promise<{ compiler: GateManifest["compiler"]; artifactBytecode: string; buildInfoBytecode: string; evidence: AnalysisInput["compilerEvidence"] }> {
+export async function parseCompiledOutput(output: string, sealed: SealedOutput): Promise<CompiledOutput<GateManifest["compiler"]>>;
+export async function parseCompiledOutput(output: string, sealed: SealedOutput, request: VulnerableCompilerRequest): Promise<CompiledOutput<FixtureCompilerProfile>>;
+export async function parseCompiledOutput(output: string, sealed: SealedOutput, request?: VulnerableCompilerRequest): Promise<CompiledOutput> {
+  const artifactName = compilerArtifactName(request);
   let artifactRaw: Buffer; let buildRaw: Buffer;
   try {artifactRaw=await requiredRaw(output,sealed,artifactName); buildRaw=await requiredRaw(output,sealed,"build-info.json");} catch {throw new SlitherGateError("BUILD_INFO_INVALID","compiler artifact or build-info is missing or unreadable");}
-  const artifact=parseTypedJson(artifactRaw.toString("utf8"),"BUILD_INFO_INVALID","compiler artifact") as ForgeArtifact;
-  const build=parseTypedJson(buildRaw.toString("utf8"),"BUILD_INFO_INVALID","compiler build-info") as BuildInfo;
-  const version=validateCompilerIdentity(build,artifact,sourceName,contractName);
-  const compiler=validateBuildCompiler(build,version); const artifactHex=artifact.bytecode?.object; const buildHex=build.output?.contracts?.[sourceName]?.[contractName]?.evm?.bytecode?.object;
-  const artifactBytes=decodeCreationBytecode(artifactHex); const buildInfoBytes=decodeCreationBytecode(buildHex);
-  if (!Array.isArray(artifact.abi)) {throw new SlitherGateError("BUILD_INFO_INVALID","compiler ABI is absent");}
-  const sourceHashes=Object.entries(build.input?.sources ?? {}).map(([path,value])=>{assertManifestPath(path); if(typeof value.content!=="string") {throw new SlitherGateError("BUILD_INFO_INVALID","compiler source content is absent");} return {path,sha256:sha256(value.content)};}).toSorted((x,y)=>x.path.localeCompare(y.path));
-  const normalized=typeof artifactHex==="string" ? (artifactHex.startsWith("0x")?artifactHex:`0x${artifactHex}`) : "";
-  const evidence={buildInfoSha256:sha256(buildRaw),compilerInputSha256:sha256(JSON.stringify(build.input)),compilerSettingsSha256:sha256(JSON.stringify(build.input?.settings)),compilerInput:build.input as Readonly<Record<string,unknown>>,compilerSettings:build.input?.settings as Readonly<Record<string,unknown>>,sourceHashes,artifactSha256:sha256(artifactRaw),abiSha256:sha256(JSON.stringify(artifact.abi)),creationBytecode:normalized,creationBytecodeSha256:sha256(artifactBytes),rawBuildInfo:buildRaw.toString("utf8"),rawArtifact:artifactRaw.toString("utf8")};
-  return {compiler,artifactBytecode:sha256(artifactBytes),buildInfoBytecode:sha256(buildInfoBytes),evidence};
+  return request ? parseCompilerOutput(buildRaw, artifactRaw, request) : parseCompilerOutput(buildRaw, artifactRaw);
 }
-export function decodeCreationBytecode(value: unknown): Buffer {
-  if (typeof value !== "string") {throw new SlitherGateError("BYTECODE_MISSING", "fresh creation bytecode is absent or malformed");}
-  const normalized = value.startsWith("0x") ? value.slice(2) : value;
-  if (!/^(?:[0-9a-fA-F]{2})+$/u.test(normalized)) {throw new SlitherGateError("BYTECODE_MISSING", "fresh creation bytecode is absent or malformed");}
-  return Buffer.from(normalized, "hex");
-}
+export { decodeCreationBytecode } from "./compiler-output.ts";
 export { assertSuppressionShape, parseTypedJson };
 export interface SlitherRuntimeIdentity {
   readonly image: string; readonly revision: string; readonly platform: string;
