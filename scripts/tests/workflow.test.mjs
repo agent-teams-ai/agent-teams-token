@@ -312,7 +312,7 @@ test("environment PATH keeps verified Core tools ahead of the package-manager bi
   const agave = environmentText.indexOf("agave-v4.2.1-$token_env_platform/bin");
   const packageBin = environmentText.indexOf('"$token_env_tools_root/bin"');
   assert.ok(node >= 0 && node < foundry && foundry < solc && solc < agave && agave < packageBin);
-  assert.match(environmentText, /export PATH="\$token_env_node:\$token_env_foundry:\$token_env_solc:\$token_env_agave:\$token_env_package_bin"/);
+  assert.match(environmentText, /export PATH="\$token_env_node:\$token_env_foundry:\$token_env_solc\$\{token_env_agave:\+:\$token_env_agave\}:\$token_env_package_bin"/);
   assert.doesNotMatch(environmentText, /:\$PATH/);
   assert.doesNotMatch(environmentText, /\bfind\b/);
 });
