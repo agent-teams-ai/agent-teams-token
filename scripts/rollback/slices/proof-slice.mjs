@@ -150,7 +150,7 @@ function prepareSlicePreState(context) {
   return capturePreState(context);
 }
 
-function validateCandidateStructure(context, environment) {
+export function validateCandidateStructure(context, environment) {
   const { candidateSha, checkout, group, recorder } = context;
   recorder.run(
     group,
@@ -161,7 +161,9 @@ function validateCandidateStructure(context, environment) {
       cwd: checkout,
       env: allowlistedChildEnvironment(process.env, { PATH: toolPath(environment.tools) }),
       phase: "candidate-validation",
-      timeout: 120_000,
+      // The complete authenticated suite took 426 seconds on Linux. Match the
+      // existing 15-minute proof gate budget; keep every test and a finite limit.
+      timeout: 900_000,
     },
   );
   recorder.stage(

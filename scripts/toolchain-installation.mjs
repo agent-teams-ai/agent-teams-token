@@ -339,9 +339,99 @@ function trustedNodeWrapper(lock, platform) {
   const nodeDirectory = lock.tools.node.platforms[platform].installDirectory;
   const directories = ["bin"];
   const pathGuard = wrapperPathGuard(lock, platform);
+  const supervisor = `(${trustedNodeChildMain.toString()})(require)`;
+  const quotedSupervisor = "'" + supervisor.replaceAll("'", "'\\''") + "'";
   const keys = trustedNodeEnvironmentKeys.filter((key) =>
     !["LANG", "LC_ALL", "PATH", "TZ"].includes(key));
-  return `#!/bin/bash\nset -euo pipefail\ntoken_node_source=\${BASH_SOURCE[0]}\nif [[ "$token_node_source" == */* ]]; then\n  token_node_directory=\${token_node_source%/*}\n  [[ -n "$token_node_directory" ]] || token_node_directory=/\nelse\n  token_node_directory=.\nfi\ntoken_node_tools_root=$(CDPATH= cd -- "$token_node_directory/.." && pwd -P)\n${pathGuard}\ntoken_node_git_root=$(pwd -P)\ntoken_node_private_root=$(/usr/bin/mktemp -d /tmp/agtmai-node-environment.XXXXXX)\ntoken_node_private_root=$(CDPATH= cd -- "$token_node_private_root" && pwd -P)\n/bin/chmod 700 "$token_node_private_root"\nfor token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n  /bin/mkdir -m 700 "$token_node_private_root/$token_node_private_name"\ndone\ntoken_node_cleanup_private() {\n  local token_node_cleanup_status=0\n  for token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n    /bin/rmdir "$token_node_private_root/$token_node_private_name" 2>/dev/null || token_node_cleanup_status=1\n  done\n  /bin/rmdir "$token_node_private_root" 2>/dev/null || token_node_cleanup_status=1\n  return "$token_node_cleanup_status"\n}\ntrap 'token_node_cleanup_private || true' EXIT HUP INT TERM\ntoken_node_environment=(/usr/bin/env -i HOME="$token_node_private_root/home" TMPDIR="$token_node_private_root/tmp" XDG_CACHE_HOME="$token_node_private_root/xdg-cache" XDG_CONFIG_HOME="$token_node_private_root/xdg-config" XDG_DATA_HOME="$token_node_private_root/xdg-data" XDG_RUNTIME_DIR="$token_node_private_root/xdg-runtime" NODE_DISABLE_COMPILE_CACHE=1 NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null LANG=C LC_ALL=C TZ=UTC PATH="$token_node_tools_root/${directories.join(`:$token_node_tools_root/`)}:/usr/bin:/bin:/usr/lib/git-core" GCM_INTERACTIVE=never GIT_ASKPASS=/bin/false GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=6 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null GIT_CONFIG_KEY_2=core.attributesFile GIT_CONFIG_VALUE_2=/dev/null GIT_CONFIG_KEY_3=credential.helper GIT_CONFIG_VALUE_3= GIT_CONFIG_KEY_4=credential.interactive GIT_CONFIG_VALUE_4=never GIT_CONFIG_KEY_5=safe.directory GIT_CONFIG_VALUE_5="$token_node_git_root" GIT_NO_REPLACE_OBJECTS=1 GIT_SSH_COMMAND=/bin/false GIT_TERMINAL_PROMPT=0 SSH_ASKPASS=/bin/false)\nunset token_node_git_root\nfor token_node_key in ${keys.join(" ")}; do\n  if [[ -n \${!token_node_key+x} ]]; then\n    token_node_environment+=("$token_node_key=\${!token_node_key}")\n  fi\ndone\nset +e\n"\${token_node_environment[@]}" "$token_node_tools_root/${nodeDirectory}/bin/node" "$@"\ntoken_node_status=$?\nset -e\ntrap - EXIT HUP INT TERM\nif ! token_node_cleanup_private; then\n  printf 'TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=%s\\n' "$token_node_private_root" >&2\n  token_node_status=1\nfi\nexit "$token_node_status"\n`;
+  return `#!/bin/bash\nset -euo pipefail\ntoken_node_source=\${BASH_SOURCE[0]}\nif [[ "$token_node_source" == */* ]]; then\n  token_node_directory=\${token_node_source%/*}\n  [[ -n "$token_node_directory" ]] || token_node_directory=/\nelse\n  token_node_directory=.\nfi\ntoken_node_tools_root=$(CDPATH= cd -- "$token_node_directory/.." && pwd -P)\n${pathGuard}\ntoken_node_git_root=$(pwd -P)\ntoken_node_private_root=$(/usr/bin/mktemp -d /tmp/agtmai-node-environment.XXXXXX)\ntoken_node_private_root=$(CDPATH= cd -- "$token_node_private_root" && pwd -P)\n/bin/chmod 700 "$token_node_private_root"\nfor token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n  /bin/mkdir -m 700 "$token_node_private_root/$token_node_private_name"\ndone\ntoken_node_cleanup_private() {\n  local token_node_cleanup_status=0\n  for token_node_private_name in home xdg-cache xdg-config xdg-data xdg-runtime tmp; do\n    /bin/rmdir "$token_node_private_root/$token_node_private_name" 2>/dev/null || token_node_cleanup_status=1\n  done\n  /bin/rmdir "$token_node_private_root" 2>/dev/null || token_node_cleanup_status=1\n  return "$token_node_cleanup_status"\n}\ntrap 'token_node_cleanup_private || true' EXIT\ntrap 'exit 129' HUP\ntrap 'exit 130' INT\ntrap 'exit 143' TERM\ntoken_node_environment=(/usr/bin/env -i HOME="$token_node_private_root/home" TMPDIR="$token_node_private_root/tmp" XDG_CACHE_HOME="$token_node_private_root/xdg-cache" XDG_CONFIG_HOME="$token_node_private_root/xdg-config" XDG_DATA_HOME="$token_node_private_root/xdg-data" XDG_RUNTIME_DIR="$token_node_private_root/xdg-runtime" NODE_DISABLE_COMPILE_CACHE=1 NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null LANG=C LC_ALL=C TZ=UTC PATH="$token_node_tools_root/${directories.join(`:$token_node_tools_root/`)}:/usr/bin:/bin:/usr/lib/git-core" GCM_INTERACTIVE=never GIT_ASKPASS=/bin/false GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=6 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null GIT_CONFIG_KEY_2=core.attributesFile GIT_CONFIG_VALUE_2=/dev/null GIT_CONFIG_KEY_3=credential.helper GIT_CONFIG_VALUE_3= GIT_CONFIG_KEY_4=credential.interactive GIT_CONFIG_VALUE_4=never GIT_CONFIG_KEY_5=safe.directory GIT_CONFIG_VALUE_5="$token_node_git_root" GIT_NO_REPLACE_OBJECTS=1 GIT_SSH_COMMAND=/bin/false GIT_TERMINAL_PROMPT=0 SSH_ASKPASS=/bin/false)\nunset token_node_git_root\nfor token_node_key in ${keys.join(" ")}; do\n  if [[ -n \${!token_node_key+x} ]]; then\n    token_node_environment+=("$token_node_key=\${!token_node_key}")\n  fi\ndone\nexec "\${token_node_environment[@]}" "$token_node_tools_root/${nodeDirectory}/bin/node" --input-type=commonjs --eval ${quotedSupervisor} -- "$@"\n`;
+}
+
+// Embedded in the authenticated wrapper, then exec'd in its private environment.
+// Own exactly one ChildProcess: no PID polling, delayed numeric kills, process
+// groups or descendant discovery. A signal gets 1s grace, then KILL and 1s to
+// reap. Unconfirmed termination preserves the environment and fails closed.
+function trustedNodeChildMain(require) {
+  const { spawn } = require("node:child_process");
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const { constants } = require("node:os");
+  const root = path.dirname(process.env.HOME);
+  const paths = [root, ...["home", "xdg-cache", "xdg-config", "xdg-data", "xdg-runtime", "tmp"]
+    .map((name) => path.join(root, name))];
+  const identities = [];
+  let child;
+  let interruption;
+  let finished = false;
+  let childError = false;
+  let graceTimer;
+  let reapTimer;
+
+  function verify(index) {
+    const current = fs.lstatSync(paths[index], { bigint: true });
+    const expected = identities[index];
+    if (!current.isDirectory() || current.uid !== BigInt(process.getuid())
+      || (current.mode & 0o777n) !== 0o700n
+      || ["dev", "ino", "mode", "uid"].some((key) => current[key] !== expected[key])) {
+      throw new Error("TOOLCHAIN_PRIVATE_ENVIRONMENT_SUBSTITUTED");
+    }
+  }
+
+  function finish(status, reaped = true) {
+    if (finished) { return; }
+    finished = true;
+    clearTimeout(graceTimer);
+    clearTimeout(reapTimer);
+    let cleanupFailed = !reaped;
+    if (reaped) {
+      // Check the root before each exact rmdir; never traverse retained output.
+      for (const index of [1, 2, 3, 4, 5, 6, 0]) {
+        try {
+          verify(0);
+          verify(index);
+          fs.rmdirSync(paths[index]);
+        } catch {
+          cleanupFailed = true;
+        }
+      }
+    }
+    if (cleanupFailed) {
+      process.stderr.write("TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + root + "\n");
+    }
+    process.exitCode = interruption ?? (cleanupFailed || childError ? 1 : status);
+  }
+
+  function interrupt(signal) {
+    if (interruption !== undefined) { return; }
+    interruption = 128 + constants.signals[signal];
+    if (finished) { process.exitCode = interruption; return; }
+    child.kill(signal);
+    graceTimer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reapTimer = setTimeout(() => {
+        process.stderr.write("TOOLCHAIN_NODE_CHILD_TERMINATION_UNCONFIRMED\n");
+        finish(interruption, false);
+        child.unref();
+      }, 1_000);
+    }, 1_000);
+  }
+
+  for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+    process.on(signal, () => interrupt(signal));
+  }
+  try {
+    for (const directory of paths) { identities.push(fs.lstatSync(directory, { bigint: true })); }
+    for (let index = 0; index < paths.length; index += 1) { verify(index); }
+    child = spawn(process.execPath, process.argv.slice(1), { stdio: "inherit" });
+    child.on("error", (error) => {
+      childError = true;
+      process.stderr.write("TOOLCHAIN_NODE_CHILD_ERROR code=" + error.code + "\n");
+    });
+    child.once("close", (status, signal) => {
+      finish(status ?? (signal === null ? 1 : 128 + constants.signals[signal]));
+    });
+  } catch {
+    finish(1);
+  }
 }
 
 function wrapperPathGuard(lock, platform) {
