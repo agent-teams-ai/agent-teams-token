@@ -161,6 +161,9 @@ function removeTestBlock(source, titlePrefix) {
 function testBlock(source, titlePrefix) {
   const start = source.indexOf(`test("${titlePrefix}`);
   if (start < 0) {throw new Error(`ROLLBACK_WORKFLOW_TEST_MISSING title=${titlePrefix}`);}
+  if (source.indexOf(`test("${titlePrefix}`, start + 6) >= 0) {
+    throw new Error(`ROLLBACK_WORKFLOW_TEST_AMBIGUOUS title=${titlePrefix}`);
+  }
   const next = source.indexOf("\ntest(\"", start + 6);
   if (next < 0) {throw new Error(`ROLLBACK_WORKFLOW_TEST_BOUNDARY_MISSING title=${titlePrefix}`);}
   return source.slice(start, next + 1);
@@ -213,10 +216,44 @@ export function editWorkflowTest(root, manifest, sharedPlan, workspaceHandle) {
       testBlock(baseline, "foundation and TypeScript job bootstraps verified pnpm"),
       `${sliceId}:workflow-foundation-proof-test`,
     );
+    source = replaceExactly(
+      source,
+      `  assert.equal(\n`
+        + `    packageJson.scripts["check:linux"],\n`
+        + `    "pnpm rollback:preflight && pnpm check && pnpm rollback:prove",\n`
+        + `  );`,
+      `  assert.equal(packageJson.scripts["check:linux"], undefined);`,
+      `${sliceId}:workflow-linux-check-policy`,
+    );
+    source = replaceExactly(
+      source,
+      `  assert.match(\n`
+        + `    workflow.jobs["foundation-and-typescript"].steps\n`
+        + `      .find((step) => step.id === "run-root-check-with-exact-rollback-proof").run,\n`
+        + `    /pnpm check:linux$/u,\n`
+        + `  );`,
+      `  assert.equal(\n`
+        + `    workflow.jobs["foundation-and-typescript"].steps\n`
+        + `      .find((step) => step.id === "run-root-check-with-exact-rollback-proof"),\n`
+        + `    undefined,\n`
+        + `  );\n`
+        + `  assert.equal(\n`
+        + `    workflow.jobs["foundation-and-typescript"].steps\n`
+        + `      .find((step) => step.name === "Final repository check").run,\n`
+        + `    "source scripts/env.sh && pnpm check",\n`
+        + `  );`,
+      `${sliceId}:workflow-root-check-policy`,
+    );
     source = replaceExactly(source, configuration[0], "", `${sliceId}:workflow-job-list`);
     source = removeTestBlock(source, configuration[1]);
     source = replaceExactly(source, configuration[2], "", `${sliceId}:workflow-check-list`);
     if (sliceId === "slither") {
+      source = replaceExactly(
+        source,
+        testBlock(source, "actual workflow Node validation ignores inherited preload and proxy authority"),
+        "",
+        "slither:workflow-node-validation-test",
+      );
       source = replaceExactly(
         source,
         "uses.filter((value) => value.startsWith(\"actions/upload-artifact@\")).length,\n    1,",
