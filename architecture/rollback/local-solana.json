@@ -73,7 +73,7 @@
     {
       "path": "scripts/tests/workflow.test.mjs",
       "beforeSha256": "99ad9eba106fa72307d2818626b4a7395500651eebeff890795d9e19fea1f181",
-      "afterSha256": "1b7a59397eefde102b6f560f7c387e849e48b300a6d8ece78442c8d07562fba1"
+      "afterSha256": "cb3def226f5c53446fb4ac5f673a4e89234af3f5ddb5c90c2be3ae045dc05ccd"
     },
     {
       "path": "tooling/toolchain.lock.json",
