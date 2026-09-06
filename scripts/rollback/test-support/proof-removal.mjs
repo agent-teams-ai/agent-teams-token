@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies } from "./proof-workflow.mjs";
 import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
 import { editWorkflowTest, removeWorkflowJob } from "../slices/transforms.mjs";
 import * as proofSupport from "./proof-fixture.mjs";
@@ -345,48 +345,10 @@ test("owned-root shape verification rejects symlink escape and entry overflow", 
   }
 });
 
-const workflowPolicyTitle = "package-manager policy disables implicit downloads and the final check has no silent omissions";
 const workflowPolicyPattern = "^(workflow syntax|all third-party|every job|workflow dispatch|foundation |solidity job|local EVM job|local Solana job|deployment-plan job|Slither job|Compose |package-manager policy)";
 const workflowNodePolicyTitle = "actual workflow Node validation ignores inherited preload and proxy authority";
 const workflowNodePolicyBlock = /^test\("actual workflow Node validation ignores inherited preload and proxy authority",[\s\S]*?^\}\);\n/gmu;
 
-function workflowPolicyFixture(context, manifest) {
-  const boundary = temporaryDirectory("agtmai-rollback-workflow-policy-");
-  const checkout = join(boundary, "checkout");
-  const quarantineRoot = join(boundary, "gate-tmp");
-  let workspaceHandle;
-  context.after(() => {
-    closeRollbackWorkspaceHandle(workspaceHandle);
-    rmSync(boundary, { recursive: true, force: true });
-  });
-  proofSupport.cloneRepository(repositoryRoot, checkout, boundary);
-  copyCurrentRollbackSharedState(checkout, manifest);
-  const requireFromSupply = createRequire(join(repositoryRoot, "packages/contexts/supply/package.json"));
-  mkdirSync(join(checkout, "node_modules"));
-  symlinkSync(dirname(requireFromSupply.resolve("yaml/package.json")), join(checkout, "node_modules/yaml"), "dir");
-  mkdirSync(quarantineRoot, { mode: 0o700 });
-  workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
-  return { checkout, workspaceHandle, parse: requireFromSupply("yaml").parse };
-}
-
-function checkWorkflowPolicies(checkout, pattern, count, failures = 0) {
-  const result = spawnSync(process.execPath, [
-    "--test", "--test-reporter=tap", `--test-name-pattern=${pattern}`,
-    "scripts/tests/workflow.test.mjs",
-  ], { cwd: checkout, env: {}, encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024 });
-  const output = result.stdout + result.stderr;
-  assert.equal(result.error, undefined, output);
-  assert.equal(result.signal, null, output);
-  assert.equal(result.status, failures === 0 ? 0 : 1, output);
-  assert.match(result.stdout, new RegExp(`^# tests ${count}$`, "mu"), output);
-  assert.match(result.stdout, new RegExp(`^# fail ${failures}$`, "mu"), output);
-  assert.match(result.stdout, /^# skipped 0$/mu, output);
-  if (failures === 0) {
-    parseStrictTap(result.stdout, workflowPolicyTitle);
-  } else {
-    assert.match(result.stdout, new RegExp(`^not ok [0-9]+ - ${workflowPolicyTitle}$`, "mu"), output);
-  }
-}
 
 for (const manifest of manifests()) {
   test(`workflow rollback ${manifest.sliceId} preserves executable candidate and restored policies`, (context) => {
@@ -396,7 +358,9 @@ for (const manifest of manifests()) {
     const testPath = "scripts/tests/workflow.test.mjs";
     const candidatePackage = JSON.parse(readFileSync(join(checkout, packagePath), "utf8"));
     const candidateWorkflow = parse(readFileSync(join(checkout, workflowPath), "utf8"));
-    const candidateNodePolicy = readFileSync(join(checkout, testPath), "utf8").match(workflowNodePolicyBlock);
+    const candidateSource = readFileSync(join(checkout, testPath), "utf8");
+    const candidateImports = candidateSource.match(/^import .*;$/gmu);
+    const candidateNodePolicy = candidateSource.match(workflowNodePolicyBlock);
     assert.equal(candidateNodePolicy?.length, 1);
     const reject = (path, changed) => {
       const original = readFileSync(join(checkout, path));
@@ -427,6 +391,21 @@ for (const manifest of manifests()) {
       readFileSync(join(checkout, testPath), "utf8").match(workflowNodePolicyBlock),
       manifest.sliceId === "slither" ? null : candidateNodePolicy,
     );
+
+    const restoredSource = readFileSync(join(checkout, testPath), "utf8");
+    if (slitherRemoved) {
+      assert.doesNotMatch(restoredSource, /\b(spawnSync|existsSync|mkdtempSync|rmSync|writeFileSync|tmpdir)\b/u);
+      assert.match(restoredSource, /import \{ readFileSync \} from "node:fs";/u);
+      const lint = spawnSync(join(repositoryRoot, "node_modules/.bin/oxlint"), [
+        "--config", join(repositoryRoot, ".oxlintrc.json"), "--deny-warnings", testPath,
+      ], { cwd: checkout, encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024 });
+      assert.equal(lint.error, undefined, lint.stderr);
+      assert.equal(lint.signal, null, lint.stderr);
+      assert.equal(lint.status, 0, lint.stdout + lint.stderr);
+    } else {
+      assert.deepEqual(restoredSource.match(/^import .*;$/gmu), candidateImports);
+    }
+    assert.equal(readFileSync(join(repositoryRoot, testPath), "utf8"), candidateSource);
 
     const restoredPackage = JSON.parse(readFileSync(join(checkout, packagePath), "utf8"));
     const restoredWorkflow = parse(readFileSync(join(checkout, workflowPath), "utf8"));
@@ -487,7 +466,14 @@ for (const manifest of manifests()) {
       ["workflow-linux-check-policy", /  assert.equal\(\n    packageJson.scripts\["check:linux"\],[\s\S]*?\n  \);/u],
       ["workflow-root-check-policy", /  assert.match\(\n    workflow.jobs\["foundation-and-typescript"\].steps\n      .find\(\(step\) => step.id === "run-root-check-with-exact-rollback-proof"\).run,[\s\S]*?\n  \);/u],
     ];
-    if (manifest.sliceId === "slither") {assertions.push([workflowNodePolicyTitle, workflowNodePolicyBlock]);}
+    if (manifest.sliceId === "slither") {
+      assertions.push(
+        [workflowNodePolicyTitle, workflowNodePolicyBlock],
+        ["workflow-node-child-process-import", /^import \{ spawnSync \} from "node:child_process";\n/mu],
+        ["workflow-node-fs-import", /^import \{ existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync \} from "node:fs";\n/mu],
+        ["workflow-node-os-import", /^import \{ tmpdir \} from "node:os";\n/mu],
+      );
+    }
     for (const [label, pattern] of assertions) {
       const assertion = source.match(pattern)?.[0];
       assert.ok(assertion, label);

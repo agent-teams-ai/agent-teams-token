@@ -256,6 +256,24 @@ export function editWorkflowTest(root, manifest, sharedPlan, workspaceHandle) {
       );
       source = replaceExactly(
         source,
+        'import { spawnSync } from "node:child_process";\n',
+        "",
+        "slither:workflow-node-child-process-import",
+      );
+      source = replaceExactly(
+        source,
+        'import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";\n',
+        'import { readFileSync } from "node:fs";\n',
+        "slither:workflow-node-fs-import",
+      );
+      source = replaceExactly(
+        source,
+        'import { tmpdir } from "node:os";\n',
+        "",
+        "slither:workflow-node-os-import",
+      );
+      source = replaceExactly(
+        source,
         "uses.filter((value) => value.startsWith(\"actions/upload-artifact@\")).length,\n    1,",
         "uses.filter((value) => value.startsWith(\"actions/upload-artifact@\")).length,\n    0,",
         "slither:upload-action-count",
