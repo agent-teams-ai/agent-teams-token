@@ -71,6 +71,7 @@
     "tooling/security/slither/tests/fixtures/slither-0.11.6-production.json",
     "tooling/security/slither/tests/fixtures/slither-0.11.6-vulnerable.json",
     "tooling/security/slither/tests/gate.test.ts",
+    "tooling/security/slither/tests/helpers/observer.ts",
     "tooling/security/slither/tests/image-preflight.test.ts",
     "tooling/security/slither/tests/manifest.test.ts",
     "tooling/security/slither/tests/parent-signal.test.ts",

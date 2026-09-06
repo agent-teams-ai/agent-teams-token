@@ -5,6 +5,8 @@ import { syncBuiltinESMExports } from "node:module";
 import { test, type TestContext } from "node:test";
 import { OwnedProcess } from "../src/adapters/process.ts";
 
+import { assertDeadlineObservation, assertDeadlineObserverReaped, assertDeliveredObservation, assertObserverReaped, substituteObserver } from "./helpers/observer.ts";
+
 const port = new OwnedProcess();
 const realSpawn = childProcess.spawn;
 const realExecFile = childProcess.execFile;
@@ -341,34 +343,59 @@ test("failed group and direct kills reject at the deadline without waiting forev
   // Teardown restores the real syscalls and terminates this deliberately held fixture.
 });
 
-function substituteObserver(t: TestContext, fixture: Fixture, script: string): void {
-  // Force an observation even on hosts whose init promptly reaps orphan zombies.
-  t.mock.method(process, "kill", (pid: number, signal?: string | number): true => {
-    if (signal === 0 && fixture.groups.has(-pid)) { return true; }
-    return realKill(pid, signal);
+for (const [name, script, errorCode] of [
+  ["nonzero", "process.exit(23)", "23"],
+  ["malformed", "process.stdout.write('not a process table')", undefined],
+  ["oversized", "process.stdout.write('x'.repeat(300000))", "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"],
+] as const) {
+  test(`delivered real ${name} observer rejects with its inspection cause within the caller budget`, { timeout: 4_000 }, async (t) => {
+    const fixture = track(t);
+    const observations = substituteObserver(t, fixture, script);
+    const start = performance.now();
+    // An early primary exit leaves a real descendant to kill, starting inspection
+    // before stopAt. A waiting primary leaves only the final 250ms to start Node
+    // and deliver a response, so the absolute deadline can legitimately win.
+    await assert.rejects(port.run(process.execPath, ["-e", treeScript("exit")], 800), (error: unknown) => {
+      assert.ok(error instanceof ProcessFailure);
+      assert.equal(error.result.exitCode, 0);
+      assert.equal(error.result.timedOut, false);
+      assert.equal(matches(error, /PROCESS_CLEANUP_UNCONFIRMED/u), false);
+      const failure = errors(error).find((entry) => entry instanceof Error && /PROCESS_GROUP_INSPECTION_FAILED/u.test(entry.message));
+      t.diagnostic(`observer callback at ${assertDeliveredObservation(observations, failure, errorCode) - start}ms; cause ${errorCode ?? "PROCESS_GROUP_INSPECTION_INVALID"}`);
+      return true;
+    });
+    assert.ok(performance.now() - start < 800 + SCHEDULING_ALLOWANCE);
+    await waitForQuiet(fixture);
+    await assertObserverReaped(observations[0]!);
+    assertReleased(fixture.children[0]!);
   });
-  t.mock.method(childProcess, "execFile", (...args: unknown[]): ChildProcess => {
-    assert.equal(args[0], "/bin/ps");
-    const observer = Reflect.apply(realExecFile, childProcess, [process.execPath, ["-e", script], args[2], args[3]]) as ChildProcess;
-    fixture.children.push(observer);
-    return observer;
-  });
-  syncBuiltinESMExports();
 }
 
-for (const [name, script, pattern] of [
-  ["nonzero", "process.exit(23)", /PROCESS_GROUP_INSPECTION_FAILED/u],
-  ["malformed", "process.stdout.write('not a process table')", /PROCESS_GROUP_INSPECTION_FAILED/u],
-  ["oversized", "process.stdout.write('x'.repeat(300000))", /PROCESS_GROUP_INSPECTION_FAILED/u],
-  ["stalled", "setTimeout(()=>{},5000)", /PROCESS_CLEANUP_UNCONFIRMED|PROCESS_GROUP_INSPECTION_FAILED/u],
+for (const [name, script] of [
+  ["delayed nonzero", "setTimeout(() => process.exit(23), 350)"],
+  ["delayed malformed", "setTimeout(() => process.stdout.write('not a process table'), 350)"],
+  ["delayed oversized", "setTimeout(() => process.stdout.write('x'.repeat(300000)), 350)"],
+  ["stalled", "setTimeout(()=>{},5000)"],
 ] as const) {
-  test(`real ${name} observer fails closed within the caller budget`, { timeout: 4_000 }, async (t) => {
+  test(`deadline before real ${name} observer delivery fails closed and reaps`, { timeout: 4_000 }, async (t) => {
     const fixture = track(t);
-    substituteObserver(t, fixture, script);
+    const observations = substituteObserver(t, fixture, script);
     const start = performance.now();
-    await assert.rejects(port.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 800), (error: unknown) => matches(error, pattern));
+    // Observation starts after stopAt=550ms. The 350ms response delay exceeds
+    // its <=250ms remaining budget. Either deadline termination route must
+    // reject without interpreting the delayed response as success or absence.
+    await assert.rejects(port.run(process.execPath, ["-e", "setTimeout(()=>{},5000)"], 800), (error: unknown) => {
+      assert.ok(error instanceof ProcessFailure);
+      assert.deepEqual(error.result, { exitCode: null, stdout: "", stderr: "", timedOut: true });
+      t.diagnostic(`termination route: ${assertDeadlineObservation(observations, errors(error))}`);
+      return true;
+    });
     assert.ok(performance.now() - start < 800 + SCHEDULING_ALLOWANCE);
-    assert.ok(fixture.children.length >= 2, "a real observer was started");
+    // Reap may arrive after rejection. Wait without test-side kills so teardown
+    // cannot mask a missing production kill; track() still owns failure cleanup.
+    await waitForQuiet(fixture);
+    await assertDeadlineObserverReaped(observations[0]!);
+    assertReleased(fixture.children[0]!);
   });
 }
 
