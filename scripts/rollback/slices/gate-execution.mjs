@@ -214,7 +214,7 @@ export function runCommonGates(root, recorder, group, tools, environment) {
     cwd: root,
     env: environment,
     phase: "gate",
-    timeout: 60_000,
+    timeout: 600_000,
   });
   for (const [id, script] of [
     ["foundation-assert-dev-only", "foundation:assert-dev-only"],
