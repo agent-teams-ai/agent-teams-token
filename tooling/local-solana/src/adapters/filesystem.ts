@@ -53,9 +53,7 @@ export class PrivateRunStore implements RunStorePort {
       if (!name.startsWith(PREFIX)) { continue; }
       const directory = join(root, name); const validated = await validateOwnedRun(root, directory, true).catch(() => null);
       if (!validated || !sameIdentity(validated.lease.rootIdentity, rootIdentity) || await leaseOwnerIsLive(validated.lease)) { continue; }
-      if (validated.lease.validator !== null) { await terminateAuthenticatedValidator(validated.lease, directory); }
-      const refreshed = await validateOwnedRun(root, directory, true);
-      await quarantineAndDeleteRun(root, directory, refreshed); reclaimed += 1;
+      if (await quarantineAndDeleteRun(root, directory, validated, true)) { reclaimed += 1; }
     }
     return reclaimed;
   }
@@ -203,10 +201,23 @@ function validValidatorNetwork(identity: Record<string, unknown>): boolean {
   return identity.bindAddress === "127.0.0.1" && typeof identity.rpcPort === "number" && Number.isSafeInteger(identity.rpcPort) && identity.rpcPort >= 1 && identity.rpcPort <= 65_535;
 }
 
-async function quarantineAndDeleteRun(root: string, directory: string, validated: ValidatedRun): Promise<void> {
-  await assertDirectoryIdentity(root, validated.rootIdentity); const before = await validateOwnedRun(root, directory, true);
-  if (!sameIdentity(before.directoryIdentity, validated.directoryIdentity) || !sameIdentity(before.markerIdentity, validated.markerIdentity) || before.lease.token !== validated.lease.token) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "run identity changed before quarantine"); }
-  const quarantine = join(root, ".quarantine-" + validated.lease.token); if (await exists(quarantine)) { throw new LocalSolanaError("SOLANA_CLEANUP_QUARANTINE", "quarantine target already exists"); } await rename(directory, quarantine);
+async function quarantineAndDeleteRun(root: string, directory: string, validated: ValidatedRun, stale = false): Promise<boolean> {
+  const quarantine = join(root, ".quarantine-" + validated.lease.token);
+  try {
+    await assertDirectoryIdentity(root, validated.rootIdentity);
+    if (stale && validated.lease.validator !== null) { await terminateAuthenticatedValidator(validated.lease, directory); }
+    const before = await validateOwnedRun(root, directory, true, validated);
+    if (before.lease.token !== validated.lease.token) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "run identity changed before quarantine"); }
+    if (await exists(quarantine)) {
+      if (stale && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
+      throw new LocalSolanaError("SOLANA_CLEANUP_QUARANTINE", "quarantine target already exists");
+    }
+    await rename(directory, quarantine);
+  } catch (cause) {
+    // Only a lost pre-claim source is benign. Failures after our rename remain errors.
+    if (stale && (cause as NodeJS.ErrnoException).code === "ENOENT" && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
+    throw cause;
+  }
   try {
     await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity);
     const marker = await readLease(quarantine); const lease = parseLease(marker.raw);
@@ -214,6 +225,15 @@ async function quarantineAndDeleteRun(root: string, directory: string, validated
     await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity); const finalMarker = await readLease(quarantine); if (!sameIdentity(finalMarker.identity, validated.markerIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined marker changed before deletion"); }
     await rm(quarantine, { recursive: true, force: false, maxRetries: 2 }); await assertDirectoryIdentity(root, validated.rootIdentity);
   } catch (cause) { const currentRoot = await privateDirectoryIdentity(root).catch(() => null); if (currentRoot !== null && sameIdentity(currentRoot, validated.rootIdentity)) { await rename(quarantine, directory).catch(() => {}); } throw cause; }
+  return true;
+}
+
+async function staleRunIsAbsent(root: string, directory: string, rootIdentity: FileIdentity): Promise<boolean> {
+  await assertDirectoryIdentity(root, rootIdentity);
+  // lstat must observe dangling symlinks and other replacements as present.
+  const entry = await lstat(directory).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return null; } throw cause; });
+  await assertDirectoryIdentity(root, rootIdentity);
+  return entry === null;
 }
 
 async function terminateAuthenticatedValidator(lease: Lease, directory: string): Promise<void> {
