@@ -19,11 +19,8 @@ import {
 
 const execute = promisify(execFile);
 const repositoryRoot = await realpath(resolvePath(import.meta.dirname, "../../.."));
-const foundry = pinnedFoundryBinaries(repositoryRoot);
 const firstAddress = "0x7000000000000000000000000000000000000001";
 const secondAddress = "0x7000000000000000000000000000000000000002";
-const anvilBinary = foundry.anvil;
-const castBinary = foundry.cast;
 
 test("Anvil startup failure is fail-closed and leaves no child behind", { timeout: 20_000 }, async (context) => {
   const fixture = await syntheticAnvil(context, "exit");
@@ -42,6 +39,7 @@ test("a missing Anvil executable rejects through the owned-process API", { timeo
 });
 
 test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 60_000 }, async () => {
+  const {anvil: anvilBinary} = pinnedFoundryBinaries(repositoryRoot);
   const first = await startOwnedAnvil(anvilBinary, firstAddress);
   const second = await startOwnedAnvil(anvilBinary, secondAddress);
   try {
@@ -60,6 +58,7 @@ test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 6
 });
 
 test("Anvil account and mnemonic output is never returned by the owned-process API", { timeout: 20_000 }, async () => {
+  const {anvil: anvilBinary} = pinnedFoundryBinaries(repositoryRoot);
   const anvil = await startOwnedAnvil(anvilBinary, firstAddress);
   try {
     assert.deepEqual(Object.keys(anvil).toSorted(), ["pid", "rpcUrl", "stop"]);
@@ -454,6 +453,7 @@ async function runBoundedLeaseFixture(args: readonly string[]): Promise<LeaseFix
 }
 
 async function chainId(url: string): Promise<string> {
+  const {cast: castBinary} = pinnedFoundryBinaries(repositoryRoot);
   const { stdout } = await execute(castBinary, ["chain-id", "--rpc-url", url], { timeout: 30_000, killSignal: "SIGKILL" });
   return `0x${BigInt(stdout.trim()).toString(16)}`;
 }

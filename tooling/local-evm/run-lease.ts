@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { lstat, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { LocalEvmError } from "./model.ts";
+import { assertRegularFile, assertWithinBounds } from "./file-state.ts";
 import {
   authenticateProcess,
   processStartIdentity,
@@ -97,7 +98,7 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     let lease: RunLease;
     try {
       await validatePrivateDirectory(directory);
-      lease = (await readLease(directory)).lease;
+      lease = await readReclaimLease(directory, expectedDirectory, entry.runName);
     } catch (cause) {
       if (await reclaimProvisionalEntry(directory, expectedDirectory, entry.runName, cause, hooks)) {reclaimed += 1;}
       continue;
@@ -125,6 +126,46 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     reclaimed += 1;
   }
   return reclaimed;
+}
+
+// Registration replaces the lease inode once. A scanner holding its predecessor
+// can observe nlink=0. Retry only that bounded domain transition, never generic
+// unsafe reads, and keep the ordinary strict reader for the successor.
+async function readReclaimLease(
+  directory: string,
+  expectedDirectory: string,
+  runName: string,
+): Promise<RunLease> {
+  const path = join(directory, LEASE);
+  const predecessor = await lstat(path, {bigint: true}).catch((cause: unknown) => {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return;}
+    throw cause;
+  });
+  try {return (await readLease(directory)).lease;}
+  catch (cause) {
+    if (!(cause instanceof LocalEvmError)
+      || !["LOCAL_EVM_RUN_LEASE_NOT_REGULAR", "LOCAL_EVM_RUN_LEASE_CHANGED"].includes(cause.code)
+      || predecessor === undefined) {throw cause;}
+    assertRegularFile(predecessor, "RUN_LEASE", 0o600);
+    assertWithinBounds(predecessor, "RUN_LEASE", RUN_LEASE_BOUNDS);
+    // Legacy names have no independent owner authentication: fail closed.
+    if (!runName.startsWith("run-init-")) {throw cause;}
+    const initializer = await assertProvisionalName(runName);
+    if (await authenticateProcess(initializer) !== "owned") {throw cause;}
+    await validatePrivateDirectory(directory);
+    if (await directoryIdentity(directory) !== expectedDirectory) {
+      throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_CHANGED", "run directory changed during lease observation");
+    }
+    const successor = await lstat(path, {bigint: true});
+    if (successor.dev === predecessor.dev && successor.ino === predecessor.ino) {throw cause;}
+    const confirmed = (await readLease(directory)).lease;
+    if (confirmed.runner.pid !== initializer.pid
+      || confirmed.runner.processStart !== initializer.processStart
+      || confirmed.anvil === null
+      || await authenticateProcess(initializer) !== "owned"
+      || await directoryIdentity(directory) !== expectedDirectory) {throw cause;}
+    return confirmed;
+  }
 }
 
 async function reclaimProvisionalEntry(
@@ -272,7 +313,7 @@ async function directoryIdentity(directory: string): Promise<string> {
 async function existingDirectoryIdentity(directory: string): Promise<string | undefined> {
   try {return await directoryIdentity(directory);}
   catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return undefined;}
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return;}
     throw cause;
   }
 }
