@@ -1,9 +1,8 @@
 import {
   lstatSync,
-  mkdirSync,
   readFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import {
   abandonCleanupHandle,
@@ -284,7 +283,6 @@ export function runSurvivorGate({
   group,
   tools,
   environment,
-  evidenceDirectory,
 }) {
   if (survivor === "local-solana") {
     recorder.run(group, "solana-offline-toolchain-verify", "/bin/bash", [
@@ -304,8 +302,7 @@ export function runSurvivorGate({
       ["test:local-solana"],
       900_000,
     );
-    const output = join(evidenceDirectory, "survivors", "local-solana", group);
-    mkdirSync(dirname(output), { recursive: true, mode: 0o700 });
+    const output = join(recorder.prepareSurvivorDirectory("local-solana"), group);
     runPnpm(
       recorder,
       group,
@@ -365,8 +362,7 @@ export function runSurvivorGate({
     }
     const slitherTools = tools;
     runPnpm(recorder, group, "slither-unit", slitherTools, root, environment, ["security:slither:test"]);
-    const output = join(evidenceDirectory, "survivors", "slither", group);
-    mkdirSync(dirname(output), { recursive: true, mode: 0o700 });
+    const output = join(recorder.prepareSurvivorDirectory("slither"), group);
     const slitherEnvironment = {
       ...environment,
       GITHUB_SHA: rollbackSha,

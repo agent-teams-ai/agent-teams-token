@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import {
   constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -17,6 +18,8 @@ import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { closeDescriptorOnce, throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
   assertCustodyCanonicalSpelling,
+  assertCustodyStableObject,
+  custodyIdentity,
   closeDirectoryCustody,
   createDirectoryCustody,
   refreshDirectoryCustody,
@@ -191,6 +194,34 @@ export class EvidenceRecorder {
   document;
   sequence;
   target;
+
+  #survivorDirectories = new Map();
+
+  prepareSurvivorDirectory(survivor) {
+    if (survivor !== "slither" && survivor !== "local-solana") {
+      throw new Error("ROLLBACK_EVIDENCE_SURVIVOR_INVALID");
+    }
+    let path = this.directory;
+    for (const component of ["survivors", survivor]) {
+      path = join(path, component);
+      mutateEvidenceDirectory(this.target, "ROLLBACK_EVIDENCE_SURVIVOR_DIRECTORY_FAILED", () => {
+        // Only reuse directories created by this recorder. Never adopt an
+        // existing foreign directory or refresh custody before verification.
+        const owned = this.#survivorDirectories.get(path);
+        if (owned === undefined) {
+          mkdirSync(path, { mode: 0o700 });
+          this.#survivorDirectories.set(path, custodyIdentity(lstatSync(path, { bigint: true })));
+        } else {
+          assertCustodyStableObject(
+            owned,
+            lstatSync(path, { bigint: true }),
+            "ROLLBACK_EVIDENCE_SURVIVOR_DIRECTORY_SUBSTITUTED",
+          );
+        }
+      });
+    }
+    return path;
+  }
 
   writeArtifact(relativePath, value) {
     const path = resolveInside(this.directory, relativePath);
