@@ -68,7 +68,7 @@
   ],
   "retainedSharedPaths": [
     {"path": "architecture/foundation/repository-agent-workflow.yaml", "sha256": "fe9983d52ae461796f937bd09577b8704c9e1b6bb224ddb1a41208fa2e240ea0", "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub"},
-    {"path": "scripts/tests/tooling-boundaries.test.mjs", "sha256": "4bf1757dd4380c21bbb0f93ba03c30cf4f66f2921ae949e26811712694aa5985", "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"}
+    {"path": "scripts/tests/tooling-boundaries.test.mjs", "sha256": "f547dfbb7319cc7bc138e64146f4b6ba1eecb08f99f5ea79fedf90b052af502e", "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"}
   ],
   "survivingGates": ["local-solana", "slither"]
 }

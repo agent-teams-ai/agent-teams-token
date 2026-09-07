@@ -111,7 +111,7 @@
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",
-      "sha256": "4bf1757dd4380c21bbb0f93ba03c30cf4f66f2921ae949e26811712694aa5985",
+      "sha256": "f547dfbb7319cc7bc138e64146f4b6ba1eecb08f99f5ea79fedf90b052af502e",
       "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"
     }
   ],
