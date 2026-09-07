@@ -22,8 +22,18 @@
   требует hCaptcha. Эти проверки не обходились, средства не получены.
 - Solana faucet вернул RPC Internal error без signature; последующая finalized
   проверка показала 0 lamports. Повторные отправки вслепую не выполняются.
-- Осталось: testnet gas, actual deploy/register/pool configuration, Solana signing
-  path, coherent accounting/status consumer, настоящий round trip и bounded
+- Solana checkpoint `280133b`: официальный generator 0.5.1 установлен на Linux
+  по release SHA-256 и frozen lock без install scripts. Mint verifier проверяет
+  точные System createAccount + SPL InitializeMint2 bytes, supply 0/freeze None.
+  Журнал не повторяет неизвестную отправку и не заменяет expired transaction.
+  Native SDK проверка на одноразовых ключах прошла: 390 bytes, обе подписи valid,
+  подменённая подпись отклонена. Это offline test, не создание mint в Devnet.
+- 50 focused tests проходят локально; strict TS/oxlint прошли для новых TS modules.
+  Реальный unsigned mint подготовлен с Devnet rent 1 066 800 lamports. Blockhash
+  может истечь до финансирования и должен быть обновлён перед первой подписью.
+  Generator derive-accounts пока ожидаемо отклоняет отсутствующий mint.
+- Осталось: testnet gas, actual deploy/register/pool configuration, Solana RPC
+  observer/broadcast и CLI composition, coherent accounting/status consumer, настоящий round trip и bounded
   negative flow, затем актуальный main/CI/review/runbook. Подготовка Solana и
   accounting продолжается независимо от доступности faucet.
 - Public mainnet launch, tokenomics/allocations и liquidity: вне текущего этапа.
