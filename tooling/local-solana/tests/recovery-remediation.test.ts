@@ -119,3 +119,77 @@ test("reclamation preserves captured child custody before supervisor disconnect 
     neighbour.kill("SIGKILL"); await once(neighbour, "close"); await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const window of ["opened", "reading"] as const) {
+  for (const replacement of ["absent", "directory", "symlink", "root"] as const) {
+    test(`held custody ${window}: competing claim leaves ${replacement}`, async () => {
+      const root = await boundary(); const runRoot = join(root, "runs"); const store = new PrivateRunStore(runRoot, join(root, "out"));
+      const original = fs.open;
+      try {
+        const paths = await store.create(); await stale(paths.directory);
+        const marker = join(paths.directory, ".agtmai-validator-startup.json"); let opens = 0; let triggered = false;
+        const compete = async (): Promise<void> => {
+          triggered = true; assert.equal(await store.reclaimStale(), 1);
+          if (replacement === "directory") { await fs.mkdir(paths.directory, { mode: 0o700 }); await writeFile(join(paths.directory, "foreign"), "FOREIGN"); }
+          if (replacement === "symlink") { await fs.symlink(join(root, "missing"), paths.directory); }
+          if (replacement === "root") { await fs.rename(runRoot, join(root, "saved-runs")); await fs.mkdir(runRoot, { mode: 0o700 }); await writeFile(join(runRoot, "foreign"), "FOREIGN"); }
+        };
+        fs.open = (async (...args: Parameters<typeof fs.open>) => {
+          const handle = await original(...args);
+          if (args[0] === marker && ++opens === 2) {
+            if (window === "opened") { await compete(); assert.equal((await handle.stat()).nlink, 0); }
+            else {
+              const read = handle.read.bind(handle); let raced = false;
+              handle.read = (async (...values: Parameters<typeof read>) => {
+                if (!raced) { raced = true; await compete(); }
+                return await read(...values);
+              }) as typeof handle.read;
+            }
+          }
+          return handle;
+        }) as typeof fs.open; syncBuiltinESMExports();
+        if (replacement === "absent") { assert.equal(await store.reclaimStale(), 0); assert.deepEqual(await fs.readdir(runRoot), []); }
+        else {
+          await assert.rejects(store.reclaimStale(), /SOLANA_STARTUP_CUSTODY|SOLANA_LEASE_INVALID|SOLANA_CLEANUP_IDENTITY|ENOENT/u);
+          if (replacement === "symlink") { assert.equal((await lstat(paths.directory)).isSymbolicLink(), true); }
+          else { assert.equal(await readFile(join(replacement === "root" ? runRoot : paths.directory, "foreign"), "utf8"), "FOREIGN"); }
+        }
+        assert.equal(triggered, true);
+      } finally { fs.open = original; syncBuiltinESMExports(); await rm(root, { recursive: true, force: true }); }
+    });
+  }
+}
+
+for (const residue of ["none", "unknown", "unknown-snapshot", "pending"] as const) {
+  test(`genuine helper cleanup with real snapshot lease: ${residue}`, async () => {
+    const { createHash } = await import("node:crypto");
+    const { AuthenticatedToolSnapshots } = await import("../src/adapters/tool-snapshots.ts");
+    const { cleanupRecoveryRuns } = await import("./helpers/agave-recovery.ts");
+    const { reserveStartupCustody } = await import("../src/adapters/startup-custody.ts");
+    const root = await boundary(); const runRoot = join(root, "runs"); const store = new PrivateRunStore(runRoot, join(root, "out"));
+    const neighbour = await store.create(); const snapshot = new AuthenticatedToolSnapshots(neighbour);
+    let released = false; let closed = false;
+    try {
+      const source = join(root, "tool"); await writeFile(source, "synthetic tool bytes");
+      const hash = createHash("sha256").update("synthetic tool bytes").digest("hex");
+      const sources = Object.fromEntries(["solana", "keygen", "validator", "splToken", "tokenProgram", "associatedTokenProgram"].map((name) => [name, { path: source, hash }])) as import("../src/adapters/tool-snapshots.ts").ToolSources;
+      const tools = await snapshot.create(sources);
+      const victim = await store.create(); await stale(victim.directory);
+      if (residue === "pending") { await reserveStartupCustody(victim.ledger, victim.leaseToken); }
+      const unknown = join(runRoot, residue === "unknown-snapshot" ? ".authenticated-tools-foreign" : "foreign");
+      if (residue === "unknown" || residue === "unknown-snapshot") { await writeFile(unknown, "FOREIGN"); }
+      const ports = { rpcPort: 1, faucetPort: 2, gossipPort: 3, dynamicPortRange: "4-5", release: async () => {
+        await lstat(tools.validator); await assert.rejects(lstat(victim.directory), { code: "ENOENT" }); released = true;
+      } };
+      const lease = { close: async () => { assert.equal(released, true); await snapshot.close(); closed = true; } };
+      const cleanup = cleanupRecoveryRuns(store, runRoot, neighbour, lease, ports, tools, 1);
+      if (residue === "none") {
+        await cleanup; assert.equal(closed, true); assert.equal(released, true); assert.deepEqual(await fs.readdir(runRoot), []);
+      } else {
+        await assert.rejects(cleanup, /uncertain recovery run/u); assert.equal(closed, false); assert.equal(released, false);
+        await lstat(tools.validator); await lstat(neighbour.directory);
+        if (residue === "pending") { await lstat(victim.ledger); } else { assert.equal(await readFile(unknown, "utf8"), "FOREIGN"); }
+      }
+    } finally { await snapshot.close(); await rm(root, { recursive: true, force: true }); }
+  });
+}

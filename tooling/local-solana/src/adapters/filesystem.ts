@@ -211,7 +211,15 @@ async function quarantineAndDeleteRun(root: string, directory: string, validated
   const quarantine = join(root, ".quarantine-" + validated.lease.token);
   try {
     await assertDirectoryIdentity(root, validated.rootIdentity);
-    if (!await startupCustodySettled(directory, validated.lease.token, validated.lease.validator !== null)) {
+    let settled: boolean;
+    try { settled = await startupCustodySettled(directory, validated.lease.token, validated.lease.validator !== null); }
+    catch (cause) {
+      // A competitor can unlink the already-open marker during stat/read too.
+      // Only authenticated source absence before our rename makes this benign.
+      if (stale && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
+      throw cause;
+    }
+    if (!settled) {
       if (stale && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
       throw new LocalSolanaError("SOLANA_STARTUP_CUSTODY", "startup custody has not settled");
     }

@@ -3,9 +3,9 @@ import { execFile, fork, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { PortLease, RunPaths, ToolLease, ValidatorIdentity } from "../../src/application/ports.ts";
+import type { PortLease, RunPaths, ToolLease, ToolPaths, ValidatorIdentity } from "../../src/application/ports.ts";
 import { PrivateRunStore } from "../../src/adapters/filesystem.ts";
 import { NodeCommandAdapter } from "../../src/adapters/process.ts";
 import { PinnedToolResolver } from "../../src/adapters/toolchain.ts";
@@ -21,10 +21,11 @@ export async function genuineAgaveRecovery(repositoryRoot: string): Promise<void
   const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   let ports: PortLease | undefined;
   let snapshots: ToolLease | undefined; let owner: ChildProcess | undefined; let paths: RunPaths | undefined;
+  let tools: ToolPaths | undefined;
   let identity: ValidatorIdentity | undefined; let custodian: { pid: number; start: string } | undefined;
   try {
     ports = await new LoopbackPortAllocator(join(root, "ports")).allocate();
-    const tools = await new PinnedToolResolver(repositoryRoot, new NodeCommandAdapter()).resolve({ run: neighbourRun, own: (lease) => { snapshots = lease; } });
+    tools = await new PinnedToolResolver(repositoryRoot, new NodeCommandAdapter()).resolve({ run: neighbourRun, own: (lease) => { snapshots = lease; } });
     owner = fork(new URL("./start-unregistered-agave.ts", import.meta.url), [runRoot, outputRoot], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
     const run = await message(owner, "run") as { paths: RunPaths }; paths = run.paths;
     const captured = message(owner, "captured"); owner.send({ tools, rpcPort: ports.rpcPort, faucetPort: ports.faucetPort, gossipPort: ports.gossipPort, dynamicPortRange: ports.dynamicPortRange });
@@ -58,16 +59,29 @@ export async function genuineAgaveRecovery(repositoryRoot: string): Promise<void
     if (custodian !== undefined) { await requireExited(custodian.pid); }
     // Even a lost capture message cannot authorize removing executable snapshots.
     // Settle every other run first, using the same durable recovery authority.
-    for (let attempt = 0; attempt < 600; attempt += 1) {
-      await store.reclaimStale();
-      if ((await readdir(runRoot)).length === 1) { break; }
-      await delay(25);
-    }
-    assert.deepEqual((await readdir(runRoot)), [neighbourRun.directory.slice(runRoot.length + 1)], "uncertain recovery run retains snapshots and private state");
-    await ports?.release(); await snapshots?.close();
-    await store.cleanup(neighbourRun);
+    await cleanupRecoveryRuns(store, runRoot, neighbourRun, snapshots, ports, tools);
     await rm(root, { recursive: true, force: true });
   }
+}
+
+/** Called only after the owner, validator and custodian have terminated. */
+export async function cleanupRecoveryRuns(store: PrivateRunStore, runRoot: string, neighbourRun: RunPaths,
+  snapshots: ToolLease | undefined, ports: PortLease | undefined, tools: ToolPaths | undefined, attempts = 600): Promise<void> {
+  // Only directories named by this resolver's returned tools are expected.
+  // Prefix discovery would silently authorize foreign snapshot-looking entries.
+  const snapshotDirectories = [...new Set(Object.values(tools ?? {}).map((path) => dirname(path)))];
+  for (const directory of snapshotDirectories) { assert.equal(dirname(directory), runRoot); }
+  const expected = [basename(neighbourRun.directory), ...snapshotDirectories.map((directory) => basename(directory))].toSorted();
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await store.reclaimStale();
+    if (JSON.stringify((await readdir(runRoot)).toSorted()) === JSON.stringify(expected)) { break; }
+    await delay(25);
+  }
+  assert.deepEqual((await readdir(runRoot)).toSorted(), expected, "uncertain recovery run retains snapshots and private state");
+  await ports?.release(); await snapshots?.close();
+  assert.deepEqual(await readdir(runRoot), [basename(neighbourRun.directory)], "snapshot close must remove the owned inventory");
+  await store.cleanup(neighbourRun);
+  assert.deepEqual(await readdir(runRoot), [], "recovery cleanup must leave no run or snapshot residue");
 }
 
 async function message(child: ChildProcess, type: string): Promise<unknown> {
