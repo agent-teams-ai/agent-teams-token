@@ -16,6 +16,11 @@
       "id": "ADR-0003",
       "path": "docs/decisions/0003-clean-architecture-boundaries.md",
       "immutableDigest": "sha256:7ff425e0328aa92dbbc2c6973e869aaaa5aa111f66be6f5c6add2596187afbc6"
+    },
+    {
+      "id": "ADR-0005",
+      "path": "docs/decisions/0005-ccip-testnet-protocol-line.md",
+      "immutableDigest": "sha256:e8407e63c2ca22f4645529679124ed4a226b67c56a883abead2892798a2d93a6"
     }
   ]
 }

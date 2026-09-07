@@ -9,6 +9,7 @@ instead of editing the accepted decision.
 
 ## Accepted
 
+- [ADR-0005: CCIP testnet protocol line](0005-ccip-testnet-protocol-line.md)
 - [ADR-0001: Hybrid native macOS and Linux CI toolchain](0001-hybrid-toolchain.md)
 - [ADR-0002: Script-first CCIP integration](0002-script-first-ccip.md)
 - [ADR-0003: Clean Architecture boundaries](0003-clean-architecture-boundaries.md)
