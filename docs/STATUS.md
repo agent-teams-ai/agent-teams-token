@@ -32,8 +32,14 @@
   Реальный unsigned mint подготовлен с Devnet rent 1 066 800 lamports. Blockhash
   может истечь до финансирования и должен быть обновлён перед первой подписью.
   Generator derive-accounts пока ожидаемо отклоняет отсутствующий mint.
-- Осталось: testnet gas, actual deploy/register/pool configuration, Solana RPC
-  observer/broadcast и CLI composition, coherent accounting/status consumer, настоящий round trip и bounded
+- Solana RPC observer/send и mint CLI реализованы в `75cbb5f`. Linux запуск на
+  настоящем тестовом адресе остановился до подписи: faucet SOL отсутствует,
+  journal/lock не остались. Отправка использует preflight и maxRetries 0; observer
+  проверяет exact bytes, finalized signature/slot, mint owner/decimals/supply/
+  authorities и повторно читает transaction/status. Исчезнувшие receipts и ошибки
+  RPC не означают success. Шесть focused RPC tests проходят, strict TS/lint green.
+- Осталось: testnet gas, actual deploy/register/pool configuration,
+  coherent accounting/status consumer, настоящий round trip и bounded
   negative flow, затем актуальный main/CI/review/runbook. Подготовка Solana и
   accounting продолжается независимо от доступности faucet.
 - Public mainnet launch, tokenomics/allocations и liquidity: вне текущего этапа.
