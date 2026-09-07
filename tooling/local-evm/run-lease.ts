@@ -126,29 +126,33 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
       if (await reclaimProvisionalEntry(directory, expectedDirectory, entry.runName, cause, hooks)) {reclaimed += 1;}
       continue;
     }
-    const runnerState = await authenticateProcess(lease.runner);
-    if (runnerState === "owned") { continue; }
-    if (runnerState === "ambiguous") {
-      throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
-    }
-    if (lease.anvil !== null) {
-      const anvilState = await authenticateProcess(lease.anvil);
-      if (anvilState === "owned" || anvilState === "ambiguous") {
-        throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "supervisor did not close its owned Anvil; refusing unauthenticated cross-process termination");
-      }
-    }
-    await hooks.afterDirectoryList?.(directory);
-    const claim = await claimDirectory(directory, expectedDirectory);
-    if (claim === undefined) {continue;}
-    await validatePrivateDirectory(claim);
-    const confirmed = (await readLease(claim)).lease;
-    if (JSON.stringify(confirmed) !== JSON.stringify(lease)) {
-      throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "stale-run lease changed during reclamation");
-    }
-    await deleteClaim(claim, expectedDirectory);
-    reclaimed += 1;
+    if (await reclaimLeasedEntry(directory, expectedDirectory, lease, hooks)) {reclaimed += 1;}
   }
   return reclaimed;
+}
+
+async function reclaimLeasedEntry(directory: string, expectedDirectory: string, lease: RunLease, hooks: ReclaimHooks): Promise<boolean> {
+  const runnerState = await authenticateProcess(lease.runner);
+  if (runnerState === "owned") { return false; }
+  if (runnerState === "ambiguous") {
+    throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
+  }
+  if (lease.anvil !== null) {
+    const anvilState = await authenticateProcess(lease.anvil);
+    if (anvilState === "owned" || anvilState === "ambiguous") {
+      throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "supervisor did not close its owned Anvil; refusing unauthenticated cross-process termination");
+    }
+  }
+  await hooks.afterDirectoryList?.(directory);
+  const claim = await claimDirectory(directory, expectedDirectory);
+  if (claim === undefined) {return false;}
+  await validatePrivateDirectory(claim);
+  const confirmed = (await readLease(claim)).lease;
+  if (JSON.stringify(confirmed) !== JSON.stringify(lease)) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "stale-run lease changed during reclamation");
+  }
+  await deleteClaim(claim, expectedDirectory);
+  return true;
 }
 
 // Registration replaces the lease inode once. A scanner holding its predecessor
@@ -298,8 +302,11 @@ async function claimDirectory(directory: string, expectedIdentity: string, delet
   }
   const encodedIdentity = expectedIdentity.replaceAll(":", "-");
   const start = (await processStartIdentity(process.pid)).replace(":", "x");
-  const originalName = entry.initializing ? entry.runName.replace("run-init-", ".initialize-v1-") : entry.runName;
+  const originalName = await claimRunName(entry);
   const claim = join(dirname(directory), `${deleting ? ".delete-v1" : ".reclaim-v1"}-${encodedIdentity}-${process.pid}-${start}-${randomBytes(12).toString("hex")}-${originalName}`);
+  if (Buffer.byteLength(basename(claim)) > 255) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_NAME_INVALID", "authenticated claim exceeds NAME_MAX");
+  }
   try {
     await rename(directory, claim);
     if (await directoryIdentity(claim) !== expectedIdentity) {
@@ -311,6 +318,15 @@ async function claimDirectory(directory: string, expectedIdentity: string, delet
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return;}
     throw cause;
   }
+}
+
+// Drop only run-ID/mkdtemp labels: retain full initializer PID/start and phase.
+// Full directory/claimant identities and the 96-bit nonce remain in the claim.
+async function claimRunName(entry: ReclaimEntry): Promise<string> {
+  if (!entry.runName.startsWith("run-init-")) {return "run-claimed";}
+  const initializer = await assertProvisionalName(entry.runName);
+  const phase = entry.initializing ? ".initialize-v1" : "run-init";
+  return `${phase}-${initializer.pid}-${initializer.processStart.replace(":", "x")}-c`;
 }
 
 async function deleteClaim(directory: string, expectedIdentity: string): Promise<boolean> {
