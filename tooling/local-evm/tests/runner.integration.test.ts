@@ -207,7 +207,12 @@ interface RunResult { readonly stdout: string; readonly stderr: string; readonly
 async function run(): Promise<RunResult> { return await start().result; }
 
 async function runDirectories(): Promise<string[]> {
-  try { return (await readdir(privateRoot)).filter((name) => name.startsWith("run-")); } catch { return []; }
+  try {
+    return (await readdir(privateRoot)).filter((name) => ["run-", ".initialize-v1-", ".reclaim-v1-", ".delete-v1-"].some((prefix) => name.startsWith(prefix)));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return [];}
+    throw cause;
+  }
 }
 
 async function readPid(path: string): Promise<number | undefined> {

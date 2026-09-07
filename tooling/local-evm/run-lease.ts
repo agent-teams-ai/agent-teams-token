@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { authenticateRunPhase } from "./run-initialization.ts";
 import { LocalEvmError } from "./model.ts";
 import { assertRegularFile, assertWithinBounds } from "./file-state.ts";
 import {
@@ -79,6 +80,9 @@ interface ReclaimHooks { readonly afterDirectoryList?: (directory: string) => Pr
 interface ReclaimEntry {
   readonly runName: string;
   readonly claimedIdentity?: string;
+  readonly initializing?: boolean;
+  readonly claimant?: OwnedProcessIdentity;
+  readonly deleting?: boolean;
 }
 
 export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): Promise<number> {
@@ -94,6 +98,25 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     if (expectedDirectory === undefined) {continue;}
     if (entry.claimedIdentity !== undefined && entry.claimedIdentity !== expectedDirectory) {
       throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_CHANGED", "abandoned claim no longer names the inode originally claimed");
+    }
+    if (entry.claimant !== undefined) {
+      const state = await authenticateRunPhase(directory, expectedDirectory, entry.claimant);
+      if (state !== "stale") {continue;}
+    }
+    if (entry.deleting && entry.claimant !== undefined) {
+      if (await deleteClaim(directory, expectedDirectory)) {reclaimed += 1;}
+      continue;
+    }
+    if (entry.initializing) {
+      const state = await authenticateRunPhase(directory, expectedDirectory, await assertProvisionalName(entry.runName));
+      if (state !== "stale") {continue;}
+      await hooks.afterDirectoryList?.(directory);
+      const claim = await claimDirectory(directory, expectedDirectory);
+      if (claim === undefined) {continue;}
+      await validatePrivateDirectory(claim);
+      await deleteClaim(claim, expectedDirectory);
+      reclaimed += 1;
+      continue;
     }
     let lease: RunLease;
     try {
@@ -122,7 +145,7 @@ export async function reclaimStaleRuns(root: string, hooks: ReclaimHooks = {}): 
     if (JSON.stringify(confirmed) !== JSON.stringify(lease)) {
       throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "stale-run lease changed during reclamation");
     }
-    await rm(claim, { recursive: true, force: false, maxRetries: 2 });
+    await deleteClaim(claim, expectedDirectory);
     reclaimed += 1;
   }
   return reclaimed;
@@ -183,7 +206,7 @@ async function reclaimProvisionalEntry(
   if (claim === undefined) {return false;}
   await validatePrivateDirectory(claim);
   await assertProvisionalName(runName);
-  await rm(claim, {recursive: true, force: false, maxRetries: 2});
+  await deleteClaim(claim, expectedDirectory);
   return true;
 }
 
@@ -268,13 +291,15 @@ async function assertProvisionalName(name: string): Promise<OwnedProcessIdentity
   return initializer;
 }
 
-async function claimDirectory(directory: string, expectedIdentity: string): Promise<string | undefined> {
+async function claimDirectory(directory: string, expectedIdentity: string, deleting = false): Promise<string | undefined> {
   const entry = parseReclaimEntry(basename(directory));
   if (entry === undefined) {
     throw new LocalEvmError("LOCAL_EVM_RUN_DIRECTORY_NAME_INVALID", "run directory cannot be represented by an atomic claim");
   }
   const encodedIdentity = expectedIdentity.replaceAll(":", "-");
-  const claim = join(dirname(directory), `.reclaim-v1-${encodedIdentity}-${process.pid}-${randomBytes(12).toString("hex")}-${entry.runName}`);
+  const start = (await processStartIdentity(process.pid)).replace(":", "x");
+  const originalName = entry.initializing ? entry.runName.replace("run-init-", ".initialize-v1-") : entry.runName;
+  const claim = join(dirname(directory), `${deleting ? ".delete-v1" : ".reclaim-v1"}-${encodedIdentity}-${process.pid}-${start}-${randomBytes(12).toString("hex")}-${originalName}`);
   try {
     await rename(directory, claim);
     if (await directoryIdentity(claim) !== expectedIdentity) {
@@ -286,6 +311,14 @@ async function claimDirectory(directory: string, expectedIdentity: string): Prom
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") {return;}
     throw cause;
   }
+}
+
+async function deleteClaim(directory: string, expectedIdentity: string): Promise<boolean> {
+  const claim = await claimDirectory(directory, expectedIdentity, true);
+  if (claim === undefined) {return false;}
+  await validatePrivateDirectory(claim);
+  await rm(claim, {recursive: true, force: false, maxRetries: 2});
+  return true;
 }
 
 export async function removeOwnedRunDirectory(directory: string): Promise<void> {
@@ -302,7 +335,7 @@ export async function removeOwnedRunDirectory(directory: string): Promise<void> 
   if (lease.runner.pid !== process.pid || lease.runner.processStart !== current) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "refusing to delete a claimed directory not owned by this runner");
   }
-  await rm(claim, {recursive: true, force: false, maxRetries: 2});
+  await deleteClaim(claim, expectedDirectory);
 }
 
 async function directoryIdentity(directory: string): Promise<string> {
@@ -319,10 +352,21 @@ async function existingDirectoryIdentity(directory: string): Promise<string | un
 }
 
 function parseReclaimEntry(name: string): ReclaimEntry | undefined {
+  if (/^\.initialize-v1-[A-Za-z0-9-]+$/u.test(name)) {
+    return {runName: name.replace(".initialize-v1-", "run-init-"), initializing: true};
+  }
   if (/^run-[A-Za-z0-9-]+$/u.test(name)) {return {runName: name};}
-  const claim = /^\.reclaim-v1-([0-9]+)-([0-9]+)-([0-9]+)-[1-9][0-9]*-[0-9a-f]{24}-(run-[A-Za-z0-9-]+)$/u.exec(name);
+  const claim = /^\.(?:reclaim|delete)-v1-([0-9]+)-([0-9]+)-([0-9]+)-([1-9][0-9]*)-(?:(linuxx[0-9]+|darwinx[a-f0-9]+)-)?[0-9a-f]{24}-((?:run-|\.initialize-v1-)[A-Za-z0-9-]+)$/u.exec(name);
   if (!claim) {return undefined;}
-  return {runName: claim[4]!, claimedIdentity: `${claim[1]}:${claim[2]}:${claim[3]}`};
+  const original = parseReclaimEntry(claim[6]!);
+  if (original === undefined) {return undefined;}
+  const claimant = claim[5] === undefined ? undefined : {
+    pid: Number(claim[4]), processStart: claim[5].replace(/^(linux|darwin)x/u, "$1:"),
+  };
+  if (claimant !== undefined && !isIdentity(claimant)) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_INITIALIZER_INVALID", "claimant identity is invalid");
+  }
+  return {...original, claimant, deleting: name.startsWith(".delete-v1-"), claimedIdentity: `${claim[1]}:${claim[2]}:${claim[3]}`};
 }
 
 function isIdentity(value: unknown): value is OwnedProcessIdentity {

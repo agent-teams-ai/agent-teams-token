@@ -8,7 +8,8 @@ import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
 import { checkedCommand, command, CommandExitError, CommandSpawnError, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
-import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
+import { createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
+import { createInitializingRunDirectory, publishInitializedRun } from "./run-initialization.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
 import {
   ensurePrivateDirectory,
@@ -39,10 +40,9 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   const foundry = authenticateFoundryBinaries(root, options.foundryBinaries);
   const {privateRoot, reportsRoot} = await prepareRunRoots(root, options.reportsRoot);
   const runId = `${Date.now().toString(36)}-${randomBytes(12).toString("hex")}`;
-  const runDirectory = await createProvisionalRunDirectory(privateRoot, runId);
-  await ensurePrivateDirectory(runDirectory);
+  const initial = await createInitializingRunDirectory(privateRoot, runId);
   await faultPause("after-run-directory-before-lease");
-  await createRunLease(runDirectory);
+  const runDirectory = await publishInitializedRun(initial, async () => await createRunLease(initial.directory));
   await publishProcessId(runDirectory, "runner.pid", process.pid);
   let anvil: OwnedAnvil | undefined;
   let solc: PinnedSolc | undefined;

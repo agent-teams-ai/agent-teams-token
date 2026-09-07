@@ -8,7 +8,7 @@ import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, regist
 import { processStartIdentity } from "../process.ts";
 
 // Intercept only the scheduling boundary; every open/stat/rename is real.
-for (const boundary of ["before-fstat", "after-fstat"] as const) {
+for (const boundary of ["before-fstat", "after-fstat", "during-finalization"] as const) {
   test(`reclaimer survives registration ${boundary}`, {timeout: 10_000}, async (context) => {
     const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "evm-lease-barrier-")));
     const directory = await createProvisionalRunDirectory(root, "overlap");
@@ -18,6 +18,9 @@ for (const boundary of ["before-fstat", "after-fstat"] as const) {
     await fs.writeFile(join(directory, "foreign-sentinel"), "preserve");
     const originalOpen = fs.open;
     let intercepted = false;
+    const finalizing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let registration: Promise<void> | undefined;
     try {
       context.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
         const handle = await originalOpen(...args);
@@ -25,7 +28,11 @@ for (const boundary of ["before-fstat", "after-fstat"] as const) {
           intercepted = true;
           const before = await handle.stat({bigint: true});
           assert.equal(before.nlink, 1n);
-          await registerRunAnvil(directory, identity);
+          registration = registerRunAnvil(directory, identity, boundary === "during-finalization" ? {
+            afterPublish: async () => {finalizing.resolve(); await release.promise;},
+          } : {});
+          if (boundary === "during-finalization") {await finalizing.promise;}
+          else {await registration;}
           const after = await handle.stat({bigint: true});
           assert.equal(after.nlink, 0n);
           assert.equal(after.ino, before.ino);
@@ -48,6 +55,8 @@ for (const boundary of ["before-fstat", "after-fstat"] as const) {
       assert.deepEqual(JSON.parse(await fs.readFile(path, "utf8")).anvil, identity);
       assert.equal(await fs.readFile(join(directory, "foreign-sentinel"), "utf8"), "preserve");
     } finally {
+      release.resolve();
+      await registration;
       context.mock.restoreAll();
       syncBuiltinESMExports();
       await fs.rm(root, {recursive: true, force: true});
