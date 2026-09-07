@@ -342,7 +342,7 @@ function validateSemanticStatement(statement, expectedSha) {
   }
 }
 
-export function validateEvidenceBundle({ bundlePath, expectedSha, requireReady = true }) {
+export function validateEvidenceBundle({ bundlePath, expectedSha, requireReady = true, allowPendingReady = false }) {
   if (!isAbsolute(bundlePath)) {throw new Error("RECOVERY_EVIDENCE_BUNDLE_NOT_ABSOLUTE");}
   const bundle = realpathSync(bundlePath);
   const bundleEntry = lstatSync(bundle, { bigint: true });
@@ -375,7 +375,7 @@ export function validateEvidenceBundle({ bundlePath, expectedSha, requireReady =
   }
 
   if (requireReady) {
-    const readyBytes = readStableFile(join(bundle, "READY"), "READY");
+    const readyBytes = readStableFile(join(bundle, allowPendingReady ? "READY.pending" : "READY"), "READY");
     const ready = parseJson(readyBytes, "READY");
     if (!readyBytes.equals(Buffer.from(canonicalJson(ready) + "\n", "utf8"))) {
       throw new Error("RECOVERY_EVIDENCE_READY_NOT_CANONICAL");
@@ -397,7 +397,7 @@ function cli() {
   const cliArguments = process.argv.slice(2);
   const bundleArgument = cliArguments.find((value) => value.startsWith("--bundle="));
   const expectedArgument = cliArguments.find((value) => value.startsWith("--expected-sha="));
-  const allowed = new Set(["--allow-missing-ready"]);
+  const allowed = new Set(["--allow-missing-ready", "--allow-pending-ready"]);
   for (const argument of cliArguments) {
     if (!argument.startsWith("--bundle=") && !argument.startsWith("--expected-sha=") && !allowed.has(argument)) {
       throw new Error(`RECOVERY_EVIDENCE_ARGUMENT_INVALID value=${argument}`);
@@ -414,9 +414,11 @@ function cli() {
     bundlePath: bundleArgument.slice("--bundle=".length),
     expectedSha,
     requireReady: !cliArguments.includes("--allow-missing-ready"),
+    allowPendingReady: cliArguments.includes("--allow-pending-ready"),
   });
   process.stdout.write(
-    `RECOVERY_EVIDENCE_VALID candidate=${result.candidateSha}`
+    (cliArguments.includes("--allow-pending-ready") ? "RECOVERY_EVIDENCE_PROVISIONAL" : "RECOVERY_EVIDENCE_VALID")
+    + ` candidate=${result.candidateSha}`
     + ` proof=${result.proofDigestSha256} seal=${result.sealSha256}\n`,
   );
 }

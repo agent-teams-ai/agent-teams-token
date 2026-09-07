@@ -483,6 +483,10 @@ function validatePublishedProof(evidenceDirectory, candidate, allowMissingReady)
   ];
   if (allowMissingReady) {
     argumentsList.push("--allow-missing-ready");
+  } else {
+    // Validate staged READY contents before terminal custody settlement.
+    // runEvidenceLifecycle publishes READY only after all closes succeed.
+    argumentsList.push("--allow-pending-ready");
   }
   basicRun(join(repositoryRoot, ".tools", "bin", "node"), argumentsList, {
     cwd: repositoryRoot,

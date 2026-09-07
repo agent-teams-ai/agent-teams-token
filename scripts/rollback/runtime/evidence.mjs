@@ -18,6 +18,7 @@ import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { closeDescriptorOnce, throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
   assertCustodyCanonicalSpelling,
+  assertCustodyIdentity,
   assertCustodyStableObject,
   custodyIdentity,
   closeDirectoryCustody,
@@ -135,13 +136,56 @@ function combinedEvidenceFailure(message, primary, secondary) {
   return new AggregateError([primary, secondary], message, { cause: primary });
 }
 
+// Stage lifecycle-owned READY until validation and every custody close succeed.
+// Failed bundles retain only READY.pending, which is never independent proof.
+const evidencePublications = new Map();
+
+function prepareEvidenceSettlement(value, publication) {
+  if (publication.pending === undefined) {
+    return;
+  }
+  const path = verifyEvidenceDirectory(value);
+  const ancestors = [];
+  for (let parent = dirname(path);; parent = dirname(parent)) {
+    ancestors.push({ path: parent, identity: custodyIdentity(lstatSync(parent, { bigint: true })) });
+    if (parent === dirname(parent)) {break;}
+  }
+  publication.ancestors = ancestors;
+  publication.directory = custodyIdentity(lstatSync(path, { bigint: true }));
+}
+
+function settleEvidencePublication(path, publication) {
+  if (publication.pending === undefined) {
+    return;
+  }
+  const code = "ROLLBACK_EVIDENCE_SETTLEMENT_SUBSTITUTED";
+  for (const ancestor of publication.ancestors) {
+    assertCustodyStableObject(ancestor.identity, lstatSync(ancestor.path, { bigint: true }), code);
+  }
+  assertCustodyIdentity(publication.directory, lstatSync(path, { bigint: true }), code);
+  assertCustodyIdentity(publication.pending, lstatSync(join(path, "READY.pending"), { bigint: true }), code);
+  if (lstatSync(join(path, "READY"), { throwIfNoEntry: false }) !== undefined) {
+    throw new Error("ROLLBACK_EVIDENCE_READY_EXISTS");
+  }
+  // No live descriptors or fallible work after this final syscall. Node lacks
+  // renameat2(RENAME_NOREPLACE): the accepted same-UID final-syscall race applies.
+  renameSync(join(path, "READY.pending"), join(path, "READY"));
+}
+
 export function runEvidenceLifecycle(value, createRecorder, action) {
+  const path = evidenceDirectoryPath(value);
+  if (evidencePublications.has(path)) {
+    throw new Error("ROLLBACK_EVIDENCE_LIFECYCLE_ALREADY_ACTIVE");
+  }
+  const publication = {};
+  evidencePublications.set(path, publication);
   let failure;
   let recorder;
   let result;
   try {
     recorder = createRecorder();
     result = action(recorder);
+    prepareEvidenceSettlement(value, publication);
   } catch (error) {
     if (error instanceof Error) {
       error.message += "\nROLLBACK_EVIDENCE path=" + evidenceDirectoryPath(value);
@@ -159,6 +203,7 @@ export function runEvidenceLifecycle(value, createRecorder, action) {
       }
     }
   }
+  evidencePublications.delete(path);
   try {
     closeEvidenceDirectory(value);
   } catch (closeError) {
@@ -169,6 +214,7 @@ export function runEvidenceLifecycle(value, createRecorder, action) {
   if (failure !== undefined) {
     throw failure;
   }
+  settleEvidencePublication(path, publication);
   return result;
 }
 
@@ -467,6 +513,7 @@ export function publishEvidenceSeal(directory, statement, schemaPath) {
 
 export function publishReadyMarker(directory, publication) {
   const target = evidenceTarget(directory);
+  const lifecycle = evidencePublications.get(target.path);
   const ready = {
     schemaVersion: 1,
     kind: "agtmai-recovery-proof-ready",
@@ -476,10 +523,13 @@ export function publishReadyMarker(directory, publication) {
   };
   mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_READY_WRITE_FAILED", () => {
     writeFileSync(
-      join(target.path, "READY"),
+      join(target.path, lifecycle === undefined ? "READY" : "READY.pending"),
       Buffer.from(canonicalJson(ready) + "\n", "utf8"),
       { flag: "wx", mode: 0o400 },
     );
+    if (lifecycle !== undefined) {
+      lifecycle.pending = custodyIdentity(lstatSync(join(target.path, "READY.pending"), { bigint: true }));
+    }
   });
   return ready;
 }
