@@ -27,10 +27,10 @@ function fixture(context) {
 function createEventWriter(write) {
   let failure;
   return (event, extra = {}) => {
-    if (failure) throw failure;
+    if (failure) { throw failure; }
     try {
       const record = Buffer.from(JSON.stringify({ event, ...extra }) + "\n", "utf8");
-      if (record.length > 16_384) throw new Error("event record exceeds 16384 bytes");
+      if (record.length > 16_384) { throw new Error("event record exceeds 16384 bytes"); }
       let offset = 0;
       let interruptions = 0;
       while (offset < record.length) {
@@ -38,7 +38,7 @@ function createEventWriter(write) {
         try {
           count = write(1, record, offset, record.length - offset);
         } catch (error) {
-          if (error.code === "EINTR" && interruptions++ < 8) continue;
+          if (error.code === "EINTR" && interruptions++ < 8) { continue; }
           throw error;
         }
         if (!Number.isInteger(count) || count <= 0 || count > record.length - offset) {
@@ -59,7 +59,7 @@ function withLogDescriptors(paths, action, io = fs) {
   const errors = [];
   let result;
   try {
-    for (const path of paths) owned.push(io.openSync(path, "wx", 0o600));
+    for (const path of paths) { owned.push(io.openSync(path, "wx", 0o600)); }
     result = action(owned);
   } catch (error) {
     errors.push(error);
@@ -81,13 +81,13 @@ function readEvents(stdout) {
   const events = [];
   let offset = 0;
   try {
-    if (!bytes.length) throw new Error("empty evidence");
+    if (!bytes.length) { throw new Error("empty evidence"); }
     while (offset < bytes.length) {
       const end = bytes.indexOf(10, offset);
-      if (end < 0) throw new Error("incomplete event record (including SIGKILL-interrupted emission)");
+      if (end < 0) { throw new Error("incomplete event record (including SIGKILL-interrupted emission)"); }
       const line = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(offset, end));
       const record = JSON.parse(line);
-      if (!record || typeof record.event !== "string") throw new Error("invalid event record");
+      if (!record || typeof record.event !== "string") { throw new Error("invalid event record"); }
       events.push(record);
       offset = end + 1;
     }
@@ -99,7 +99,7 @@ function readEvents(stdout) {
 
 function assertSequence(events, signal) {
   assert.deepEqual(events.map(({ event }) => event), signal ? ["started", "signal"] : ["started", "completed"]);
-  if (signal) assert.deepEqual(events[1], { event: "signal", signal, privateExists: true });
+  if (signal) { assert.deepEqual(events[1], { event: "signal", signal, privateExists: true }); }
 }
 
 function captureEvidence(result, durationMs, stdout, stderr, errors = []) {
@@ -114,7 +114,7 @@ function captureEvidence(result, durationMs, stdout, stderr, errors = []) {
   process.stderr.write("LIFECYCLE_EVIDENCE " + diagnostic + "\n");
   let events;
   try { events = readEvents(stdout); } catch (error) { errors.push(error); }
-  if (errors.length) throw new AggregateError(errors, "lifecycle evidence failed: " + diagnostic);
+  if (errors.length) { throw new AggregateError(errors, "lifecycle evidence failed: " + diagnostic); }
   return { ...result, durationMs, events, stdout, stderr: stderr.toString("utf8") };
 }
 
@@ -306,7 +306,7 @@ test("event writer completes short writes and EINTR exactly once", () => {
   let calls = 0;
   const emit = createEventWriter((fd, bytes, offset, length) => {
     assert.equal(fd, 1);
-    if (++calls <= 2) throw Object.assign(new Error("interrupted"), { code: "EINTR" });
+    if (++calls <= 2) { throw Object.assign(new Error("interrupted"), { code: "EINTR" }); }
     const count = Math.min(3, length);
     chunks.push(Buffer.from(bytes.subarray(offset, offset + count)));
     return count;
@@ -321,13 +321,13 @@ test("event writer terminalizes zero, hard errors, exhausted EINTR and invalid p
     const cause = Object.assign(new Error(String(outcome)), { code: outcome });
     const emit = createEventWriter(() => {
       calls++;
-      if (typeof outcome === "string" && outcome !== "1") throw cause;
+      if (typeof outcome === "string" && outcome !== "1") { throw cause; }
       return outcome;
     });
     let failure;
     assert.throws(() => emit("started"), error => { failure = error; return true; });
     assert.equal(calls, outcome === "EINTR" ? 9 : 1);
-    if (outcome === "EIO" || outcome === "EINTR") assert.equal(failure, cause);
+    if (outcome === "EIO" || outcome === "EINTR") { assert.equal(failure, cause); }
     const before = calls;
     assert.throws(() => emit("completed"), error => error === failure);
     assert.equal(calls, before);
@@ -360,7 +360,7 @@ test("log descriptor failures preserve acquisition, action and every close error
     const closeErrors = [new Error("close first"), new Error("close second")];
     const outcome = withLogDescriptors(["stdout", "stderr"], () => { throw action; }, {
       openSync() {
-        if (opened.length === failOpen) throw acquisition;
+        if (opened.length === failOpen) { throw acquisition; }
         const fd = 10 + opened.length;
         opened.push(fd);
         return fd;
@@ -416,7 +416,7 @@ for (const interrupted of [false, true]) {
     });
     child.stderr.on("data", bytes => stderr.push(bytes));
     child.on("error", error => errors.push(error));
-    const result = await new Promise(resolve => child.on("close", (status, signal) => resolve({ status, signal })));
+    const result = await new Promise(resolve => { child.on("close", (status, signal) => resolve({ status, signal })); });
     clearTimeout(deadline);
     const durationMs = performance.now() - startedAt;
     const raw = Buffer.concat(stdout);
