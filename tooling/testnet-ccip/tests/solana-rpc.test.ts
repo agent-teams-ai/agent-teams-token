@@ -16,7 +16,8 @@ function fixture(overrides: Record<string, unknown> = {}) {
     getAccountInfo: mint, getBlockHeight: 100, isBlockhashValid: { value: true }, sendTransaction: signed.signature };
   const fetcher = (async (_url: unknown, options: RequestInit) => {
     const body = JSON.parse(String(options.body)); calls.push(body);
-    const result = Object.hasOwn(overrides, body.method) ? overrides[body.method] : defaults[body.method];
+    const selected = Object.hasOwn(overrides, body.method) ? overrides[body.method] : defaults[body.method];
+    const result = typeof selected === "function" ? selected(calls) : selected;
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
   }) as typeof fetch;
   return { calls, rpc: createSolanaMintRpc(() => "bWVzc2FnZQ==", fetcher) };
@@ -57,4 +58,13 @@ test("send uses preflight and zero retries; errors are never retried", async () 
     [signed.bytesBase64, { encoding: "base64", skipPreflight: false, preflightCommitment: "finalized", maxRetries: 0 }]);
   const bad = fixture({ sendTransaction: null }); await assert.rejects(bad.rpc.broadcast(signed.bytesBase64));
   assert.equal(bad.calls.filter(x => x.method === "sendTransaction").length, 1);
+});
+
+
+test("disappearing finalized transaction and transport failures remain unknown", async () => {
+  const disappearing = fixture({ getTransaction: (calls: { method: string }[]) =>
+    calls.filter(x => x.method === "getTransaction").length === 1 ? tx : null });
+  assert.equal((await disappearing.rpc.observe(signed, intent)).kind, "unknown");
+  const broken = fixture({ getSignatureStatuses: () => { throw new Error("connection reset"); } });
+  assert.equal((await broken.rpc.observe(signed, intent)).kind, "unknown");
 });
