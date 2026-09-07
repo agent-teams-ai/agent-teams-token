@@ -20,10 +20,15 @@ node tooling/security/slither/src/composition/cli.ts
 ```
 
 The Docker CLI path is an explicit platform composition binding. It is
-canonicalized and must resolve to an absolute executable regular file; no PATH
+canonicalized and must resolve to an executable in a root-owned, non-writable
+system ancestor chain, using the existing system-tool custody pattern. No PATH
 lookup or fallback occurs. The official toolbox image must already be present by its manifest digest. The
 runner never pulls, uses a public network, or falls back to host tools. It
-copies the pinned production closure into fresh container tmpfs, prebuilds with
+acquires Forge, solc and the exact input allowlist from their read-only mounts
+into private container tmpfs, hashes the acquired copies against the authenticated
+host pins, and only then authorizes analysis. Analysis uses `/work/tools` and
+`/work/input`; it never rereads mutable mounts after acquisition. Both create
+vectors explicitly use `--pull never`. It prebuilds with
 the project Forge while skipping tests and scripts, then invokes Slither with
 `--foundry-ignore-compile`. A second pinned Slither object-model pass supplies
 the analyzed contract/source inventory; Forge build labels are never reported
@@ -107,3 +112,17 @@ Separately, every visible Low/Informational/Optimization fingerprint must have
 exactly one current entry in `triage.v1.json` with owner, disposition, rationale
 and UTC review date. Missing, duplicate, malformed, or stale triage makes the
 otherwise nonblocking result an output failure.
+
+Scratch custody retains acquired directory and file descriptors and an inventory
+recorded during creation. Cleanup validates identities and exact membership before
+restoring directory write permission through held descriptors, then removes only
+that inventory. Unknown entries and pathname successors survive with explicit
+cleanup failure; primary failures remain first when finalization also fails.
+The accepted POSIX race between a final identity check and its syscall remains
+outside this guarantee.
+
+Staging validates bundle content and compiler semantics. The independent finalized
+validator additionally rejects executable Git configuration through the existing
+trusted Git boundary, requires exact clean HEAD, and binds canonical bytes and
+schemas actually read to the requested commit's Git objects. Matching supplied
+SHA strings alone cannot authorize finalized evidence.

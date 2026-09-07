@@ -1,3 +1,5 @@
+import { mountAcquisitionArguments, type MountAuthority } from "./mount-authority.ts";
+import type { ScratchCustody } from "./scratch-custody.ts";
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ProcessPort, ProcessResult } from "../application/ports.ts";
@@ -30,11 +32,18 @@ const OVERALL_TIMEOUT_MS = 600_000;
 const CLEANUP_RESERVE_MS = 30_000;
 
 /** Production requires Linux cgroups, PID namespaces and descriptor paths. */
-export const runContainerById = createContainerRunner(linuxOutputDirectoryPath);
+const linuxContainerRunner = createContainerRunner(linuxOutputDirectoryPath);
+export async function runContainerById(port: ProcessPort, dockerPath: string, createArguments: readonly string[], output: string,
+  allowlist: readonly string[], custody: ScratchCustody, authority: MountAuthority): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> {
+  // Validate authority before creating any resource, even for JavaScript callers.
+  if (!custody || !authority) { throw new SlitherGateError("INPUT_HASH_MISMATCH", "production analysis requires acquired scratch and mount authority"); }
+  mountAcquisitionArguments("0".repeat(64), authority);
+  return await linuxContainerRunner(port, dockerPath, createArguments, output, allowlist, custody, authority);
+}
 
 /** Proves, exports and removes a container solely through its immutable ID. */
 export function createContainerRunner(directoryPath: OutputDirectoryPath) {
-  return async (port: ProcessPort, dockerPath: string, createArguments: readonly string[], output: string, allowlist: readonly string[]): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> => {
+  return async (port: ProcessPort, dockerPath: string, createArguments: readonly string[], output: string, allowlist: readonly string[], custody?: ScratchCustody, authority?: MountAuthority): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> => {
     assertNotCancelled(port.signal);
     let deadline = performance.now() + OVERALL_TIMEOUT_MS;
     const workDeadline = deadline - CLEANUP_RESERVE_MS;
@@ -51,7 +60,7 @@ export function createContainerRunner(directoryPath: OutputDirectoryPath) {
         assertNotCancelled(port.signal);
         if (failures.length !== 0) { throw failures[0]; }
         if (created.exitCode !== 0 || created.timedOut) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container creation did not complete");}
-        const inspection = await startContainer(work, dockerPath, id);
+        const inspection = await startContainer(work, dockerPath, id, authority);
         const exitCode = await awaitCompletion(work, dockerPath, id);
         analysisExit = exitCode;
         await assertRetainedContainer(work, dockerPath, id, inspection);
@@ -66,7 +75,7 @@ export function createContainerRunner(directoryPath: OutputDirectoryPath) {
         });
         if (exported.exitCode !== 0 || exported.timedOut || exported.stderr !== "") {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container-private output export failed");}
         await assertRetainedContainer(work, dockerPath, id, inspection);
-        await receiveOutput(exported.stdout, output, allowed, exitCode === 0, directoryPath);
+        await receiveOutput(exported.stdout, output, allowed, exitCode === 0, directoryPath, custody);
         await authenticateTransferredOutput(output, allowed, exitCode === 0);
         assertNotCancelled(port.signal);
         assertTimeRemaining(workDeadline);
@@ -93,13 +102,17 @@ export function createContainerRunner(directoryPath: OutputDirectoryPath) {
   };
 }
 
-async function startContainer(work: ProcessPort, dockerPath: string, id: string): Promise<ContainerInspection> {
+async function startContainer(work: ProcessPort, dockerPath: string, id: string, authority?: MountAuthority): Promise<ContainerInspection> {
   await inspectContainer(work, dockerPath, id, false);
   const started = await work.run(dockerPath, ["start", id], 30_000);
   if (started.exitCode !== 0 || started.timedOut || started.stdout.trim() !== id) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container failed to start");}
   const inspection = await inspectContainer(work, dockerPath, id, true);
   if (inspection.State?.Paused !== false) {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container cannot authorize analysis while paused");}
   await assertLiveCgroup(id, inspection);
+  if (authority) {
+    const acquired = await work.run(dockerPath, mountAcquisitionArguments(id, authority), 30_000);
+    if (acquired.exitCode !== 0 || acquired.timedOut || acquired.stderr !== "") {throw new SlitherGateError("INPUT_HASH_MISMATCH", "acquired container snapshots differ from authenticated inputs");}
+  }
   const authorize = await work.run(dockerPath, ["exec", id, "/bin/bash", "-ceu", AUTHORIZE_ANALYSIS], 30_000);
   if (authorize.exitCode !== 0 || authorize.timedOut) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container delegation authorization failed");}
   return inspection;

@@ -12,12 +12,13 @@ interface ValidationContext {
 export async function assertSerializedAgainstSchema(
   serialized: string,
   schemaPath: string,
+  authenticatedSchema?: string,
 ): Promise<void> {
   let value: unknown;
   let schema: unknown;
   try {
     value = parseJsonWithoutDuplicateKeys(serialized);
-    schema = parseJsonWithoutDuplicateKeys(await readFile(schemaPath, "utf8"));
+    schema = parseJsonWithoutDuplicateKeys(authenticatedSchema ?? await readFile(schemaPath, "utf8"));
   } catch {
     throw new SlitherGateError("EVIDENCE_SCHEMA_INVALID", "evidence or its exact schema is malformed JSON");
   }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { copyFile, lstat, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -21,8 +21,7 @@ test("duplicate keys are rejected before ordinary JSON parsing", async () => {
   );
 });
 
-const candidateSha = "a".repeat(40);
-interface CliFixture { readonly parent: string; readonly repositoryRoot: string; readonly output: string }
+interface CliFixture { candidateSha: string; readonly parent: string; readonly repositoryRoot: string; readonly output: string }
 
 async function makeCliFixture(parent: string): Promise<CliFixture> {
   const repositoryRoot = join(parent, "repository");
@@ -32,13 +31,16 @@ async function makeCliFixture(parent: string): Promise<CliFixture> {
     await copyFile(`${schemaDirectory}/${name}.schema.v1.json`, join(schemas, `${name}.schema.v1.json`));
   }
   await copyFile("tooling/toolchain.lock.json", join(repositoryRoot, "tooling/toolchain.lock.json"));
-  return { parent, repositoryRoot, output: join(parent, "bundle") };
+  const fixture = { parent, repositoryRoot, output: join(parent, "bundle"), candidateSha: "" };
+  fixtureGit(fixture, ["init", "--quiet"]);
+  await commitFixture(fixture);
+  return fixture;
 }
 
 function assertCli(fixture: CliFixture, expectedCode: number, expectedError = "", options: { entrypoint?: string; output?: string; sha?: string; githubSha?: string } = {}): void {
   const result = spawnSync(process.execPath, [resolve(`${schemaDirectory}/src/composition/${options.entrypoint ?? "validate-evidence"}.ts`)], {
     cwd: fixture.repositoryRoot,
-    env: { SLITHER_REPOSITORY_ROOT: fixture.repositoryRoot, SLITHER_CANDIDATE_SHA: options.sha ?? candidateSha,
+    env: { SLITHER_REPOSITORY_ROOT: fixture.repositoryRoot, SLITHER_CANDIDATE_SHA: options.sha ?? fixture.candidateSha,
       SLITHER_EVIDENCE_DIRECTORY: options.output ?? fixture.output, GITHUB_SHA: options.githubSha, TMPDIR: fixture.parent },
     encoding: "utf8", timeout: 10_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024,
   });
@@ -59,7 +61,7 @@ async function snapshot(path: string): Promise<unknown> {
 }
 
 async function makeFailureBundle(fixture: CliFixture): Promise<void> {
-  await writeFailureEvidence({ output: fixture.output, candidateSha, category: "environment-failure", exitCode: 50,
+  await writeFailureEvidence({ output: fixture.output, candidateSha: fixture.candidateSha, category: "environment-failure", exitCode: 50,
     stage: "image-preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory: join(fixture.repositoryRoot, schemaDirectory),
     assertReadyPrecondition: async () => {}, publication: testPublication() });
   const parentInfo = await lstat(fixture.parent, { bigint: true });
@@ -109,7 +111,7 @@ test("real finalized-evidence CLI rejects invalid SHA and path boundaries", asyn
     await mkdir(join(fixture.repositoryRoot, "inside"));
     await writeFile(join(parent, "file"), "synthetic file");
     const before = await snapshot(fixture.output);
-    assertCli(fixture, 40, "SLITHER_EVIDENCE_INVALID EVIDENCE_BUNDLE_INVALID\n", { sha: "b".repeat(40) });
+    assertCli(fixture, 40, "SLITHER_EVIDENCE_INVALID CANDIDATE_SHA_MISMATCH\n", { sha: "b".repeat(40) });
     for (const sha of ["", "bad", "A".repeat(40)]) {
       assertCli(fixture, 40, "SLITHER_EVIDENCE_INVALID CANDIDATE_SHA_INVALID\n", { sha });
     }
@@ -182,7 +184,8 @@ async function makeAnalysisBundle(fixture: CliFixture): Promise<void> {
   for (const name of ["detector-inventory.v1.json", "slither.config.json", "suppressions.v1.json", "triage.v1.json"]) {
     await copyFile(join(fixture.repositoryRoot, name), join(schemas, name));
   }
-  await writeReadyEvidence({ output: fixture.output, candidateSha, manifest: accepted, input,
+  await commitFixture(fixture);
+  await writeReadyEvidence({ output: fixture.output, candidateSha: fixture.candidateSha, manifest: accepted, input,
     decision: { category: "clean", exitCode: 0, blocking: [], visible: [], suppressed: [], errors: [] },
     hashes: { config: hashes.config, policy: hashes.policy }, triageHash: hashes.triage, schemaDirectory: schemas,
     assertReadyPrecondition: async () => {}, publication: testPublication() });
@@ -230,3 +233,15 @@ test("cross-category failure mutations are impossible to publish", async () => {
     }), /exhaustive registry/u);
   } finally {await rm(parent, { recursive: true, force: true });}
 });
+
+function fixtureGit(fixture: CliFixture, args: string[]): string {
+  return execFileSync("/usr/bin/git", ["-C", fixture.repositoryRoot, ...args], {
+    encoding: "utf8", env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+  });
+}
+async function commitFixture(fixture: CliFixture): Promise<void> {
+  const paths = (await readdir(fixture.repositoryRoot)).filter((name) => name !== ".git");
+  fixtureGit(fixture, ["add", "--", ...paths]);
+  fixtureGit(fixture, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "test: canonical evidence fixture"]);
+  fixture.candidateSha = fixtureGit(fixture, ["rev-parse", "HEAD"]).trim();
+}

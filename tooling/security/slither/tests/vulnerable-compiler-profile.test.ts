@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { evaluatePolicy, evaluateVulnerableFixture } from "../src/application/policy.ts";
 import type { CompiledOutput, VulnerableCompilerRequest } from "../src/adapters/compiler-output.ts";
-import { validateFinalizedEvidenceBundle } from "../src/adapters/evidence-bundle.ts";
+import { validateEvidenceBundleContents } from "../src/adapters/evidence-bundle.ts";
 import { writeReadyEvidence } from "../src/adapters/evidence.ts";
 import { sha256 } from "../src/adapters/fingerprint.ts";
 import { assertSlitherStatus, parseCompiledOutput, parseGateManifest, parseSlitherExit } from "../src/adapters/runner.ts";
@@ -79,7 +79,7 @@ async function bundle(parent: string): Promise<string> {
     triageHash: sha256(await readFile(`${schemaDirectory}/triage.v1.json`)), assertReadyPrecondition: async () => {}, publication: testPublication() });
   return output;
 }
-const validate = async (output: string): Promise<void> => await validateFinalizedEvidenceBundle({ output, candidateSha, schemaDirectory, finalizationMode: "local" });
+const validate = async (output: string): Promise<void> => await validateEvidenceBundleContents({ output, candidateSha, schemaDirectory, finalizationMode: "local" });
 
 test("actual isolated fixture preserves captures, source, compiler and bytecode pins and reaches policy exit 20", async () => {
   assert.equal(Buffer.byteLength(captured.build), 7635);

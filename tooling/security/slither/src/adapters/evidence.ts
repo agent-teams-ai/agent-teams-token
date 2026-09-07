@@ -8,7 +8,7 @@ import { assertNotCancelled } from "../application/ports.ts";
 import { classifyGateFailure } from "../application/failure.ts";
 import { sha256 } from "./fingerprint.ts";
 import { IMAGE, IMAGE_REVISION } from "./container-contract.ts";
-import { assertAnalysisEvidenceSemantics, renderAnalysisSummary, validateFinalizedEvidenceBundle } from "./evidence-bundle.ts";
+import { assertAnalysisEvidenceSemantics, renderAnalysisSummary, validateEvidenceBundleContents } from "./evidence-bundle.ts";
 import { assertSerializedAgainstSchema } from "./json-schema.ts";
 
 function canonical(value: unknown): unknown {
@@ -99,7 +99,7 @@ export async function writeReadyEvidence(request: ReadyEvidenceRequest): Promise
     await write("detector-inventory.json", stable({ schemaVersion: 1, detectors: input.detectorInventory }));
     await write("slither-status.json", stable({ schemaVersion: 1, analysisExit: input.findings.length === 0 ? 0 : 255, inventoryExit: 0 }));
     await request.assertReadyPrecondition();
-  }, async (staging) => await validateFinalizedEvidenceBundle({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory, canonicalDirectory: request.canonicalDirectory }), READY_EVIDENCE_FILES, request.publication);
+  }, async (staging) => await validateEvidenceBundleContents({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory, canonicalDirectory: request.canonicalDirectory }), READY_EVIDENCE_FILES, request.publication);
 }
 
 export async function writeEnvironmentFailure(request: EnvironmentFailureRequest): Promise<void> {
@@ -125,7 +125,7 @@ export async function writeFailureEvidence(request: FailureEvidenceRequest): Pro
   await publish(output, async (write) => {
     await write(name, serialized);
     await request.assertReadyPrecondition();
-  }, async (staging) => await validateFinalizedEvidenceBundle({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory }), ["READY", name], request.publication);
+  }, async (staging) => await validateEvidenceBundleContents({ output: staging, candidateSha, schemaDirectory: request.schemaDirectory }), ["READY", name], request.publication);
 }
 
 function executionIdentity(): Record<string, string> {

@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { GitRepositoryState } from "./repository.ts";
+import { OwnedProcess } from "./process.ts";
 import { createHash } from "node:crypto";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -27,8 +30,28 @@ interface ValidationRequest {
   readonly finalizationMode?: "local" | "ci";
 }
 
-/** Independently derives the uploaded result from raw, normalized analyzer inputs. */
+const exactSource = new AsyncLocalStorage<{ root: string; candidateSha: string; repository: GitRepositoryState }>();
+
+/** Final validation independently establishes exact clean HEAD and Git object bytes. */
 export async function validateFinalizedEvidenceBundle(request: ValidationRequest): Promise<void> {
+  const schema = await realpath(request.schemaDirectory);
+  const root = await realpath(join(schema, "../../.."));
+  const repository = new GitRepositoryState(root, new OwnedProcess());
+  await repository.assertExactClean(request.candidateSha);
+  if (request.canonicalDirectory !== undefined && await realpath(request.canonicalDirectory) !== schema) {
+    throw invalid("final canonical inputs must belong to the exact requested checkout");
+  }
+  await exactSource.run({ root, candidateSha: request.candidateSha, repository }, async () => {
+    for (const name of await readdir(schema)) {
+      if (name.endsWith(".schema.v1.json")) { await readStableCanonicalFile(join(schema, name), name); }
+    }
+    await validateEvidenceBundleContents(request);
+  });
+  await repository.assertExactClean(request.candidateSha);
+}
+
+/** Staging content validation; exact-source admission belongs to finalized validation. */
+export async function validateEvidenceBundleContents(request: ValidationRequest): Promise<void> {
   const canonicalSchemaDirectory = await realpath(request.schemaDirectory).catch(() => { throw invalid("schema root is not realpath-resolvable"); });
   const repositoryRoot = await realpath(join(canonicalSchemaDirectory, "../../.."));
   if (!request.output.startsWith("/") || !/^[0-9a-f]{40}$/u.test(request.candidateSha)) {
@@ -48,7 +71,7 @@ export async function validateFinalizedEvidenceBundle(request: ValidationRequest
   if ((await readStableOutputFile(join(request.output, "READY"))).length !== 0) {throw invalid("READY must be empty");}
 
   const serialized = (await readStableOutputFile(join(request.output, variant))).toString("utf8");
-  await assertSerializedAgainstSchema(serialized, join(canonicalSchemaDirectory, schemaName(variant)));
+  await assertCanonicalSchema(serialized, join(canonicalSchemaDirectory, schemaName(variant)));
   const value = object(parseJsonWithoutDuplicateKeys(serialized), "evidence");
   if (value.candidateSha !== request.candidateSha) {throw invalid("evidence candidate SHA differs from the upload candidate");}
   assertExecution(value, request.finalizationMode ?? (process.env.GITHUB_ACTIONS === "true" ? "ci" : "local"));
@@ -257,8 +280,8 @@ async function readCanonicalPolicies(
   if (JSON.stringify(config) !== JSON.stringify({ exclude_dependencies: false, legacy_ast: false })) {throw invalid("Slither config contains unsupported exclusions or fields");}
   const policyBytes = await readStableCanonicalFile(join(directory, "suppressions.v1.json"), "suppressions.v1.json");
   const triageBytes = await readStableCanonicalFile(join(directory, "triage.v1.json"), "triage.v1.json");
-  await assertSerializedAgainstSchema(policyBytes.toString("utf8"), join(schemaDirectory, "suppression-ledger.schema.v1.json"));
-  await assertSerializedAgainstSchema(triageBytes.toString("utf8"), join(schemaDirectory, "triage-ledger.schema.v1.json"));
+  await assertCanonicalSchema(policyBytes.toString("utf8"), join(schemaDirectory, "suppression-ledger.schema.v1.json"));
+  await assertCanonicalSchema(triageBytes.toString("utf8"), join(schemaDirectory, "triage-ledger.schema.v1.json"));
   const policy = object(parseJsonWithoutDuplicateKeys(policyBytes.toString("utf8")), "suppression policy");
   const suppressions = array(policy.suppressions, "suppressions").map((item) => object(item, "suppression"));
   const suppressed = deriveSuppressions(findings, suppressions);
@@ -484,9 +507,19 @@ async function readStableCanonicalFile(path: string, label: string): Promise<Buf
   const info = await lstat(path, { bigint: true });
   if (!info.isFile() || info.isSymbolicLink()) {throw invalid(`canonical input is not a sealed regular file: ${label}`);}
   const handle = await (await import("node:fs/promises")).open(path, 0 | 131072);
-  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== info.ino || opened.dev !== info.dev || opened.nlink !== 1n) {throw invalid(`canonical input identity changed: ${label}`);} const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw invalid(`canonical input changed during read: ${label}`);} return bytes; } finally { await handle.close(); }
+  try { const opened = await handle.stat({ bigint: true }); if (opened.ino !== info.ino || opened.dev !== info.dev || opened.nlink !== 1n) {throw invalid(`canonical input identity changed: ${label}`);} const bytes = await handle.readFile(); const after = await handle.stat({ bigint: true }); if (after.ino !== opened.ino || after.dev !== opened.dev || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.nlink !== 1n) {throw invalid(`canonical input changed during read: ${label}`);} const source = exactSource.getStore();
+    if (source) {
+      const pathInRepository = relative(source.root, path);
+      await source.repository.assertCanonicalBytes(source.candidateSha, pathInRepository, bytes);
+    }
+    return bytes; } finally { await handle.close(); }
 }
 
 function object(value: unknown, name: string): JsonObject {if (value === null || typeof value !== "object" || Array.isArray(value)) {throw invalid(`${name} is not an object`);} return value as JsonObject;}
 function array(value: unknown, name: string): unknown[] {if (!Array.isArray(value)) {throw invalid(`${name} is not an array`);} return value;}
 function invalid(message: string): SlitherGateError {return new SlitherGateError("EVIDENCE_BUNDLE_INVALID", message);}
+
+async function assertCanonicalSchema(serialized: string, path: string): Promise<void> {
+  const schema = await readStableCanonicalFile(path, "validation schema");
+  await assertSerializedAgainstSchema(serialized, path, schema.toString("utf8"));
+}

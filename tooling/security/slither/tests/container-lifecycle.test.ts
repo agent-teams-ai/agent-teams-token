@@ -1,3 +1,4 @@
+import { ACQUIRE_MOUNTS, type MountAuthority } from "../src/adapters/mount-authority.ts";
 import assert from "node:assert/strict";
 import fs, { chmod, readFile, rm } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
@@ -94,6 +95,8 @@ function scriptCgroup(t: TestContext): string[] {
 }
 
 interface LifecycleOptions {
+  readonly authority?: MountAuthority;
+  readonly acquisitionFails?: boolean;
   readonly completion?: ProcessResult;
   readonly output?: Readonly<Record<string, string>>;
   readonly exported?: ProcessResult;
@@ -122,6 +125,11 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
   const calls: {args: readonly string[]; timeout: number}[] = [];
   let started = false; let authorized = false; let completed = false;
   const execute = (args: readonly string[]): ProcessResult => {
+    if (args[6] === ACQUIRE_MOUNTS) {
+      assert.equal(authorized, false, "acquisition must precede authorization");
+      assert.equal(cgroupReads.length, 6);
+      return result("", { exitCode: options.acquisitionFails ? 1 : 0 });
+    }
     if (args[2] === "/bin/bash") {
       assert.equal(cgroupReads.length, 6, "live cgroup proof must precede authorization");
       assert.deepEqual(args, ["exec", lifecycleId, "/bin/bash", "-ceu", AUTHORIZE_ANALYSIS]);
@@ -160,7 +168,7 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
     const response = await scripted.run(command, args, timeout, processOptions);
     return options.transport ? await options.transport(args, response, timeout, processOptions) : response;
   }};
-  return {output, calls, run: async () => await runContainerById(port, "/usr/bin/docker", ["create"], output, ["slither.exit"])};
+  return {output, calls, run: async () => await runContainerById(port, "/usr/bin/docker", ["create"], output, ["slither.exit"], undefined, options.authority)};
 }
 
 const codeIs = (code: string) => (error: unknown): boolean => error instanceof Error && "code" in error && error.code === code;
@@ -413,3 +421,16 @@ test("production completion followed by cancellation cannot start the next conta
   await assert.rejects(run.run(), (error: unknown) => error === reason);
   assert.equal(run.calls.length, calls, "the fixture stage cannot even query the daemon");
 });
+
+for (const acquisitionFails of [false, true]) {
+  test(`mount snapshot acquisition precedes analysis authorization (failure=${acquisitionFails})`, async (t) => {
+    const authority = { forge: "a".repeat(64), solc: "b".repeat(64), inputs: { "source.sol": "c".repeat(64) } };
+    const run = await lifecycle(t, { authority, acquisitionFails });
+    if (acquisitionFails) {
+      await assert.rejects(run.run(), codeIs("INPUT_HASH_MISMATCH"));
+      assert.equal(run.calls.some(({ args }) => args.includes(AUTHORIZE_ANALYSIS)), false);
+    } else { await run.run(); }
+    assert.ok(run.calls.some(({ args }) => args.includes(ACQUIRE_MOUNTS)));
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+  });
+}

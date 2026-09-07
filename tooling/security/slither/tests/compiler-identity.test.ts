@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { evaluatePolicy } from "../src/application/policy.ts";
-import { validateFinalizedEvidenceBundle } from "../src/adapters/evidence-bundle.ts";
+import { validateEvidenceBundleContents } from "../src/adapters/evidence-bundle.ts";
 import { writeReadyEvidence } from "../src/adapters/evidence.ts";
 import { sha256 } from "../src/adapters/fingerprint.ts";
 import { parseCompiledOutput, parseGateManifest } from "../src/adapters/runner.ts";
@@ -90,7 +90,7 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
     assertReadyPrecondition: async () => {}, publication: testPublication() });
   return { output, canonicalDirectory };
 }
-const validate = async (bundle: { output: string; canonicalDirectory: string }): Promise<void> => await validateFinalizedEvidenceBundle({ ...bundle, candidateSha: base, schemaDirectory, finalizationMode: "local" });
+const validate = async (bundle: { output: string; canonicalDirectory: string }): Promise<void> => await validateEvidenceBundleContents({ ...bundle, candidateSha: base, schemaDirectory, finalizationMode: "local" });
 
 test("captured Foundry output preserves exact raw bytes, all eight compiler commits and production pins", async () => {
   assert.equal(Buffer.byteLength(buildRaw), 369186);

@@ -47,6 +47,7 @@ const paths = { input: "/tmp/input", forge: "/tmp/forge", solc: "/tmp/solc", ima
 for (const create of [dockerCreateArguments, dockerVulnerableFixtureCreateArguments]) {
   test(`${create.name}: generated shell parses and preserves private tmpfs and readonly binds`, async () => {
     const args = create(paths);
+    assert.deepEqual(args.slice(0, 3), ["create", "--pull", "never"]);
     const parsed = await new OwnedProcess().run("/bin/bash", ["-n", "-c", args.at(-1)!], 3_000);
     assert.equal(parsed.exitCode, 0, parsed.stderr);
     assert.equal(parsed.timedOut, false);

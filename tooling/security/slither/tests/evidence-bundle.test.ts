@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { validateFinalizedEvidenceBundle } from "../src/adapters/evidence-bundle.ts";
+import { validateEvidenceBundleContents } from "../src/adapters/evidence-bundle.ts";
 import { findingFingerprint, sha256 } from "../src/adapters/fingerprint.ts";
 import { writeEnvironmentFailure, writeReadyEvidence } from "../src/adapters/evidence.ts";
 import type { AnalysisInput, Finding, GateManifest, PolicyDecision } from "../src/domain/model.ts";
@@ -20,7 +20,7 @@ const findings: readonly Finding[] = [golden.finding];
 const manifest: GateManifest = { schemaVersion: 1, targets: [{ path: "contracts/evm/src/A.sol", contract: "A" }], expectedContracts: ["A"], sources: [{ path: "contracts/evm/src/A.sol", sha256: "2".repeat(64) }], config: [], compiler: { version: "0.8.36+commit.8a079791", evmVersion: "paris", optimizerEnabled: true, optimizerRuns: 200, bytecodeHash: "ipfs", cborMetadata: true, useLiteralContent: false, viaIR: false, experimental: false, remappings: ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/", "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"] }, tools: { forgeArchiveSha256: "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57", forgeBinarySha256: "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f", solcBinarySha256: "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6" }, creationBytecodeSha256: bytecode, vulnerableFixture: testBuild.vulnerableFixture, detectorInventory: { path: "detectors.json", sha256: "d".repeat(64) } };
 const input: AnalysisInput = { success: true, findings, analyzedContracts: ["A"], analyzedSources: ["src/A.sol"], closure: [], detectorInventory: [...Array.from({ length: 100 }, (_, index) => `d-${index}`), "fixture-detector"].toSorted(), compiler: manifest.compiler, creationBytecodeSha256: bytecode, freshFoundryCreationBytecodeSha256: bytecode, analysisErrors: [], forgeBinarySha256: manifest.tools.forgeBinarySha256, solcBinarySha256: manifest.tools.solcBinarySha256, compilerEvidence: testBuild.compilerEvidence, fixtureProof: testBuild.fixtureProof };
 const decision: PolicyDecision = { category: "clean", exitCode: 0, blocking: [], visible: findings, suppressed: [], errors: [] };
-const validate = async (output: string, candidateSha = sha): Promise<void> => await validateFinalizedEvidenceBundle({ output, candidateSha, schemaDirectory, canonicalDirectory: join(dirname(output), "canonical"), finalizationMode: "local" });
+const validate = async (output: string, candidateSha = sha): Promise<void> => await validateEvidenceBundleContents({ output, candidateSha, schemaDirectory, canonicalDirectory: join(dirname(output), "canonical"), finalizationMode: "local" });
 
 async function makeBundle(output: string): Promise<void> {
   const canonicalDirectory = join(dirname(output), "canonical");
@@ -40,7 +40,7 @@ test("default canonical validation resolves repository-relative manifest inputs"
   try {
     await makeBundle(output);
     await assert.rejects(
-      validateFinalizedEvidenceBundle({ output, candidateSha: sha, schemaDirectory, finalizationMode: "local" }),
+      validateEvidenceBundleContents({ output, candidateSha: sha, schemaDirectory, finalizationMode: "local" }),
       /raw targets, sources or detectors differ/u,
     );
   } finally {await rm(parent, { recursive: true, force: true });}
@@ -143,7 +143,7 @@ test("CI finalization rejects evidence without the current complete GitHub execu
   try {
     await makeBundle(output);
     delete process.env.GITHUB_RUN_ATTEMPT;
-    await assert.rejects(validateFinalizedEvidenceBundle({ output, candidateSha: sha, schemaDirectory,
+    await assert.rejects(validateEvidenceBundleContents({ output, candidateSha: sha, schemaDirectory,
       canonicalDirectory: join(parent, "canonical"), finalizationMode: "ci" }), /current CI environment|requires GitHub Actions/u);
   } finally {
     if (runAttempt === undefined) {delete process.env.GITHUB_RUN_ATTEMPT;} else {process.env.GITHUB_RUN_ATTEMPT = runAttempt;}

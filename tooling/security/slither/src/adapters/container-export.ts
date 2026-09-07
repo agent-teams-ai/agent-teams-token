@@ -1,3 +1,4 @@
+import type { ScratchCustody } from "./scratch-custody.ts";
 import { constants, lstat, open, realpath, readdir } from "node:fs/promises";
 import { SlitherGateError } from "../domain/model.ts";
 import { FIXTURE_OUTPUT_FILES, PRODUCTION_OUTPUT_FILES } from "./container-contract.ts";
@@ -188,12 +189,12 @@ export function linuxOutputDirectoryPath(fd: number): string {
   return `/proc/self/fd/${fd}`;
 }
 
-export async function receiveOutput(raw: string, directory: string, allowlist: readonly string[], exact: boolean, directoryPath: OutputDirectoryPath = linuxOutputDirectoryPath): Promise<void> {
+export async function receiveOutput(raw: string, directory: string, allowlist: readonly string[], exact: boolean, directoryPath: OutputDirectoryPath = linuxOutputDirectoryPath, custody?: ScratchCustody): Promise<void> {
   try {
     // Validate the entire frame before creating any host file. The existing
     // ProcessPort is buffered; the trusted producer bounds bytes at source.
     const files = decodeOutput(raw, allowlist, exact);
-    await writeOutput(directory, files, directoryPath);
+    await writeOutput(directory, files, directoryPath, custody);
   } catch (cause) {
     const failure = invalidExport();
     failure.cause = cause;
@@ -201,10 +202,12 @@ export async function receiveOutput(raw: string, directory: string, allowlist: r
   }
 }
 
-async function writeOutput(directory: string, files: readonly ExportedFile[], directoryPath: OutputDirectoryPath): Promise<void> {
+async function writeOutput(directory: string, files: readonly ExportedFile[], directoryPath: OutputDirectoryPath, custody?: ScratchCustody): Promise<void> {
+  await custody?.assert(directory);
   if (await realpath(directory) !== directory) {throw invalidExport();}
   const root = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
+    await custody?.assertHandle(directory, root);
     const before = await root.stat({bigint: true});
     if (!before.isDirectory() || before.uid !== BigInt(process.getuid?.() ?? -1) || (before.mode & 0o7777n) !== 0o700n) {throw invalidExport();}
     const anchored = directoryPath(root.fd, directory);
@@ -212,7 +215,7 @@ async function writeOutput(directory: string, files: readonly ExportedFile[], di
     if ((await readdir(anchored)).length !== 0) {throw invalidExport();}
     for (const {name, bytes} of files) {
       const handle = await open(`${anchored}/${name}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try {await handle.writeFile(bytes);} finally {await handle.close();}
+      try {await custody?.file(`${directory}/${name}`, handle); await handle.writeFile(bytes);} finally {await handle.close();}
     }
     const after = await lstat(directory, {bigint: true});
     if (after.dev !== before.dev || after.ino !== before.ino || after.mode !== before.mode || after.uid !== before.uid) {throw invalidExport();}

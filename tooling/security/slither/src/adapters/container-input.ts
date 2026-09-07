@@ -1,5 +1,6 @@
+import type { ScratchCustody } from "./scratch-custody.ts";
 import { chmod, constants, lstat, mkdir, open, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { SlitherGateError } from "../domain/model.ts";
 
 export async function readStableRegularFile(path: string, label: string): Promise<Buffer> {
@@ -27,6 +28,7 @@ export async function readStableRegularFile(path: string, label: string): Promis
 export async function ensureContainerReadableDirectory(
   root: string,
   relativePath: string,
+  custody?: ScratchCustody,
 ): Promise<void> {
   let current = root;
   for (const part of relativePath.split("/").filter((value) => value !== ".")) {
@@ -34,6 +36,7 @@ export async function ensureContainerReadableDirectory(
       throw unsafeInput();
     }
     current = join(current, part);
+    if (custody) { await custody.directory(current); continue; }
     await mkdir(current, { mode: 0o700 }).catch((cause: NodeJS.ErrnoException) => {
       if (cause.code !== "EEXIST") { throw cause; }
     });
@@ -48,13 +51,16 @@ export async function ensureContainerReadableDirectory(
 export async function writeContainerReadableFile(
   path: string,
   content: Uint8Array | string,
+  custody?: ScratchCustody,
 ): Promise<void> {
+  await custody?.assert(dirname(path));
   const handle = await open(
     path,
     constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
     0o600,
   );
   try {
+    await custody?.file(path, handle);
     await handle.writeFile(content);
     await handle.sync();
     await handle.chmod(0o444);

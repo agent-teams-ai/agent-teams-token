@@ -1,4 +1,6 @@
-import { chmod, constants, lstat, mkdir, mkdtemp, open, readFile, realpath, readdir, rm, stat } from "node:fs/promises";
+import { resolveDockerCli } from "./executable.ts";
+import { finalizeScratch, ScratchCustody } from "./scratch-custody.ts";
+import { constants, lstat, mkdtemp, open, realpath, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { validateExternalTempRoot } from "./validated-environment.ts";
 import { dirname, join } from "node:path";
@@ -59,31 +61,37 @@ interface PreparedGate {
 }
 export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
   const { repositoryRoot, processPort, forgePath, solcPath, dockerPath } = request;
+  if (await resolveDockerCli(dockerPath) !== dockerPath) { throw new SlitherGateError("DOCKER_CLI_INVALID", "Docker executable binding must be canonical"); }
   const prepared = await prepareGate(request);
   const { base, manifest, imageEnvironment, forgeBinarySha256, solcBinarySha256 } = prepared;
   const temporaryRoot = await validateExternalTempRoot(repositoryRoot, tmpdir());
   const scratch = await mkdtemp(join(temporaryRoot, "agtmai-slither-"));
-  if ((await realpath(scratch)) !== scratch) {throw new SlitherGateError("TEMP_ROOT_INVALID", "temporary staging identity changed");}
+  const custody = await ScratchCustody.acquire(scratch);
   const inputDirectory = join(scratch, "input");
   const rawOutput = join(scratch, "raw");
-  await chmod(scratch, 0o700);
-  await mkdir(inputDirectory, { mode: 0o700 });
-  await chmod(inputDirectory, 0o755);
-  await mkdir(rawOutput, { mode: 0o700 });
+  const failures: unknown[] = [];
   try {
+    if ((await realpath(scratch)) !== scratch) {throw new SlitherGateError("TEMP_ROOT_INVALID", "temporary staging identity changed");}
+    await custody.directory(inputDirectory);
+    await custody.directory(rawOutput, 0o700);
     const productionClosure = [...manifest.sources, ...manifest.config, manifest.detectorInventory];
     for (const entry of productionClosure) {
-      await copyPinned(repositoryRoot, inputDirectory, entry);
+      await copyPinned(repositoryRoot, inputDirectory, entry, custody);
     }
     const targetsPath = join(inputDirectory, "tooling/security/slither/targets.txt");
     await writeContainerReadableFile(
       targetsPath,
       `${manifest.targets.map(({ path }) => path.replace(/^contracts\/evm\//u, "")).join("\n")}\n`,
+      custody,
     );
     const before = await closure(repositoryRoot, productionClosure);
-    const result = await runContainerById(processPort, dockerPath, dockerCreateArguments({ input: inputDirectory, forge: forgePath, solc: solcPath, ...imageEnvironment }), rawOutput, PRODUCTION_OUTPUT_FILES);
+    const result = await runContainerById(processPort, dockerPath, dockerCreateArguments({ input: inputDirectory, forge: forgePath, solc: solcPath, ...imageEnvironment }), rawOutput, PRODUCTION_OUTPUT_FILES, custody, {
+      forge: forgeBinarySha256, solc: solcBinarySha256,
+      inputs: Object.fromEntries([...productionClosure.map((entry) => [entry.path, entry.sha256]),
+        ["tooling/security/slither/targets.txt", sha256(`${manifest.targets.map(({ path }) => path.replace(/^contracts\/evm\//u, "")).join("\n")}\n`)] ]),
+    });
     await assertContainerResult(result, rawOutput);
-    const rawSeal = await sealRawOutput(rawOutput);
+    const rawSeal = await sealRawOutput(rawOutput, custody);
     await verifyVersions(rawOutput, rawSeal);
     const after = await closure(repositoryRoot, productionClosure);
     if (JSON.stringify(before) !== JSON.stringify(after)) {
@@ -100,6 +108,7 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
     const fixtureProof = await assertRealVulnerableFixture({
       repositoryRoot,
       scratch,
+      custody,
       processPort,
       dockerPath,
       forgePath,
@@ -107,6 +116,8 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
       imageEnvironment,
       expectedDetectors: prepared.expectedDetectors,
       fixture: manifest.vulnerableFixture,
+      tools: manifest.tools,
+      config: manifest.config,
     });
     const input: AnalysisInput = {
       success: parsed.success && inventory.success, findings: parsed.findings, analyzedContracts: inventory.contracts, analyzedSources: inventory.sources, closure: after,
@@ -123,31 +134,42 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
       policyHash: sha256(await readStableRegularFile(join(base, "suppressions.v1.json"), "suppressions.v1.json")),
       triageHash: sha256(await readStableRegularFile(join(base, "triage.v1.json"), "triage.v1.json")),
     };
-  } finally {
-    await rm(scratch, { recursive: true, force: true });
+  } catch (cause) { failures.push(cause); throw cause; }
+  finally {
+    await finalizeScratch(custody, failures);
   }
 }
 interface VulnerableFixtureRequest {
-  readonly repositoryRoot: string; readonly scratch: string;
+  readonly repositoryRoot: string; readonly scratch: string; readonly custody: ScratchCustody;
   readonly processPort: ProcessPort; readonly dockerPath: string;
   readonly forgePath: string; readonly solcPath: string; readonly imageEnvironment: OfficialImageEnvironment;
+  readonly tools: GateManifest["tools"]; readonly config: readonly ClosureEntry[];
   readonly expectedDetectors: readonly string[]; readonly fixture: GateManifest["vulnerableFixture"]; }
 async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): Promise<AnalysisInput["fixtureProof"]> {
   const input = join(request.scratch, "fixture-input");
   const output = join(request.scratch, "fixture-output");
-  await mkdir(input, { mode: 0o700 });
-  await chmod(input, 0o755);
-  await ensureContainerReadableDirectory(input, "contracts/evm/src");
-  await ensureContainerReadableDirectory(input, "tooling/security/slither");
-  await mkdir(output, { mode: 0o700 });
+  await request.custody.directory(input);
+  await ensureContainerReadableDirectory(input, "contracts/evm/src", request.custody);
+  await ensureContainerReadableDirectory(input, "tooling/security/slither", request.custody);
+  await request.custody.directory(output, 0o700);
   const fixtureBytes = await readConfinedStableFile(request.repositoryRoot, request.fixture.source.path, "vulnerable fixture");
   if (sha256(fixtureBytes) !== request.fixture.source.sha256) {throw new SlitherGateError("VULNERABLE_FIXTURE_NOT_BLOCKED", "vulnerable fixture source pin differs");}
-  await writeContainerReadableFile(join(input, "contracts/evm/src/Vulnerable.sol"), fixtureBytes);
-  await safeCopyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"));
-  await safeCopyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"));
-  const result = await runContainerById(request.processPort, request.dockerPath, dockerVulnerableFixtureCreateArguments({ input, forge: request.forgePath, solc: request.solcPath, ...request.imageEnvironment }), output, FIXTURE_OUTPUT_FILES);
+  await writeContainerReadableFile(join(input, "contracts/evm/src/Vulnerable.sol"), fixtureBytes, request.custody);
+  await safeCopyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"), request.custody);
+  await safeCopyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"), request.custody);
+  const result = await runContainerById(request.processPort, request.dockerPath, dockerVulnerableFixtureCreateArguments({ input, forge: request.forgePath, solc: request.solcPath, ...request.imageEnvironment }), output, FIXTURE_OUTPUT_FILES, request.custody, {
+    forge: request.tools.forgeBinarySha256, solc: request.tools.solcBinarySha256,
+    inputs: Object.fromEntries([
+      ["contracts/evm/src/Vulnerable.sol", request.fixture.source.sha256],
+      ...["contracts/evm/foundry.toml", "tooling/security/slither/slither.config.json"].map((path) => {
+        const entry = request.config.find((value) => value.path === path);
+        if (!entry) { throw new SlitherGateError("INPUT_HASH_MISMATCH", "fixture config pin is absent"); }
+        return [path, entry.sha256];
+      }),
+    ]),
+  });
   await assertContainerResult(result, output);
-  const outputSeal = await sealRawOutput(output);
+  const outputSeal = await sealRawOutput(output, request.custody);
   await verifyVersions(output, outputSeal);
   const parsed = await parseSlitherJson((await requiredRaw(output, outputSeal, "slither.json")).toString("utf8"), input);
   const status = parseSlitherExit(await requiredRaw(output, outputSeal, "slither.exit"));
@@ -222,8 +244,8 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
   if (solcPath !== expectedSolcPath || await realpath(solcPath) !== solcPath) {throw new SlitherGateError("SOLC_PIN_MISMATCH", "solc must be the offline-installed project override");}
   await assertTool(forgePath, manifest.tools.forgeBinarySha256, "FORGE_PIN_MISMATCH");
   await assertTool(solcPath, manifest.tools.solcBinarySha256, "SOLC_PIN_MISMATCH");
-  const forgeBinarySha256 = sha256(await readFile(forgePath));
-  const solcBinarySha256 = sha256(await readFile(solcPath));
+  const forgeBinarySha256 = manifest.tools.forgeBinarySha256;
+  const solcBinarySha256 = manifest.tools.solcBinarySha256;
   const imageEnvironment = await assertImage(processPort, dockerPath);
   return {
     base,
@@ -239,11 +261,12 @@ async function prepareGate(request: RunGateRequest): Promise<PreparedGate> {
 export { assertContainerResult };
 interface SealedFile {readonly dev:bigint;readonly ino:bigint;readonly size:bigint;readonly mtimeNs:bigint;readonly sha256:string}
 type SealedOutput=ReadonlyMap<string,SealedFile>;
-async function sealRawOutput(directory:string):Promise<SealedOutput>{
+async function sealRawOutput(directory:string,custody:ScratchCustody):Promise<SealedOutput>{
+  await custody.assert(directory);
   const before=await lstat(directory,{bigint:true});if(!before.isDirectory()||before.isSymbolicLink()) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output directory is unsafe");}
   const sealed=new Map<string,SealedFile>();
-  for(const name of await readdir(directory)){const path=join(directory,name);const listed=await lstat(path,{bigint:true});const handle=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const opened=await handle.stat({bigint:true});if(!opened.isFile()||opened.isSymbolicLink()||opened.nlink!==1n||opened.dev!==listed.dev||opened.ino!==listed.ino) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output identity is unsafe");}await handle.chmod(0o444);const bytes=await handle.readFile();const after=await handle.stat({bigint:true});if(after.dev!==opened.dev||after.ino!==opened.ino||after.size!==opened.size||after.mtimeNs!==opened.mtimeNs) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output changed while sealing");}sealed.set(name,{dev:after.dev,ino:after.ino,size:after.size,mtimeNs:after.mtimeNs,sha256:sha256(bytes)});}finally{await handle.close();}}
-  await chmod(directory,0o555);const after=await lstat(directory,{bigint:true});if(after.dev!==before.dev||after.ino!==before.ino) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output directory changed while sealing");}return sealed;
+  for(const name of await readdir(directory)){const path=join(directory,name);await custody.assert(path);const listed=await lstat(path,{bigint:true});const handle=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{await custody.assertHandle(path,handle);const opened=await handle.stat({bigint:true});if(!opened.isFile()||opened.isSymbolicLink()||opened.nlink!==1n||opened.dev!==listed.dev||opened.ino!==listed.ino) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output identity is unsafe");}await handle.chmod(0o444);const bytes=await handle.readFile();const after=await handle.stat({bigint:true});if(after.dev!==opened.dev||after.ino!==opened.ino||after.size!==opened.size||after.mtimeNs!==opened.mtimeNs) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output changed while sealing");}sealed.set(name,{dev:after.dev,ino:after.ino,size:after.size,mtimeNs:after.mtimeNs,sha256:sha256(bytes)});}finally{await handle.close();}}
+  await custody.chmod(directory,0o555);const after=await lstat(directory,{bigint:true});if(after.dev!==before.dev||after.ino!==before.ino) {throw new SlitherGateError("INPUT_HASH_MISMATCH","analyzer output directory changed while sealing");}return sealed;
 }
 async function requiredRaw(output:string,sealed:SealedOutput,name:string):Promise<Buffer>{
   const expected=sealed.get(name);if(!expected) {throw new SlitherGateError("MALFORMED_JSON","required analyzer output is absent");}
@@ -371,11 +394,11 @@ async function readConfinedStableFile(root: string, relative: string, label: str
   } finally { if (current !== rootHandle) {await current.close();} await rootHandle.close().catch(() => {}); }
 }
 const safePathList = (value: string): boolean => value.split(":").every((entry) => /^\/[A-Za-z0-9._/-]+$/u.test(entry) && !entry.split("/").includes(".."));
-async function copyPinned(root: string, destination: string, entry: ClosureEntry): Promise<void> {
+async function copyPinned(root: string, destination: string, entry: ClosureEntry, custody: ScratchCustody): Promise<void> {
   assertManifestPath(entry.path); const content = await readConfinedStableFile(root, entry.path, entry.path);
   if (sha256(content) !== entry.sha256) {throw new SlitherGateError("INPUT_HASH_MISMATCH", `pinned input differs: ${entry.path}`);}
-  await ensureContainerReadableDirectory(destination, dirname(entry.path));
-  await writeContainerReadableFile(join(destination, entry.path), content);
+  await ensureContainerReadableDirectory(destination, dirname(entry.path), custody);
+  await writeContainerReadableFile(join(destination, entry.path), content, custody);
 }
 async function closure(root: string, entries: readonly ClosureEntry[]): Promise<ClosureEntry[]> {
   return await Promise.all(entries.map(async ({ path }) => { assertManifestPath(path); return { path, sha256: sha256(await readConfinedStableFile(root, path, path)) }; }));
@@ -402,9 +425,9 @@ export async function verifyVersions(output: string, sealed?: SealedOutput): Pro
     throw new SlitherGateError("TOOL_VERSION_MISMATCH", "forge.version did not report the exact pinned version");
   }
 }
-async function safeCopyFile(source: string, destination: string): Promise<void> {
+async function safeCopyFile(source: string, destination: string, custody: ScratchCustody): Promise<void> {
   const content = await readStableRegularFile(source, "vulnerable fixture input");
-  await writeContainerReadableFile(destination, content);
+  await writeContainerReadableFile(destination, content, custody);
 }
 
 export async function parseCompiledOutput(output: string, sealed: SealedOutput): Promise<CompiledOutput<GateManifest["compiler"]>>;
