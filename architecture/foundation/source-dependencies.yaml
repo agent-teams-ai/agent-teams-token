@@ -8,7 +8,21 @@ governedRoots:
   - tooling/local-solana/src
   - tooling/deployment-plan/src
   - tooling/security/slither/src
+  - scripts/execution-environment
 boundaries:
+  - id: tooling.execution-environment
+    roots:
+      - scripts/execution-environment
+    entrypoints:
+      - scripts/execution-environment/toolchain-environment.mjs
+    allow:
+      boundaries: []
+      packages: []
+      builtins:
+        - node:child_process
+        - node:fs
+        - node:path
+      runtimeReferences: []
   - id: token.domain
     roots:
       - packages/domain/src
@@ -254,10 +268,12 @@ boundaries:
       - tooling/security/slither/src/adapters/validated-environment.ts
     allow:
       boundaries:
+        - tooling.execution-environment
         - tooling.slither.application
         - tooling.slither.domain
       packages: []
       builtins:
+        - node:async_hooks
         - node:child_process
         - node:crypto
         - node:fs

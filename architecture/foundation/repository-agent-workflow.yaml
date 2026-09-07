@@ -59,6 +59,7 @@ fullScanPaths:
   - scripts/toolchain-archive.mjs
   - scripts/toolchain-cleanup.mjs
   - scripts/toolchain-environment.mjs
+  - scripts/execution-environment/toolchain-environment.mjs
   - scripts/toolchain-installation.mjs
   - scripts/toolchain-policy.mjs
   - scripts/toolchain-provenance.mjs

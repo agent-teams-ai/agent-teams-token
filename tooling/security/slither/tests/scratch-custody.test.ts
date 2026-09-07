@@ -26,6 +26,9 @@ for (const replacement of ["root", "child", "unknown", "sealed"]) {
       } else {
         const replaced = replacement === "root" ? root : child;
         if (replacement !== "unknown") {
+          // Darwin requires owner write permission on the directory being moved.
+          // Only the child-replacement fixture needs this; sealed cleanup stays 0555.
+          if (replacement === "child") { await chmod(child, 0o755); }
           await rename(replaced, `${replaced}-displaced`);
           await mkdir(replaced, { mode: 0o700 });
         } else { await chmod(child, 0o755); }

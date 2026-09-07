@@ -272,9 +272,11 @@ test("clean-candidate CLI validates current hashes and rejects drift and unpinne
     for (const path of [
       "scripts/toolchain-archive.mjs",
       "scripts/toolchain-environment.mjs",
+      "scripts/execution-environment/toolchain-environment.mjs",
       "scripts/toolchain-policy.mjs",
       "scripts/toolchain-provenance.mjs",
     ]) {
+      mkdirSync(dirname(join(checkout, path)), { recursive: true });
       cpSync(join(repositoryRoot, path), join(checkout, path));
     }
     cpSync(
@@ -297,6 +299,7 @@ test("clean-candidate CLI validates current hashes and rejects drift and unpinne
       "scripts/tests/tooling-boundaries.test.mjs",
       "scripts/toolchain-archive.mjs",
       "scripts/toolchain-environment.mjs",
+      "scripts/execution-environment/toolchain-environment.mjs",
       "scripts/toolchain-policy.mjs",
       "scripts/toolchain-provenance.mjs",
       "package.json",
