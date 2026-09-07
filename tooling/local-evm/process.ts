@@ -172,51 +172,63 @@ export async function startOwnedAnvil(
 
 async function superviseAnvil(executable: string, fundedAddress: string): Promise<void> {
   const control = supervisorControl();
-  const child = spawn(executable, [
-    "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
-    "--fund-accounts", `${fundedAddress}:1000000000000000000`,
-  ], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
-  if (child.pid === undefined) {
-    try {
+  try {
+    const child = spawn(executable, [
+      "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
+      "--fund-accounts", `${fundedAddress}:1000000000000000000`,
+    ], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    if (child.pid === undefined) {
       await listeningUrl(child);
       throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
-    } finally {control.dispose();}
-  }
-  const startup = listeningUrl(child).then(
-    (rpcUrl) => ({status: "ready" as const, rpcUrl}),
-    (cause: unknown) => ({status: "failed" as const, cause}),
-  );
-  try {
-    let processStart: string;
-    try {processStart = await processStartIdentity(child.pid);}
-    catch (cause) {
-      const outcome = await Promise.race([startup, control.terminated]);
-      if (outcome.status === "failed") {throw outcome.cause;}
-      throw cause;
     }
-    const identity = {pid: child.pid, processStart};
-    await control.write({ type: "identity", ...identity });
-    if (!await control.acknowledged) {
+    const startupCancellation = new AbortController();
+    const startup = listeningUrl(child, startupCancellation.signal).then(
+      (rpcUrl) => ({status: "ready" as const, rpcUrl}),
+      (cause: unknown) => ({status: "failed" as const, cause}),
+    );
+    let failure: {cause: unknown} | undefined;
+    try {
+      let processStart: string;
+      try {processStart = await processStartIdentity(child.pid);}
+      catch (cause) {
+        const outcome = await Promise.race([startup, control.terminated]);
+        if (outcome.status === "failed") {throw outcome.cause;}
+        throw cause;
+      }
+      const identity = {pid: child.pid, processStart};
+      await control.write({ type: "identity", ...identity });
+      if (!await control.acknowledged) {
+        const terminal = await control.terminated;
+        if (terminal.cause) {throw terminal.cause;}
+        return;
+      }
+      const outcome = await Promise.race([startup, control.terminated]);
+      if (outcome.status === "terminated") {
+        if (outcome.cause) {throw outcome.cause;}
+        return;
+      }
+      if (outcome.status === "failed") {throw outcome.cause;}
+      await control.write({ type: "ready", rpcUrl: outcome.rpcUrl });
       const terminal = await control.terminated;
       if (terminal.cause) {throw terminal.cause;}
-      return;
+    } catch (cause) {
+      failure = {cause};
+      throw cause;
+    } finally {
+      try {
+        await stopExactChild(child);
+      } catch (cleanupCause) {
+        if (failure) {
+          throw new AggregateError([failure.cause, cleanupCause], "Anvil supervisor failed and owned-child cleanup also failed", {cause: failure.cause});
+        }
+        throw cleanupCause;
+      } finally {
+        // Cleanup can reject without a close event. Settle startup in either case.
+        startupCancellation.abort();
+        await startup;
+      }
     }
-    const outcome = await Promise.race([startup, control.terminated]);
-    if (outcome.status === "terminated") {
-      if (outcome.cause) {throw outcome.cause;}
-      return;
-    }
-    if (outcome.status === "failed") {throw outcome.cause;}
-    await control.write({ type: "ready", rpcUrl: outcome.rpcUrl });
-    const terminal = await control.terminated;
-    if (terminal.cause) {throw terminal.cause;}
-  } finally {
-    try {
-      await stopExactChild(child);
-      // Reaping also settles startup and clears its deadline/listeners on cancellation.
-      await startup;
-    } finally {control.dispose();}
-  }
+  } finally {control.dispose();}
 }
 
 function supervisorControl() {
@@ -376,12 +388,13 @@ export async function authenticateProcess(
 
 type AnvilChild = ChildProcessByStdio<null, Readable, Readable>;
 
-async function listeningUrl(child: AnvilChild): Promise<string> {
+async function listeningUrl(child: AnvilChild, signal?: AbortSignal): Promise<string> {
   return await new Promise((resolve, reject) => {
     let pending = "";
     const timeout = setTimeout(() => fail(new LocalEvmError("LOCAL_EVM_ANVIL_START_TIMEOUT", "Anvil did not publish its private listening address")), 10_000);
     const cleanup = (): void => {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
       child.stdout.removeListener("data", onStdout);
       child.removeListener("error", fail);
       child.removeListener("close", onClose);
@@ -390,6 +403,7 @@ async function listeningUrl(child: AnvilChild): Promise<string> {
       cleanup();
       reject(cause);
     };
+    const onAbort = (): void => fail(signal?.reason);
     // Account and mnemonic output is deliberately neither accumulated nor forwarded.
     child.stderr.resume();
     const onStdout = (chunk: Buffer): void => {
@@ -408,6 +422,8 @@ async function listeningUrl(child: AnvilChild): Promise<string> {
     child.stdout.on("data", onStdout);
     child.once("error", fail);
     child.once("close", onClose);
+    signal?.addEventListener("abort", onAbort, {once: true});
+    if (signal?.aborted) {onAbort();}
   });
 }
 

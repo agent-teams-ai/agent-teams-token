@@ -7,6 +7,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
+import { stripTypeScriptTypes } from "node:module";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { LocalEvmError } from "../model.ts";
 import { authenticateProcess, command, processStartIdentity, startOwnedAnvil } from "../process.ts";
 import { pinnedFoundryBinaries } from "../toolchain.ts";
 import { assertPayloadStopped, syntheticAnvil, waitForJson } from "./fixtures/synthetic-anvil.ts";
@@ -37,6 +41,131 @@ test("a missing Anvil executable rejects through the owned-process API", { timeo
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("synchronous supervisor spawn failure disposes control with the pipe held open", {timeout: 10_000}, async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-supervisor-sync-spawn-"));
+  const observer = join(directory, "observer.mjs");
+  const report = join(directory, "report.json");
+  // Inject only at the inner spawn boundary. E2BIG comes from the real kernel;
+  // the supervisor process itself starts with ordinary arguments/environment.
+  await writeFile(observer, [
+    `import childProcess from "node:child_process";`,
+    `import {syncBuiltinESMExports} from "node:module";`,
+    `import {writeFileSync} from "node:fs";`,
+    `const original = childProcess.spawn;`,
+    `const events = [[process.stdin, ["data", "end", "close", "error"]], [process.stdout, ["close", "error"]]];`,
+    `const counts = () => events.flatMap(([stream, names]) => names.map(name => stream.listenerCount(name)));`,
+    `const before = counts(); let code; let installed;`,
+    `childProcess.spawn = (...args) => {`,
+    `  installed = counts().map((count, index) => count - before[index]);`,
+    `  try {return original(process.execPath, ["-e", "", "x".repeat(8 * 1024 * 1024)], {env: {}, stdio: "ignore"});}`,
+    `  catch (error) {code = error.code; throw error;}`,
+    `};`,
+    `syncBuiltinESMExports();`,
+    `process.once("beforeExit", () => writeFileSync(${JSON.stringify(report)}, JSON.stringify({code, installed, remaining: counts().map((count, index) => count - before[index]), flowing: process.stdin.readableFlowing})));`,
+  ].join("\n"));
+  const supervisor = spawn(process.execPath, ["--import", observer,
+    fileURLToPath(new URL("../process.ts", import.meta.url)), "--supervise-anvil", process.execPath, firstAddress],
+  {stdio: ["pipe", "pipe", "pipe"]});
+  supervisor.stdin.on("error", () => {});
+  let stderr = "";
+  supervisor.stdout.resume();
+  supervisor.stderr.on("data", (chunk: Buffer) => {stderr += chunk.toString();});
+  let exited = false;
+  const closed = new Promise<void>((resolve) => supervisor.once("close", () => {exited = true; resolve();}));
+  try {
+    for (let i = 0; i < 250 && !exited; i += 1) {await delay(10);}
+    assert.equal(supervisor.stdin.writableEnded, false, "parent must hold the control pipe open");
+    context.diagnostic(`held control pipe; supervisor=${supervisor.pid}; exited=${exited}; stderr=${JSON.stringify(stderr)}`);
+    assert.equal(exited, true, "synchronous spawn failure must settle without parent EOF");
+    assert.equal(supervisor.exitCode, 1);
+    assert.match(stderr, /E2BIG/);
+    assert.deepEqual(JSON.parse(await readFile(report, "utf8")), {
+      code: "E2BIG", installed: [1, 1, 1, 1, 1, 1], remaining: [0, 0, 0, 0, 0, 0], flowing: false,
+    });
+  } finally {
+    if (!exited) {supervisor.kill("SIGKILL");}
+    await closed;
+    await rm(directory, {recursive: true, force: true});
+  }
+});
+
+for (const {boundary, cleanupFails} of [
+  {boundary: "startup", cleanupFails: true},
+  {boundary: "identity", cleanupFails: true},
+  {boundary: "ready", cleanupFails: true},
+  {boundary: "terminal", cleanupFails: true},
+  {boundary: "stop", cleanupFails: true},
+  {boundary: "startup", cleanupFails: false},
+  {boundary: "identity", cleanupFails: false},
+  {boundary: "ready", cleanupFails: false},
+] as const) {
+  test(`supervisor preserves ${boundary} outcome with cleanup ${cleanupFails ? "failure" : "success"} and settles startup`, {timeout: 3_000}, async (context) => {
+    // Evaluate the exact private supervisor/control/listening functions with only
+    // OS boundaries supplied. No production exports or fixture hooks are added.
+    const source = await readFile(new URL("../process.ts", import.meta.url), "utf8");
+    const functions = source.slice(source.indexOf("async function superviseAnvil("), source.indexOf("async function supervisorMessage("))
+      + source.slice(source.indexOf("async function listeningUrl("), source.indexOf("async function stopExactChild("));
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const child = Object.assign(new EventEmitter(), {pid: 123, stdout: new PassThrough(), stderr: new PassThrough()});
+    const primary = new Error(`${boundary} failed`);
+    const cleanup = new Error("cleanup failed");
+    let stops = 0;
+    const evaluate = new Function("spawn", "process", "processStartIdentity", "stopExactChild", "LocalEvmError",
+      `${stripTypeScriptTypes(functions)}\nreturn superviseAnvil;`);
+    const supervise = evaluate(() => child, {stdin, stdout, env: {}}, async () => "linux:123", async () => {
+      stops += 1;
+      // Failed cleanup supplies no close: pending startup must be cancelled.
+      if (cleanupFails) {throw cleanup;}
+      child.emit("close", 0);
+    }, LocalEvmError) as (executable: string, address: string) => Promise<void>;
+    const write = stdout.write.bind(stdout);
+    stdout.write = ((chunk: string, callback: (error?: Error) => void): boolean => {
+      const message = JSON.parse(chunk) as {type: string};
+      if (message.type === boundary) {throw primary;}
+      const result = write(chunk, callback);
+      if (message.type === "identity") {
+        queueMicrotask(() => {
+          stdin.write("ack\n");
+          if (boundary === "startup") {child.emit("error", primary);}
+          if (boundary === "ready") {child.stdout.write("Listening on 127.0.0.1:8545\n");}
+          if (boundary === "terminal") {stdin.emit("error", primary);}
+          if (boundary === "stop") {stdin.write("stop\n");}
+        });
+      }
+      return result;
+    }) as typeof stdout.write;
+    let deadline: NodeJS.Timeout | undefined;
+    try {
+      const result = await Promise.race([
+        supervise("synthetic", firstAddress).then(() => ({cause: undefined}), (cause: unknown) => ({cause})),
+        new Promise<never>((_, reject) => {deadline = setTimeout(() => reject(new Error("finalization did not settle within 500ms")), 500);}),
+      ]);
+      context.diagnostic(`observed=${result.cause instanceof Error ? result.cause.message : String(result.cause)}; cleanupFails=${cleanupFails}`);
+      if (cleanupFails && boundary !== "stop") {
+        assert(result.cause instanceof AggregateError);
+        assert.deepEqual(result.cause.errors, [primary, cleanup]);
+        assert.equal(result.cause.errors[0], primary);
+        assert.equal(result.cause.errors[1], cleanup);
+        assert.equal(result.cause.cause, primary);
+      } else {assert.equal(result.cause, boundary === "stop" ? cleanup : primary);}
+      assert.equal(stops, 1);
+      assert.equal(stdin.readableFlowing, false);
+      for (const name of ["data", "end", "close", "error"]) {assert.equal(stdin.listenerCount(name), 0, `stdin ${name}`);}
+      for (const name of ["close", "error"]) {assert.equal(stdout.listenerCount(name), 0, `stdout ${name}`);}
+      assert.equal(child.stdout.listenerCount("data"), 0);
+      assert.equal(child.listenerCount("error"), 0);
+      assert.equal(child.listenerCount("close"), 0);
+      context.diagnostic(`${boundary}: expected error identities retained; startup settled and all lifecycle listeners removed`);
+    } finally {
+      if (deadline) {clearTimeout(deadline);}
+      // Bound red-run cleanup as well, without supplying close before assertions.
+      child.emit("close", 1);
+      stdin.destroy(); stdout.destroy(); child.stdout.destroy(); child.stderr.destroy();
+    }
+  });
+}
 
 test("stopping one owned PID does not affect a neighbouring Anvil", { timeout: 60_000 }, async () => {
   const {anvil: anvilBinary} = pinnedFoundryBinaries(repositoryRoot);
