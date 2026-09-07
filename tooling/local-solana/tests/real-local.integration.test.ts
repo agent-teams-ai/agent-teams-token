@@ -107,3 +107,9 @@ function publicFailureDiagnostic(value: { readonly status?: unknown; readonly di
 }
 
 function bounded(previous: string, chunk: string): string { return (previous + chunk).slice(-4096); }
+
+test("genuine pinned Agave owner SIGKILL preserves pre-registration custody before immediate reclamation", { skip: available ? false : required ? false : "checksum-pinned Agave fixture binaries are not installed", timeout: 120_000 }, async () => {
+  assert.equal(available, true);
+  const { genuineAgaveRecovery } = await import("./helpers/agave-recovery.ts");
+  await genuineAgaveRecovery(repositoryRoot);
+});

@@ -9,6 +9,9 @@ import { assertEvidenceReport } from "../application/evidence.ts";
 import { verifyObservations } from "../application/verifier.ts";
 import { authenticateValidatorIdentity, processStartIdentity } from "./process-identity.ts";
 
+import { readBoundedMarker, assertMarkerBounds } from "./lease-marker.ts";
+import { initializeStartupCustody, startupCustodySettled } from "./startup-custody.ts";
+
 const PREFIX = "run-";
 const MARKER = ".agtmai-local-solana-lease.json";
 
@@ -30,6 +33,7 @@ export class PrivateRunStore implements RunStorePort {
     await assertDirectoryIdentity(root, rootIdentity); await assertDirectoryIdentity(directory, directoryIdentity);
     await atomicWrite(join(directory, "config.yml"), `json_rpc_url: http://127.0.0.1:0/\nwebsocket_url: ''\nkeypair_path: ${payerKey}\naddress_labels: {}\ncommitment: finalized\n`, 0o600);
     const ledger = join(directory, "ledger"); await mkdir(ledger, { mode: 0o700 });
+    await initializeStartupCustody(directory, token);
     return { directory, ledger, config: join(directory, "config.yml"), payerKey, mintKey: join(directory, "mint.json"), ownerKey: join(directory, "owner.json"), leaseToken: token, rootIdentity, directoryIdentity, markerIdentity };
   }
   public async registerValidator(paths: RunPaths, identity: ValidatorIdentity): Promise<void> {
@@ -43,7 +47,7 @@ export class PrivateRunStore implements RunStorePort {
     if (entry === null) { return; }
     const root = await canonicalTarget(this.root); const validated = await validateOwnedRun(root, paths.directory, false, paths);
     if (validated.lease.token !== paths.leaseToken) { throw new LocalSolanaError("SOLANA_LEASE_TOKEN", "run lease token changed before cleanup"); }
-    if (validated.lease.validator !== null && processAlive(validated.lease.validator.pid)) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
+    if (!await startupCustodySettled(paths.directory, validated.lease.token, validated.lease.validator !== null) || (validated.lease.validator !== null && !await processExited(validated.lease.validator.pid, validated.lease.validator.startTime))) { throw new LocalSolanaError("SOLANA_VALIDATOR_ACTIVE", "refusing to delete a run while its registered validator is alive"); }
     await quarantineAndDeleteRun(root, paths.directory, validated);
     if (await exists(paths.directory)) { throw new LocalSolanaError("SOLANA_CLEANUP_INCOMPLETE", "private run directory still exists after cleanup"); }
   }
@@ -53,6 +57,7 @@ export class PrivateRunStore implements RunStorePort {
       if (!name.startsWith(PREFIX)) { continue; }
       const directory = join(root, name); const validated = await validateOwnedRun(root, directory, true).catch(() => null);
       if (!validated || !sameIdentity(validated.lease.rootIdentity, rootIdentity) || await leaseOwnerIsLive(validated.lease)) { continue; }
+      if (!await startupCustodySettled(directory, validated.lease.token, validated.lease.validator !== null).catch(() => false)) { continue; }
       if (await quarantineAndDeleteRun(root, directory, validated, true)) { reclaimed += 1; }
     }
     return reclaimed;
@@ -138,7 +143,7 @@ async function readLease(directory: string): Promise<{ readonly raw: Record<stri
   const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const entry = await handle.stat({ bigint: true }); assertPrivateMarkerStat(entry); const identity = fileIdentity(entry);
-    const content = await handle.readFile({ encoding: "utf8" }); if (Buffer.byteLength(content) > 16_384) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "lease exceeds its size bound"); }
+    const content = await readBoundedMarker(handle);
     let raw: unknown; try { raw = JSON.parse(content); } catch { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "lease is not valid JSON"); }
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) { throw new LocalSolanaError("SOLANA_LEASE_INVALID", "lease is not an object"); }
     const after = await handle.stat({ bigint: true }); assertPrivateMarkerStat(after); if (!sameIdentity(identity, fileIdentity(after))) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "lease marker identity changed while reading"); }
@@ -158,6 +163,7 @@ async function rewriteLease(directory: string, raw: Record<string, unknown>, exp
 }
 
 function assertPrivateMarkerStat(entry: import("node:fs").BigIntStats): void {
+  assertMarkerBounds(entry);
   const expectedUid = process.getuid?.();
   if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n || (entry.mode & 0o777n) !== 0o600n || (expectedUid !== undefined && entry.uid !== BigInt(expectedUid))) { throw new LocalSolanaError("SOLANA_LEASE_UNSAFE", "lease must be an owned private singly-linked regular file"); }
 }
@@ -205,6 +211,10 @@ async function quarantineAndDeleteRun(root: string, directory: string, validated
   const quarantine = join(root, ".quarantine-" + validated.lease.token);
   try {
     await assertDirectoryIdentity(root, validated.rootIdentity);
+    if (!await startupCustodySettled(directory, validated.lease.token, validated.lease.validator !== null)) {
+      if (stale && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
+      throw new LocalSolanaError("SOLANA_STARTUP_CUSTODY", "startup custody has not settled");
+    }
     if (stale && validated.lease.validator !== null) { await terminateAuthenticatedValidator(validated.lease, directory); }
     const before = await validateOwnedRun(root, directory, true, validated);
     if (before.lease.token !== validated.lease.token) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "run identity changed before quarantine"); }
@@ -238,25 +248,25 @@ async function staleRunIsAbsent(root: string, directory: string, rootIdentity: F
 
 async function terminateAuthenticatedValidator(lease: Lease, directory: string): Promise<void> {
   const identity = lease.validator;
-  if (identity === null || !processAlive(identity.pid)) { return; }
+  if (identity === null || await processExited(identity.pid, identity.startTime)) { return; }
   const expectedLedger = await realpath(join(directory, "ledger"));
   const authenticated = identity.ledger === expectedLedger && await authenticateValidatorIdentity(identity, lease.token);
   if (!authenticated) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "refusing to terminate a PID that does not authenticate as the owned validator"); }
   if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before TERM"); }
   process.kill(identity.pid, "SIGTERM");
-  if (!await processExited(identity.pid) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after TERM"); }
-  if (!await awaitExit(identity.pid, 5_000)) {
+  if (!await processExited(identity.pid, identity.startTime) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid, identity.startTime)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after TERM"); }
+  if (!await awaitExit(identity.pid, identity.startTime, 5_000)) {
     if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before KILL"); }
     process.kill(identity.pid, "SIGKILL");
-    if (!await processExited(identity.pid) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after KILL"); }
-    if (!await awaitExit(identity.pid, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); }
+    if (!await processExited(identity.pid, identity.startTime) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid, identity.startTime)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after KILL"); }
+    if (!await awaitExit(identity.pid, identity.startTime, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); }
   }
 }
 
-async function awaitExit(pid: number, timeoutMs: number): Promise<boolean> {
+async function awaitExit(pid: number, startTime: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) { if (await processExited(pid)) { return true; } await delay(50); }
-  return await processExited(pid);
+  while (Date.now() < deadline) { if (await processExited(pid, startTime)) { return true; } await delay(50); }
+  return await processExited(pid, startTime);
 }
 
 /**
@@ -265,14 +275,14 @@ async function awaitExit(pid: number, timeoutMs: number): Promise<boolean> {
  * does not wait forever (or report a false timeout) after an orphaned
  * validator terminates.
  */
-async function processExited(pid: number): Promise<boolean> {
+async function processExited(pid: number, startTime: string): Promise<boolean> {
   if (!processAlive(pid)) { return true; }
   if (process.platform !== "linux") { return false; }
   try {
     const procStat = await readFile(`/proc/${pid}/stat`, "utf8");
     const end = procStat.lastIndexOf(")");
-    const state = end < 0 ? undefined : procStat.slice(end + 2).trim().split(/\s+/u)[0];
-    return state === "Z";
+    const fields = end < 0 ? [] : procStat.slice(end + 2).trim().split(/\s+/u);
+    return fields[0] === "Z" && `linux:${fields[19]}` === startTime;
   } catch { return false; }
 }
 
@@ -288,7 +298,7 @@ export async function atomicWrite(path: string, content: string, mode: number): 
   await rename(temporary, path);
   const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY); try { await directory.sync(); } finally { await directory.close(); }
 }
-function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; } }
+function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (cause) { return (cause as NodeJS.ErrnoException).code !== "ESRCH"; } }
 async function exists(path: string): Promise<boolean> { try { await stat(path); return true; } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return false; } throw cause; } }
 function markdown(report: EvidenceReport): string { return `# Local Solana SPL fixture evidence\n\n- Status: READY\n- Mint: ${report.mintAddress}\n- Program: ${report.programId}\n- Authenticated RPC listener scope: ${report.rpcListener.scope}\n- Decimals: ${report.decimals}\n- Supply: ${report.initialSupply} -> ${report.intermediateSupply} -> ${report.finalSupply}\n- Freeze authority: None\n- Signed restore/freeze attempts: reached Token Program and failed\n- Public network: false\n- Real asset cost USD: 0\n- Mint authority revoked: false\n- Authority key retained: false\n- Remint possible until teardown: true\n- Production hard cap proven: false\n`; }
 function assertFailureEvidence(value: FailureEvidenceReport): void {

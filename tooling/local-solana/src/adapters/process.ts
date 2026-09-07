@@ -7,6 +7,8 @@ import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LocalSolanaError } fro
 import type { CommandPort, CommandResult, ValidatorHandle, ValidatorIdentity, ValidatorPort, ValidatorStartRequest } from "../application/ports.ts";
 import { assertValidatorRpcListener, authenticateValidatorIdentity, processStartIdentity, validatorIdentityAuthenticationFailures } from "./process-identity.ts";
 
+import { reserveStartupCustody } from "./startup-custody.ts";
+
 export class NodeCommandAdapter implements CommandPort {
   public async run(executable: string, args: readonly string[], options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}): Promise<CommandResult> {
     if (!executable.startsWith("/")) { throw new LocalSolanaError("SOLANA_EXECUTABLE_ABSOLUTE", "child executable must be absolute"); }
@@ -49,6 +51,7 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       "--bpf-program", CLASSIC_TOKEN_PROGRAM, request.tokenProgram,
       "--bpf-program", ASSOCIATED_TOKEN_PROGRAM, request.associatedTokenProgram,
     ];
+    const custody = await reserveStartupCustody(request.ledger, request.leaseToken);
     const supervisor = fork(fileURLToPath(new URL("./validator-supervisor.ts", import.meta.url)), [], {
       env: request.env, stdio: ["ignore", "ignore", "inherit", "ipc"],
     });
@@ -73,7 +76,7 @@ export class OwnedValidatorAdapter implements ValidatorPort {
     request.signal.addEventListener("abort", abort, { once: true });
     try {
       if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
-      supervisor.send({ type: "start", executable: request.executable, args, env: request.env, leaseToken: request.leaseToken });
+      supervisor.send({ type: "start", executable: request.executable, args, env: request.env, leaseToken: request.leaseToken, custody });
       await waitFor(() => (validatorPid !== undefined && immutableIdentity !== undefined) || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000);
       if (validatorPid === undefined || immutableIdentity === undefined) { throw startupFailure(validatorExit, output, request); }
       const expectedExecutable = await realpath(request.executable); const expectedLedger = await realpath(request.ledger);
