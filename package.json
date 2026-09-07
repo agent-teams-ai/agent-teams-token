@@ -46,10 +46,11 @@
     "test:local-evm:integration": "pnpm build && .tools/bin/node --test tooling/local-evm/tests/runner.integration.test.ts",
     "test:local-solana": ".tools/bin/node --test tooling/local-solana/tests/*.test.ts",
     "test:deployment-plan": ".tools/bin/node --test tooling/deployment-plan/tests/*.test.ts",
-    "typecheck": "tsc --build --pretty false && tsc -p tooling/local-evm/tsconfig.json --pretty false && tsc -p tooling/local-solana/tsconfig.json --pretty false && tsc -p tooling/deployment-plan/tsconfig.json --pretty false && tsc -p tooling/security/slither/tsconfig.json --pretty false",
-    "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:linux-parity && pnpm genesis:vector:check && pnpm security:check && pnpm test:local-evm:built && pnpm test:local-solana && pnpm test:deployment-plan && pnpm security:slither:test && pnpm rollback:test",
+    "typecheck": "tsc --build --pretty false && tsc -p tooling/local-evm/tsconfig.json --pretty false && tsc -p tooling/local-solana/tsconfig.json --pretty false && tsc -p tooling/deployment-plan/tsconfig.json --pretty false && tsc -p tooling/security/slither/tsconfig.json --pretty false && tsc -p tooling/testnet-ccip/tsconfig.json --pretty false",
+    "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:linux-parity && pnpm genesis:vector:check && pnpm security:check && pnpm test:local-evm:built && pnpm test:local-solana && pnpm test:deployment-plan && pnpm security:slither:test && pnpm test:testnet-ccip && pnpm rollback:test",
     "check:linux": "pnpm rollback:preflight && pnpm check && pnpm rollback:prove",
-    "check:release": "pnpm check && pnpm security:solidity"
+    "check:release": "pnpm check && pnpm security:solidity",
+    "test:testnet-ccip": ".tools/bin/node --test tooling/testnet-ccip/tests/*.test.ts"
   },
   "devDependencies": {
     "@agent-teams/engineering-foundation": "0.20.0",
