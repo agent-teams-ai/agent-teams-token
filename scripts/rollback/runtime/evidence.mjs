@@ -136,6 +136,17 @@ function combinedEvidenceFailure(message, primary, secondary) {
   return new AggregateError([primary, secondary], message, { cause: primary });
 }
 
+function annotateEvidenceFailure(error, path) {
+  try {
+    if (error instanceof Error) {
+      error.message += "\nROLLBACK_EVIDENCE path=" + path;
+    }
+  } catch (annotationError) {
+    return combinedEvidenceFailure("ROLLBACK_EVIDENCE_ANNOTATION_FAILED", error, annotationError);
+  }
+  return error;
+}
+
 // Stage lifecycle-owned READY until validation and every custody close succeed.
 // Failed bundles retain only READY.pending, which is never independent proof.
 const evidencePublications = new Map();
@@ -187,10 +198,7 @@ export function runEvidenceLifecycle(value, createRecorder, action) {
     result = action(recorder);
     prepareEvidenceSettlement(value, publication);
   } catch (error) {
-    if (error instanceof Error) {
-      error.message += "\nROLLBACK_EVIDENCE path=" + evidenceDirectoryPath(value);
-    }
-    failure = error;
+    failure = annotateEvidenceFailure(error, path);
     if (recorder !== undefined) {
       try {
         recorder.finalize("failed", error);
@@ -202,14 +210,15 @@ export function runEvidenceLifecycle(value, createRecorder, action) {
         );
       }
     }
-  }
-  evidencePublications.delete(path);
-  try {
-    closeEvidenceDirectory(value);
-  } catch (closeError) {
-    failure = failure === undefined
-      ? closeError
-      : combinedEvidenceFailure("ROLLBACK_EVIDENCE_CUSTODY_CLOSE_FAILED", failure, closeError);
+  } finally {
+    evidencePublications.delete(path);
+    try {
+      closeEvidenceDirectory(value);
+    } catch (closeError) {
+      failure = failure === undefined
+        ? closeError
+        : combinedEvidenceFailure("ROLLBACK_EVIDENCE_CUSTODY_CLOSE_FAILED", failure, closeError);
+    }
   }
   if (failure !== undefined) {
     throw failure;

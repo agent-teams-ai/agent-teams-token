@@ -270,6 +270,88 @@ function standaloneValidation(bundle) {
   ], { encoding: "utf8" });
 }
 
+for (const fault of ["constructor", "action", "action-finalize-close", "message-getter", "message-setter"]) {
+  test(`exception annotation cannot bypass lifecycle teardown: ${fault}`, (context) => {
+    const fixture = fixtureBundle();
+    context.after(() => rmSync(fixture.bundle, { recursive: true, force: true }));
+    const custody = createDirectoryCustody(fixture.bundle, { owned: true });
+    const target = { custody, path: fixture.bundle };
+    const descriptors = [custody.descriptor, ...custody.ancestorChain.map((entry) => entry.descriptor)];
+    const primary = new Error("primary frozen failure");
+    const annotation = new Error("annotation accessor failure");
+    if (fault.startsWith("message-")) {
+      Object.defineProperty(primary, "message", {
+        get() {
+          if (fault === "message-getter") {throw annotation;}
+          return "primary";
+        },
+        set() {throw annotation;},
+      });
+    }
+    Object.freeze(primary);
+    const secondary = new Error("diagnostics failure");
+    const finalized = [];
+    const calls = [];
+    let injection;
+    let caught;
+    const restore = setDescriptorCloseImplementationForTest((descriptor) => {
+      calls.push(descriptor);
+      closeSync(descriptor);
+    });
+    try {
+      runEvidenceLifecycle(target, () => {
+        if (fault === "constructor") {throw primary;}
+        return { finalize(status, error) {
+          finalized.push([status, error]);
+          if (fault === "action-finalize-close") {throw secondary;}
+        } };
+      }, () => {
+        publishReadyMarker(target, publishEvidenceSeal(target, fixture.statement, schemaPath));
+        validateEvidenceBundle({ bundlePath: fixture.bundle, allowPendingReady: true });
+        if (fault === "action-finalize-close") {injection = injectedUncertainClose(0);}
+        throw primary;
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      injection?.restore();
+      restore();
+      // A red run leaks real descriptors: release only those still owned/open.
+      context.after(() => {
+        for (const descriptor of descriptors) {
+          if (!(injection?.calls ?? calls).includes(descriptor)) {closeSync(descriptor);}
+        }
+        if (injection?.reusedDescriptor() !== undefined) {closeSync(injection.reusedDescriptor());}
+      });
+    }
+    const closed = injection?.calls ?? calls;
+    context.diagnostic(`close attempts=${closed.length}/${descriptors.length}; finalized=${finalized.length}`);
+    assert.deepEqual(new Set(closed), new Set(descriptors));
+    assert.equal(closed.length, descriptors.length);
+    assertOtherDescriptorsClosed(descriptors, injection?.reusedDescriptor());
+    if (injection !== undefined) {assert.doesNotThrow(() => fstatSync(injection.reusedDescriptor()));}
+    assert.deepEqual(finalized, fault === "constructor" ? [] : [["failed", primary]]);
+    let annotated = caught;
+    if (fault === "action-finalize-close") {
+      assert.equal(caught.message, "ROLLBACK_EVIDENCE_CUSTODY_CLOSE_FAILED");
+      assert.equal(caught.errors[1].errors[0].code, "EINTR");
+      assert.equal(caught.errors[0].errors[1], secondary);
+      assert.equal(caught.cause, caught.errors[0]);
+      annotated = caught.errors[0].errors[0];
+      assert.equal(caught.errors[0].cause, annotated);
+    }
+    assert.equal(annotated.cause, primary);
+    assert.equal(annotated.errors[0], primary);
+    if (fault.startsWith("message-")) {assert.equal(annotated.errors[1], annotation);}
+    else {assert.ok(annotated.errors[1] instanceof TypeError);}
+    assert.equal(lstatSync(join(fixture.bundle, "READY"), { throwIfNoEntry: false }), undefined);
+    assert.equal(standaloneValidation(fixture.bundle).status, 1);
+    const next = { path: fixture.bundle, custody: createDirectoryCustody(fixture.bundle, { owned: true }) };
+    assert.equal(runEvidenceLifecycle(next, () => ({}), () => "subsequent lifecycle"), "subsequent lifecycle");
+    assert.equal(lstatSync(join(fixture.bundle, "READY"), { throwIfNoEntry: false }), undefined);
+  });
+}
+
 for (const fault of ["none", "close", "last-close", "late-validation", "late-validation-and-close", "late-validation-finalize-and-close"]) {
   test(`sealed production lifecycle terminal settlement: ${fault}`, (context) => {
     const fixture = fixtureBundle();
