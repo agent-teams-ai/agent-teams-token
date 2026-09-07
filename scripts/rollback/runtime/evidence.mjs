@@ -14,8 +14,9 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
+import { closeCommandLogDescriptors, selectedEnvironment } from "./evidence-command.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
-import { closeDescriptorOnce, throwDescriptorCloseFailures } from "./descriptor-close.mjs";
+import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
   assertCustodyCanonicalSpelling,
   assertCustodyIdentity,
@@ -26,56 +27,6 @@ import {
   refreshDirectoryCustody,
   verifyDirectoryCustody,
 } from "./custody.mjs";
-
-const EVIDENCE_ENVIRONMENT_KEYS = [
-  "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY",
-  "AGTMAI_ROLLBACK_TMPDIR",
-  "AGTMAI_ANVIL_BINARY",
-  "AGTMAI_FORGE_BINARY",
-  "AGTMAI_SOLANA_REAL_TESTS_REQUIRED",
-  "AGTMAI_SOLC_BINARY",
-  "CI",
-  "FOUNDRY_PROFILE",
-  "GITHUB_SHA",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "PATH",
-  "SLITHER_CANDIDATE_SHA",
-  "SLITHER_DOCKER_PATH",
-  "SLITHER_EVIDENCE_DIRECTORY",
-  "SLITHER_FORGE_PATH",
-  "SLITHER_REPOSITORY_ROOT",
-  "SLITHER_SOLC_PATH",
-  "TMPDIR",
-  "XDG_CACHE_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "XDG_RUNTIME_DIR",
-];
-
-function selectedEnvironment(environment) {
-  return Object.fromEntries(
-    EVIDENCE_ENVIRONMENT_KEYS
-      .filter((key) => environment[key] !== undefined)
-      .map((key) => [key, String(environment[key])]),
-  );
-}
-
-function closeCommandLogDescriptors(descriptors) {
-  const failures = [];
-  for (const descriptor of descriptors) {
-    if (!Number.isInteger(descriptor)) {
-      continue;
-    }
-    try {
-      closeDescriptorOnce(descriptor);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  return failures;
-}
 
 function evidenceTarget(value) {
   if (typeof value === "string") {

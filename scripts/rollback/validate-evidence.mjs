@@ -342,6 +342,19 @@ function validateSemanticStatement(statement, expectedSha) {
   }
 }
 
+function validateReadyMarker({ bundle, allowPendingReady, schema, statement, seal, sealBytes }) {
+  const readyBytes = readStableFile(join(bundle, allowPendingReady ? "READY.pending" : "READY"), "READY");
+  const ready = parseJson(readyBytes, "READY");
+  if (!readyBytes.equals(Buffer.from(canonicalJson(ready) + "\n", "utf8"))) {
+    throw new Error("RECOVERY_EVIDENCE_READY_NOT_CANONICAL");
+  }
+  validateSchema(ready, schema.$defs.ready, schema);
+  if (ready.candidateSha !== statement.candidate.sha || ready.sealSha256 !== sha256(sealBytes)
+    || ready.proofDigestSha256 !== seal.statement.canonicalSha256) {
+    throw new Error("RECOVERY_EVIDENCE_READY_MISMATCH");
+  }
+}
+
 export function validateEvidenceBundle({ bundlePath, expectedSha, requireReady = true, allowPendingReady = false }) {
   if (!isAbsolute(bundlePath)) {throw new Error("RECOVERY_EVIDENCE_BUNDLE_NOT_ABSOLUTE");}
   const bundle = realpathSync(bundlePath);
@@ -375,16 +388,7 @@ export function validateEvidenceBundle({ bundlePath, expectedSha, requireReady =
   }
 
   if (requireReady) {
-    const readyBytes = readStableFile(join(bundle, allowPendingReady ? "READY.pending" : "READY"), "READY");
-    const ready = parseJson(readyBytes, "READY");
-    if (!readyBytes.equals(Buffer.from(canonicalJson(ready) + "\n", "utf8"))) {
-      throw new Error("RECOVERY_EVIDENCE_READY_NOT_CANONICAL");
-    }
-    validateSchema(ready, schema.$defs.ready, schema);
-    if (ready.candidateSha !== statement.candidate.sha || ready.sealSha256 !== sha256(sealBytes)
-      || ready.proofDigestSha256 !== seal.statement.canonicalSha256) {
-      throw new Error("RECOVERY_EVIDENCE_READY_MISMATCH");
-    }
+    validateReadyMarker({ bundle, allowPendingReady, schema, statement, seal, sealBytes });
   }
   return {
     candidateSha: statement.candidate.sha,
