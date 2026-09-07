@@ -63,11 +63,12 @@ export class ScratchCustody {
 
   private async retain(path: string, directory: boolean, acquired?: FileHandle): Promise<void> {
     if (this.closed || this.entries.has(path)) { throw unsafe(); }
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | (directory ? constants.O_DIRECTORY : 0));
+    // A substituted FIFO must not block before descriptor authentication.
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | (directory ? constants.O_DIRECTORY : 0));
     this.entries.set(path, { handle, directory });
     if (acquired) {
       const [original, held] = await Promise.all([acquired.stat({ bigint: true }), handle.stat({ bigint: true })]);
-      if (original.dev !== held.dev || original.ino !== held.ino) {
+      if (!original.isFile() || !held.isFile() || held.nlink !== 1n || original.dev !== held.dev || original.ino !== held.ino) {
         this.entries.delete(path);
         await handle.close();
         throw unsafe();

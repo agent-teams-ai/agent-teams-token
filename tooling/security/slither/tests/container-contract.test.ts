@@ -55,7 +55,8 @@ for (const create of [dockerCreateArguments, dockerVulnerableFixtureCreateArgume
       "type=bind,src=/tmp/input,dst=/input,readonly", "type=bind,src=/tmp/forge,dst=/tools/forge,readonly", "type=bind,src=/tmp/solc,dst=/tools/solc,readonly",
     ]);
     assert.deepEqual(args.flatMap((arg, index) => arg === "--tmpfs" ? [args[index + 1]] : []), [
-      "/work:rw,nosuid,nodev,size=768m,uid=1000,gid=1000,mode=0700",
+      "/work:rw,nosuid,nodev,noexec,size=768m,uid=1000,gid=1000,mode=0700",
+      "/work/tools:rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
       "/home/gate:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700",
       "/tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000,mode=0700",
     ]);

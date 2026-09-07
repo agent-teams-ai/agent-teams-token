@@ -12,6 +12,7 @@ for (const substitution of ["forge", "solc", "input", "none"]) {
     const root = await mkdtemp(join(await realpath(tmpdir()), "slither-mount-authority-"));
     try {
       for (const name of ["tools", "input", "work"]) { await mkdir(join(root, name)); }
+      await mkdir(join(root, "work/tools"), { mode: 0o700 });
       const authority = { forge: sha256("forge"), solc: sha256("solc"), inputs: { "source.sol": sha256("source") } };
       await writeFile(join(root, "tools/forge"), "forge");
       await writeFile(join(root, "tools/solc"), "solc");

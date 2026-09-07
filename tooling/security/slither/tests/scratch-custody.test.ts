@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { chmod, lstat, mkdir, mkdtemp, realpath, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -93,4 +94,51 @@ test("a separately acquired successor descriptor cannot inherit owned identity",
     finally { await successor.close(); }
     await custody.cleanup();
   } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+// A subprocess watchdog bounds a real FIFO read-open even on the defective code.
+test("FIFO substitution rejects without a writer and preserves the successor", async () => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "slither-fifo-watchdog-"));
+  try {
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { spawnSync } from "node:child_process";
+    import { open, rename, lstat, rm } from "node:fs/promises";
+    import { join } from "node:path";
+    import { ScratchCustody } from ${JSON.stringify(new URL("../src/adapters/scratch-custody.ts", import.meta.url).href)};
+    const root = ${JSON.stringify(root)};
+    const custody = await ScratchCustody.acquire(root);
+    const path = join(root, "owned");
+    const acquired = await open(path, "wx", 0o600);
+    try {
+      await rename(path, join(root, "displaced"));
+      const fifo = spawnSync("/usr/bin/mkfifo", ["-m", "600", path]);
+      assert.equal(fifo.status, 0);
+      const before = await lstat(path, { bigint: true });
+      assert.ok(before.isFIFO());
+      console.log("FIFO_READY");
+      const watchdog = setTimeout(() => {
+        console.error("FIFO_ACQUISITION_BLOCKED");
+        process.exit(124);
+      }, 1500);
+      try {
+        await assert.rejects(custody.file(path, acquired), { code: "TEMP_ROOT_INVALID" });
+      } finally { clearTimeout(watchdog); }
+      await assert.rejects(custody.cleanup(), { code: "TEMP_ROOT_INVALID" });
+      const after = await lstat(path, { bigint: true });
+      assert.ok(after.isFIFO());
+      assert.equal(after.ino, before.ino);
+      assert.equal(after.dev, before.dev);
+      assert.equal(after.mode, before.mode);
+      console.log("FIFO_PRESERVED");
+    } finally {
+      await acquired.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  `], { encoding: "utf8", timeout: 5000, killSignal: "SIGKILL" });
+  assert.equal(result.error, undefined, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /FIFO_READY/u);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /FIFO_PRESERVED/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

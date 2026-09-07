@@ -72,7 +72,9 @@ export function dockerVulnerableFixtureCreateArguments(paths: ContainerPaths): r
 function hardenedCreateArguments(paths: ContainerPaths, script: string): readonly string[] {
   return ["create", "--pull", "never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", CONTAINER_UID_GID,
     "--security-opt", "no-new-privileges=true", "--cap-drop", "ALL", "--pids-limit", "128", "--memory", "2g", "--memory-swap", "2g", "--cpus", "2",
-    "--ulimit", "nofile=256:256", "--stop-timeout", "5", "--tmpfs", "/work:rw,nosuid,nodev,size=768m,uid=1000,gid=1000,mode=0700",
+    "--ulimit", "nofile=256:256", "--stop-timeout", "5", "--tmpfs", "/work:rw,nosuid,nodev,noexec,size=768m,uid=1000,gid=1000,mode=0700",
+    // Only authenticated tool snapshots need execution; other scratch stays noexec.
+    "--tmpfs", "/work/tools:rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
     "--tmpfs", "/home/gate:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700", "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000,mode=0700",
     "--mount", `type=bind,src=${paths.input},dst=/input,readonly`, "--mount", `type=bind,src=${paths.forge},dst=/tools/forge,readonly`,
     "--mount", `type=bind,src=${paths.solc},dst=/tools/solc,readonly`, "--entrypoint", "/usr/bin/env", IMAGE, "-i", "HOME=/home/gate", "TMPDIR=/tmp",

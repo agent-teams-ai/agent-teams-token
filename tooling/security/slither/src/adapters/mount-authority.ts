@@ -48,7 +48,9 @@ def copy(source, destination, digest, executable=False):
         os.close(fd)
 require(len(expected["inputs"]) > 0)
 os.mkdir("/work/input", 0o700)
-os.mkdir("/work/tools", 0o700)
+# Docker supplies the private executable tmpfs; reject unexpected contents.
+require(stat.S_ISDIR(os.lstat("/work/tools").st_mode))
+require(os.listdir("/work/tools") == [])
 copy("/tools/forge", "/work/tools/forge", expected["forge"], True)
 copy("/tools/solc", "/work/tools/solc", expected["solc"], True)
 for path, digest in expected["inputs"].items():
