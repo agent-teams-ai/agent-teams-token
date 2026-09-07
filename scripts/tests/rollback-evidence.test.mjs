@@ -489,7 +489,12 @@ for (const substitution of ["root", "ancestor", "pending", "pending-bytes", "rea
       restore?.();
     }
     assert.equal(closed, custody.ancestorChain.length + 1);
-    assert.deepEqual(lstatSync(foreignPath, { bigint: true }), foreignIdentity);
+    // Observation may advance access time; every other lstat field must survive.
+    assert.deepEqual({
+      ...lstatSync(foreignPath, { bigint: true }),
+      atimeMs: foreignIdentity.atimeMs,
+      atimeNs: foreignIdentity.atimeNs,
+    }, { ...foreignIdentity });
     if (substitution !== "ready-symlink") {
       assert.equal(readFileSync(foreignPath, "utf8"), "preserve successor");
     }
