@@ -172,6 +172,8 @@ export async function startOwnedAnvil(
 
 async function superviseAnvil(executable: string, fundedAddress: string): Promise<void> {
   const control = supervisorControl();
+  let failure: {cause: unknown} | undefined;
+  let cleanupFailure: {cause: unknown} | undefined;
   try {
     const child = spawn(executable, [
       "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
@@ -186,7 +188,6 @@ async function superviseAnvil(executable: string, fundedAddress: string): Promis
       (rpcUrl) => ({status: "ready" as const, rpcUrl}),
       (cause: unknown) => ({status: "failed" as const, cause}),
     );
-    let failure: {cause: unknown} | undefined;
     try {
       let processStart: string;
       try {processStart = await processStartIdentity(child.pid);}
@@ -197,31 +198,22 @@ async function superviseAnvil(executable: string, fundedAddress: string): Promis
       }
       const identity = {pid: child.pid, processStart};
       await control.write({ type: "identity", ...identity });
-      if (!await control.acknowledged) {
-        const terminal = await control.terminated;
-        if (terminal.cause) {throw terminal.cause;}
-        return;
+      if (await control.acknowledged) {
+        const outcome = await Promise.race([startup, control.terminated]);
+        if (outcome.status === "failed") {throw outcome.cause;}
+        if (outcome.status === "ready") {
+          await control.write({ type: "ready", rpcUrl: outcome.rpcUrl });
+        }
       }
-      const outcome = await Promise.race([startup, control.terminated]);
-      if (outcome.status === "terminated") {
-        if (outcome.cause) {throw outcome.cause;}
-        return;
-      }
-      if (outcome.status === "failed") {throw outcome.cause;}
-      await control.write({ type: "ready", rpcUrl: outcome.rpcUrl });
       const terminal = await control.terminated;
       if (terminal.cause) {throw terminal.cause;}
     } catch (cause) {
       failure = {cause};
-      throw cause;
     } finally {
       try {
         await stopExactChild(child);
       } catch (cleanupCause) {
-        if (failure) {
-          throw new AggregateError([failure.cause, cleanupCause], "Anvil supervisor failed and owned-child cleanup also failed", {cause: failure.cause});
-        }
-        throw cleanupCause;
+        cleanupFailure = {cause: cleanupCause};
       } finally {
         // Cleanup can reject without a close event. Settle startup in either case.
         startupCancellation.abort();
@@ -229,6 +221,11 @@ async function superviseAnvil(executable: string, fundedAddress: string): Promis
       }
     }
   } finally {control.dispose();}
+  if (failure && cleanupFailure) {
+    throw new AggregateError([failure.cause, cleanupFailure.cause], "Anvil supervisor failed and owned-child cleanup also failed", {cause: failure.cause});
+  }
+  if (failure) {throw failure.cause;}
+  if (cleanupFailure) {throw cleanupFailure.cause;}
 }
 
 function supervisorControl() {
