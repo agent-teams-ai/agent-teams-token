@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
-import { authenticateProcess, processStartIdentity, startOwnedAnvil } from "../process.ts";
+import { authenticateProcess, command, processStartIdentity, startOwnedAnvil } from "../process.ts";
 import { pinnedFoundryBinaries } from "../toolchain.ts";
 import { assertPayloadStopped, syntheticAnvil, waitForJson } from "./fixtures/synthetic-anvil.ts";
 import {
@@ -106,11 +106,190 @@ test("control-channel EOF before registration acknowledgement terminates Anvil",
   assert.notEqual(await authenticateProcess(identity), "owned");
 });
 
+for (const outputMode of ["file", "pipe"] as const) {
+  test(`control-channel EOF after ack during delayed startup reaps Anvil (${outputMode})`, {timeout: 20_000}, async (context) => {
+    const fixture = await syntheticAnvil(context, "delayed");
+    const ackPath = join(fixture.directory, "ack.json");
+    const eofPath = join(fixture.directory, "eof.json");
+    const exitPath = join(fixture.directory, "exit.json");
+    const identityPath = join(fixture.directory, "supervisor.json");
+    const outputPath = join(fixture.directory, "supervisor-output.jsonl");
+    const observer = join(fixture.directory, "observe-control.mjs");
+    // Observe actual ack handling and EOF, with startup held by a file barrier.
+    // File output isolates EOF; piped output also disappears with the killed parent.
+    // The observer never reads, resumes, pauses or writes the control stream.
+    await writeFile(observer, [
+      `import {writeFileSync} from "node:fs";`,
+      `process.stdin.on("data", (chunk) => {if (String(chunk) === "ack\\n") {`,
+      `  setImmediate(() => writeFileSync(${JSON.stringify(ackPath)}, "{}"));`,
+      `}});`,
+      `process.stdin.once("end", () => writeFileSync(${JSON.stringify(eofPath)}, "{}"));`,
+      `process.once("exit", (code) => writeFileSync(${JSON.stringify(exitPath)}, JSON.stringify({code})));`,
+    ].join("\n"));
+    const runner = await fixture.runner([
+      `import {spawn} from "node:child_process";`,
+      `import {closeSync, openSync, readFileSync, writeFileSync, writeSync} from "node:fs";`,
+      `const output = openSync(${JSON.stringify(outputPath)}, "wx", 0o600);`,
+      `const child = spawn(process.execPath, ["--import", ${JSON.stringify(observer)},`,
+      `  ${JSON.stringify(fileURLToPath(new URL("../process.ts", import.meta.url)))},`,
+      `  "--supervise-anvil", ${JSON.stringify(fixture.executable)}, ${JSON.stringify(firstAddress)}],`,
+      `  {stdio: ["pipe", ${outputMode === "pipe" ? '"pipe"' : "output"}, "ignore"]});`,
+      outputMode === "pipe" ? `child.stdout.on("data", (chunk) => writeSync(output, chunk));` : `closeSync(output);`,
+      `const timer = setInterval(() => {`,
+      `  const line = readFileSync(${JSON.stringify(outputPath)}, "utf8").split("\\n")[0];`,
+      `  if (line) {`,
+      `    const message = JSON.parse(line);`,
+      `    if (message.type === "identity") {`,
+      `      writeFileSync(${JSON.stringify(identityPath)}, JSON.stringify({parentPid: process.pid, supervisorPid: child.pid, ...message}));`,
+      `      child.stdin.write("ack\\n");`,
+      `      clearInterval(timer);`,
+      `    }`,
+      `  }`,
+      `}, 10);`,
+    ].join("\n"));
+    const identity = await waitForJson<{parentPid: number; supervisorPid: number; pid: number; processStart: string}>(identityPath);
+    const payload = await fixture.payload();
+    assert.equal(identity.pid, payload.pid);
+    const supervisorIdentity = {pid: identity.supervisorPid, processStart: await processStartIdentity(identity.supervisorPid)};
+    let supervisorExited = false;
+    try {
+      await waitForJson(ackPath);
+      assert.equal((await readFile(outputPath, "utf8")).includes('"type":"ready"'), false);
+      await runner.kill();
+      assert.equal(processExists(identity.parentPid), false);
+      await waitForJson(eofPath);
+      context.diagnostic(`ack handled; parent ${identity.parentPid} SIGKILL completed; EOF observed before startup release; supervisor=${identity.supervisorPid}, payload=${payload.pid}`);
+      await fixture.releaseStartup();
+      await assertPayloadStopped(payload.pid);
+      const exit = await waitForJson(exitPath);
+      supervisorExited = true;
+      assert.deepEqual(exit, {code: 0});
+      assert.equal((await readFile(outputPath, "utf8")).includes('"type":"ready"'), false);
+      context.diagnostic(`owned payload ${payload.pid} reaped; supervisor ${identity.supervisorPid} exited 0`);
+    } finally {
+      if (await authenticateProcess(identity) === "owned") {
+        process.kill(payload.pid, "SIGTERM");
+        await assertPayloadStopped(payload.pid);
+        context.diagnostic(`failure cleanup: exact owned payload ${payload.pid} terminated and reaped`);
+      }
+      // The supervisor owns the child reaper; terminate it only after the child is gone.
+      if (!supervisorExited && await authenticateProcess(supervisorIdentity) === "owned") {
+        try {
+          process.kill(identity.supervisorPid, "SIGTERM");
+          context.diagnostic(`cleanup: signaled only authenticated supervisor ${identity.supervisorPid} after child reaping`);
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== "ESRCH") {throw cause;}
+        }
+      }
+    }
+  });
+}
+
+for (const boundary of ["identity pipe", "ready pipe", "ack EOF", "coalesced ack EOF", "coalesced stop", "stdin error"] as const) {
+  test(`supervisor terminal channel during startup: ${boundary}`, {timeout: 20_000}, async (context) => {
+    const fixture = await syntheticAnvil(context, "delayed");
+    const neighbourFixture = await syntheticAnvil(context);
+    const neighbour = await neighbourFixture.start(secondAddress);
+    const gate = join(fixture.directory, "observer-release.json");
+    const ack = join(fixture.directory, "observed-ack.json");
+    const uncaught = join(fixture.directory, "uncaught.json");
+    const observer = join(fixture.directory, "terminal-observer.mjs");
+    // Keep a broken baseline alive only to reap its exact child after assertion failure.
+    // This does not handle stream errors or alter the production control reader.
+    await writeFile(observer, [
+      `import {existsSync, writeFileSync} from "node:fs";`,
+      // Hold the first real write until the payload can be identified for red cleanup.
+      boundary === "identity pipe" ? `const write = process.stdout.write.bind(process.stdout); process.stdout.write = (...args) => {const timer = setInterval(() => {if (existsSync(${JSON.stringify(join(fixture.directory, "identity-write-release.json"))})) {clearInterval(timer); write(...args);}}, 10); return true;};` : "",
+      `process.setUncaughtExceptionCaptureCallback((error) => writeFileSync(${JSON.stringify(uncaught)}, JSON.stringify({message:error.message})));`,
+      `process.stdin.on("data", () => setImmediate(() => {`,
+      `  writeFileSync(${JSON.stringify(ack)}, "{}");`,
+      boundary === "stdin error" ? `  process.stdin.emit("error", new Error("synthetic control failure"));` : "",
+      `}));`,
+      `await new Promise((resolve) => {const timer = setInterval(() => {if (existsSync(${JSON.stringify(gate)})) {clearInterval(timer); resolve();}}, 10);});`,
+    ].join("\n"));
+    const supervisor = spawn(process.execPath, ["--import", observer,
+      fileURLToPath(new URL("../process.ts", import.meta.url)), "--supervise-anvil", fixture.executable, firstAddress],
+    {stdio: ["pipe", "pipe", "pipe"]});
+    supervisor.stdin.on("error", () => {});
+    let output = "";
+    let stderr = "";
+    supervisor.stdout.on("data", (chunk: Buffer) => {output += chunk.toString();});
+    supervisor.stderr.on("data", (chunk: Buffer) => {stderr += chunk.toString();});
+    let exited = false;
+    const closed = new Promise<void>((resolve) => {supervisor.once("close", () => {exited = true; resolve();});});
+    let identity: {pid: number; processStart: string} | undefined;
+    try {
+      if (boundary === "identity pipe") {
+        const outputClosed = new Promise<void>((resolve) => {supervisor.stdout.once("close", resolve);});
+        supervisor.stdout.destroy();
+        await outputClosed;
+      }
+      await writeFile(gate, "{}");
+      const payload = await fixture.payload();
+      identity = {pid: payload.pid, processStart: await processStartIdentity(payload.pid)};
+      if (boundary === "identity pipe") {await writeFile(join(fixture.directory, "identity-write-release.json"), "{}");}
+      if (boundary !== "identity pipe") {
+        for (let i = 0; i < 200 && !output.includes("\n"); i += 1) {await delay(10);}
+        assert.equal(JSON.parse(output.split("\n")[0]!).pid, payload.pid);
+        if (boundary === "coalesced ack EOF") {supervisor.stdin.end("ack\n");}
+        else if (boundary === "coalesced stop") {supervisor.stdin.write("ack\nstop\n");}
+        else {
+          supervisor.stdin.write("ack\n");
+          await waitForJson(ack);
+          if (boundary === "ack EOF") {supervisor.stdin.end();}
+          if (boundary === "ready pipe") {
+            const outputClosed = new Promise<void>((resolve) => {supervisor.stdout.once("close", resolve);});
+            supervisor.stdout.destroy();
+            await outputClosed;
+            await fixture.releaseStartup();
+          }
+        }
+      }
+      // EOF/stop/error must cancel the held startup, without waiting for its 10s timeout.
+      for (let i = 0; i < 250 && !exited; i += 1) {await delay(10);}
+      if (!exited) {
+        const captured = await readFile(uncaught, "utf8").catch(() => "none");
+        context.diagnostic(`${boundary}: supervisor=${supervisor.pid} still running; payload=${payload.pid}; captured uncaught=${captured}; stderr=${JSON.stringify(stderr)}`);
+      }
+      assert.equal(exited, true, `${boundary}: supervisor must exit while startup is held`);
+      assert.equal(processExists(payload.pid), false, "owned payload must already be reaped at supervisor exit");
+      await assert.rejects(readFile(uncaught), {code: "ENOENT"});
+      if (boundary.includes("pipe")) {assert.match(stderr, /EPIPE|broken pipe/i); assert.equal(supervisor.exitCode, 1);}
+      else if (boundary === "stdin error") {assert.match(stderr, /synthetic control failure/); assert.equal(supervisor.exitCode, 1);}
+      else {assert.equal(stderr, ""); assert.equal(supervisor.exitCode, 0);}
+      assert.equal(processExists(neighbour.pid), true);
+      context.diagnostic(`${boundary}: supervisor=${supervisor.pid} exit=${supervisor.exitCode}; payload=${payload.pid} reaped; neighbour=${neighbour.pid} alive; stderr=${JSON.stringify(stderr)}`);
+    } finally {
+      if (identity && await authenticateProcess(identity) === "owned") {
+        process.kill(identity.pid, "SIGTERM");
+        await assertPayloadStopped(identity.pid);
+        context.diagnostic(`failure cleanup: exact payload ${identity.pid} reaped by supervisor ${supervisor.pid}`);
+      }
+      if (!exited) {supervisor.kill("SIGKILL");}
+      await closed;
+      await neighbour.stop();
+    }
+  });
+}
+
 test("synthetic Anvil startup timeout reaps the actual payload", {timeout: 20_000}, async (context) => {
   const fixture = await syntheticAnvil(context, "silent");
   await assert.rejects(fixture.start(firstAddress), /did not publish its private listening address/);
   const payload = await fixture.payload();
   assert.equal(processExists(payload.pid), false);
+});
+
+test("oversized control input is rejected before acknowledgement", {timeout: 20_000}, async (context) => {
+  const fixture = await syntheticAnvil(context);
+  const result = await command(process.execPath, [
+    fileURLToPath(new URL("../process.ts", import.meta.url)),
+    "--supervise-anvil", fixture.executable, firstAddress,
+  ], {stdin: `${" ".repeat(4097)}ack\n`, timeoutMs: 15_000});
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, "");
+  const messages = result.stdout.trim().split("\n").map((line) => JSON.parse(line) as {type: string; pid: number});
+  assert.deepEqual(messages.map((message) => message.type), ["identity"]);
+  assert.equal(processExists(messages[0]!.pid), false);
 });
 
 test("synthetic Anvil registration failure reaps the actual payload", {timeout: 20_000}, async (context) => {

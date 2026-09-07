@@ -171,13 +171,16 @@ export async function startOwnedAnvil(
 }
 
 async function superviseAnvil(executable: string, fundedAddress: string): Promise<void> {
+  const control = supervisorControl();
   const child = spawn(executable, [
     "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
     "--fund-accounts", `${fundedAddress}:1000000000000000000`,
   ], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
   if (child.pid === undefined) {
-    await listeningUrl(child);
-    throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
+    try {
+      await listeningUrl(child);
+      throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
+    } finally {control.dispose();}
   }
   const startup = listeningUrl(child).then(
     (rpcUrl) => ({status: "ready" as const, rpcUrl}),
@@ -187,43 +190,99 @@ async function superviseAnvil(executable: string, fundedAddress: string): Promis
     let processStart: string;
     try {processStart = await processStartIdentity(child.pid);}
     catch (cause) {
-      const outcome = await startup;
+      const outcome = await Promise.race([startup, control.terminated]);
       if (outcome.status === "failed") {throw outcome.cause;}
       throw cause;
     }
     const identity = {pid: child.pid, processStart};
-    process.stdout.write(`${JSON.stringify({ type: "identity", ...identity })}\n`);
-    const first = await controlMessage();
-    if (first !== "ack") {return;}
-    const outcome = await startup;
+    await control.write({ type: "identity", ...identity });
+    if (!await control.acknowledged) {
+      const terminal = await control.terminated;
+      if (terminal.cause) {throw terminal.cause;}
+      return;
+    }
+    const outcome = await Promise.race([startup, control.terminated]);
+    if (outcome.status === "terminated") {
+      if (outcome.cause) {throw outcome.cause;}
+      return;
+    }
     if (outcome.status === "failed") {throw outcome.cause;}
-    process.stdout.write(`${JSON.stringify({ type: "ready", rpcUrl: outcome.rpcUrl })}\n`);
-    await controlMessage();
+    await control.write({ type: "ready", rpcUrl: outcome.rpcUrl });
+    const terminal = await control.terminated;
+    if (terminal.cause) {throw terminal.cause;}
   } finally {
-    process.stdin.pause();
-    await stopExactChild(child);
+    try {
+      await stopExactChild(child);
+      // Reaping also settles startup and clears its deadline/listeners on cancellation.
+      await startup;
+    } finally {control.dispose();}
   }
 }
 
-async function controlMessage(): Promise<string | undefined> {
+function supervisorControl() {
+  type Terminal = {status: "terminated"; cause?: unknown};
+  let acknowledge!: (value: boolean) => void;
+  let terminate!: (value: Terminal) => void;
+  const acknowledged = new Promise<boolean>((resolve) => {acknowledge = resolve;});
+  const terminated = new Promise<Terminal>((resolve) => {terminate = resolve;});
+  let terminal: Terminal | undefined;
+  let pending = "";
+  let received = 0;
+  let ack = false;
+  const finish = (cause?: unknown): void => {
+    if (terminal) {return;}
+    terminal = {status: "terminated", cause};
+    acknowledge(false);
+    terminate(terminal);
+  };
+  const onEnd = (): void => finish();
+  const onError = (cause: Error): void => finish(cause);
+  const onData = (chunk: string): void => {
+    if (terminal) {return;}
+    received += chunk.length;
+    if (received > 4096) {finish(); return;}
+    pending += chunk;
+    let newline: number;
+    while ((newline = pending.indexOf("\n")) >= 0) {
+      const message = pending.slice(0, newline).trim();
+      pending = pending.slice(newline + 1);
+      if (ack || message !== "ack") {finish(); return;}
+      ack = true;
+      acknowledge(true);
+    }
+  };
+  // Keep the two-message protocol and terminal state observed across startup.
   process.stdin.setEncoding("utf8");
-  return await new Promise((resolve) => {
-    let pending = "";
-    const done = (value?: string): void => {
+  process.stdin.on("data", onData);
+  process.stdin.on("end", onEnd);
+  process.stdin.on("close", onEnd);
+  process.stdin.on("error", onError);
+  process.stdout.on("error", onError);
+  process.stdout.on("close", onEnd);
+  if (process.stdin.readableEnded || process.stdin.destroyed) {finish();}
+  return {
+    acknowledged, terminated,
+    async write(message: Record<string, unknown>): Promise<void> {
+      if (terminal) {
+        if (terminal.cause) {throw terminal.cause;}
+        if (message.type !== "identity") {return;}
+      }
+      await new Promise<void>((resolve, reject) => {
+        process.stdout.write(`${JSON.stringify(message)}\n`, (cause) => {
+          if (cause) {finish(cause); reject(cause);} else {resolve();}
+        });
+      });
+    },
+    dispose(): void {
+      process.stdin.pause();
       process.stdin.removeListener("data", onData);
       process.stdin.removeListener("end", onEnd);
-      resolve(value);
-    };
-    const onData = (chunk: string): void => {
-      pending += chunk;
-      const newline = pending.indexOf("\n");
-      if (newline >= 0) {done(pending.slice(0, newline).trim());}
-    };
-    const onEnd = (): void => done();
-    process.stdin.on("data", onData);
-    process.stdin.once("end", onEnd);
-    process.stdin.resume();
-  });
+      process.stdin.removeListener("close", onEnd);
+      process.stdin.removeListener("error", onError);
+      process.stdout.removeListener("error", onError);
+      process.stdout.removeListener("close", onEnd);
+    },
+  };
 }
 
 async function supervisorMessage(

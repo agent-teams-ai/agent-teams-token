@@ -14,13 +14,14 @@ interface PayloadIdentity {
 
 export async function syntheticAnvil(
   context: Pick<TestContext, "after">,
-  mode: "ready" | "stubborn" | "silent" | "exit" = "ready",
+  mode: "ready" | "stubborn" | "silent" | "exit" | "delayed" = "ready",
 ) {
   // Exercise shell quoting as well as spaces, without copying the authenticated Node.
   const directory = await mkdtemp(join(tmpdir(), "agtmai synthetic anvil '"));
   const executable = join(directory, "synthetic anvil.sh");
   const payloadPath = join(directory, "payload identity.json");
   const signalPath = join(directory, "sigterm.json");
+  const releasePath = join(directory, "release.json");
   const starts: Promise<OwnedAnvil>[] = [];
   const runners: {child: ChildProcess; closed: Promise<Error | undefined>}[] = [];
   context.after(async () => {
@@ -50,10 +51,11 @@ export async function syntheticAnvil(
   });
   const payload = join(directory, "synthetic payload.mjs");
   await writeFile(payload, [
-    `import {writeFileSync} from "node:fs";`,
+    `import {existsSync, writeFileSync} from "node:fs";`,
     mode === "stubborn" ? `process.on("SIGTERM", () => writeFileSync(${JSON.stringify(signalPath)}, JSON.stringify({pid: process.pid})));` : "",
     `writeFileSync(${JSON.stringify(payloadPath)}, JSON.stringify({pid: process.pid, execPath: process.execPath}));`,
     mode === "exit" ? "process.exit(17);" : "",
+    mode === "delayed" ? `await new Promise((resolve) => {const timer = setInterval(() => {if (existsSync(${JSON.stringify(releasePath)})) {clearInterval(timer); resolve();}}, 10);});` : "",
     mode === "silent" ? "" : `process.stdout.write("Listening on 127.0.0.1:18545\\n");`,
     "setInterval(() => {}, 1000);",
   ].join("\n"));
@@ -62,6 +64,7 @@ export async function syntheticAnvil(
   await writeFile(executable, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(payload)} "$@"\n`, {mode: 0o700});
   return {
     directory, executable, signalPath,
+    async releaseStartup(): Promise<void> {await writeFile(releasePath, "{}");},
     start(address: string, registerIdentity?: (identity: OwnedProcessIdentity) => Promise<void>): Promise<OwnedAnvil> {
       const pending = startOwnedAnvil(executable, address, registerIdentity);
       starts.push(pending);
