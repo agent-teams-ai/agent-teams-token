@@ -14,7 +14,7 @@ import { makeTestDirectory } from "./test-directory.ts";
 // remain real. These fixtures do not prove Darwin container support.
 const fixtureDirectoryPath = (_fd: number, directory: string): string => directory;
 async function receiveFixtureOutput(raw: string, directory: string, allowlist: readonly string[], exact: boolean): Promise<void> {
-  await receiveOutput(raw, directory, allowlist, exact, fixtureDirectoryPath);
+  await receiveOutput(raw, directory, allowlist, exact, { directoryPath: fixtureDirectoryPath });
 }
 
 const rejected = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "ARTIFACT_EXPORT_FAILED";

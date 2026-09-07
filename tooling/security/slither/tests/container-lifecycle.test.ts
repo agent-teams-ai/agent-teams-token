@@ -31,7 +31,7 @@ test("a timed-out create with a validated immutable ID is removed by exact ID", 
     throw new Error(`unexpected command: ${args.join(" ")}`);
   }};
   await assert.rejects(
-    runContainerById(port, "/usr/bin/docker", ["create"], "/tmp/not-used", []),
+    runContainerById(port, "/usr/bin/docker", ["create"], { output: "/tmp/not-used", allowlist: [] }),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "CONTAINER_ID_INVALID",
   );
   assert.deepEqual(calls.at(-1), ["rm", "--force", id]);
@@ -50,7 +50,7 @@ test("container lifecycle rejects inexact configured cgroup limits before delega
     throw new Error(`unexpected command: ${args.join(" ")}`);
   }};
   await assert.rejects(
-    runContainerById(port, "/usr/bin/docker", ["create"], "/tmp/not-used", []),
+    runContainerById(port, "/usr/bin/docker", ["create"], { output: "/tmp/not-used", allowlist: [] }),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "CGROUP_RUNTIME_UNPROVEN",
   );
   assert.deepEqual(calls.at(-1), ["rm", "--force", id]);
@@ -168,7 +168,7 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
     const response = await scripted.run(command, args, timeout, processOptions);
     return options.transport ? await options.transport(args, response, timeout, processOptions) : response;
   }};
-  return {output, calls, run: async () => await runContainerById(port, "/usr/bin/docker", ["create"], output, ["slither.exit"], undefined, options.authority)};
+  return {output, calls, run: async () => await runContainerById(port, "/usr/bin/docker", ["create"], { output, allowlist: ["slither.exit"], authority: options.authority })};
 }
 
 const codeIs = (code: string) => (error: unknown): boolean => error instanceof Error && "code" in error && error.code === code;

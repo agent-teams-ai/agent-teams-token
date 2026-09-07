@@ -85,11 +85,11 @@ export async function runGate(request: RunGateRequest): Promise<GateAnalysis> {
       custody,
     );
     const before = await closure(repositoryRoot, productionClosure);
-    const result = await runContainerById(processPort, dockerPath, dockerCreateArguments({ input: inputDirectory, forge: forgePath, solc: solcPath, ...imageEnvironment }), rawOutput, PRODUCTION_OUTPUT_FILES, custody, {
+    const result = await runContainerById(processPort, dockerPath, dockerCreateArguments({ input: inputDirectory, forge: forgePath, solc: solcPath, ...imageEnvironment }), { output: rawOutput, allowlist: PRODUCTION_OUTPUT_FILES, custody, authority: {
       forge: forgeBinarySha256, solc: solcBinarySha256,
       inputs: Object.fromEntries([...productionClosure.map((entry) => [entry.path, entry.sha256]),
         ["tooling/security/slither/targets.txt", sha256(`${manifest.targets.map(({ path }) => path.replace(/^contracts\/evm\//u, "")).join("\n")}\n`)] ]),
-    });
+    } });
     await assertContainerResult(result, rawOutput);
     const rawSeal = await sealRawOutput(rawOutput, custody);
     await verifyVersions(rawOutput, rawSeal);
@@ -157,7 +157,7 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
   await writeContainerReadableFile(join(input, "contracts/evm/src/Vulnerable.sol"), fixtureBytes, request.custody);
   await safeCopyFile(join(request.repositoryRoot, "contracts/evm/foundry.toml"), join(input, "contracts/evm/foundry.toml"), request.custody);
   await safeCopyFile(join(request.repositoryRoot, "tooling/security/slither/slither.config.json"), join(input, "tooling/security/slither/slither.config.json"), request.custody);
-  const result = await runContainerById(request.processPort, request.dockerPath, dockerVulnerableFixtureCreateArguments({ input, forge: request.forgePath, solc: request.solcPath, ...request.imageEnvironment }), output, FIXTURE_OUTPUT_FILES, request.custody, {
+  const result = await runContainerById(request.processPort, request.dockerPath, dockerVulnerableFixtureCreateArguments({ input, forge: request.forgePath, solc: request.solcPath, ...request.imageEnvironment }), { output, allowlist: FIXTURE_OUTPUT_FILES, custody: request.custody, authority: {
     forge: request.tools.forgeBinarySha256, solc: request.tools.solcBinarySha256,
     inputs: Object.fromEntries([
       ["contracts/evm/src/Vulnerable.sol", request.fixture.source.sha256],
@@ -167,7 +167,7 @@ async function assertRealVulnerableFixture(request: VulnerableFixtureRequest): P
         return [path, entry.sha256];
       }),
     ]),
-  });
+  } });
   await assertContainerResult(result, output);
   const outputSeal = await sealRawOutput(output, request.custody);
   await verifyVersions(output, outputSeal);

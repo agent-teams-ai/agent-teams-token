@@ -94,10 +94,10 @@ function preload(directory: string, phase: Phase, cleanupFails: boolean): string
         const script = marker + 'setTimeout(() => process.stdout.write(' + JSON.stringify(stdout) + '), ' + delay + ')';
         return await processPort.run(process.execPath, ['-e', script], Math.min(timeout, 5500), options);
       }};
-      await createContainerRunner((_fd, path) => path)(port, '/synthetic/docker', ['create'], directory + '/raw', ['slither.exit']);
+      await createContainerRunner((_fd, path) => path)(port, '/synthetic/docker', ['create'], { output: directory + '/raw', allowlist: ['slither.exit'] });
       await note(['vulnerable-stage']);
       // An already cancelled second lifecycle must not launch even docker info.
-      await createContainerRunner((_fd, path) => path)(port, '/synthetic/docker', ['create'], directory + '/raw', ['slither.exit']);
+      await createContainerRunner((_fd, path) => path)(port, '/synthetic/docker', ['create'], { output: directory + '/raw', allowlist: ['slither.exit'] });
     }}});
   `;
 }

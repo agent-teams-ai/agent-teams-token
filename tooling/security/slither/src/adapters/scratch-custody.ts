@@ -20,7 +20,7 @@ export class ScratchCustody {
       for (const { handle } of custody.entries.values()) {
         try { await handle.close(); } catch (close) { failures.push(close); }
       }
-      throw new AggregateError(failures, "scratch acquisition failed");
+      throw new AggregateError(failures, "scratch acquisition failed", { cause });
     }
   }
 
@@ -76,6 +76,12 @@ export class ScratchCustody {
     await this.assert(path);
   }
 
+  private async assertDirectoryMembership(path: string): Promise<void> {
+    for (const name of await readdir(path)) {
+      if (!this.entries.has(`${path}/${name}`)) { throw unsafe(); }
+    }
+  }
+
   async cleanup(): Promise<void> {
     if (this.closed) { throw unsafe(); }
     const failures: unknown[] = [];
@@ -84,15 +90,13 @@ export class ScratchCustody {
       for (const [path, entry] of this.entries) {
         await this.assert(path);
         if (entry.directory) {
-          for (const name of await readdir(path)) {
-            if (!this.entries.has(`${path}/${name}`)) { throw unsafe(); }
-          }
+          await this.assertDirectoryMembership(path);
         }
       }
       for (const [path, entry] of this.entries) {
         if (entry.directory) { await this.assert(path); await entry.handle.chmod(0o700); }
       }
-      for (const [path, entry] of [...this.entries].reverse()) {
+      for (const [path, entry] of [...this.entries].toReversed()) {
         await this.assert(path);
         if (entry.directory) { await rmdir(path); } else { await unlink(path); }
       }
@@ -118,7 +122,7 @@ function unsafe(): SlitherGateError {
 export async function finalizeScratch(custody: ScratchCustody, primaryFailures: readonly unknown[]): Promise<void> {
   try { await custody.cleanup(); }
   catch (cleanup) {
-    if (primaryFailures.length !== 0) { throw new AggregateError([...primaryFailures, cleanup], "analysis and scratch cleanup failed"); }
+    if (primaryFailures.length !== 0) { throw new AggregateError([...primaryFailures, cleanup], "analysis and scratch cleanup failed", { cause: cleanup }); }
     throw cleanup;
   }
 }

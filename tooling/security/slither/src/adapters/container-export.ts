@@ -189,7 +189,12 @@ export function linuxOutputDirectoryPath(fd: number): string {
   return `/proc/self/fd/${fd}`;
 }
 
-export async function receiveOutput(raw: string, directory: string, allowlist: readonly string[], exact: boolean, directoryPath: OutputDirectoryPath = linuxOutputDirectoryPath, custody?: ScratchCustody): Promise<void> {
+interface OutputWriteOptions {
+  readonly directoryPath?: OutputDirectoryPath;
+  readonly custody?: ScratchCustody;
+}
+
+export async function receiveOutput(raw: string, directory: string, allowlist: readonly string[], exact: boolean, { directoryPath = linuxOutputDirectoryPath, custody }: OutputWriteOptions = {}): Promise<void> {
   try {
     // Validate the entire frame before creating any host file. The existing
     // ProcessPort is buffered; the trusted producer bounds bytes at source.

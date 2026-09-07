@@ -31,19 +31,27 @@ const REQUIRED_CONTROLLERS = ["cpu", "memory", "pids"] as const;
 const OVERALL_TIMEOUT_MS = 600_000;
 const CLEANUP_RESERVE_MS = 30_000;
 
+interface ContainerRunOptions {
+  readonly output: string;
+  readonly allowlist: readonly string[];
+  readonly custody?: ScratchCustody;
+  readonly authority?: MountAuthority;
+}
+
 /** Production requires Linux cgroups, PID namespaces and descriptor paths. */
 const linuxContainerRunner = createContainerRunner(linuxOutputDirectoryPath);
-export async function runContainerById(port: ProcessPort, dockerPath: string, createArguments: readonly string[], output: string,
-  allowlist: readonly string[], custody: ScratchCustody, authority: MountAuthority): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> {
+export async function runContainerById(port: ProcessPort, dockerPath: string, createArguments: readonly string[],
+  options: ContainerRunOptions & { readonly custody: ScratchCustody; readonly authority: MountAuthority }): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> {
+  const { custody, authority } = options;
   // Validate authority before creating any resource, even for JavaScript callers.
   if (!custody || !authority) { throw new SlitherGateError("INPUT_HASH_MISMATCH", "production analysis requires acquired scratch and mount authority"); }
   mountAcquisitionArguments("0".repeat(64), authority);
-  return await linuxContainerRunner(port, dockerPath, createArguments, output, allowlist, custody, authority);
+  return await linuxContainerRunner(port, dockerPath, createArguments, options);
 }
 
 /** Proves, exports and removes a container solely through its immutable ID. */
 export function createContainerRunner(directoryPath: OutputDirectoryPath) {
-  return async (port: ProcessPort, dockerPath: string, createArguments: readonly string[], output: string, allowlist: readonly string[], custody?: ScratchCustody, authority?: MountAuthority): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> => {
+  return async (port: ProcessPort, dockerPath: string, createArguments: readonly string[], { output, allowlist, custody, authority }: ContainerRunOptions): Promise<{ readonly timedOut: boolean; readonly exitCode: number | null }> => {
     assertNotCancelled(port.signal);
     let deadline = performance.now() + OVERALL_TIMEOUT_MS;
     const workDeadline = deadline - CLEANUP_RESERVE_MS;
@@ -75,7 +83,7 @@ export function createContainerRunner(directoryPath: OutputDirectoryPath) {
         });
         if (exported.exitCode !== 0 || exported.timedOut || exported.stderr !== "") {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container-private output export failed");}
         await assertRetainedContainer(work, dockerPath, id, inspection);
-        await receiveOutput(exported.stdout, output, allowed, exitCode === 0, directoryPath, custody);
+        await receiveOutput(exported.stdout, output, allowed, exitCode === 0, { directoryPath, custody });
         await authenticateTransferredOutput(output, allowed, exitCode === 0);
         assertNotCancelled(port.signal);
         assertTimeRemaining(workDeadline);

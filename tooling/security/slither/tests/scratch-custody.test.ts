@@ -70,7 +70,7 @@ test("received analyzer files enter scratch inventory before sealed output clean
   try {
     await custody.directory(output, 0o700);
     const frame = `SLITHER_EXPORT_V1\n${JSON.stringify([["slither.exit", 2, Buffer.from("0\n").toString("base64")]])}\nSLITHER_EXPORT_END\n`;
-    await receiveOutput(frame, output, ["slither.exit"], true, (_fd, path) => path, custody);
+    await receiveOutput(frame, output, ["slither.exit"], true, { directoryPath: (_fd, path) => path, custody });
     await custody.chmod(output, 0o555);
     await custody.cleanup();
     await assert.rejects(readFile(join(output, "slither.exit")), { code: "ENOENT" });
