@@ -31,20 +31,23 @@ function boundaryBlock(source, id) {
 export function restoreArchitectureBoundaries(root, manifest, sharedPlan, workspaceHandle) {
   const path = "architecture/foundation/source-dependencies.yaml";
   const baseline = run("git", ["show", `${manifest.baselineSha}:architecture/foundation/source-dependencies.yaml`], { cwd: root });
-  const prefix = manifest.sliceId === "slither" ? "tooling.slither" : `tooling.${manifest.sliceId}`;
-  editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) => {
-    let current = source;
-    for (const layer of ["domain", "application", "adapters", "composition"]) {
-      const id = `${prefix}.${layer}`;
-      current = replaceExactly(
-        current,
-        boundaryBlock(current, id),
-        boundaryBlock(baseline, id),
-        `boundary:${id}`,
-      );
-    }
-    return current;
-  });
+  editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) =>
+    restoreArchitectureBoundarySource(source, baseline, manifest.sliceId));
+}
+
+export function restoreArchitectureBoundarySource(source, baseline, sliceId) {
+  const prefix = sliceId === "slither" ? "tooling.slither" : `tooling.${sliceId}`;
+  let current = source;
+  for (const layer of ["domain", "application", "adapters", "composition"]) {
+    const id = `${prefix}.${layer}`;
+    current = replaceExactly(
+      current,
+      boundaryBlock(current, id),
+      boundaryBlock(baseline, id),
+      `boundary:${id}`,
+    );
+  }
+  return current;
 }
 
 export function editPackage(root, sliceId, options = {}) {
