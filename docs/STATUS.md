@@ -8,7 +8,24 @@
 - Исторические specialist reviews этой базы не завершены: ошибки среды не
   являются code findings или ACCEPT. Дальнейшую продуктовую реализацию не держат.
 - Реальные testnet deployments, CCIP message IDs и round trip: **не выполнены**.
-- Product adapter, accounting/status, итоговый main/CI/review: в реализации.
+- EVM product checkpoint: immutable CCIP admin token, accepted ADR 0005/pinned
+  testnet config, exact intents, durable journal, finalized RPC observer и native
+  Foundry signer реализованы. Deployment CLI использует отдельный fixture на 100
+  AGTMAI и не меняет production allocations. 36 focused tests и strict typecheck
+  прошли; новые проверки подключены к root gates. Полный новый CI ещё не пройден.
+- Native Linux signing/independent decoding прошли на `a923252`; тестовая
+  транзакция с недостижимым nonce не broadcast. Review journal/CLI обнаружил P1
+  на JSON null journal; `7fe523d` исправил его, отдельная проверка приняла fix.
+- Реальный запуск deployment CLI `21213d7` на Linux остановился ДО подписи:
+  `Test address needs faucet ETH before token deployment`. Sepolia balance = 0,
+  journal не создан, lock снят. Google faucet требует Google sign-in; PoW faucet
+  требует hCaptcha. Эти проверки не обходились, средства не получены.
+- Solana faucet вернул RPC Internal error без signature; последующая finalized
+  проверка показала 0 lamports. Повторные отправки вслепую не выполняются.
+- Осталось: testnet gas, actual deploy/register/pool configuration, Solana signing
+  path, coherent accounting/status consumer, настоящий round trip и bounded
+  negative flow, затем актуальный main/CI/review/runbook. Подготовка Solana и
+  accounting продолжается независимо от доступности faucet.
 - Public mainnet launch, tokenomics/allocations и liquidity: вне текущего этапа.
 
 Ниже сохранён исторический статус с его исходным объёмом evidence.
