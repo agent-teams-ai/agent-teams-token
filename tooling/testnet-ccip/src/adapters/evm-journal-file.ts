@@ -2,10 +2,14 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { EvmJournalPorts, EvmJournalRecord } from "../application/evm-journal.ts";
+import type { EvmJournalRecord } from "../application/evm-journal.ts";
 
 /** Caller supplies a private, owned directory. Crash locks require explicit reconciliation. */
-export function createJournalFile(path: string): Pick<EvmJournalPorts, "exclusive" | "read" | "write"> {
+export function createJournalFile<RecordType extends object = EvmJournalRecord>(path: string): {
+  exclusive<T>(work: () => Promise<T>): Promise<T>;
+  read(): Promise<RecordType | null>;
+  write(record: RecordType): Promise<void>;
+} {
   if (!isAbsolute(path)) { throw new Error("Journal path must be absolute"); }
   const directory = dirname(path);
   let held = false;
@@ -31,7 +35,7 @@ export function createJournalFile(path: string): Pick<EvmJournalPorts, "exclusiv
         await unlink(`${path}.lock`);
       }
     },
-    async read(): Promise<EvmJournalRecord | null> {
+    async read(): Promise<RecordType | null> {
       assertHeld();
       let handle;
       try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
@@ -48,10 +52,10 @@ export function createJournalFile(path: string): Pick<EvmJournalPorts, "exclusiv
         if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
           throw new Error("Existing journal is malformed; reconciliation required");
         }
-        return parsed as EvmJournalRecord;
+        return parsed as RecordType;
       } finally { await handle.close(); }
     },
-    async write(record: EvmJournalRecord): Promise<void> {
+    async write(record: RecordType): Promise<void> {
       assertHeld();
       const temporary = `${path}.${randomUUID()}.tmp`;
       const handle = await open(temporary, "wx", 0o600);
