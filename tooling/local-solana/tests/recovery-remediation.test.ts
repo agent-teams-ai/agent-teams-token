@@ -25,9 +25,9 @@ test("oversized lease is rejected before any payload read", async () => {
     fs.open = (async (...args: Parameters<typeof fs.open>) => {
       const handle = await original(...args);
       if (args[0] === marker) {
-        const read = handle.read.bind(handle); const readFile = handle.readFile.bind(handle);
+        const read = handle.read.bind(handle); const readHandleFile = handle.readFile.bind(handle);
         handle.read = ((...values: Parameters<typeof read>) => { reads += 1; return read(...values); }) as typeof handle.read;
-        handle.readFile = ((...values: Parameters<typeof readFile>) => { reads += 1; return readFile(...values); }) as typeof handle.readFile;
+        handle.readFile = ((...values: Parameters<typeof readHandleFile>) => { reads += 1; return readHandleFile(...values); }) as typeof handle.readFile;
       }
       return handle;
     }) as typeof fs.open; syncBuiltinESMExports();
@@ -182,7 +182,7 @@ for (const residue of ["none", "unknown", "unknown-snapshot", "pending"] as cons
         await lstat(tools.validator); await assert.rejects(lstat(victim.directory), { code: "ENOENT" }); released = true;
       } };
       const lease = { close: async () => { assert.equal(released, true); await snapshot.close(); closed = true; } };
-      const cleanup = cleanupRecoveryRuns(store, runRoot, neighbour, lease, ports, tools, 1);
+      const cleanup = cleanupRecoveryRuns(store, runRoot, neighbour, { snapshots: lease, ports, tools, attempts: 1 });
       if (residue === "none") {
         await cleanup; assert.equal(closed, true); assert.equal(released, true); assert.deepEqual(await fs.readdir(runRoot), []);
       } else {

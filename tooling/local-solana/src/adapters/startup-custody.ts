@@ -83,11 +83,14 @@ async function readRecord(handle: import("node:fs/promises").FileHandle, directo
   if (record === null || Object.keys(record).toSorted().join(",") !== "directory,directoryIdentity,markerIdentity,settled,supervisor,token"
     || record.directory !== directory || record.token !== token || typeof record.settled !== "boolean"
     || !same(record.markerIdentity, identity(entry)) || !same(record.directoryIdentity, await privateDirectory(directory))) { invalid(); }
-  if (record.supervisor !== null && (typeof record.supervisor !== "object" || !Number.isSafeInteger(record.supervisor.pid) || record.supervisor.pid < 1
-    || typeof record.supervisor.start !== "string" || !/^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(record.supervisor.start))) { invalid(); }
+  assertSupervisor(record.supervisor);
   const after = await handle.stat({ bigint: true });
   if (after.nlink !== 1n || after.mode !== entry.mode || after.uid !== entry.uid || !same(identity(after), identity(entry))) { invalid(); }
   return record;
+}
+function assertSupervisor(supervisor: CustodyRecord["supervisor"]): void {
+  if (supervisor !== null && (typeof supervisor !== "object" || !Number.isSafeInteger(supervisor.pid) || supervisor.pid < 1
+    || typeof supervisor.start !== "string" || !/^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(supervisor.start))) { invalid(); }
 }
 async function privateDirectory(directory: string): Promise<FileIdentity> {
   const entry = await lstat(directory, { bigint: true });

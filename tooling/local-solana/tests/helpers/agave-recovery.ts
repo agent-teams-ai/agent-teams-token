@@ -59,14 +59,21 @@ export async function genuineAgaveRecovery(repositoryRoot: string): Promise<void
     if (custodian !== undefined) { await requireExited(custodian.pid); }
     // Even a lost capture message cannot authorize removing executable snapshots.
     // Settle every other run first, using the same durable recovery authority.
-    await cleanupRecoveryRuns(store, runRoot, neighbourRun, snapshots, ports, tools);
+    await cleanupRecoveryRuns(store, runRoot, neighbourRun, { snapshots, ports, tools });
     await rm(root, { recursive: true, force: true });
   }
 }
 
+interface RecoveryCleanupOptions {
+  readonly snapshots: ToolLease | undefined;
+  readonly ports: PortLease | undefined;
+  readonly tools: ToolPaths | undefined;
+  readonly attempts?: number;
+}
+
 /** Called only after the owner, validator and custodian have terminated. */
 export async function cleanupRecoveryRuns(store: PrivateRunStore, runRoot: string, neighbourRun: RunPaths,
-  snapshots: ToolLease | undefined, ports: PortLease | undefined, tools: ToolPaths | undefined, attempts = 600): Promise<void> {
+  { snapshots, ports, tools, attempts = 600 }: RecoveryCleanupOptions): Promise<void> {
   // Only directories named by this resolver's returned tools are expected.
   // Prefix discovery would silently authorize foreign snapshot-looking entries.
   const snapshotDirectories = [...new Set(Object.values(tools ?? {}).map((path) => dirname(path)))];

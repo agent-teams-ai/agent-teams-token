@@ -209,6 +209,20 @@ function validValidatorNetwork(identity: Record<string, unknown>): boolean {
 
 async function quarantineAndDeleteRun(root: string, directory: string, validated: ValidatedRun, stale = false): Promise<boolean> {
   const quarantine = join(root, ".quarantine-" + validated.lease.token);
+  if (!await claimRunQuarantine(root, directory, validated, stale)) { return false; }
+  try {
+    await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity);
+    const marker = await readLease(quarantine); const lease = parseLease(marker.raw);
+    if (!sameIdentity(marker.identity, validated.markerIdentity) || lease.token !== validated.lease.token || !sameIdentity(lease.rootIdentity, validated.rootIdentity) || !sameIdentity(lease.directoryIdentity, validated.directoryIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined run identity changed"); }
+    await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity); const finalMarker = await readLease(quarantine); if (!sameIdentity(finalMarker.identity, validated.markerIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined marker changed before deletion"); }
+    await rm(quarantine, { recursive: true, force: false, maxRetries: 2 }); await assertDirectoryIdentity(root, validated.rootIdentity);
+  } catch (cause) { const currentRoot = await privateDirectoryIdentity(root).catch(() => null); if (currentRoot !== null && sameIdentity(currentRoot, validated.rootIdentity)) { await rename(quarantine, directory).catch(() => {}); } throw cause; }
+  return true;
+}
+
+/** Acquire the quarantine before deletion; only authenticated pre-claim absence is benign. */
+async function claimRunQuarantine(root: string, directory: string, validated: ValidatedRun, stale: boolean): Promise<boolean> {
+  const quarantine = join(root, ".quarantine-" + validated.lease.token);
   try {
     await assertDirectoryIdentity(root, validated.rootIdentity);
     let settled: boolean;
@@ -236,13 +250,6 @@ async function quarantineAndDeleteRun(root: string, directory: string, validated
     if (stale && (cause as NodeJS.ErrnoException).code === "ENOENT" && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
     throw cause;
   }
-  try {
-    await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity);
-    const marker = await readLease(quarantine); const lease = parseLease(marker.raw);
-    if (!sameIdentity(marker.identity, validated.markerIdentity) || lease.token !== validated.lease.token || !sameIdentity(lease.rootIdentity, validated.rootIdentity) || !sameIdentity(lease.directoryIdentity, validated.directoryIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined run identity changed"); }
-    await assertDirectoryIdentity(root, validated.rootIdentity); await assertDirectoryIdentity(quarantine, validated.directoryIdentity); const finalMarker = await readLease(quarantine); if (!sameIdentity(finalMarker.identity, validated.markerIdentity)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "quarantined marker changed before deletion"); }
-    await rm(quarantine, { recursive: true, force: false, maxRetries: 2 }); await assertDirectoryIdentity(root, validated.rootIdentity);
-  } catch (cause) { const currentRoot = await privateDirectoryIdentity(root).catch(() => null); if (currentRoot !== null && sameIdentity(currentRoot, validated.rootIdentity)) { await rename(quarantine, directory).catch(() => {}); } throw cause; }
   return true;
 }
 
