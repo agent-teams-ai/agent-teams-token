@@ -1,78 +1,75 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
-## Граница MVP и правило изменения scope, 6 сентября 2026
+## Активная продуктовая граница, 8 сентября 2026
 
-Уточнено по прямому поручению владельца: закончить результат, не расширять
-разработку инструментов и отделить обязательный первый релиз от развития.
-Этот раздел определяет актуальную последовательность и границу работ при
-расхождении с широкими списками ниже. Исторические результаты не являются
-свежим acceptance. Ethereum + Solana сохраняются; переход на одну сеть не принят.
+Владелец прямо поручил изменить план и автономно доставить полезный продуктовый
+результат без повторных approvals. Этот раздел заменяет прежний local-only scope
+и порядок, требовавший сначала завершить весь отдельный цикл локальных ревью.
+Исторические результаты сохраняются; неподтверждённые ревью не объявляются принятыми.
 
-### Текущий обязательный результат: локальный MVP
+**Текущий результат: реальный AGTMAI testnet round trip Ethereum Sepolia ->
+Solana Devnet -> Ethereum Sepolia через официальный Chainlink CCIP CCT,
+с проверкой backing/supply и читаемым статусом каждого сообщения.**
 
-Сейчас выполняется только полный zero-cost E2E из
-[NEXT_ZERO_COST_SLICES_PLAN](NEXT_ZERO_COST_SLICES_PLAN.md) и
-[исходной критики](research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md).
-Genesis Core из Phase 2 является его частью, а не альтернативной сокращённой
-приёмкой. Все требования этих документов и действующей E2E-цели сохраняются.
+Разрешены автономно: реализация, независимый технический review, test-only keys,
+публичный testnet RPC, faucet requests, deploy/register/configure стандартных
+pools, testnet transactions и проверка их фактического исполнения. Агент сам
+проверяет decoded operations, адреса, chain identity, лимиты и состояние до
+подписания; отдельное подтверждение владельца на каждый тестовый шаг не нужно.
+Расход реальных денег, mainnet operations и mainnet keys не входят в этот этап.
+Faucet assets не являются бюджетом mainnet и не покупаются за реальные деньги.
 
-Внутри scope: local/test-only Genesis Core, owned Anvil и Agave/SPL,
-read-only deployment plan, Slither, воспроизводимый pinned bootstrap,
-восстановление и обязательная проверка уже реализованных компонентов.
-Выход: чистый итоговый SHA; полный Mac arm64 и Linux/Docker набор;
-`pnpm check:linux`; полный sealed rollback proof с READY-last;
-четыре specialist reviews, затем holistic ACCEPT; сохранённый актуальный main;
-зелёный итоговый GitHub CI; закрытые P0/P1, явные verdict для P2/P3 и честный
-[STATUS](STATUS.md). PR merge не входит в автономное разрешение.
+Сохраняются: AGTMAI, decimals 9, immutable fixed-supply Ethereum ERC-20 без
+post-deploy mint, LockRelease на Ethereum, стандартный SPL Token и официальный
+self-service BurnMint pool на Solana, initial remote supply 0, freeze None.
+Тестовые supply и recipients берутся из явно test-only fixture и не принимают
+production allocations/rights. Никакого собственного bridge, relayer или program.
 
-За пределами текущего этапа: public RPC/broadcast, реальные ключи и активы,
-production CCIP contracts, новый frontend/monitor, liquidity, tokenomics,
-vesting, governance, signer/recovery design и изменение supply/allocations.
-Локальный MVP не означает публичный запуск и не доказывает реальную CCIP delivery.
+### Порядок доставки
 
-### Следующие рубежи и минимальная продуктовая граница
+1. Зафиксировать совместимую protocol line и проверенные текущие Chainlink
+   addresses/programs/artifact versions в узком ADR и testnet manifest. Проверить
+   registration path существующего immutable token, а не подменять его mintable
+   tutorial token. Не мигрировать все bounded contexts ради этого сценария.
+2. Реализовать тонкий testnet deployment/transfer path с существующими provider
+   tools: chain allowlist, decoded intents, ограниченные approvals, durable tx IDs,
+   read-before-write reconciliation. При неизвестном результате сначала искать
+   исходную транзакцию; не отправлять повторно автоматически.
+3. Реализовать accounting/status непосредственно для этого flow: identity каждого
+   сообщения, finalized source/destination evidence, duplicate/conflict detection,
+   pending/manual execution, stale/unknown/reorg и backing discrepancy. Статус CLI
+   или минимальная read-only страница достаточны; отдельный dashboard не нужен.
+4. Выполнить настоящий round trip, второй recipient/ATA path и bounded negative
+   rate-limit сценарий. Сохранить source tx, message ID, destination tx, amounts,
+   fees, authorities и balances до/после. Mock tests не заменяют CCIP delivery.
+5. Совместить проверенную работу с актуальным main, сохранив Docs Protocol 0.2,
+   Foundation 0.20 и ReviewRouter; focused regression и итоговый CI, независимый
+   review продуктового изменения, PR и воспроизводимый runbook.
 
-| Рубеж | Обязательный результат | Что не добавлять автоматически |
-|---|---|---|
-| 1. Локальный MVP, текущая работа | Полная приёмка выше | Новые продуктовые функции и универсальная developer-платформа |
-| 2. Минимальный продукт и настоящий testnet E2E | Принятые права/utility/authority и protocol-line ADR; Ethereum -> Solana -> Ethereum, реальные tx/message IDs, supply/authority/message ledger, минимальный read-only статус; проверки Phase 6 | Восемь branded-страниц, собственный transaction UI, DEX/pool, рыночные и growth-метрики |
-| 3. Ограниченная двухсетевая mainnet beta | Все применимые Mainnet readiness и Beta launch gates ниже, simulation, человеческие подписи, canary, мониторинг и incident runbook | Liquidity, airdrop, продажи, rewards или дополнительные сети без отдельного принятия |
-| 4. Расширение после минимального сценария | Отдельная принятая задача с потребителем и критерием выхода | Автоматическое выполнение всего backlog перед первым релизом |
+### Приёмка и запрет расширения
 
-Рубежи 2-3 не разрешены текущей local-only задачей. Public testnet требует
-свежего разрешения конкретных decoded operations; mainnet требует отдельного
-просмотра и подписей. Production права, allocations и authority не выбираются
-агентом. Если принятые права требуют vault/vesting, соответствующая реализация
-обязательна до выпуска: её нельзя перенести под видом упрощения MVP.
+Готово только когда реальные сообщения обоих направлений достигли destination,
+согласованы finality и authorities, нет необъяснимого mint/release/duplicate,
+после settlement pending=0 и L=S, а F-L+S+P_ES+P_SE=F. Unknown/stale/inconsistent
+не показываются как success. Источники данных, hash/version и tx IDs проверяемы.
+Pending не исчезает по timeout; resumption не дублирует исходный transfer.
 
-Для минимальной двухсетевой версии обязательны причинный учёт supply и
-сообщений, finality/reorg handling, idempotency, pending/manual execution,
-выявление orphan mint/duplicate settlement/under-backing, authority checks и
-честные unknown/stale/inconsistent. Минимальный read-only статус допустим вместо
-полного branded dashboard; готовый transaction UX допустим только после
-проверки поддержки нашего flow. Недоступность подходящего готового UX требует
-ограниченной задачи на основной сценарий, а не всей Phase 7.
+Уже пройденные Mac20, Linux check:linux, sealed rollback и Docker Slither для
+75418030 сохраняются как evidence именно этого SHA. Незавершённый исторический
+набор четырёх specialist + holistic не блокирует независимую продуктовую работу.
+Для затронутых рисков обязательны focused tests и независимый review; полный
+pipeline повторяется при изменении его входов/обязательном финальном CI, а не
+как ритуал перед каждым patch. Старое evidence не объявляется проверкой нового SHA.
 
-### Защита от расширения scope
+За scope: mainnet launch, liquidity/DEX, продажи/airdrop, tokenomics/vesting,
+новая governance platform, branded frontend, новые сети и developer frameworks.
+Новый инструмент допускается только для конкретного риска активного flow.
+Если provider/faucet недоступен, фиксировать точный невыполненный шаг и продолжать
+независимую реализацию; не заменять настоящий E2E симуляцией и не объявлять запуск.
 
-- Существующие инструменты сохраняются. Новый инструмент, слой абстракции или
-  проверка добавляется только под конкретный воспроизводимый дефект, явный
-  критерий текущей приёмки либо доказанный риск уже включённого сценария.
-- До изменения записать в существующей задаче/ledger: основание, затронутый
-  инвариант, ограниченный объём правки и проверяемый выход. Отдельный framework,
-  новый gate или новый процесс согласований для этого не нужен.
-- Гипотетическое усиление, косметический рефакторинг и обобщение для будущего
-  consumer идут в backlog и не задерживают текущий результат. Обязательные
-  требования исходного E2E и подтверждённые P0/P1 не переводятся туда молча.
-- После исправления выполнять затронутые проверки; обязательную финальную
-  приёмку сохранять. Повтор того же доказанного запуска без изменения входов
-  или нового риска не является отдельной работой. Evidence старого SHA не
-  выдавать за доказательство нового.
-- Добавление продукта/сети/права/публичной операции в активный этап требует
-  явного изменения scope владельцем. Пока оно не принято, продолжать текущую
-  независимую работу. Уточнение не отменяет supply/key/authority-инварианты.
-- Статус показывает отдельно текущий локальный рубеж и остаток до публичного
-  релиза. Процент всей roadmap и число строк кода не являются сроком запуска.
+Нижние roadmap-разделы сохранены как контекст и backlog. Их прежние local-only
+запреты и per-operation human testnet approvals заменены этим поручением;
+mainnet, supply и key-инварианты остаются в силе.
 
 ## Уточнение snapshots и публикации, 5 сентября 2026
 

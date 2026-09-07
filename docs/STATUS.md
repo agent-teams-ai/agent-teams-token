@@ -1,3 +1,18 @@
+# Активный продуктовый статус, 8 сентября 2026
+
+По поручению владельца текущая цель: настоящий AGTMAI Sepolia -> Solana Devnet
+-> Sepolia через CCIP с accounting/status. Граница и автономия: [PLAN](PLAN.md).
+
+- Проверенная база: 7541803056db1815258a418459c450510e81640a; Mac20, полный Linux,
+  sealed rollback + validator, standalone Docker Slither + validator прошли.
+- Исторические specialist reviews этой базы не завершены: ошибки среды не
+  являются code findings или ACCEPT. Дальнейшую продуктовую реализацию не держат.
+- Реальные testnet deployments, CCIP message IDs и round trip: **не выполнены**.
+- Product adapter, accounting/status, итоговый main/CI/review: в реализации.
+- Public mainnet launch, tokenomics/allocations и liquidity: вне текущего этапа.
+
+Ниже сохранён исторический статус с его исходным объёмом evidence.
+
 # Project status
 
 Last reconciled: 2026-09-05. Earlier evidence below retains its original scope;
