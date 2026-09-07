@@ -36,3 +36,16 @@ test("crash lock is preserved and never automatically stolen", async () => {
     await stat(`${path}.lock`);
   } finally { await rm(dir, { recursive: true }); }
 });
+
+
+test("existing null or primitive journal never means an absent transaction", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agtmai-journal-test-"));
+  try {
+    const path = join(dir, "tx.json");
+    for (const corrupt of ["null", "false", "0", '""', "[]"]) {
+      await writeFile(path, corrupt, { mode: 0o600 });
+      const store = createJournalFile(path);
+      await assert.rejects(store.exclusive(() => store.read()), /malformed/);
+    }
+  } finally { await rm(dir, { recursive: true }); }
+});

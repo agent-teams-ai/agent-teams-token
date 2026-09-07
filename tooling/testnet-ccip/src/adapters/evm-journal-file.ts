@@ -44,7 +44,11 @@ export function createJournalFile(path: string): Pick<EvmJournalPorts, "exclusiv
         if (!stat.isFile() || stat.size > 2_000_000 || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
           throw new Error("Journal must be a private regular file");
         }
-        return JSON.parse(await handle.readFile("utf8")) as EvmJournalRecord;
+        const parsed: unknown = JSON.parse(await handle.readFile("utf8"));
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("Existing journal is malformed; reconciliation required");
+        }
+        return parsed as EvmJournalRecord;
       } finally { await handle.close(); }
     },
     async write(record: EvmJournalRecord): Promise<void> {
