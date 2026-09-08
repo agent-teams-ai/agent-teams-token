@@ -3,8 +3,8 @@ import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transac
 import { createSolanaPoolInitSdk } from "./solana-pool-init-sdk.mjs";
 import { BURNMINT_PROGRAM, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
 import { ROUTER_PROGRAM, registrationInstruction, verifySolanaRegistrationIntent } from "../domain/solana-registration.ts";
-  function anchor(data, name, size) {
-    if (data.length !== size || !data.subarray(0, 8).equals(createHash("sha256").update("account:" + name).digest().subarray(0, 8)) || data[8] !== 1) {
+  function anchor(data, name, size, version = 1) {
+    if (data.length !== size || !data.subarray(0, 8).equals(createHash("sha256").update("account:" + name).digest().subarray(0, 8)) || data[8] !== version) {
       throw new Error("Wrong " + name + " layout");
     }
   }
@@ -47,6 +47,13 @@ export async function createSolanaRegistrationSdk(providerDirectory) {
     return { ...raw, data, owner: new PublicKey(owner) };
   }
   const key = (data, offset) => new PublicKey(data.subarray(offset, offset + 32)).toBase58();
+  function decodeRegistry(rawRpcAccount) {
+    const data = account(rawRpcAccount, ROUTER_PROGRAM).data;
+    anchor(data, "TokenAdminRegistry", 170, 2);
+    if (data[169] !== 0 && data[169] !== 1) { throw new Error("Wrong TokenAdminRegistry boolean"); }
+    return { administrator: key(data, 9), pendingAdministrator: key(data, 41), lookupTable: key(data, 73),
+      writableIndexes: "0x" + data.subarray(105, 137).toString("hex"), mint: key(data, 137), supportsAutoDerivation: data[169] === 1 };
+  }
   function verifyMint(mintRaw, expected, before) {
     const tokenProgram = TOKEN_PROGRAM_ID.toBase58();
     const mintAccount = account(mintRaw, tokenProgram);
@@ -76,12 +83,11 @@ export async function createSolanaRegistrationSdk(providerDirectory) {
     } else if (registryRaw === null && !before && op === "create-token-account") {
       // This first checkpoint precedes the registry operation.
     } else {
-      const registry = account(registryRaw, ROUTER_PROGRAM).data;
-      anchor(registry, "TokenAdminRegistry", 169);
-      const administrator = key(registry, 9), pending = key(registry, 41);
+      const registry = decodeRegistry(registryRaw);
+      const { administrator, pendingAdministrator: pending } = registry;
       const proposed = administrator === zero && pending === expected.payer;
       const accepted = administrator === expected.payer && pending === zero;
-      if (key(registry, 137) !== expected.mint || key(registry, 73) !== zero || !registry.subarray(105, 137).equals(Buffer.alloc(32)) ||
+      if (registry.mint !== expected.mint || registry.lookupTable !== zero || registry.writableIndexes !== "0x" + "00".repeat(32) || registry.supportsAutoDerivation ||
         (before && op === "accept-admin-role" ? !proposed : op === "transfer-mint-authority" || op === "accept-admin-role" ? !accepted : !proposed && !accepted)) {
         throw new Error("Wrong registry administrator or configuration");
       }
@@ -105,5 +111,5 @@ export async function createSolanaRegistrationSdk(providerDirectory) {
     return { operation: op, mint: expected.mint, verified: true };
   }
 
-  return { ...transaction, derive, snapshotAddresses, verifySnapshot };
+  return { ...transaction, derive, snapshotAddresses, decodeRegistry, verifySnapshot };
 }

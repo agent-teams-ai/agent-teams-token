@@ -30,7 +30,7 @@ async function fixture() {
   const global = anchor("PoolConfig", 74); global[9] = 1; key(global, 10, ROUTER_PROGRAM); key(global, 42, "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7");
   const config = anchor("Config", 210); config[9] = 1; config.writeBigUInt64LE(16423721717087811551n, 10);
   key(config, 82, "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi"); key(config, 114, "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7");
-  const registry = anchor("TokenAdminRegistry", 169); key(registry, 41, expected.payer); key(registry, 137, expected.mint);
+  const registry = anchor("TokenAdminRegistry", 170); registry[8] = 2; key(registry, 41, expected.payer); key(registry, 137, expected.mint);
   const registryAccepted = Buffer.from(registry); registryAccepted.fill(0, 41, 73); key(registryAccepted, 9, expected.payer);
   const values = (operation, phase) => {
     const mintData = Buffer.from(mintBytes);
@@ -115,11 +115,33 @@ test("native snapshots enforce all four prerequisite/poststate transitions and e
   const invalidAtaBytes = Buffer.from(invalidAtaState[2].data[0], "base64"); invalidAtaBytes[108] = 3;
   invalidAtaState[2].data[0] = invalidAtaBytes.toString("base64");
   assert.throws(() => sdk.verifySnapshot(invalidAtaState, e, "after"), /ATA layout/);
-  for (const [index, offsets] of [[0, [0, 4, 36, 44, 45, 46]], [2, [0, 32, 64, 72, 108, 109, 121, 129]], [3, [0, 8, 9, 41, 73, 105, 137]], [4, [0, 8, 9, 10, 42]], [5, [0, 8, 9, 10, 82, 114]]]) {
+  for (const [index, offsets] of [[0, [0, 4, 36, 44, 45, 46]], [2, [0, 32, 64, 72, 108, 109, 121, 129]], [3, [0, 8, 9, 41, 73, 105, 137, 169]], [4, [0, 8, 9, 10, 42]], [5, [0, 8, 9, 10, 82, 114]]]) {
     for (const offset of offsets) {
       const bad = values(e.operation, "after"), bytes = Buffer.from(bad[index].data[0], "base64"); bytes[offset] ^= 1;
       bad[index].data[0] = bytes.toString("base64");
       assert.throws(() => sdk.verifySnapshot(bad, e, "after"), `account ${index}, offset ${offset}`);
     }
   }
+});
+
+test("native registry decoder requires exact v2 layout and canonical boolean", { skip: !provider }, async () => {
+  const { sdk, expected, values } = await fixture();
+  const e = { ...expected, operation: "owner-propose-administrator" };
+  const snapshot = values(e.operation, "after"), registry = snapshot[3];
+  const zero = "11111111111111111111111111111111";
+  assert.deepEqual(sdk.decodeRegistry(registry), { administrator: zero, pendingAdministrator: e.payer,
+    lookupTable: zero, writableIndexes: "0x" + "00".repeat(32), mint: e.mint, supportsAutoDerivation: false });
+  const bytes = Buffer.from(registry.data[0], "base64");
+  for (const [length, version, flag] of [[169, 1, 0], [170, 1, 0], [169, 2, 0], [171, 2, 0], [170, 2, 2]]) {
+    const bad = Buffer.alloc(length); bytes.copy(bad); bad[8] = version;
+    if (length > 169) { bad[169] = flag; }
+    assert.throws(() => sdk.decodeRegistry(raw(bad, ROUTER_PROGRAM)), /TokenAdminRegistry/);
+  }
+  assert.throws(() => sdk.decodeRegistry({ ...registry, owner: e.payer }), /owner/);
+  const wrongDiscriminator = Buffer.from(bytes); wrongDiscriminator[0] ^= 1;
+  assert.throws(() => sdk.decodeRegistry(raw(wrongDiscriminator, ROUTER_PROGRAM)), /layout/);
+  const auto = Buffer.from(bytes); auto[169] = 1;
+  assert.equal(sdk.decodeRegistry(raw(auto, ROUTER_PROGRAM)).supportsAutoDerivation, true);
+  snapshot[3] = raw(auto, ROUTER_PROGRAM);
+  assert.throws(() => sdk.verifySnapshot(snapshot, e, "after"), /configuration/);
 });
