@@ -82,7 +82,7 @@ function scriptCgroup(t: TestContext): string[] {
   });
   t.mock.method(fs, "readlink", async (...args: Parameters<typeof fs.readlink>) => {
     if (String(args[0]) === "/proc/self/ns/pid") {return "pid:[1]";}
-    if (String(args[0]) === "/proc/2/ns/pid") {return "pid:[2]";}
+    if (String(args[0]) === "/proc/2/ns/pid") {reads.push(String(args[0])); throw Object.assign(new Error("ptrace access denied"), {code: "EACCES"});}
     return await originalLink(...args);
   });
   t.mock.method(fs, "lstat", async (...args: Parameters<typeof fs.lstat>) => {
@@ -125,6 +125,11 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
   const calls: {args: readonly string[]; timeout: number}[] = [];
   let started = false; let authorized = false; let completed = false;
   const execute = (args: readonly string[]): ProcessResult => {
+    if (args[2] === "/usr/bin/readlink") {
+      assert.equal(authorized, false);
+      assert.deepEqual(args, ["exec", lifecycleId, "/usr/bin/readlink", "/proc/1/ns/pid"]);
+      return result("pid:[2]\n");
+    }
     if (args[6] === ACQUIRE_MOUNTS) {
       assert.equal(authorized, false, "acquisition must precede authorization");
       assert.equal(cgroupReads.length, 6);
@@ -174,12 +179,63 @@ async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
 const codeIs = (code: string) => (error: unknown): boolean => error instanceof Error && "code" in error && error.code === code;
 const isExport = (args: readonly string[]): boolean => args[0] === "exec" && args.length === 9;
 
-test("public lifecycle exports retained live tmpfs output and reaps only its immutable ID", async (t) => {
+test("public lifecycle succeeds when host target namespace readlink would return EACCES", async (t) => {
   const run = await lifecycle(t);
   assert.deepEqual(await run.run(), {timedOut: false, exitCode: 0});
   assert.equal(await readFile(join(run.output, "slither.exit"), "utf8"), "0\n");
-  assert.deepEqual(run.calls.map(({args}) => args[0]), ["info", "create", "container", "start", "container", "exec", "exec", "container", "exec", "container", "rm"]);
+  assert.deepEqual(run.calls.map(({args}) => args[0]), ["info", "create", "container", "start", "container", "exec", "container", "exec", "exec", "container", "exec", "container", "rm"]);
 });
+
+for (const [name, observed] of [
+  ["empty", result()], ["stderr", result("pid:[2]\n", {stderr: "warning"})],
+  ["nonzero", result("pid:[2]\n", {exitCode: 1})], ["timeout", result("pid:[2]\n", {timedOut: true})],
+  ["identical", result("pid:[1]\n")], ["malformed", result("pid:2\n")],
+  ["missing newline", result("pid:[2]")], ["extra newline", result("pid:[2]\n\n")],
+  ["whitespace", result(" pid:[2]\n")], ["leading zero", result("pid:[02]\n")],
+] as const) {
+  test(`live namespace ${name} fails closed before authorization and removes exact ID`, async (t) => {
+    const run = await lifecycle(t, {transport: async (args, response) => args[2] === "/usr/bin/readlink" ? observed : response});
+    await assert.rejects(run.run(), codeIs("CGROUP_RUNTIME_UNPROVEN"));
+    assert.equal(run.calls.some(({args}) => args.includes(AUTHORIZE_ANALYSIS)), false);
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+  });
+}
+
+for (const path of ["/proc/2/cgroup", `${parent}/cgroup.subtree_control`, `${leaf}/memory.max`]) {
+  test(`live namespace success cannot substitute unreadable kernel evidence: ${path}`, async (t) => {
+    const run = await lifecycle(t);
+    const read = fs.readFile;
+    t.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+      if (String(args[0]) === path) {throw Object.assign(new Error("access denied"), {code: "EACCES"});}
+      return await read(...args);
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(run.run(), codeIs("CGROUP_RUNTIME_UNPROVEN"));
+    assert.equal(run.calls.some(({args}) => args.includes(AUTHORIZE_ANALYSIS)), false);
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+  });
+}
+
+for (const mutation of ["pid", "id", "paused", "stopped"] as const) {
+  test(`container ${mutation} change during namespace observation prevents authorization`, async (t) => {
+    let observed = false;
+    const run = await lifecycle(t, {transport: async (args, response) => {
+      if (args[2] === "/usr/bin/readlink") {observed = true;}
+      if (observed && args[0] === "container") {
+        const inspection = JSON.parse(response.stdout);
+        if (mutation === "pid") {inspection.State.Pid = 3;}
+        if (mutation === "id") {inspection.Id = "d".repeat(64);}
+        if (mutation === "paused") {inspection.State.Paused = true;}
+        if (mutation === "stopped") {inspection.State.Running = false;}
+        return result(JSON.stringify(inspection));
+      }
+      return response;
+    }});
+    await assert.rejects(run.run(), codeIs(mutation === "pid" || mutation === "paused" ? "ARTIFACT_EXPORT_FAILED" : "CONTAINER_ID_INVALID"));
+    assert.equal(run.calls.some(({args}) => args.includes(AUTHORIZE_ANALYSIS)), false);
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+  });
+}
 
 for (const [stage, code] of [
   ["compiler-build", "COMPILER_BUILD_FAILED"], ["analysis-runtime", "ANALYZER_RUNTIME_FAILED"], ["detector-inventory", "DETECTOR_INVENTORY_INVALID"],
@@ -265,8 +321,8 @@ test("completion exhaustion leaves only the reserved reap interval", async (t) =
   t.mock.method(performance, "now", () => now);
   const run = await lifecycle(t, {before: (args) => {now += args[6] === COMPLETION_READER ? 565_000 : 1_000;}});
   await assert.rejects(run.run(), codeIs("CONTAINER_TIMEOUT"));
-  assert.equal(run.calls.at(-2)?.timeout, 564_000);
-  assert.equal(run.calls.at(-1)?.timeout, 29_000);
+  assert.equal(run.calls.at(-2)?.timeout, 562_000);
+  assert.equal(run.calls.at(-1)?.timeout, 27_000);
   assert.equal(run.calls.at(-1)?.args[0], "rm");
   assert.equal(run.calls.some(({args}) => isExport(args)), false);
 });
@@ -328,13 +384,13 @@ test("cancelled lifecycle starts no process and leaves no signal listeners", asy
   assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 });
 
-for (const point of ["create", "authorize", "completion", "export", "remove"] as const) {
+for (const point of ["create", "namespace", "authorize", "completion", "export", "remove"] as const) {
   test(`real child cancellation during ${point} settles custody and performs exact-ID cleanup`, async (t) => {
     const controller = new AbortController(); const reason = new SlitherCancellation("SIGINT");
     const processPort = new OwnedProcess(controller.signal);
     let triggered = false;
     const run = await lifecycle(t, {signal: controller.signal, transport: async (args, response, timeout, options) => {
-      const matches = point === "create" ? args[0] === "create" : point === "remove" ? args[0] === "rm" : point === "authorize" ? args[2] === "/bin/bash" : point === "completion" ? args[6] === COMPLETION_READER : isExport(args);
+      const matches = point === "create" ? args[0] === "create" : point === "remove" ? args[0] === "rm" : point === "namespace" ? args[2] === "/usr/bin/readlink" : point === "authorize" ? args[2] === "/bin/bash" : point === "completion" ? args[6] === COMPLETION_READER : isExport(args);
       if (args[0] === "rm") { assert.equal(options?.signal, null, "cleanup is independently runnable"); }
       if (!matches || triggered) { return response; }
       triggered = true;

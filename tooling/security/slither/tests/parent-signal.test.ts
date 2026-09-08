@@ -37,7 +37,7 @@ function preload(directory: string, phase: Phase, cleanupFails: boolean): string
       [leaf + '/pids.max']: '128\\n', [leaf + '/memory.max']: '2147483648\\n', [leaf + '/cpu.max']: '200000 100000\\n'
     };
     fs.readFile = async (...args) => String(args[0]) in files ? files[String(args[0])] : await originalRead(...args);
-    fs.readlink = async (...args) => String(args[0]) === '/proc/self/ns/pid' ? 'pid:[1]' : String(args[0]) === '/proc/2/ns/pid' ? 'pid:[2]' : await originalLink(...args);
+    fs.readlink = async (...args) => String(args[0]) === '/proc/self/ns/pid' ? 'pid:[1]' : await originalLink(...args);
     fs.lstat = async (...args) => [leaf, parent].includes(String(args[0])) ? {dev: 1n, ino: String(args[0]) === leaf ? 2n : 3n, isDirectory: () => true, isSymbolicLink: () => false} : await originalStat(...args);
     syncBuiltinESMExports();
     const note = async (entry) => { await fs.appendFile(directory + '/calls', JSON.stringify(entry) + '\\n'); };
@@ -86,6 +86,7 @@ function preload(directory: string, phase: Phase, cleanupFails: boolean): string
         else if (args[0] === 'start') {started = true; stdout = id + '\\n';}
         else if (args[0] === 'container') {stdout = JSON.stringify({Id: id, State: {Running: started, Paused: false, Pid: 2}, HostConfig: {PidsLimit: 128, Memory: 2147483648, MemorySwap: 2147483648, NanoCpus: 2000000000}});}
         else if (args[0] === 'rm') {stdout = id + '\\n'; stop = phase === 'cleanup'; if (${cleanupFails}) {throw new SlitherGateError('CONTAINER_FAILED', 'synthetic removal failure');}}
+        else if (args[2] === '/usr/bin/readlink') {stdout = 'pid:[2]\\n';}
         else if (args[6] === COMPLETION_READER) {stdout = 'SLITHER_COMPLETED_V1 0\\n'; stop = phase === 'completion';}
         else if (args.length === 9) {stdout = 'SLITHER_EXPORT_V1\\n[["slither.exit",2,"MAo="]]\\nSLITHER_EXPORT_END\\n'; stop = phase === 'export';}
         if (!stop && args[0] !== 'rm') {return {stdout, stderr: '', exitCode: 0, timedOut: false};}

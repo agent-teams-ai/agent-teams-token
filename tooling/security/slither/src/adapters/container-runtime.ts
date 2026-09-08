@@ -116,7 +116,8 @@ async function startContainer(work: ProcessPort, dockerPath: string, id: string,
   if (started.exitCode !== 0 || started.timedOut || started.stdout.trim() !== id) {throw new SlitherGateError("CONTAINER_ID_INVALID", "immutable container failed to start");}
   const inspection = await inspectContainer(work, dockerPath, id, true);
   if (inspection.State?.Paused !== false) {throw new SlitherGateError("ARTIFACT_EXPORT_FAILED", "container cannot authorize analysis while paused");}
-  await assertLiveCgroup(id, inspection);
+  await assertLiveCgroup(work, dockerPath, id, inspection);
+  await assertRetainedContainer(work, dockerPath, id, inspection);
   if (authority) {
     const acquired = await work.run(dockerPath, mountAcquisitionArguments(id, authority), 30_000);
     if (acquired.exitCode !== 0 || acquired.timedOut || acquired.stderr !== "") {throw new SlitherGateError("INPUT_HASH_MISMATCH", "acquired container snapshots differ from authenticated inputs");}
@@ -206,9 +207,9 @@ async function inspectContainer(port: ProcessPort, dockerPath: string, id: strin
   return value;
 }
 
-async function assertLiveCgroup(id: string, inspection: ContainerInspection): Promise<void> {
+async function assertLiveCgroup(port: ProcessPort, dockerPath: string, id: string, inspection: ContainerInspection): Promise<void> {
   const pid = assertConfiguredLimits(inspection);
-  const cgroupPath = await readCgroupPath(id, pid);
+  const cgroupPath = await readCgroupPath(port, dockerPath, id, pid);
   const leaf = join("/sys/fs/cgroup", cgroupPath);
   const parent = dirname(leaf);
   const parentBefore = await safeCgroupDirectory(parent);
@@ -227,12 +228,17 @@ function assertConfiguredLimits(inspection: ContainerInspection): number {
   return Number(pid);
 }
 
-async function readCgroupPath(id: string, pid: number): Promise<string> {
-  const values = await Promise.all([readlink("/proc/self/ns/pid"), readlink(`/proc/${pid}/ns/pid`), readFile(`/proc/${pid}/cgroup`, "utf8")]).catch(() => {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "live PID namespace or cgroup is unreadable");});
-  const [hostNamespace, leafNamespace, cgroup] = values;
+async function readCgroupPath(port: ProcessPort, dockerPath: string, id: string, pid: number): Promise<string> {
+  // Cross-UID or nondumpable init processes deny host readlink via ptrace checks.
+  // Observe the kernel namespace inside the authenticated pinned-image container.
+  const observed = await port.run(dockerPath, ["exec", id, "/usr/bin/readlink", "/proc/1/ns/pid"], 30_000);
+  if (observed.exitCode !== 0 || observed.timedOut || observed.stderr !== "" || !/^pid:\[[1-9][0-9]*\]\n$/u.test(observed.stdout)) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "live PID namespace observation failed");}
+  const leafNamespace = observed.stdout.slice(0, -1);
+  const values = await Promise.all([readlink("/proc/self/ns/pid"), readFile(`/proc/${pid}/cgroup`, "utf8")]).catch(() => {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "live PID namespace or cgroup is unreadable");});
+  const [hostNamespace, cgroup] = values;
   const match = /^0::(\/[A-Za-z0-9_.@:/-]+)\n$/u.exec(cgroup);
   const path = match?.[1];
-  if (hostNamespace === leafNamespace || path === undefined || !path.includes(id) || path.split("/").some((part) => part === "." || part === "..")) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container PID namespace or immutable cgroup leaf is not isolated");}
+  if (!/^pid:\[[1-9][0-9]*\]$/u.test(hostNamespace) || hostNamespace === leafNamespace || path === undefined || !path.includes(id) || path.split("/").some((part) => part === "." || part === "..")) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container PID namespace or immutable cgroup leaf is not isolated");}
   return path;
 }
 
