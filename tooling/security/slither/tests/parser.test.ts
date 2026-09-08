@@ -94,8 +94,8 @@ test("Slither printer inventory is the analyzed target and source authority", ()
 });
 
 // Byte-exact analyzer evidence exported by the unmodified ProcessPort result
-// at a9ccf2603dbfb226187d7240d5d02536d108c118; copied from .tools/handoff.
-// Original capture: /var/data/agtmai-goal-20260905-01a07193/slither-raw-a9ccf260.
+// reviewed on 2026-09-08 for the current two-token production closure.
+// Original capture: /var/data/agtmai-goal-20260905-01a07193/product-slither-ccip-production-raw.json.
 // Image: ghcr.io/trailofbits/eth-security-toolbox:nightly-20260824
 // @sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0
 // Image sourceRevision: 8cad443280f7eeb5920a901b5f58f5a91872d9aa.
@@ -128,27 +128,28 @@ async function syntheticFinding(t: TestContext): Promise<{ root: string; detecto
   } };
 }
 
-test("captured pinned Slither 0.11.6 output parses all 11 production findings", async () => {
-  assert.equal(productionBytes.length, 87782);
-  assert.equal(sha256(productionBytes), "8c5ec82fa3b789314c9a2675a70aaa017dafc4cd032a2ed341cd92a8bb9abb9d");
+test("captured pinned Slither 0.11.6 output parses all 12 production findings", async () => {
+  assert.equal(productionBytes.length, 84697);
+  assert.equal(sha256(productionBytes), "4b0b1021936cf6ff4734f051a051e598bc94ae0ff609f9273c8ead02553fe9c9");
   for (const entry of productionManifest.sources) {
     assert.equal(sha256(await readFile(entry.path)), entry.sha256, entry.path);
   }
   const parsed = await parseSlitherJson(productionRaw, process.cwd());
   assert.equal(parsed.success, true);
   assert.deepEqual(parsed.errors, []);
-  assert.equal(parsed.findings.length, 11);
-  assert.equal(new Set(parsed.findings.map((finding) => finding.fingerprint)).size, 11);
+  assert.equal(parsed.findings.length, 12);
+  assert.equal(new Set(parsed.findings.map((finding) => finding.fingerprint)).size, 12);
   // The existing ledger was pinned before this parser change; parsing captured
   // output must reproduce those identities without adjusting policy or triage.
   const triage = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as { findings: { fingerprint: string }[] };
   assert.deepEqual(parsed.findings.map((finding) => finding.fingerprint), triage.findings.map((finding) => finding.fingerprint).toSorted());
   assert.deepEqual(parsed.findings.map((finding) => finding.detectorId).toSorted(), [
-    "costly-loop", "costly-loop", "cyclomatic-complexity", "naming-convention", "naming-convention",
+    "costly-loop", "costly-loop", "cyclomatic-complexity", "naming-convention", "naming-convention", "naming-convention",
     "pragma", "solc-version", "solc-version", "solc-version", "solc-version", "too-many-digits",
   ]);
   assert.equal(parsed.findings.filter((finding) => finding.location.path.startsWith("contracts/evm/lib/")).length, 7);
-  assert.equal(parsed.findings.filter((finding) => finding.location.path === productionManifest.targets[0]!.path).length, 4);
+  assert.equal(parsed.findings.filter((finding) => finding.location.path === productionManifest.targets[0]!.path).length, 3);
+  assert.equal(parsed.findings.filter((finding) => finding.location.path === productionManifest.targets[1]!.path).length, 2);
   for (const finding of parsed.findings) {
     assert.equal(finding.impact, "Informational");
     const source = productionManifest.sources.find((entry) => entry.path === finding.location.path);

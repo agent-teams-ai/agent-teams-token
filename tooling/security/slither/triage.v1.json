@@ -3,14 +3,6 @@
   "findings": [
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:0bdc516c2ea70eb1506d9087c37a64bf74219c943fae4ce5ba6ec5c709e84607",
-      "owner": "project-security",
-      "disposition": "accepted-design",
-      "rationale": "The pinned OpenZeppelin draft IERC-6093 interface intentionally retains its broad upstream pragma.",
-      "reviewedAt": "2026-08-29T00:00:00.000Z"
-    },
-    {
-      "schemaVersion": 1,
       "fingerprint": "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
       "owner": "project-security",
       "disposition": "accepted-design",
@@ -43,11 +35,27 @@
     },
     {
       "schemaVersion": 1,
+      "fingerprint": "sha256:467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Pinned OpenZeppelin compatibility pragmas and both tokens' exact 0.8.36 pragmas compile together under verified solc 0.8.36+commit.8a079791, Paris, optimizer 200, viaIR=false, IPFS metadata and CBOR enabled. The finding describes differing source constraints, not differing executed compilers.",
+      "reviewedAt": "2026-09-08T05:52:55.734Z"
+    },
+    {
+      "schemaVersion": 1,
       "fingerprint": "sha256:6968e5dfe430c2af75b3853c25e887ca502f113bf9bda91f9534c82162306811",
       "owner": "project-security",
       "disposition": "accepted-design",
       "rationale": "The pinned OpenZeppelin IERC20Metadata interface keeps its broad upstream compatibility pragma.",
       "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:8263a454f64d24c9db2b6ba6d64e2f87cd69bd6a25d40eeb480da1133e77acfa",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "INITIAL_CCIP_ADMIN intentionally uses uppercase naming for a private immutable deployment value. The constructor rejects zero and assigns it once; getCCIPAdmin only returns it. This field introduces no setter, mint authority or token administration capability.",
+      "reviewedAt": "2026-09-08T05:52:55.734Z"
     },
     {
       "schemaVersion": 1,
@@ -75,11 +83,11 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:b44fbecb5ceae85789986a70267528994357153d5487d7ca1b1bd780889cc617",
+      "fingerprint": "sha256:cf3dec3433de4ea4c848ce18b2dcf0c2b034f800f9d37f47f038d32f767ebad1",
       "owner": "project-security",
       "disposition": "accepted-design",
-      "rationale": "The full-width hexadecimal literal is the fixed, human-decodable genesis allocation domain tag.",
-      "reviewedAt": "2026-08-29T00:00:00.000Z"
+      "rationale": "The inherited bytes32 literal encodes the zero-padded ASCII domain AGTMAI_ALLOCATION_V1. It intentionally domain-separates the canonical abi.encode genesis allocation hash; it is not an arithmetic quantity. Slither now attributes the inherited constant initialization to AGTMAICCIPToken.",
+      "reviewedAt": "2026-09-08T05:52:55.734Z"
     },
     {
       "schemaVersion": 1,

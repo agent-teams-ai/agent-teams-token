@@ -14,12 +14,12 @@ import { makeCompilerEvidence } from "./test-compiler-evidence.ts";
 import { makeTestDirectory } from "./test-directory.ts";
 import { testPublication } from "./test-publication.ts";
 
-// Byte-exact production capture at a9ccf2603dbfb226187d7240d5d02536d108c118;
-// compiler/source/config closure is unchanged at c3cfc22412fe85aed31a5884362618b6e2a273f9.
+// Byte-exact compilerEvidence from product-slither-reviewed-capture.json,
+// reviewed 2026-09-08 for the current two-token closure.
 // Image nightly-20260824@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0,
 // sourceRevision 8cad443280f7eeb5920a901b5f58f5a91872d9aa. This is replay,
 // not a newly observed container run or a real vulnerable-fixture acceptance.
-const base = "c3cfc22412fe85aed31a5884362618b6e2a273f9";
+const base = "8a56dc28ff55af87f9d0e04ca3cfef0602d950f4";
 const schemaDirectory = "tooling/security/slither";
 const sourceName = "src/features/token-genesis/AGTMAIToken.sol";
 const version = "0.8.36+commit.8a079791";
@@ -81,9 +81,13 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
   };
   const triage = parse(await readFile(`${schemaDirectory}/triage.v1.json`, "utf8")).findings as FindingTriage[];
   const decision = evaluatePolicy({ input, manifest: accepted, expectedDetectors: detectorInventory, suppressions: [], triage });
-  assert.equal(parsed.findings.length, 11);
+  assert.equal(parsed.findings.length, 12);
   assert.equal(detectorInventory.length, 101);
   assert.equal(decision.exitCode, 0, JSON.stringify(decision.errors));
+  assert.equal(decision.category, "clean");
+  assert.equal(decision.blocking.length, 0);
+  assert.equal(decision.visible.length, 12);
+  assert.equal(decision.suppressed.length, 0);
   await writeReadyEvidence({ output, candidateSha: base, manifest: accepted, input, decision,
     hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(await readFile(`${schemaDirectory}/suppressions.v1.json`)) },
     triageHash: sha256(await readFile(`${schemaDirectory}/triage.v1.json`)), schemaDirectory, canonicalDirectory,
@@ -92,14 +96,14 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
 }
 const validate = async (bundle: { output: string; canonicalDirectory: string }): Promise<void> => await validateEvidenceBundleContents({ ...bundle, candidateSha: base, schemaDirectory, finalizationMode: "local" });
 
-test("captured Foundry output preserves exact raw bytes, all eight compiler commits and production pins", async () => {
-  assert.equal(Buffer.byteLength(buildRaw), 369186);
-  assert.equal(sha256(buildRaw), "94a95d6a983fdf58cfe64d3cb220437824f8f882b125871d0417e3cdcbf922cd");
-  assert.equal(Buffer.byteLength(artifactRaw), 132447);
-  assert.equal(sha256(artifactRaw), "007b59a80bee113a7270bd5360207934042537620c214fa5dc2d3c648c5764c6");
+test("captured Foundry output preserves exact raw bytes, all 9 compiler commits and production pins", async () => {
+  assert.equal(Buffer.byteLength(buildRaw), 429063);
+  assert.equal(sha256(buildRaw), "2b3d02abe8852d9ccaeded88f6aab3c0c88273041d7b5401a9623f0324469d1d");
+  assert.equal(Buffer.byteLength(artifactRaw), 132501);
+  assert.equal(sha256(artifactRaw), "460107665721878a8c9c27bdc308b59a53a627b8f5e715ac9e09e45409084c41");
   const build = parse(buildRaw); const artifact = parse(artifactRaw);
   assert.equal(build.solcVersion, "0.8.36"); assert.equal(build.solcLongVersion, "0.8.36");
-  assert.equal(contracts(build).length, 8);
+  assert.equal(contracts(build).length, 9);
   for (const contract of contracts(build)) {assert.equal(object(parse(contract.metadata as string).compiler).version, version);}
   assert.equal(object(object(artifact.metadata).compiler).version, version);
   assert.deepEqual(parse(artifact.rawMetadata as string), parse(target(build).metadata as string));
@@ -149,7 +153,7 @@ function hostilePairs(): [string, Pair][] {
     cases.push([`coherent embedded identity ${JSON.stringify(value)}`, mutation((build, artifact) => {allVersions(build, artifact, value);})]);
   }
   cases.push(["coherent alternate release", mutation((build, artifact) => {build.solcVersion = "0.8.35"; build.solcLongVersion = "0.8.35"; allVersions(build, artifact, "0.8.35+commit.deadbeef");})]);
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < contracts(parse(buildRaw)).length; index += 1) {
     cases.push([`wrong commit in contract ${index}`, mutation((build) => {
       const contract = contracts(build)[index]!; const metadata = parse(contract.metadata as string);
       object(metadata.compiler).version = "0.8.36+commit.deadbeef"; contract.metadata = JSON.stringify(metadata);
