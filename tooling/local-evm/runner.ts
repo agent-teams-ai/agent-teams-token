@@ -275,7 +275,7 @@ function systemTemporaryRoot(): string {
 function assertApprovedBuild(artifact: string, abi: string, profile: string): void {
   const approved = artifact === APPROVED_CONTRACT_ARTIFACT_SHA256
     && abi === APPROVED_ABI_SHA256
-    && profile === "0x1efe84db9573a50e5b465e69c4d95dda74f6ca303bbf52cbb0de2a21ffb998f8";
+    && profile === "0xc64ebebb53f0a7756b14f6878038f32c7e126ffb302e2ff7f0a757eea2a2ab93";
   if (!approved) {throw new LocalEvmError("LOCAL_EVM_BUILD_NOT_APPROVED", "token artifact, ABI, or build approval differs from the committed test-only pins");}
 }
 async function toolVersions(repositoryRoot: string, foundry: FoundryBinaries, solc: PinnedSolc, signal: AbortSignal): Promise<Record<string, string>> {
