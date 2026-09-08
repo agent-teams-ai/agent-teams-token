@@ -97,3 +97,41 @@ test('discovery offRamp is rejected unless trusted native router authorizes it',
   await assert.rejects(native.authorizeOffRamp('ethereum', 'offramp', 1n), /Unauthorized/);
   allowed = true; await native.authorizeOffRamp('ethereum', 'offramp', 1n);
 });
+test('Solana offRamp marker rejects wrong owner, discriminator and executable program', async () => {
+  const { createNativeStatus } = await import('../src/adapters/transfer-status-native.mjs');
+  const { createHash } = await import('node:crypto');
+  const { ROUTER_PROGRAM } = await import('../src/domain/solana-registration.ts');
+  const marker = { owner: ROUTER_PROGRAM, executable: false, data: [createHash('sha256').update('account:AllowedOfframp').digest().subarray(0, 8).toString('base64'), 'base64'] };
+  const program = { executable: true };
+  const fetcher = async (_, options) => { const { id, params } = JSON.parse(options.body); return new Response(JSON.stringify({ jsonrpc: '2.0', id, result: { value: params[0] === 'marker' ? marker : program } })); };
+  const native = createNativeStatus('https://sepolia.invalid', 'https://solana.invalid', { allowedOffRamp: () => 'marker' }, fetcher);
+  await native.authorizeOffRamp('solana', 'offramp', 1n);
+  marker.owner = 'attacker'; await assert.rejects(native.authorizeOffRamp('solana', 'offramp', 1n), /Unauthorized/);
+  marker.owner = ROUTER_PROGRAM; marker.executable = true; await assert.rejects(native.authorizeOffRamp('solana', 'offramp', 1n), /Unauthorized/);
+  marker.executable = false; program.executable = false; await assert.rejects(native.authorizeOffRamp('solana', 'offramp', 1n), /Unauthorized/);
+  program.executable = true; marker.data[0] = Buffer.alloc(8).toString('base64'); await assert.rejects(native.authorizeOffRamp('solana', 'offramp', 1n), /Unauthorized/);
+});
+test('snapshot pins mint authority while finalized heads may advance', async () => {
+  const { createNativeStatus } = await import('../src/adapters/transfer-status-native.mjs');
+  const mint = { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: { parsed: { type: 'mint', info: { decimals: 9, isInitialized: true, freezeAuthority: null, mintAuthority: 'pool-signer' } } } };
+  let supplySlot = 10;
+  const fetcher = async (_, options) => {
+    const { id, method, params } = JSON.parse(options.body);
+    const results = { eth_chainId: '0xaa36a7', getGenesisHash: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG',
+      eth_getBlockByNumber: { hash: 'block', number: '0xa' }, getSlot: 10, getAccountInfo: { value: mint } };
+    let result = results[method];
+    if (method === 'eth_call') { result = params[0].data === '0x18160ddd' ? '0x174876e800' : '0x0'; }
+    if (method === 'getTokenSupply') { result = { context: { slot: supplySlot++ }, value: { decimals: 9, amount: '0' } }; }
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }));
+  };
+  const native = createNativeStatus('https://sepolia.invalid', 'https://solana.invalid', { solanaSigner: 'pool-signer' }, fetcher);
+  assert.equal((await native.snapshot()).coherent, true);
+  mint.data.parsed.info.mintAuthority = 'attacker'; await assert.rejects(native.snapshot(), /mint identity/);
+});
+test('SDK diagnostic logger sends all levels to its dedicated stream', async () => {
+  const { statusLogger } = await import('../src/composition/transfer-status.mjs');
+  const diagnostics = [];
+  const logger = statusLogger(text => diagnostics.push(text));
+  for (const level of ['debug', 'info', 'warn', 'error']) { logger[level]('fetched %d', 200); }
+  assert.deepEqual(diagnostics, Array(4).fill('fetched 200\n'));
+});

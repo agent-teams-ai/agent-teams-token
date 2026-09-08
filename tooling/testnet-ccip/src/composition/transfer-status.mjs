@@ -1,3 +1,4 @@
+import { format } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -8,6 +9,11 @@ import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { BURNMINT_PROGRAM } from '../domain/solana-pool-init.ts';
 import { REVERSE } from '../domain/solana-reverse.mjs';
 import { inspectTransfer, accountTransfers } from '../domain/transfer-status.mjs';
+/** SDK 1.13.0 ChainContext/WithLogger; stdout belongs exclusively to report JSON. */
+export function statusLogger(write = text => process.stderr.write(text)) {
+  const log = (...args) => { write(format(...args) + '\n'); };
+  return { debug: log, info: log, warn: log, error: log };
+}
 /** One-shot read-only CLI. Input contains public hashes and endpoints only. */
 const stringify = value => JSON.stringify(value, (_, item) => typeof item === 'bigint' ? item.toString() : item);
 export async function runStatus(settings) {
@@ -31,9 +37,12 @@ export async function runStatus(settings) {
   const solana = settings.solanaRpc ?? 'https://api.devnet.solana.com';
   const native = createNativeStatus(sepolia, solana, lane), chains = {};
   try {
-    chains.ethereum = await sdk.EVMChain.fromUrl(sepolia);
-    chains.solana = await sdk.SolanaChain.fromUrl(solana);
-    const api = sdk.CCIPAPIClient.fromUrl();
+    const logger = statusLogger();
+    // fromUrl caches API clients by URL without logger context. Own this client explicitly.
+    const api = new sdk.CCIPAPIClient(undefined, { logger });
+    const context = { logger, apiClient: api };
+    chains.ethereum = await sdk.EVMChain.fromUrl(sepolia, context);
+    chains.solana = await sdk.SolanaChain.fromUrl(solana, context);
     const inspect = async () => {
       const results = [];
       for (const transfer of settings.transfers) {
