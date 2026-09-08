@@ -30,8 +30,10 @@ pnpm check
 docker compose up -d anvil
 ```
 
-All local accounts use valueless test assets. Public testnet and mainnet access
-remain disabled until their explicit gates are implemented.
+All local accounts use valueless test assets. The active plan permits the bounded
+Sepolia/Devnet fixture through official CCIP pools; public access remains opt-in.
+Use the [fixed testnet operator runbook](tooling/testnet-ccip/transfer-status.md)
+for checkpoints, transfer status and safe resumption. Mainnet is outside this scope.
 
 ## Project state
 
