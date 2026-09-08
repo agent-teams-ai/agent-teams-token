@@ -22,7 +22,7 @@ export interface SolanaMintEnvelope {
 }
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const invalid = (): never => { throw new Error("Invalid test-only Solana mint intent"); };
-function publicKey(address: string): Buffer {
+export function solanaPublicKeyBytes(address: string): Buffer {
   if (typeof address !== "string" || address.length < 32 || address.length > 44) { return invalid(); }
   let value = 0n;
   for (const character of address) {
@@ -49,8 +49,8 @@ function validateExpectation(expected: SolanaMintExpectation): { rent: bigint; p
   if (expected.testOnly !== true || expected.cluster !== "solana-devnet" ||
     expected.payer === expected.mint || [SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM].includes(expected.payer) ||
     [SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM].includes(expected.mint)) { return invalid(); }
-  const payerBytes = publicKey(expected.payer);
-  publicKey(expected.mint);
+  const payerBytes = solanaPublicKeyBytes(expected.payer);
+  solanaPublicKeyBytes(expected.mint);
   if (typeof expected.rentLamports !== "bigint" &&
     (typeof expected.rentLamports !== "string" || !/^[1-9][0-9]*$/.test(expected.rentLamports))) { return invalid(); }
   const rent = BigInt(expected.rentLamports);
@@ -71,7 +71,7 @@ export function verifySolanaMintIntent(intent: SolanaMintIntent, expected: Solan
   checkAccount(initialize.accounts[0], expected.mint);
   const createData = data(create.dataBase64, 52);
   if (createData.readUInt32LE(0) !== 0 || createData.readBigUInt64LE(4) !== rent ||
-    createData.readBigUInt64LE(12) !== 82n || !createData.subarray(20).equals(publicKey(SPL_TOKEN_PROGRAM))) { return invalid(); }
+    createData.readBigUInt64LE(12) !== 82n || !createData.subarray(20).equals(solanaPublicKeyBytes(SPL_TOKEN_PROGRAM))) { return invalid(); }
   const mintData = data(initialize.dataBase64, 35);
   if (mintData[0] !== 20 || mintData[1] !== 9 || !mintData.subarray(2, 34).equals(payerBytes) || mintData[34] !== 0) { return invalid(); }
   return { schema: "agtmai-solana-mint-v1", cluster: "solana-devnet", payer: expected.payer,
