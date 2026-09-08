@@ -289,5 +289,192 @@
       }
     },
     "interpretation": "ATA created by standard Associated Token Program in a separate transaction by the same signer that then executed official CCIP OffRamp. B signed neither and remains unfunded. Exact execution/message/native binding is in product-final-three-message-proof-success.json."
+  },
+  "feeAndAuthorityEvidence": {
+    "scope": "Fees of the three successful source/destination pairs only; setup, approvals, recovery attempts and rent are not an all-in deployment cost. Destination execution fees may be paid by an executor, not the token holder.",
+    "ethereum": {
+      "observedAt": "2026-09-08T07:41:36.389603+00:00",
+      "finalizedHead": {
+        "number": "0xb1e97e",
+        "hash": "0xd9095ad315a9c3817d6238677cf6e697e1d8e49cd34c81052bb183c63b621041"
+      },
+      "sourceSha256": "ff54cf0a853db8e1db4d347f9d10d3822944e0747b38d406a276265875f1c47b",
+      "transactions": [
+        {
+          "label": "forwardA_source",
+          "transactionHash": "0x9d2e2a7503c12a08c5e57317470fdc7ed8f1f82575c9c695de58c6cc36ea50fa",
+          "blockHash": "0xe38ac218ca693c0739bf979dcd50e347023aa6b35f4705be98c02b6294e71e4b",
+          "blockNumber": "11658108",
+          "gasUsed": "228595",
+          "effectiveGasPriceWei": "1234060274",
+          "networkFeeWei": "282100008335030",
+          "transactionValueWei": "240030429000119",
+          "from": "0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6",
+          "to": "0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59"
+        },
+        {
+          "label": "reverse_destination",
+          "transactionHash": "0x375a00cef1637801fd1c11926f9c32c2a1853ee6386b06d078c77253f7ed4886",
+          "blockHash": "0xfc772a74f9c232ceb340823a62ea01d6b42d52f2b933deee9752cfa3a369cae8",
+          "blockNumber": "11658569",
+          "gasUsed": "164600",
+          "effectiveGasPriceWei": "1026578895",
+          "networkFeeWei": "168974886117000",
+          "transactionValueWei": "0",
+          "from": "0xc03bfdf1c576bc3720dcd45b6b4ef6a0aef4dfe6",
+          "to": "0x0820f975ce90ee5c508657f0c58b71d1fcc85ce0"
+        },
+        {
+          "label": "forwardB_source",
+          "transactionHash": "0x8b3891c0d263df5634f760f74ed538abfcb75e48b6d808e8d2d77cc94367fde1",
+          "blockHash": "0x60299dd32ad123adc3255eb626f713e03f154515358b609b15ae7ede915adbb8",
+          "blockNumber": "11658811",
+          "gasUsed": "228595",
+          "effectiveGasPriceWei": "1278445999",
+          "networkFeeWei": "292246363141405",
+          "transactionValueWei": "241528998328777",
+          "from": "0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6",
+          "to": "0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59"
+        }
+      ]
+    },
+    "solana": [
+      {
+        "label": "forwardA_destination",
+        "signature": "4apQ7wSFwRSRtbMRdmEPe9eko6VawQrJnktmStGe8qsAGpQcEWevGy8W9dNAao4SkGPcdPW8Y9wgpZVh8Q4rKcEk",
+        "slot": 494905812,
+        "networkFeeLamports": "5000",
+        "tokenEffects": [
+          {
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "parsed": {
+              "info": {
+                "account": "BDW4fQh6QGDnTbZATEjTCcu1PQaKvKSE5GzmQTGe9Kvh",
+                "amount": "1000000000",
+                "mint": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+                "multisigMintAuthority": "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX",
+                "signers": [
+                  "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX"
+                ]
+              },
+              "type": "mintTo"
+            }
+          }
+        ],
+        "sourceFile": "product-final-forwardA-parsed-fees.json",
+        "sourceSha256": "399f3bcdb227c15311395f20efa043c4aac5f143ab70b60cd141b1480a821be3"
+      },
+      {
+        "label": "reverse_source",
+        "signature": "5FhfyCdtWEt2kdTG139DRxd2MW6DRxSUSCrD42dd3GTbZWAuorJuWG3WSooRhuHFfr3s5D5d23b7D3A7NtevakAP",
+        "slot": 494910753,
+        "networkFeeLamports": "5000",
+        "tokenEffects": [
+          {
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "parsed": {
+              "info": {
+                "account": "ETmid1DpsTNnZGueaiK68hWqfcs6rJii1YFgjKxrcVzF",
+                "amount": "1000000000",
+                "authority": "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX",
+                "mint": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau"
+              },
+              "type": "burn"
+            }
+          }
+        ],
+        "sourceFile": "product-reverse-finalized-parsed-transaction.json",
+        "sourceSha256": "a98f06b0fb90aff51a98df6ced92dad14e8c068ba8704abe30972fc3a837c74b"
+      },
+      {
+        "label": "forwardB_destination",
+        "signature": "3Gc1mJJo8wMqZCZq2ei1E9vphBzh7w8XA3EW1JPD1C33AhWTkuNJgcKjuwxE1igMfRXt1SEM3hdWoizVA4Lt72jc",
+        "slot": 494936383,
+        "networkFeeLamports": "5147",
+        "tokenEffects": [
+          {
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "parsed": {
+              "info": {
+                "account": "2HGSh7v8thLVyxVSizQtvicsfKFrbYeL2sTSGjWzbCDE",
+                "amount": "1000000000",
+                "mint": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+                "multisigMintAuthority": "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX",
+                "signers": [
+                  "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX"
+                ]
+              },
+              "type": "mintTo"
+            }
+          }
+        ],
+        "sourceFile": "product-final-forwardB-parsed-fees.json",
+        "sourceSha256": "079e6c7163134e37718ce0fc87894198ea372ae81b654c6245512e8fefaf1b9c"
+      }
+    ],
+    "reverseNativePayment": {
+      "signature": "5FhfyCdtWEt2kdTG139DRxd2MW6DRxSUSCrD42dd3GTbZWAuorJuWG3WSooRhuHFfr3s5D5d23b7D3A7NtevakAP",
+      "transfer": {
+        "destination": "9TKiJBGMu1c6aqxaKuzV6G1otYaYM3PLZf5VoUHhjKY2",
+        "lamports": 10571890,
+        "source": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t"
+      },
+      "meaning": "Native SOL transfer to fee billing token account followed by syncNative; separate from network fee and the 777240-lamport nonce-account rent."
+    },
+    "postSettlementAuthorities": {
+      "observedAt": "2026-09-08T07:45:10.760246+00:00",
+      "readOnly": true,
+      "scope": "Post-settlement finalized authority observation; does not claim historical before-state proof.",
+      "ethereum": {
+        "blockHash": "0xfae5c1f7103445034e308a2852c3328b775b544f7237d5b0bdc539a4304f68a0",
+        "blockNumber": "0xb1e99b",
+        "fields": {
+          "getCCIPAdmin()": {
+            "contract": "0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9",
+            "value": "0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6"
+          },
+          "owner()": {
+            "contract": "0x24508e2eb3bedc086318abc054153fd83823a4e2",
+            "value": "0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6"
+          },
+          "getToken()": {
+            "contract": "0x24508e2eb3bedc086318abc054153fd83823a4e2",
+            "value": "0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9"
+          }
+        }
+      },
+      "solana": {
+        "mint": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+        "account": {
+          "context": {
+            "apiVersion": "4.3.0-beta.3",
+            "slot": 495001869
+          },
+          "value": {
+            "data": {
+              "parsed": {
+                "info": {
+                  "decimals": 9,
+                  "freezeAuthority": null,
+                  "isInitialized": true,
+                  "mintAuthority": "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX",
+                  "supply": "1000000000"
+                },
+                "type": "mint"
+              },
+              "program": "spl-token",
+              "space": 82
+            },
+            "executable": false,
+            "lamports": 1066800,
+            "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "rentEpoch": 18446744073709551615,
+            "space": 82
+          }
+        }
+      },
+      "sourceSha256": "9ba4c60b4e2e447b28a146f918300b38280d768649716ac199a8acb916f7f7d9"
+    },
+    "historicalAuthorityEvidence": "The exact successful Solana transaction tokenEffects preserve mint/burn authorities at execution. The later account observation is post-settlement, not a fabricated historical before snapshot."
   }
 }

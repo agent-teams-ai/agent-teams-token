@@ -61,6 +61,31 @@ PUBLIC `product-final-balances-and-b-ata-proof.json`, observed at
   mint supply=1000000000 base units, B native balance=0 lamports.
   B was not funded and signed neither transaction.
 
+## Recorded fees and authorities
+
+The linked JSON ledger includes `feeAndAuthorityEvidence`, with receipt hashes,
+gas arithmetic, exact Solana execution signatures and historical mint/burn
+instructions. Ethereum receipts were reread against canonical finalized blocks
+on 8 September 2026. Amounts below are integer base units, not fiat estimates.
+
+| Leg | Source network fee | Source native CCIP payment | Destination network fee |
+| --- | --- | --- | --- |
+| E->A | 282100008335030 wei | 240030429000119 wei transaction value | 5000 lamports |
+| A->E | 5000 lamports | 10571890 lamports transferred to fee billing account | 168974886117000 wei |
+| E->B | 292246363141405 wei | 241528998328777 wei transaction value | 5147 lamports |
+
+Destination fees can be paid by the executor. These rows exclude setup,
+approvals, failed recovery attempts and rent, so they are not an all-in cost.
+B ATA rent/creation fees remain listed above. The reverse transaction also
+creates its nonce account with 777240 lamports rent, separate from its fees.
+
+A later finalized authority observation records the same Ethereum test admin
+as `getCCIPAdmin()` and pool `owner()`, and the pool's exact token address.
+Solana mint authority is `8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX`,
+freeze authority is null, decimals are 9, and supply is 1000000000 base units.
+Historical mint/burn instructions and this post-settlement account read are
+separate evidence; the later read does not invent a historical before-state.
+
 ## Fixture and prerequisites
 
 | Identity | Fixed public value |
