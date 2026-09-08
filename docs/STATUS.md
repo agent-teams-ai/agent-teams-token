@@ -1,48 +1,35 @@
 # Активный продуктовый статус, 8 сентября 2026
 
-По поручению владельца текущая цель: настоящий AGTMAI Sepolia -> Solana Devnet
--> Sepolia через CCIP с accounting/status. Граница и автономия: [PLAN](PLAN.md).
+Цель: настоящий AGTMAI Sepolia -> Solana Devnet -> Sepolia через CCIP,
+с accounting/status. Граница и автономия: [PLAN](PLAN.md).
 
-- Проверенная база: 7541803056db1815258a418459c450510e81640a; Mac20, полный Linux,
-  sealed rollback + validator, standalone Docker Slither + validator прошли.
-- Исторические specialist reviews этой базы не завершены: ошибки среды не
-  являются code findings или ACCEPT. Дальнейшую продуктовую реализацию не держат.
-- Реальные testnet deployments, CCIP message IDs и round trip: **не выполнены**.
-- EVM product checkpoint: immutable CCIP admin token, accepted ADR 0005/pinned
-  testnet config, exact intents, durable journal, finalized RPC observer и native
-  Foundry signer реализованы. Deployment CLI использует отдельный fixture на 100
-  AGTMAI и не меняет production allocations. 36 focused tests и strict typecheck
-  прошли; новые проверки подключены к root gates. Полный новый CI ещё не пройден.
-- Native Linux signing/independent decoding прошли на `a923252`; тестовая
-  транзакция с недостижимым nonce не broadcast. Review journal/CLI обнаружил P1
-  на JSON null journal; `7fe523d` исправил его, отдельная проверка приняла fix.
-- Реальный запуск deployment CLI `21213d7` на Linux остановился ДО подписи:
-  `Test address needs faucet ETH before token deployment`. Sepolia balance = 0,
-  journal не создан, lock снят. Google faucet требует Google sign-in; PoW faucet
-  требует hCaptcha. Эти проверки не обходились, средства не получены.
-- Solana faucet вернул RPC Internal error без signature; последующая finalized
-  проверка показала 0 lamports. Повторные отправки вслепую не выполняются.
-- Solana checkpoint `280133b`: официальный generator 0.5.1 установлен на Linux
-  по release SHA-256 и frozen lock без install scripts. Mint verifier проверяет
-  точные System createAccount + SPL InitializeMint2 bytes, supply 0/freeze None.
-  Журнал не повторяет неизвестную отправку и не заменяет expired transaction.
-  Native SDK проверка на одноразовых ключах прошла: 390 bytes, обе подписи valid,
-  подменённая подпись отклонена. Это offline test, не создание mint в Devnet.
-- 50 focused tests проходят локально; strict TS/oxlint прошли для новых TS modules.
-  Реальный unsigned mint подготовлен с Devnet rent 1 066 800 lamports. Blockhash
-  может истечь до финансирования и должен быть обновлён перед первой подписью.
-  Generator derive-accounts пока ожидаемо отклоняет отсутствующий mint.
-- Solana RPC observer/send и mint CLI реализованы в `75cbb5f`. Linux запуск на
-  настоящем тестовом адресе остановился до подписи: faucet SOL отсутствует,
-  journal/lock не остались. Отправка использует preflight и maxRetries 0; observer
-  проверяет exact bytes, finalized signature/slot, mint owner/decimals/supply/
-  authorities и повторно читает transaction/status. Исчезнувшие receipts и ошибки
-  RPC не означают success. Шесть focused RPC tests проходят, strict TS/lint green.
-- Осталось: testnet gas, actual deploy/register/pool configuration,
-  coherent accounting/status consumer, настоящий round trip и bounded
-  negative flow, затем актуальный main/CI/review/runbook. Подготовка Solana и
-  accounting продолжается независимо от доступности faucet.
-- Public mainnet launch, tokenomics/allocations и liquidity: вне текущего этапа.
+- Solana Devnet mint `13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau` создан.
+  Journal/RPC подтвердили exact finalized transaction, standard SPL, decimals 9,
+  supply 0, mint authority тестового payer, freeze None. Signature:
+  `3piZtyGu7R16EgNBDdpdYURmoQjMJ7pdzExBhoXCRkhLmcQfVAATVS6qnMGfbubzYJ31RVezTXGpAEHDN8ZkT9bp`.
+- Sepolia token `0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9` mined status 1;
+  finalized reconciliation ещё ожидается. Transaction:
+  `0xb4abc127a893bbe451fedf71a51d9a6e90b4e186b29775e5dea79398ea0b1837`.
+  Canonical block-bound calls подтвердили supply 100 тестовых AGTMAI, decimals 9,
+  весь fixture balance у тестового администратора и ожидаемый getCCIPAdmin.
+- Исходная низкокомиссионная транзакция заменена одной осознанной fee-only
+  операцией с тем же nonce 0 и теми же deployment bytes. Оба журнала сохранены;
+  использовать fee-recovery settings для reconciliation и pool prerequisite.
+  Production supply/allocations не менялись; faucet funding получено в обеих сетях.
+- Официальный Solana BurnMint initialize-pool прошёл live simulation (24294 CU).
+  Это ещё не создание pool. Remote pool identity для EVM: Pool Config PDA,
+  а не общий program ID. Нужные адреса и ABI calldata подготовлены.
+- EVM LockRelease deployment CLI и extraction на `f1600ae` получили независимый
+  bounded ACCEPT без найденных P0/P1/P2. Registration CLI реализует отдельные
+  register-admin/accept-admin/set-pool journals и finalized prerequisites;
+  6 focused tests прошли, независимый bounded review ACCEPT.
+- Исторический полный proof `7541803056db1815258a418459c450510e81640a` сохраняется:
+  Mac20, Linux check:linux, sealed rollback, Docker Slither. Это не proof нового HEAD.
+  Новые focused gates на `f1600ae`: 61 test, strict TS и lint прошли.
+- Осталось: реальные pools/register/configuration, accounting/status consumer,
+  round trip, второй recipient/ATA и bounded negative flow, затем main/CI/review/runbook.
+  Реальных CCIP message IDs и доказанного round trip пока нет.
+- Mainnet, tokenomics/allocations и liquidity остаются вне текущего этапа.
 
 Ниже сохранён исторический статус с его исходным объёмом evidence.
 
