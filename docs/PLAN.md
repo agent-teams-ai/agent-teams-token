@@ -25,6 +25,17 @@ self-service BurnMint pool на Solana, initial remote supply 0, freeze None.
 Тестовые supply и recipients берутся из явно test-only fixture и не принимают
 production allocations/rights. Никакого собственного bridge, relayer или program.
 
+### Подтверждённый формат Solana registry, 8 сентября 2026
+
+Реальный owner-propose-administrator создал TokenAdminRegistry v2: 170 bytes,
+последний byte 169 - canonical bool supports_auto_derivation (false в этом flow).
+IDL generator 0.5.1 описывал старый v1/169 и не доказывает формат live account.
+Официальный source `c73892d4d33926195eee87b77013883e650a833c` создаёт v2;
+accept-admin и set-pool требуют v2. Проверять строгий v2, без fallback к v1
+и без игнорирования trailing bytes. Router Config при этом остаётся v1.
+Это исправление verifier, не повторное предложение администратора: исходная
+proposal transaction уже finalized успешно и должна быть reconciled по её ID.
+
 ### Порядок доставки
 
 1. Зафиксировать совместимую protocol line и проверенные текущие Chainlink
