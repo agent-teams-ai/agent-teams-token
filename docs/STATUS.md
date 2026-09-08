@@ -31,11 +31,32 @@ Devnet -> Sepolia round trip и третий E->B settled через офици�
 - Main `370c` интегрирован в `255138f`; burn review `8e` ACCEPT, artifact
   approval ACCEPT_REFRESH; `e403d49`: 141 local-EVM + 7 native checks passed.
   Полный `pnpm check` на `ab69885` прошёл, включая 416 rollback tests с 1 skip.
-  Последующий sealed proof failed только на forge fmt двух test statements;
-  исправлено `c370232`, повторный proof ещё ожидается. Final-head Linux/CI,
-  sealed rollback и итоговый review квалифицируются по release evidence;
-  их успешное завершение для нового HEAD пока не заявляется. Исторический
-  полный proof `75418030` остаётся evidence только своего SHA.
+  Последующий sealed proof failed на forge fmt двух test statements;
+  исправлено `c370232`. Повторный proof `7a6465d` дошёл до Slither survivor
+  и выявил отсутствующую CCIP source assignment; он завершился ошибкой и
+  не является successful sealed proof. Исторический полный proof `75418030`
+  остаётся evidence только своего SHA.
+- `7268cfc`: оба token contracts входят в настоящий Docker Slither analysis.
+  647 security tests passed без skips; штатный CLI и отдельный evidence validator
+  завершились с exit 0. Policy clean, 0 blocking, 12 visible, 0 suppressed.
+  Три обновлённые информационные записи рассмотрены независимым reviewer;
+  исходные captures Slither/Foundry сохранены побайтно в test fixtures.
+- CI `34191565273` на `b6939ec`: Solidity job passed; весь run failed.
+  Исправлены runner context placement (`b181126`, independent ACCEPT) и
+  точное `gc.auto=0` от checkout (`8a56dc2`, independent ACCEPT).
+  Сбой Solana reclaim после TERM воспроизведён независимым аудитом: Linux
+  teardown мог временно скрывать cmdline/environment до исчезновения PID.
+- `1e76206`: bounded polling различает завершение исходного процесса,
+  подмену identity и неполные наблюдения. Каждый сигнал требует свежей полной
+  аутентификации; неоднозначность не разрешает удаление run. HIGH review ACCEPT,
+  58 filesystem tests и полный strict Solana suite 192/192 без skips passed.
+  `e72e056` только переразбивает тесты и добавляет новый test path в rollback
+  ownership; production implementation сохраняется. Lint и typecheck passed.
+- Итоговая Linux/Docker и sealed rollback qualification выполняется workflow
+  `CI` на exact HEAD PR. Принимать её можно только по green run и проверенному
+  immutable artifact с READY; исторические тесты выше не заменяют этот gate.
+  При неуспешном run устраняется конкретная недоказанная фаза. Mainnet launch,
+  новые сети, tokenomics, liquidity и developer frameworks остаются вне scope.
 
 ## Исторические setup/checkpoint evidence, 8 сентября
 
