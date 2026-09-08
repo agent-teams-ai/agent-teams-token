@@ -272,6 +272,8 @@ function assertNoBareGitAncestor(candidate) {
 }
 
 function allowedLocalGitConfig(key, value) {
+  // actions/checkout v7.0.1 disables automatic GC; no other GC authority is allowed.
+  if (key === "gc.auto") {return value === "0";}
   const boolean = /^(?:true|false)$/u;
   const exact = new Map([
     ["core.repositoryformatversion", /^(?:0|1)$/u],

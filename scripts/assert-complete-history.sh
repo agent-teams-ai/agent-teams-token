@@ -62,20 +62,37 @@ rollback_git_inspect() {
 }
 
 rollback_assert_git_authority() {
-  local rollback_key
-  while IFS= read -r rollback_key; do
+  local rollback_key rollback_record rollback_value rollback_config_file
+  rollback_config_file=$(/usr/bin/mktemp /tmp/agtmai-git-config.XXXXXX) || return 1
+  if ! rollback_git_inspect config --local --no-includes --null --list >"$rollback_config_file"; then
+    /bin/rm -f -- "$rollback_config_file"
+    printf 'ROLLBACK_GIT_LOCAL_CONFIG_UNAVAILABLE\n' >&2
+    return 1
+  fi
+  while IFS= read -r -d '' rollback_record; do
+    rollback_key=${rollback_record%%$'\n'*}
+    rollback_value=${rollback_record#*$'\n'}
     case "$rollback_key" in
+      gc.auto)
+        # actions/checkout v7.0.1 disables automatic GC; admit only literal 0.
+        if [[ "$rollback_value" == 0 ]]; then continue; fi
+        /bin/rm -f -- "$rollback_config_file"
+        printf 'ROLLBACK_GIT_LOCAL_CONFIG_FORBIDDEN key=%s\n' "$rollback_key" >&2
+        return 1
+        ;;
       core.repositoryformatversion|core.filemode|core.bare|core.logallrefupdates|\
       core.ignorecase|core.precomposeunicode|user.name|user.email)
         ;;
       remote.*.url|remote.*.fetch|branch.*.remote|branch.*.merge)
         ;;
       *)
+        /bin/rm -f -- "$rollback_config_file"
         printf 'ROLLBACK_GIT_LOCAL_CONFIG_FORBIDDEN key=%s\n' "$rollback_key" >&2
         return 1
         ;;
     esac
-  done < <(rollback_git_inspect config --local --no-includes --name-only --list)
+  done <"$rollback_config_file"
+  /bin/rm -f -- "$rollback_config_file"
 
   local rollback_common_directory
   rollback_common_directory=$(rollback_git_inspect rev-parse --path-format=absolute --git-common-dir)
