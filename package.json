@@ -47,12 +47,20 @@
     "test:local-solana": ".tools/bin/node --test tooling/local-solana/tests/*.test.ts",
     "test:deployment-plan": ".tools/bin/node --test tooling/deployment-plan/tests/*.test.ts",
     "typecheck": "tsc --build --pretty false && tsc -p tooling/local-evm/tsconfig.json --pretty false && tsc -p tooling/local-solana/tsconfig.json --pretty false && tsc -p tooling/deployment-plan/tsconfig.json --pretty false && tsc -p tooling/security/slither/tsconfig.json --pretty false && tsc -p tooling/testnet-ccip/tsconfig.json --pretty false",
-    "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:linux-parity && pnpm genesis:vector:check && pnpm security:check && pnpm test:local-evm:built && pnpm test:local-solana && pnpm test:deployment-plan && pnpm security:slither:test && pnpm test:testnet-ccip && pnpm rollback:test",
+    "check": "pnpm docs:protocol:check && pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:linux-parity && pnpm genesis:vector:check && pnpm security:check && pnpm test:local-evm:built && pnpm test:local-solana && pnpm test:deployment-plan && pnpm security:slither:test && pnpm test:testnet-ccip && pnpm rollback:test",
     "check:linux": "pnpm rollback:preflight && pnpm check && pnpm rollback:prove",
     "check:release": "pnpm check && pnpm security:solidity",
-    "test:testnet-ccip": ".tools/bin/node --test tooling/testnet-ccip/tests/*.test.ts tooling/testnet-ccip/tests/solana-registration-composition.test.mjs tooling/testnet-ccip/tests/evm-forward.test.mjs tooling/testnet-ccip/tests/solana-pool-config-composition.test.mjs tooling/testnet-ccip/tests/solana-reverse.test.mjs tooling/testnet-ccip/tests/transfer-status.test.mjs"
+    "test:testnet-ccip": ".tools/bin/node --test tooling/testnet-ccip/tests/*.test.ts tooling/testnet-ccip/tests/solana-registration-composition.test.mjs tooling/testnet-ccip/tests/evm-forward.test.mjs tooling/testnet-ccip/tests/solana-pool-config-composition.test.mjs tooling/testnet-ccip/tests/solana-reverse.test.mjs tooling/testnet-ccip/tests/transfer-status.test.mjs",
+    "docs:check": "agent-teams-docs check --consumer . --profile architecture/foundation/docs-protocol.yaml",
+    "docs:doctor": "agent-teams-docs doctor --consumer . --profile architecture/foundation/docs-protocol.yaml",
+    "docs:find": "agent-teams-docs find --consumer . --profile architecture/foundation/docs-protocol.yaml",
+    "docs:info": "agent-teams-docs info --consumer . --profile architecture/foundation/docs-protocol.yaml",
+    "docs:new": "agent-teams-docs new --consumer . --profile architecture/foundation/docs-protocol.yaml",
+    "docs:recover": "agent-teams-docs recover --consumer . --profile architecture/foundation/docs-protocol.yaml",
+    "docs:protocol:check": "pnpm docs:check"
   },
   "devDependencies": {
+    "@agent-teams/docs-protocol": "0.2.0",
     "@agent-teams/engineering-foundation": "0.20.0",
     "@types/node": "catalog:",
     "oxlint": "catalog:",

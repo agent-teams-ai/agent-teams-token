@@ -17,6 +17,10 @@ changedChecks:
     extensions: [.ts, .tsx, .mts, .cts]
     passPaths: false
 fullScanPaths:
+  - docs
+  - AGENTS.md
+  - README.md
+  - .agents/skills/docs-authoring
   - .github/workflows
   - .oxlintrc.json
   - architecture/foundation

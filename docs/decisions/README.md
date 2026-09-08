@@ -1,3 +1,11 @@
+---
+id: token.decisions.index
+type: index
+status: active
+owner: architecture
+summary: Canonical index of accepted, proposed, and superseded architecture decisions.
+---
+
 # Architecture Decision Index
 
 Accepted decisions are immutable evidence. A change requires a superseding ADR

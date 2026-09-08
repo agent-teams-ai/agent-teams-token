@@ -1,0 +1,240 @@
+contract: foundation.document-metadata-sidecar/v1
+documents:
+  docs/ARCHITECTURE.md:
+    id: "token.document.architecture"
+    type: "architecture"
+    status: "active"
+    owner: "architecture"
+    summary: "Records Architecture."
+  docs/CONTRACTS.md:
+    id: "token.document.contracts"
+    type: "architecture"
+    status: "active"
+    owner: "architecture"
+    summary: "Records Transparent token release contracts."
+  docs/DECISIONS.md:
+    id: "token.document.decisions"
+    type: "open-decision-register"
+    status: "active"
+    owner: "product"
+    summary: "Records Decision register."
+  docs/GENESIS_CORE_LOCAL_PLAN.md:
+    id: "token.document.genesis-core-local-plan"
+    type: "plan"
+    status: "active"
+    owner: "product"
+    summary: "Records AGTMAI Genesis Core: подробный план локальной реализации."
+  docs/NAMING.md:
+    id: "token.document.naming"
+    type: "research"
+    status: "decision-required"
+    owner: "product"
+    summary: "Records Token naming research."
+  docs/NEXT_ZERO_COST_SLICES_PLAN.md:
+    id: "token.document.next-zero-cost-slices-plan"
+    type: "plan"
+    status: "active"
+    owner: "product"
+    summary: "Records AGTMAI: план трёх следующих локальных zero-cost slices."
+  docs/NON_NEGOTIABLES.md:
+    id: "token.document.non-negotiables"
+    type: "architecture"
+    status: "active"
+    owner: "security"
+    summary: "Records Ошибки, которые проект не повторяет."
+  docs/OPEN_QUESTIONS.md:
+    id: "token.document.open-questions"
+    type: "open-decision-register"
+    status: "active"
+    owner: "product"
+    summary: "Records Open product decisions."
+  docs/PLAN.md:
+    id: "token.document.plan"
+    type: "plan"
+    status: "active"
+    owner: "product"
+    summary: "Records Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP."
+  docs/STATUS.md:
+    id: "token.document.status"
+    type: "status-report"
+    status: "active"
+    owner: "product"
+    summary: "Records Активный продуктовый статус, 8 сентября 2026."
+  docs/TOKENOMICS.md:
+    id: "token.document.tokenomics"
+    type: "proposal"
+    status: "proposed"
+    owner: "tokenomics"
+    summary: "Records Community-first tokenomics proposal."
+  docs/decisions/0001-hybrid-toolchain.md:
+    id: "ADR-0001"
+    type: "adr"
+    status: "accepted"
+    owner: "architecture"
+    summary: "Records ADR-0001: Hybrid native macOS and Linux CI toolchain."
+    supersedes: []
+    superseded_by: []
+  docs/decisions/0002-script-first-ccip.md:
+    id: "ADR-0002"
+    type: "adr"
+    status: "accepted"
+    owner: "architecture"
+    summary: "Records ADR-0002: Script-first CCIP integration."
+    supersedes: []
+    superseded_by: []
+  docs/decisions/0003-clean-architecture-boundaries.md:
+    id: "ADR-0003"
+    type: "adr"
+    status: "accepted"
+    owner: "architecture"
+    summary: "Records ADR-0003: Clean Architecture boundaries."
+    supersedes: []
+    superseded_by: []
+  docs/decisions/0004-feature-module-topology.md:
+    id: "ADR-0004"
+    type: "adr"
+    status: "proposed"
+    owner: "architecture"
+    summary: "Records ADR-0004: Feature-module topology and bounded contexts."
+    supersedes: []
+    superseded_by: []
+  docs/decisions/0005-ccip-testnet-protocol-line.md:
+    id: "ADR-0005"
+    type: "adr"
+    status: "accepted"
+    owner: "architecture"
+    summary: "Records ADR-0005: CCIP testnet protocol line."
+    supersedes: []
+    superseded_by: []
+  docs/research/ADR-0004-CRITIQUE-2026-08-28.md:
+    id: "token.research.adr-0004-critique-2026-08-28"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records ADR-0004 independent critique, 2026-08-28."
+  docs/research/CONTRACT-DESIGN-REVIEW-2026-08-27.md:
+    id: "token.research.contract-design-review-2026-08-27"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Contract design review - 2026-08-27."
+  docs/research/CRITIQUE-ROUND-2026-08-27.md:
+    id: "token.research.critique-round-2026-08-27"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Six-critic review of the token foundation."
+  docs/research/E2E-RECONCILIATION-2026-09-04.md:
+    id: "token.research.e2e-reconciliation-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "product"
+    summary: "Records E2E execution reconciliation, 2026-09-04."
+  docs/research/ENGINEERING-BASELINE-2026-08-27.md:
+    id: "token.research.engineering-baseline-2026-08-27"
+    type: "research"
+    status: "active"
+    owner: "architecture"
+    summary: "Records Engineering baseline research."
+  docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md:
+    id: "token.research.genesis-core-code-review-2026-08-28"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Genesis Core implementation review ledger - 2026-08-28."
+  docs/research/GENESIS-CORE-PLAN-CRITIQUE-2026-08-28.md:
+    id: "token.research.genesis-core-plan-critique-2026-08-28"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Genesis Core plan critique - 2026-08-28."
+  docs/research/MAIN-RECONCILIATION-PLAN-2026-09-04.md:
+    id: "token.research.main-reconciliation-plan-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "product"
+    summary: "Records Main reconciliation review, 2026-09-04."
+  docs/research/NEXT-ZERO-COST-SLICES-CODE-REVIEW-2026-08-29.md:
+    id: "token.research.next-zero-cost-slices-code-review-2026-08-29"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Zero-cost slices implementation review ledger - 2026-08-29."
+  docs/research/NEXT-ZERO-COST-SLICES-IMPLEMENTATION-LEDGER-2026-08-29.md:
+    id: "token.research.next-zero-cost-slices-implementation-ledger-2026-08-29"
+    type: "research"
+    status: "active"
+    owner: "product"
+    summary: "Records AGTMAI zero-cost slices: implementation ledger."
+  docs/research/NEXT-ZERO-COST-SLICES-PLAN-CRITIQUE-2026-08-29.md:
+    id: "token.research.next-zero-cost-slices-plan-critique-2026-08-29"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Критика плана трёх zero-cost slices."
+  docs/research/ORIGINAL-PLAN-INVARIANT-AUDIT-2026-09-04.md:
+    id: "token.research.original-plan-invariant-audit-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Full original-plan invariant audit, 2026-09-04."
+  docs/research/RECOVERY-ACQUISITION-REGRESSION-2026-09-04.md:
+    id: "token.research.recovery-acquisition-regression-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Recovery command-log and directory-acquisition corrections."
+  docs/research/RECOVERY-ARCHIVE-PREPARATION-FINALIZATION-2026-09-04.md:
+    id: "token.research.recovery-archive-preparation-finalization-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Prepared archive finalization correction."
+  docs/research/RECOVERY-CONSUMER-FINALIZATION-2026-09-04.md:
+    id: "token.research.recovery-consumer-finalization-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Recovery shape and staging finalization."
+  docs/research/RECOVERY-EVIDENCE-AND-PROOF-CONSTRUCTION-2026-09-04.md:
+    id: "token.research.recovery-evidence-and-proof-construction-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Recovery evidence and proof-construction correction."
+  docs/research/RECOVERY-FINALIZATION-REGRESSION-2026-09-04.md:
+    id: "token.research.recovery-finalization-regression-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Recovery finalization correction."
+  docs/research/RECOVERY-FULL-BASE-CRITIQUE-2026-09-04.md:
+    id: "token.research.recovery-full-base-critique-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Full recovery base critique."
+  docs/research/RECOVERY-RUNTIME-FINALIZATION-2026-09-04.md:
+    id: "token.research.recovery-runtime-finalization-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Pinned runtime ownership correction."
+  docs/research/SLITHER-125-PROPOSAL-CRITIQUE-2026-09-04.md:
+    id: "token.research.slither-125-proposal-critique-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Slither125 recovered proposal: not applied."
+  docs/research/TOKENOMICS-REVIEW-2026-08-27.md:
+    id: "token.research.tokenomics-review-2026-08-27"
+    type: "research"
+    status: "active"
+    owner: "tokenomics"
+    summary: "Records Tokenomics research review."
+  docs/research/TOOLCHAIN-PUBLICATION-TRANSACTION-2026-09-04.md:
+    id: "token.research.toolchain-publication-transaction-2026-09-04"
+    type: "research"
+    status: "active"
+    owner: "security"
+    summary: "Records Toolchain publication transaction."

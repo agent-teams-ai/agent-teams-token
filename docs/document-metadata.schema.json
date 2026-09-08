@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.ai/schemas/agent-teams-token/document-metadata/v1",
+  "title": "Agent Teams token document metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "status", "owner", "summary"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160,
+      "pattern": "^(ADR-[0-9]{3,4}|OD-[0-9]{3}|[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+)$"
+    },
+    "type": {
+      "enum": [
+        "index",
+        "adr",
+        "architecture",
+        "open-decision",
+        "open-decision-register",
+        "plan",
+        "proposal",
+        "research",
+        "status-report"
+      ]
+    },
+    "status": {
+      "enum": ["active", "accepted", "proposed", "open", "decision-required", "superseded"]
+    },
+    "owner": {
+      "enum": ["architecture", "product", "security", "tokenomics"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 180,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "related": { "$ref": "#/$defs/idList" },
+    "blocked_by": { "$ref": "#/$defs/idList" },
+    "code_anchors": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enforcement", "pattern"],
+        "properties": {
+          "enforcement": { "enum": ["advisory", "required"] },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?!/)(?!(?:docs|\\.agents)(?:/|$))(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._@*?/\\[\\]-]+$"
+          }
+        }
+      }
+    },
+    "supersedes": { "$ref": "#/$defs/idList" },
+    "superseded_by": { "$ref": "#/$defs/idList" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "adr" } }, "required": ["type"] },
+      "then": { "properties": { "status": { "enum": ["proposed", "accepted", "superseded"] } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "open-decision" } }, "required": ["type"] },
+      "then": { "properties": { "status": { "enum": ["open", "accepted", "superseded"] } } }
+    }
+  ],
+  "$defs": {
+    "idList": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 160,
+        "pattern": "^(ADR-[0-9]{3,4}|OD-[0-9]{3}|[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+)$"
+      }
+    }
+  }
+}

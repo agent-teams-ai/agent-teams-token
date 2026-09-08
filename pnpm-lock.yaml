@@ -26,6 +26,9 @@ importers:
 
   .:
     devDependencies:
+      '@agent-teams/docs-protocol':
+        specifier: 0.2.0
+        version: 0.2.0(@types/node@24.13.3)(supports-color@8.1.1)
       '@agent-teams/engineering-foundation':
         specifier: 0.20.0
         version: 0.20.0(@types/node@24.13.3)(supports-color@8.1.1)
@@ -51,6 +54,12 @@ importers:
   packages/domain: {}
 
 packages:
+
+  '@agent-teams/docs-protocol@0.2.0':
+    resolution: {integrity: sha512-KtmILYJTQf91wU643UMRh5QuO2Jnbn5f/kBD6e3agUIWv0KpuxHqEyZZPLsp0jiTA1WV4TBJa4EyFDT0Ju1/KQ==}
+    engines: {node: '>=24.18.0 <25', pnpm: '>=11.17.0 <12'}
+    hasBin: true
+
 
   '@agent-teams/engineering-foundation@0.20.0':
     resolution: {integrity: sha512-YGyNyfpxyElMUALIho+pi+xM9XHXWWEV5hBBEzcysaCO1Dgz5/3GuUjQ6fQM2sCjfPo7Pd6OoFJOSKiHaqe5ZA==}
@@ -911,6 +920,18 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@agent-teams/docs-protocol@0.2.0(@types/node@24.13.3)(supports-color@8.1.1)':
+    dependencies:
+      '@agent-teams/engineering-foundation': 0.20.0(@types/node@24.13.3)(supports-color@8.1.1)
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      jsonc-parser: 3.3.1
+      yaml: 2.9.0
+    transitivePeerDependencies:
+      - '@types/node'
+      - supports-color
+
 
   '@agent-teams/engineering-foundation@0.20.0(@types/node@24.13.3)(supports-color@8.1.1)':
     dependencies:

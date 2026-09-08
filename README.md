@@ -49,3 +49,6 @@ remain disabled until their explicit gates are implemented.
 - [Non-negotiable mistakes and invariants](docs/NON_NEGOTIABLES.md)
 - [Current status](docs/STATUS.md)
 - [Genesis Core implementation review ledger](docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md)
+
+Documentation navigation: [documentation index](docs/README.md) and
+[architecture decision index](docs/decisions/README.md).
