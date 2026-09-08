@@ -202,7 +202,7 @@ test("strict validator accepts a canonical sealed statement only after READY pub
   });
   assert.equal(beforeReady.proofDigestSha256, publication.seal.statement.canonicalSha256);
   publishReadyMarker(fixture.bundle, publication);
-  assert.deepEqual(validateEvidenceBundle({ bundlePath: fixture.bundle, expectedSha: candidateSha }), beforeReady);
+  assert.deepEqual(validateEvidenceBundle({ bundlePath: fixture.bundle, expectedSha: candidateSha }), { ...beforeReady, candidateSha });
 });
 
 test("field deletion, incomplete gates and post-seal artifact mutation fail closed", (context) => {
