@@ -36,6 +36,15 @@ accept-admin и set-pool требуют v2. Проверять строгий v2
 Это исправление verifier, не повторное предложение администратора: исходная
 proposal transaction уже finalized успешно и должна быть reconciled по её ID.
 
+### Подтверждённая аллокация Solana ChainConfig
+
+Реальная init-chain-remote-config финализирована в slot 494854806. Для
+32-byte EVM token сериализованные поля занимают 115 + 36*N bytes, но
+RemoteAddress.address имеет max_len(64): официальный init выделяет
+147 + 36*N bytes. В текущем fresh append-only flow проверять точные поля
+и дополнительные 32 нулевых байта, не считать allocation slack новым полем.
+Не повторять успешную транзакцию из-за прежней ошибки длины в observer.
+
 ### Порядок доставки
 
 1. Зафиксировать совместимую protocol line и проверенные текущие Chainlink

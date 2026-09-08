@@ -78,3 +78,28 @@ test("native config snapshots reject malformed vectors, rates, registry phase an
   assert.throws(() => sdk.verifySnapshot(values(create, "before"), create, "before", 612), /recentSlot/);
   assert.throws(() => sdk.verifySnapshot(values(create, "after"), create, "after", 200, 151), /later actual slot/);
 });
+
+test("native chain allocation matches finalized147-byte evidence and rejects compact or malformed reserved slack", { skip: !provider }, async () => {
+  const f = await poolConfigFixture(provider), { sdk, values } = f;
+  // Public finalized init transaction slot494854806. Rust INIT_SPACE includes64
+  // token-address bytes, but this serialized EVM token uses32 bytes.
+  const observed = "DbHpjdQdlDgAAAAAIAAAAAAAAAAAAAAAAAAAAL7pG6PKlN18Y57mwbHC/BoZls3JCQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const initial = forOperation(f, "init-chain-remote-config"), actual = values(initial, "after");
+  assert.equal(Buffer.from(observed, "base64").length, 147);
+  assert.equal(actual[6].data[0], observed);
+  actual[6].data[0] = observed;
+  assert.equal(sdk.verifySnapshot(actual, initial, "after", 494855030, 494854806).verified, true);
+  for (const operation of ["init-chain-remote-config", "append-remote-pool-addresses"]) {
+    const e = forOperation(f, operation), snapshot = values(e, "after"), bytes = Buffer.from(snapshot[6].data[0], "base64");
+    assert.equal(bytes.length, operation === "init-chain-remote-config" ? 147 : 183);
+    for (const invalid of [bytes.subarray(0, bytes.length - 32), bytes.subarray(0, bytes.length - 1), Buffer.concat([bytes, Buffer.alloc(1)])]) {
+      const bad = structuredClone(snapshot); bad[6].data[0] = invalid.toString("base64");
+      assert.throws(() => sdk.verifySnapshot(bad, e, "after", 200, 175));
+    }
+    for (let offset = bytes.length - 32; offset < bytes.length; offset++) {
+      const bad = structuredClone(snapshot), changed = Buffer.from(bytes); changed[offset] = 1;
+      bad[6].data[0] = changed.toString("base64");
+      assert.throws(() => sdk.verifySnapshot(bad, e, "after", 200, 175), /allocation slack/);
+    }
+  }
+});

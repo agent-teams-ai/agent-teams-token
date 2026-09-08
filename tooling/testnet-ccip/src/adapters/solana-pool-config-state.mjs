@@ -31,9 +31,13 @@ function verifyChain(raw, expected, phase) {
     return;
   }
   const bytes = data(raw, BURNMINT_PROGRAM);
-  if (bytes.length < 115 || !bytes.subarray(0, 8).equals(discriminator("ChainConfig"))) { throw new Error("Wrong chain layout"); }
+  if (bytes.length < 147 || !bytes.subarray(0, 8).equals(discriminator("ChainConfig"))) { throw new Error("Wrong chain layout"); }
   const count = bytes.readUInt32LE(8);
-  if (count > 1 || bytes.length !== 115 + count * 36) { throw new Error("Wrong bounded remote pool vector"); }
+  // Rust RemoteAddress::INIT_SPACE reserves64 bytes for token_address, while this
+  // EVM address serializes32. Allocation is147+36*N, payload115+36*N.
+  // This fresh append-only flow leaves exactly32 zero bytes of allocation slack.
+  if (count > 1 || bytes.length !== 147 + count * 36) { throw new Error("Wrong bounded remote pool allocation"); }
+  if (!bytes.subarray(115 + count * 36).equals(Buffer.alloc(32))) { throw new Error("Wrong remote pool allocation slack"); }
   let offset = 12;
   if (count === 1) {
     if (bytes.readUInt32LE(offset) !== 32 || !bytes.subarray(offset + 4, offset + 36).equals(remoteBytes(REMOTE_POOL))) { throw new Error("Wrong padded remote pool"); }

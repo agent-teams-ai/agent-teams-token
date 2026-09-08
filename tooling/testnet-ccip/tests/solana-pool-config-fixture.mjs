@@ -31,7 +31,7 @@ export async function poolConfigFixture(provider) {
   const values = (e, phase) => {
     const operation = e.operation, before = phase === "before";
     const count = operation === "init-chain-remote-config" || operation === "append-remote-pool-addresses" && before ? 0 : 1;
-    const chain = Buffer.alloc(115 + count * 36); createHash("sha256").update("account:ChainConfig").digest().copy(chain, 0, 0, 8);
+    const chain = Buffer.alloc(147 + count * 36); createHash("sha256").update("account:ChainConfig").digest().copy(chain, 0, 0, 8);
     chain.writeUInt32LE(count, 8); let offset = 12;
     if (count) { chain.writeUInt32LE(32, offset); remoteBytes(REMOTE_POOL).copy(chain, offset + 4); offset += 36; }
     chain.writeUInt32LE(32, offset); remoteBytes(REMOTE_TOKEN).copy(chain, offset + 4); chain[offset + 36] = 9; offset += 37;

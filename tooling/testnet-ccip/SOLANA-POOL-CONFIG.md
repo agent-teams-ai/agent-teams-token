@@ -56,3 +56,16 @@ including both ALT instructions, and reject malformed variable layouts/rates.
 Provider source: BS58 generator commit `4c8d008a0990f1135da1e2b8bf511edba94904de`;
 Solana onchain layout/rate/registry reference commit
 `c73892d4d33926195eee87b77013883e650a833c`. No provider execute mode is used.
+
+## Chain account allocation
+
+Pinned Rust `base-token-pool/src/common.rs` uses `#[max_len(64)]` for
+`RemoteAddress.address`. Accordingly `ChainConfig::INIT_SPACE` allocates
+147 bytes for an empty pool vector, although its EVM32 token payload serializes
+to115 bytes. Appending one32-byte pool allocates183 bytes and serializes151.
+The fresh append-only verifier requires the exact allocation and32 zero trailing
+bytes; it does not treat those bytes as a field or accept compact accounts.
+`burnmint-token-pool/src/context.rs` initialization and append realloc formulas
+preserve that32-byte difference. The native regression includes the public147-byte
+account from finalized init transaction slot494854806; its original signature
+must be reconciled, never replaced or resent because an observer rejected layout.
