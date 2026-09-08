@@ -91,7 +91,7 @@ jobs:
         env: *rollback-runner-environment
         id: non-pulling-rollback-environment-cache-preflight
         shell: bash
-        run: source scripts/env.sh && pnpm rollback:preflight -- --expected-sha="$GITHUB_SHA"
+        run: source scripts/env.sh && pnpm rollback:preflight --expected-sha="$GITHUB_SHA"
       - name: Final repository check
         env: *rollback-runner-environment
         id: run-root-check-with-exact-rollback-proof

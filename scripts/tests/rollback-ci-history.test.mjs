@@ -131,7 +131,7 @@ test("integrated CI requires complete exact-head history before cache and qualit
   assert.ok(steps.indexOf(preflight) < steps.indexOf(rootCheck));
   assert.equal(
     preflight.run,
-    "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\"",
+    "source scripts/env.sh && pnpm rollback:preflight --expected-sha=\"$GITHUB_SHA\"",
   );
   assert.ok(foundation.includes("run: " + preflight.run));
   assert.ok(foundation.includes("run: source scripts/env.sh && pnpm check:linux"));

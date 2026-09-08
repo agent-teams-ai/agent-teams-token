@@ -47,7 +47,7 @@ test("portable root check and mandatory Linux proof wiring are integrated pendin
   );
   assert.equal(
     preflight.run,
-    "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\"",
+    "source scripts/env.sh && pnpm rollback:preflight --expected-sha=\"$GITHUB_SHA\"",
   );
   const cleanAfter = patch.steps.find(
     ({ id }) => id === "assert-complete-history-and-exact-clean-head-after",

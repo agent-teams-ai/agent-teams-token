@@ -139,7 +139,7 @@ test("foundation job proves complete exact history and preflights every rollback
   const preflight = byId("non-pulling-rollback-environment-cache-preflight");
   assert.equal(
     preflight.run,
-    'source scripts/env.sh && pnpm rollback:preflight -- --expected-sha="$GITHUB_SHA"',
+    'source scripts/env.sh && pnpm rollback:preflight --expected-sha="$GITHUB_SHA"',
   );
   const rootCheck = byId("run-root-check-with-exact-rollback-proof");
   assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check:linux");

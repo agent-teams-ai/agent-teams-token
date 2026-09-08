@@ -99,7 +99,7 @@
         "id": "non-pulling-rollback-environment-cache-preflight",
         "position": "after-slither-image-preload-before-root-check",
         "shell": "bash",
-        "run": "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\"",
+        "run": "source scripts/env.sh && pnpm rollback:preflight --expected-sha=\"$GITHUB_SHA\"",
         "env": {
           "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
           "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
