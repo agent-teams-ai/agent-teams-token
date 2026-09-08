@@ -17,20 +17,29 @@
     "lint": "oxlint --deny-warnings .",
     "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built",
     "typecheck": "tsc --build --pretty false",
-    "check": "pnpm docs:protocol:check && pnpm lint && pnpm typecheck && pnpm test",
+    "check": "pnpm foundation:assert-dev-only && pnpm foundation:assert-registry && pnpm foundation:check && pnpm test:foundation-gates && pnpm docs:protocol:check && pnpm test:docs-migration && pnpm lint && pnpm typecheck && pnpm test",
     "docs:check": "agent-teams-docs check --consumer . --profile architecture/foundation/docs-protocol.yaml",
     "docs:doctor": "agent-teams-docs doctor --consumer . --profile architecture/foundation/docs-protocol.yaml",
     "docs:find": "agent-teams-docs find --consumer . --profile architecture/foundation/docs-protocol.yaml",
     "docs:info": "agent-teams-docs info --consumer . --profile architecture/foundation/docs-protocol.yaml",
     "docs:new": "agent-teams-docs new --consumer . --profile architecture/foundation/docs-protocol.yaml",
     "docs:recover": "agent-teams-docs recover --consumer . --profile architecture/foundation/docs-protocol.yaml",
-    "docs:protocol:check": "pnpm docs:check"
+    "docs:protocol:check": "pnpm docs:check",
+    "test:docs-migration": "node --test tests/docs-migration.test.mjs",
+    "foundation:check": "agent-teams-foundation check",
+    "foundation:status": "agent-teams-foundation status",
+    "foundation:attach": "agent-teams-foundation attach",
+    "foundation:detach": "agent-teams-foundation detach",
+    "foundation:assert-dev-only": "agent-teams-foundation assert-dev-only",
+    "foundation:assert-registry": "agent-teams-foundation assert-registry",
+    "test:foundation-gates": "node --test tests/foundation-gates.test.mjs"
   },
   "devDependencies": {
-    "@agent-teams/docs-protocol": "0.2.0",
-    "@agent-teams/engineering-foundation": "0.20.0",
+    "@agent-teams/docs-protocol": "0.6.0",
+    "@agent-teams/engineering-foundation": "1.1.0",
     "@types/node": "24.13.3",
     "oxlint": "1.80.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "@agent-teams/docs-protocol-agent-teams": "0.2.0"
   }
 }
