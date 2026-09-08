@@ -50,7 +50,7 @@ export async function createSolanaRegistrationSdk(providerDirectory) {
   function verifyMint(mintRaw, expected, before) {
     const tokenProgram = TOKEN_PROGRAM_ID.toBase58();
     const mintAccount = account(mintRaw, tokenProgram);
-    if (mintAccount.data.length !== 82 || mintAccount.data.readUInt32LE(0) !== 1 || mintAccount.data.readUInt32LE(46) !== 0) { throw new Error("Wrong mint layout"); }
+    if (mintAccount.data.length !== 82 || mintAccount.data.readUInt32LE(0) !== 1 || mintAccount.data.readUInt32LE(46) !== 0 || mintAccount.data[45] !== 1) { throw new Error("Wrong mint layout"); }
     const mint = unpackMint(new PublicKey(expected.mint), mintAccount, TOKEN_PROGRAM_ID);
     const authority = mint.mintAuthority?.toBase58();
     const validAuthority = before ? authority === expected.payer : expected.operation === "transfer-mint-authority" ? authority === expected.signer : [expected.payer, expected.signer].includes(authority);
@@ -63,7 +63,7 @@ export async function createSolanaRegistrationSdk(providerDirectory) {
       if (ataRaw !== null) { throw new Error("ATA already exists; reconcile its original journal"); }
     } else {
       const ataAccount = account(ataRaw, tokenProgram);
-      if (ataAccount.data.length !== 165) { throw new Error("Wrong ATA layout"); }
+      if (ataAccount.data.length !== 165 || ataAccount.data[108] !== 1) { throw new Error("Wrong ATA layout"); }
       const ata = unpackAccount(new PublicKey(expected.ata), ataAccount, TOKEN_PROGRAM_ID);
       if (ata.mint.toBase58() !== expected.mint || ata.owner.toBase58() !== expected.signer || !ata.isInitialized || ata.isFrozen ||
         ata.amount !== 0n || ata.delegate !== null || ata.delegatedAmount !== 0n || ata.closeAuthority !== null || ata.isNative) { throw new Error("Wrong pool ATA"); }

@@ -107,6 +107,14 @@ test("native snapshots enforce all four prerequisite/poststate transitions and e
     assert.throws(() => sdk.verifySnapshot(values(operation, "before"), e, "after"));
   }
   const e = { ...expected, operation: "transfer-mint-authority" };
+  const invalidMintState = values(e.operation, "after");
+  const invalidMintBytes = Buffer.from(invalidMintState[0].data[0], "base64"); invalidMintBytes[45] = 2;
+  invalidMintState[0].data[0] = invalidMintBytes.toString("base64");
+  assert.throws(() => sdk.verifySnapshot(invalidMintState, e, "after"), /mint layout/);
+  const invalidAtaState = values(e.operation, "after");
+  const invalidAtaBytes = Buffer.from(invalidAtaState[2].data[0], "base64"); invalidAtaBytes[108] = 3;
+  invalidAtaState[2].data[0] = invalidAtaBytes.toString("base64");
+  assert.throws(() => sdk.verifySnapshot(invalidAtaState, e, "after"), /ATA layout/);
   for (const [index, offsets] of [[0, [0, 4, 36, 44, 45, 46]], [2, [0, 32, 64, 72, 108, 109, 121, 129]], [3, [0, 8, 9, 41, 73, 105, 137]], [4, [0, 8, 9, 10, 42]], [5, [0, 8, 9, 10, 82, 114]]]) {
     for (const offset of offsets) {
       const bad = values(e.operation, "after"), bytes = Buffer.from(bad[index].data[0], "base64"); bytes[offset] ^= 1;
