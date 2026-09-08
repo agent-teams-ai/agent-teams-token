@@ -153,8 +153,8 @@
   "retainedSharedPaths": [
     {
       "path": "architecture/foundation/repository-agent-workflow.yaml",
-      "sha256": "fe9983d52ae461796f937bd09577b8704c9e1b6bb224ddb1a41208fa2e240ea0",
-      "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub"
+      "sha256": "8413d3e29613ccea223fc35588c380ccce334fb6d4b95287897b6586eb25113a",
+      "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub; current-main Docs Protocol authoring paths retain full-scan enforcement"
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",
