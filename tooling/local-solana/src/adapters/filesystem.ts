@@ -7,7 +7,7 @@ import { FAILURE_PHASES, LocalSolanaError, type EvidenceReport, type FailureEvid
 import type { FileIdentity, RunPaths, RunStorePort, ValidatorIdentity } from "../application/ports.ts";
 import { assertEvidenceReport } from "../application/evidence.ts";
 import { verifyObservations } from "../application/verifier.ts";
-import { authenticateValidatorIdentity, processStartIdentity } from "./process-identity.ts";
+import { validatorIdentityAuthenticationFailures, processStartIdentity } from "./process-identity.ts";
 
 import { readBoundedMarker, assertMarkerBounds } from "./lease-marker.ts";
 import { initializeStartupCustody, startupCustodySettled } from "./startup-custody.ts";
@@ -263,42 +263,80 @@ async function staleRunIsAbsent(root: string, directory: string, rootIdentity: F
 
 async function terminateAuthenticatedValidator(lease: Lease, directory: string): Promise<void> {
   const identity = lease.validator;
-  if (identity === null || await processExited(identity.pid, identity.startTime)) { return; }
+  if (identity === null || exitProven(await observeExit(identity.pid, identity.startTime))) { return; }
   const expectedLedger = await realpath(join(directory, "ledger"));
-  const authenticated = identity.ledger === expectedLedger && await authenticateValidatorIdentity(identity, lease.token);
-  if (!authenticated) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "refusing to terminate a PID that does not authenticate as the owned validator"); }
-  if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before TERM"); }
-  process.kill(identity.pid, "SIGTERM");
-  if (!await processExited(identity.pid, identity.startTime) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid, identity.startTime)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after TERM"); }
-  if (!await awaitExit(identity.pid, identity.startTime, 5_000)) {
-    if (!await authenticateValidatorIdentity(identity, lease.token)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed before KILL"); }
-    process.kill(identity.pid, "SIGKILL");
-    if (!await processExited(identity.pid, identity.startTime) && !await authenticateValidatorIdentity(identity, lease.token) && !await processExited(identity.pid, identity.startTime)) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed after KILL"); }
-    if (!await awaitExit(identity.pid, identity.startTime, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); }
+  if (identity.ledger !== expectedLedger) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator ledger changed before termination"); }
+  if (!await authenticateBeforeSignal(identity, lease.token)) { return; }
+  await signalValidator(identity, "SIGTERM");
+  if (!await awaitExit(identity, lease.token, 5_000)) {
+    if (!await authenticateBeforeSignal(identity, lease.token)) { return; }
+    await signalValidator(identity, "SIGKILL");
+    if (!await awaitExit(identity, lease.token, 5_000)) { throw new LocalSolanaError("SOLANA_RECLAIM_TIMEOUT", "owned stale validator did not exit"); }
   }
 }
 
-async function awaitExit(pid: number, startTime: string, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) { if (await processExited(pid, startTime)) { return true; } await delay(50); }
-  return await processExited(pid, startTime);
+async function authenticateBeforeSignal(identity: ValidatorIdentity, token: string): Promise<boolean> {
+  const failures = await validatorIdentityAuthenticationFailures(identity, token);
+  rejectIdentityMismatch(failures);
+  if (failures.length === 0) { return true; }
+  if (exitProven(await observeExit(identity.pid, identity.startTime))) { return false; }
+  throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity unavailable before signal");
 }
 
-/**
- * `kill(pid, 0)` still succeeds for a zombie whose parent was SIGKILLed until
- * the system reaps it. Treat that kernel state as exited so stale-run reclaim
- * does not wait forever (or report a false timeout) after an orphaned
- * validator terminates.
- */
+function rejectIdentityMismatch(failures: readonly string[]): void {
+  if (failures.some((failure) => failure !== "observation")) { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator identity changed during termination"); }
+}
+
+async function signalValidator(identity: ValidatorIdentity, signal: "SIGTERM" | "SIGKILL"): Promise<void> {
+  try { process.kill(identity.pid, signal); }
+  catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ESRCH" && exitProven(await observeExit(identity.pid, identity.startTime))) { return; }
+    throw cause;
+  }
+}
+
+async function awaitExit(identity: ValidatorIdentity, token: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const outcome = await observeExit(identity.pid, identity.startTime);
+    if (exitProven(outcome)) { return true; }
+    rejectIdentityMismatch(await validatorIdentityAuthenticationFailures(identity, token));
+    if (Date.now() >= deadline) { return exitProven(await observeExit(identity.pid, identity.startTime)); }
+    await delay(50);
+  }
+}
+
+function exitProven(outcome: ExitObservation): boolean {
+  if (outcome === "replaced") { throw new LocalSolanaError("SOLANA_RECLAIM_IDENTITY", "validator process start changed during termination"); }
+  return outcome === "exited";
+}
+
+type ExitObservation = "exited" | "live" | "replaced" | "unproven";
+
 async function processExited(pid: number, startTime: string): Promise<boolean> {
-  if (!processAlive(pid)) { return true; }
-  if (process.platform !== "linux") { return false; }
+  return await observeExit(pid, startTime) === "exited";
+}
+
+/** Only fresh PID absence or the original-start zombie proves termination. */
+async function observeExit(pid: number, startTime: string): Promise<ExitObservation> {
+  try { process.kill(pid, 0); }
+  catch (cause) { return (cause as NodeJS.ErrnoException).code === "ESRCH" ? "exited" : "unproven"; }
+  if (process.platform !== "linux") { return "unproven"; }
   try {
     const procStat = await readFile(`/proc/${pid}/stat`, "utf8");
     const end = procStat.lastIndexOf(")");
     const fields = end < 0 ? [] : procStat.slice(end + 2).trim().split(/\s+/u);
-    return fields[0] === "Z" && `linux:${fields[19]}` === startTime;
-  } catch { return false; }
+    if (fields[19] === undefined || !/^[0-9]+$/u.test(fields[19]) || fields[0] === undefined || !/^[RSDZTtWXxKIP]$/u.test(fields[0])) { return "unproven"; }
+    if (`linux:${fields[19]}` !== startTime) { return "replaced"; }
+    return fields[0] === "Z" ? "exited" : "live";
+  } catch (cause) {
+    if (["ENOENT", "ESRCH"].includes((cause as NodeJS.ErrnoException).code ?? "")) {
+      // A missing procfs entry alone is not proof: re-probe the PID now.
+      try { process.kill(pid, 0); }
+      catch (probeCause) { if ((probeCause as NodeJS.ErrnoException).code === "ESRCH") { return "exited"; } }
+    }
+    return "unproven";
+  }
 }
 
 async function leaseOwnerIsLive(lease: Lease): Promise<boolean> {
