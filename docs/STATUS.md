@@ -5,7 +5,7 @@
 
 - Solana Devnet mint `13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau` создан.
   Journal/RPC подтвердили exact finalized transaction, standard SPL, decimals 9,
-  supply 0, mint authority тестового payer, freeze None. Signature:
+  supply 0, исходный mint authority тестового payer, freeze None. Signature:
   `3piZtyGu7R16EgNBDdpdYURmoQjMJ7pdzExBhoXCRkhLmcQfVAATVS6qnMGfbubzYJ31RVezTXGpAEHDN8ZkT9bp`.
 - Sepolia token `0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9` подтверждён
   exact-finalized-receipt. Transaction:
@@ -20,12 +20,27 @@
   инициализирован и финализирован. Exact transaction и 368-byte State/BaseConfig
   проверены по mint/owner/signers/ATA/router/RMN/defaults. Signature:
   `5PyfuSbAUMEsybeFxLGyXWNsp8sS4qm3S85eJJPAEJa1L5s34S6DfXNis3Ui39WHYwDsN647XoDTxQcXiUdXFuT7`.
-- EVM LockRelease pool `0x24508e2eb3bedc086318abc054153fd83823a4e2` mined status 1,
-  финальность пока ожидается. Tx:
+- EVM LockRelease pool `0x24508e2eb3bedc086318abc054153fd83823a4e2` финализирован,
+  exact successful receipt подтверждён. Tx:
   `0xd6b574e9dc7391d00cf7b2ca4addb7593f32aeb2ce39c146f48a46126dd21521`.
   Canonical block calls подтвердили token/owner/decimals/router/RMN.
 - Remote pool identity для EVM: raw 32-byte Solana Pool Config PDA. ABI calldata
-  подготовлено; registration, remote configuration и transfer ещё не выполнены.
+  подготовлено. EVM register-admin и accept-admin финализированы; set-pool
+  отправлен: `0x8d7731e8fa00d1ccc42c810da65ecd1d1c50602a57d7b5e35e92f7b5716e2a5d`.
+  EVM remote configuration и CCIP transfer пока не отправлены.
+- Solana pool ATA, proposal/accept administrator и передача mint authority
+  официальному pool signer финализированы. Authority signature:
+  `QacXkW3hAjKof1K7zCGHhjRKrLFXweNhcxmLXzntQ2V6Mzs7uL7hzk5YCKW2L44rBp8wB9hDZ9gtkh6VMFJprzB`.
+- Solana remote chain init и append Ethereum pool финализированы. Signatures:
+  `TpYd5Q85cqC7Ak2LNGqZs6cVzAx71E6HRYdfxxrJSzc2RiSmGsMJnJScarUFPC25qsFwL899hNa6g3eQCUtWyUu`,
+  `RmS8YGMv5uWTUWQtch7w3tReRK6UY8hNHbnjQF9teBCVjWfMLtdaQTD73G5ba9yFjmYGM3HTcocJuMUQuaFzUZN`.
+  Live registry v2 и ChainConfig allocation подтверждены официальным source;
+  прежние observer length errors исправлены без повторной отправки.
+- `d401b53`: 105 focused local tests без skips. `0908aba`: native Linux 3/3,
+  включая captured live ChainConfig, exact SDK builders и отрицательные cases;
+  независимый review ACCEPT. Rates, ALT и setPool Solana финализированы.
+  ALT `595XKFP6v7zGTtSuA9h19BdA4q7hmcGTFiHSLRsmV6ru`; setPool signature:
+  `3j9vHPuCTtQ6YSHxaVjVT3Pk3LCn4UoQKpdgkp9yw84xUBxKD9iPZmZz972oNmhNGTWpWEnD74yapY4VpFCEkBnA`.
 - `f9d5613`: 82 focused Linux tests и отдельный native SDK signature/layout test
   прошли без skips; strict TS/lint прошли, независимый bounded review ACCEPT.
 - EVM LockRelease deployment CLI и extraction на `f1600ae` получили независимый
