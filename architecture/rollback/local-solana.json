@@ -45,6 +45,7 @@
     "tooling/local-solana/tests/ports.test.ts",
     "tooling/local-solana/tests/process.test.ts",
     "tooling/local-solana/tests/real-local.integration.test.ts",
+    "tooling/local-solana/tests/reclaim-observation.test.ts",
     "tooling/local-solana/tests/recovery-remediation.test.ts",
     "tooling/local-solana/tests/rpc.test.ts",
     "tooling/local-solana/tests/runner.test.ts",

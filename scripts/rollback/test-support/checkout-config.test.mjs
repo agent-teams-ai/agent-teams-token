@@ -9,7 +9,7 @@ import { assertRecoveryGitAuthority, canonicalGitEnvironment } from "../../toolc
 
 const history = fileURLToPath(new URL("../../assert-complete-history.sh", import.meta.url));
 
-test("checkout v7.0.1 gc.auto is exact in both Git authority validators", () => {
+export const checkoutConfigTests = test("checkout v7.0.1 gc.auto is exact in both Git authority validators", () => {
   const root = mkdtempSync(join(tmpdir(), "agtmai-checkout-config-"));
   const env = canonicalGitEnvironment({ PATH: "/usr/bin:/bin" });
   const git = (...args) => {
