@@ -57,7 +57,13 @@ test("portable root check and mandatory Linux proof wiring are integrated pendin
   assert.match(cleanAfter.run, /assert-clean-head\.sh/u);
   const validation = patch.steps.find(({ id }) => id === "validate-rollback-proof");
   assert.equal(validation.if, "${{ success() }}");
-  assert.match(validation.run, /pnpm rollback:evidence:validate --/u);
+  assert.equal(
+    validation.run.replace(/\\\r?\n\s*/gu, "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n"),
+    'source scripts/env.sh\n'
+      + 'pnpm rollback:evidence:validate --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" --expected-sha="$GITHUB_SHA"\n'
+      + 'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\n'
+      + 'scripts/assert-clean-head.sh "$GITHUB_SHA"',
+  );
   assert.match(validation.run, /assert-complete-history\.sh/u);
   assert.match(validation.run, /assert-clean-head\.sh/u);
   const upload = patch.steps.find(({ id }) => id === "upload-rollback-proof-evidence");

@@ -262,9 +262,10 @@ test("deterministic statement and seal exclude volatile diagnostic telemetry", (
   assert.equal(readFileSync(join(left.bundle, "seal.json"), "utf8"), readFileSync(join(right.bundle, "seal.json"), "utf8"));
 });
 
-function standaloneValidation(bundle) {
+function standaloneValidation(bundle, extraArguments = []) {
   return spawnSync(process.execPath, [
     join(repositoryRoot, "scripts/rollback/validate-evidence.mjs"),
+    ...extraArguments,
     "--bundle=" + bundle,
     "--expected-sha=" + candidateSha,
   ], { encoding: "utf8" });
@@ -519,4 +520,18 @@ test("staged READY validation is explicitly provisional until terminal publicati
   });
   assert.equal(lstatSync(join(fixture.bundle, "READY.pending"), { throwIfNoEntry: false }), undefined);
   assert.equal(standaloneValidation(fixture.bundle).status, 0);
+});
+
+test("standalone evidence CLI accepts CI argv and rejects a literal pnpm separator", (context) => {
+  const fixture = fixtureBundle();
+  context.after(() => rmSync(fixture.bundle, { recursive: true, force: true }));
+  const publication = publishEvidenceSeal(fixture.bundle, fixture.statement, schemaPath);
+  publishReadyMarker(fixture.bundle, publication);
+  const valid = standaloneValidation(fixture.bundle);
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.match(valid.stdout, /^RECOVERY_EVIDENCE_VALID /u);
+  const hostile = standaloneValidation(fixture.bundle, ["--"]);
+  assert.equal(hostile.status, 1, hostile.stderr);
+  assert.match(hostile.stderr, /RECOVERY_EVIDENCE_ARGUMENT_INVALID value=--(?:\n|$)/u);
+  assert.equal(hostile.stdout, "");
 });

@@ -112,7 +112,7 @@ jobs:
         shell: bash
         run: |
           source scripts/env.sh
-          pnpm rollback:evidence:validate -- \
+          pnpm rollback:evidence:validate \
             --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" \
             --expected-sha="$GITHUB_SHA"
           scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45

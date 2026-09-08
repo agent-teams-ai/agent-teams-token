@@ -134,7 +134,7 @@
         "position": "after-post-gate-history-revalidation",
         "if": "${{ success() }}",
         "shell": "bash",
-        "run": "source scripts/env.sh\npnpm rollback:evidence:validate -- --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "run": "source scripts/env.sh\npnpm rollback:evidence:validate --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
         "env": {
           "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
           "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
