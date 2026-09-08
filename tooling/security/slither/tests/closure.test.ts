@@ -1,8 +1,28 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { DetectorInventoryDocument, GateManifest } from "../src/domain/model.ts";
 import { sha256 } from "../src/adapters/fingerprint.ts";
+import { assertProductionCoverage } from "../src/application/coverage.ts";
+
+test("committed closure assigns every tracked production source to analysis", async () => {
+  const manifest = JSON.parse(await readFile("tooling/security/slither/production-closure.v1.json", "utf8")) as GateManifest;
+  const tracked = execFileSync("git", ["ls-files", "-z", "--", "contracts/evm/src"], { encoding: "utf8" })
+    .split("\0").filter((path) => path.endsWith(".sol")).toSorted();
+  assertProductionCoverage(tracked, manifest);
+  assert.deepEqual(manifest.targets, [
+    { path: "contracts/evm/src/features/token-genesis/AGTMAIToken.sol", contract: "AGTMAIToken" },
+    { path: "contracts/evm/src/features/token-genesis/AGTMAICCIPToken.sol", contract: "AGTMAICCIPToken" },
+  ]);
+  for (const target of manifest.targets) {
+    assert.ok(manifest.expectedContracts.includes(target.contract));
+    assert.throws(() => assertProductionCoverage(tracked, {
+      ...manifest,
+      targets: manifest.targets.filter(({ path }) => path !== target.path),
+    }), { code: "PRODUCTION_SOURCE_UNASSIGNED" });
+  }
+});
 
 test("committed production closure has exact source and config hashes", async () => {
   const root = process.cwd();

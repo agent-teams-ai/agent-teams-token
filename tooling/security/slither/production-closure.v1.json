@@ -4,9 +4,14 @@
     {
       "path": "contracts/evm/src/features/token-genesis/AGTMAIToken.sol",
       "contract": "AGTMAIToken"
+    },
+    {
+      "path": "contracts/evm/src/features/token-genesis/AGTMAICCIPToken.sol",
+      "contract": "AGTMAICCIPToken"
     }
   ],
   "expectedContracts": [
+    "AGTMAICCIPToken",
     "AGTMAIToken",
     "Context",
     "ERC20",
@@ -20,6 +25,10 @@
     {
       "path": "contracts/evm/src/features/token-genesis/AGTMAIToken.sol",
       "sha256": "eae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989"
+    },
+    {
+      "path": "contracts/evm/src/features/token-genesis/AGTMAICCIPToken.sol",
+      "sha256": "818e93e0d875a5bc921710ff27dbe6e95cf101699eb39427955ddca01cbe5da5"
     },
     {
       "path": "contracts/evm/lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol",
