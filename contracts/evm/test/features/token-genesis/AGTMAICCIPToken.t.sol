@@ -34,10 +34,12 @@ contract AGTMAICCIPTokenTest is TestBase {
     function testRegistrationAdminCannotMintOrReplaceItself() public {
         AGTMAICCIPToken token = new AGTMAICCIPToken(1000, allocations(), ADMIN);
         vm.prank(ADMIN);
-        (bool minted,) = address(token).call(abi.encodeWithSignature("mint(address,uint256)", ADMIN, 1));
+        (bool minted,) =
+            address(token).call(abi.encodeWithSignature("mint(address,uint256)", ADMIN, 1));
         assertFalse(minted);
         vm.prank(ADMIN);
-        (bool changed,) = address(token).call(abi.encodeWithSignature("setCCIPAdmin(address)", RECIPIENT));
+        (bool changed,) =
+            address(token).call(abi.encodeWithSignature("setCCIPAdmin(address)", RECIPIENT));
         assertFalse(changed);
         assertEq(token.getCCIPAdmin(), ADMIN);
         assertEq(token.totalSupply(), 1000);
