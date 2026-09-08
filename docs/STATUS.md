@@ -25,9 +25,11 @@
   `0xd6b574e9dc7391d00cf7b2ca4addb7593f32aeb2ce39c146f48a46126dd21521`.
   Canonical block calls подтвердили token/owner/decimals/router/RMN.
 - Remote pool identity для EVM: raw 32-byte Solana Pool Config PDA. ABI calldata
-  подготовлено. EVM register-admin и accept-admin финализированы; set-pool
-  отправлен: `0x8d7731e8fa00d1ccc42c810da65ecd1d1c50602a57d7b5e35e92f7b5716e2a5d`.
-  EVM remote configuration и CCIP transfer пока не отправлены.
+  подготовлено. EVM register-admin, accept-admin и set-pool финализированы; set-pool
+  transaction: `0x8d7731e8fa00d1ccc42c810da65ecd1d1c50602a57d7b5e35e92f7b5716e2a5d`.
+  EVM remote configuration отправлена:
+  `0x886aa9cc62b2740f7a9f75e072e10b3dd909597b29803f710fd271b83e232c54`,
+  финальность ожидается. CCIP transfer пока не отправлен.
 - Solana pool ATA, proposal/accept administrator и передача mint authority
   официальному pool signer финализированы. Authority signature:
   `QacXkW3hAjKof1K7zCGHhjRKrLFXweNhcxmLXzntQ2V6Mzs7uL7hzk5YCKW2L44rBp8wB9hDZ9gtkh6VMFJprzB`.
@@ -50,6 +52,15 @@
 - Исторический полный proof `7541803056db1815258a418459c450510e81640a` сохраняется:
   Mac20, Linux check:linux, sealed rollback, Docker Slither. Это не proof нового HEAD.
   Новые focused gates на `f1600ae`: 61 test, strict TS и lint прошли.
+- Reverse consumer `f07c490`: independent ACCEPT, Linux 108/108 tests,
+  native v0 signing/inspection на истёкшем TEST payload прошёл без broadcast.
+- Status consumer `ddd88a8`: independent ACCEPT, 11 focused tests; live native
+  baseline с чистым JSON подтвердил fixed supply 100000000000 base units,
+  locked 0, Solana supply 0, backing surplus 0. Это исходное состояние,
+  не доказательство межсетевой доставки.
+- Pinned SDK подготовил unsigned forward 1 AGTMAI и exact bounded approval;
+  calldata независимо сверена, send не подписан. Котировка комиссии сохраняется
+  как evidence подготовки и должна обновиться перед реальным подписанием.
 - Осталось: завершить pool registration/configuration, accounting/status consumer,
   round trip, второй recipient/ATA и bounded negative flow, затем main/CI/review/runbook.
   Реальных CCIP message IDs и доказанного round trip пока нет.
