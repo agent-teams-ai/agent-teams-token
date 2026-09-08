@@ -55,6 +55,12 @@ async function sdkModule(directory) {
   const require = createRequire(resolve(directory,'package.json'));
   return import(pathToFileURL(require.resolve('@chainlink/ccip-sdk')).href);
 }
+const le = v => { const b=Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; };
+async function read(rpc,addresses) {
+  const result=await rpc('getMultipleAccounts',[addresses,{encoding:'base64',commitment:'finalized'}]);
+  if (!Number.isSafeInteger(result?.context?.slot) || result.context.slot < 1 || result.value?.length !== addresses.length) { throw new Error('Incomplete finalized manual snapshot'); }
+  return result;
+}
 export async function createManualExecutionState(settings, provider) {
   const { PublicKey, AddressLookupTableAccount } = provider.web3;
   const { TOKEN_PROGRAM_ID, unpackAccount, getAssociatedTokenAddressSync } = provider.spl;
@@ -62,7 +68,6 @@ export async function createManualExecutionState(settings, provider) {
   const pool = await createSolanaPoolInitSdk(settings.providerDirectory);
   const registration = await createSolanaRegistrationSdk(settings.providerDirectory);
   const verifyPool = createPoolConfigStateVerifier(provider,pool,registration);
-  const le = v => { const b=Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; };
   const pda = (seeds, program) => PublicKey.findProgramAddressSync(seeds,new PublicKey(program))[0].toBase58();
   const mint = new PublicKey(MANUAL.mint), payer = new PublicKey(MANUAL.payer);
   const recipientAta = getAssociatedTokenAddressSync(mint,payer).toBase58();
@@ -83,11 +88,6 @@ export async function createManualExecutionState(settings, provider) {
     if(e.signer!==lane.solanaSigner) {throw new Error('Wrong independently derived pool signer');}
     await native.authorizeOffRamp('solana',MANUAL.offRamp,BigInt(manualInput().sourceChainSelector));
   }
-  async function read(rpc,addresses) {
-    const result=await rpc('getMultipleAccounts',[addresses,{encoding:'base64',commitment:'finalized'}]);
-    if (!Number.isSafeInteger(result?.context?.slot) || result.context.slot < 1 || result.value?.length !== addresses.length) { throw new Error('Incomplete finalized manual snapshot'); }
-    return result;
-  }
   async function transfer(signature) {
     // This local metadata binds only a persisted signature. No API discovery or regenerated report.
     const api={getMessageById:async()=>({metadata:signature ? {receiptTransactionHash:signature,offRamp:MANUAL.offRamp} : {}})};
@@ -96,7 +96,7 @@ export async function createManualExecutionState(settings, provider) {
     return result;
   }
   function recipient(raw,e,amount) {
-    if(raw===null && amount===0n) return;
+    if(raw===null && amount===0n) {return;}
     const b=bytes(raw,TOKEN_PROGRAM_ID.toBase58());
     if(b.length!==165) {throw new Error('Wrong recipient SPL layout');}
     const a=unpackAccount(new PublicKey(e.recipientAta),{...raw,owner:TOKEN_PROGRAM_ID,data:b});

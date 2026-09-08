@@ -27,12 +27,14 @@ export function createSolanaTransactionRpc<Envelope, State>(
   messageFromSigned: (bytes: string, intent: Envelope) => string,
   readState: (rpc: SolanaRpcRead, intent: Envelope, slot: number) => Promise<State>,
   fetcher: typeof fetch = globalThis.fetch,
+  maxRetries: 0 | 3 = 0,
 ): {
   observe(signed: SignedSolanaTransaction, intent: Envelope): Promise<SolanaObservation<State>>;
   broadcast(bytes: string): Promise<string>;
   readRpc: SolanaRpcRead;
   chain(): Promise<void>;
 } {
+  if (maxRetries !== 0 && maxRetries !== 3) { throw new Error("Invalid Solana maxRetries"); }
   let sequence = 0;
   async function rpc(method: string, params: unknown[]): Promise<unknown> {
     const id = ++sequence;
@@ -99,7 +101,7 @@ export function createSolanaTransactionRpc<Envelope, State>(
     encoded(bytes);
     await chain();
     const signature = await rpc("sendTransaction", [bytes,
-      { encoding: "base64", skipPreflight: false, preflightCommitment: "finalized", maxRetries: 0 }]);
+      { encoding: "base64", skipPreflight: false, preflightCommitment: "finalized", maxRetries }]);
     if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature)) {
       throw new Error("Unknown Solana send outcome");
     }

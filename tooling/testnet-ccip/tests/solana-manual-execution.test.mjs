@@ -47,3 +47,61 @@ test('manual native delay/simulation errors stop before signing or writing journ
   assert.equal(f.counts().signs,0);assert.equal(f.record(),null);
   await assert.rejects(executeSolanaManualRecovery({...settings,maxNativeBalanceLamports:'1000000001'},f.ports),/1 SOL/);
 });
+
+test('manual opts into forwarding 3; fresh signed unknown then absent observes same identity twice',async()=>{
+  const f=fixture();let observations=0,checks=0;
+  f.ports.rpc=(inspect,after,fetcher,maxRetries)=>{
+    assert.equal(typeof inspect,'function');assert.equal(typeof after,'function');
+    assert.equal(fetcher,undefined);assert.equal(maxRetries,3);return f.rpc;
+  };
+  f.sdk.state.before=async()=>{checks++;};
+  let firstSigned,firstIntent;
+  f.rpc.observe=async(signed,intent)=>{
+    assert.equal(f.record().phase,'signed');assert.deepEqual(signed,f.record().signed);
+    if(++observations===1){firstSigned=signed;firstIntent=intent;return {kind:'unknown'};}
+    assert.strictEqual(signed,firstSigned);assert.strictEqual(intent,firstIntent);return {kind:'not-found'};
+  };
+  const broadcast=f.rpc.broadcast;
+  f.rpc.broadcast=async bytes=>{assert.equal(bytes,firstSigned.bytesBase64);return broadcast(bytes);};
+  await executeSolanaManualRecovery(settings,f.ports);
+  assert.equal(observations,2);assert.equal(checks,3);
+  assert.deepEqual(f.counts(),{broadcasts:1,candidates:1,signs:1});
+});
+test('persistent unknown stops after two reads; stored signed resumes without regeneration',async()=>{
+  const f=fixture();let observations=0;
+  f.rpc.observe=async()=>{observations++;return {kind:'unknown'};};
+  await executeSolanaManualRecovery(settings,f.ports);
+  assert.equal(observations,2);assert.equal(f.record().phase,'signed');
+  const original=structuredClone(f.record());
+  assert.deepEqual(f.counts(),{broadcasts:0,candidates:1,signs:1});
+  observations=0;
+  f.rpc.observe=async(signed,intent)=>{
+    assert.deepEqual(signed,original.signed);assert.deepEqual(intent,original.intent);
+    return {kind:++observations===1?'unknown':'not-found'};
+  };
+  await executeSolanaManualRecovery(settings,f.ports);
+  assert.equal(observations,2);assert.deepEqual(f.counts(),{broadcasts:1,candidates:1,signs:1});
+});
+for(const phase of ['signed','submitting','submitted','succeeded','failed']){
+  for(const kind of ['unknown','expired','not-found']){
+    if(phase==='signed'&&kind!=='expired'){continue;}
+    test(`${phase}/${kind} does not regenerate or resend`,async()=>{
+      const f=fixture();f.rpc.observe=async()=>({kind:'unknown'});
+      await executeSolanaManualRecovery(settings,f.ports);
+      f.record().phase=phase;
+      const original=structuredClone(f.record()),before=f.counts();let observations=0;
+      f.rpc.observe=async()=>{observations++;return {kind};};
+      f.sdk.candidate=f.sdk.sign=f.sdk.state.before=async()=>{throw new Error('fresh effect forbidden');};
+      await executeSolanaManualRecovery(settings,f.ports);
+      assert.equal(observations,1);assert.deepEqual(f.counts(),before);assert.deepEqual(f.record(),original);
+    });
+  }
+}
+test('second observation never bypasses pre-broadcast state checks',async()=>{
+  const f=fixture();let observations=0,checks=0;
+  f.rpc.observe=async()=>({kind:++observations===1?'unknown':'not-found'});
+  f.sdk.state.before=async()=>{if(++checks===3){throw new Error('state changed');}};
+  const result=await executeSolanaManualRecovery(settings,f.ports);
+  assert.equal(result.phase,'submitting');assert.equal(observations,2);
+  assert.deepEqual(f.counts(),{broadcasts:0,candidates:1,signs:1});
+});

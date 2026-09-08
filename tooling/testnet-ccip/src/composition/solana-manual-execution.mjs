@@ -6,6 +6,7 @@ import { createSolanaTransactionRpc } from '../adapters/solana-transaction-rpc.t
 import { createJournalFile } from '../adapters/evm-journal-file.ts';
 import { runSolanaTransactionJournal } from '../application/solana-transaction-journal.ts';
 import { manualExpected, validateManualExpected, manualContract } from '../domain/solana-manual-execution.mjs';
+const fromStored=intent=>manualExpected(intent.lookupTables);
 const defaults={sdk:createSolanaManualExecutionSdk,store:createJournalFile,rpc:createSolanaTransactionRpc};
 /** Recover only the original message; the shared durable journal never re-signs uncertain/expired bytes. */
 export async function executeSolanaManualRecovery(settings,ports=defaults) {
@@ -13,9 +14,8 @@ export async function executeSolanaManualRecovery(settings,ports=defaults) {
     BigInt(settings.maxNativeBalanceLamports)>1000000000n){throw new Error('Explicit test-only manual recovery with at most 1 SOL required');}
   const sdk=await ports.sdk(settings),store=ports.store(resolve(settings.journalFile));
   let signature;
-  const fromStored=intent=>manualExpected(intent.lookupTables);
   const rpc=ports.rpc((bytes,intent)=>sdk.inspectSigned(bytes,fromStored(intent)).messageBase64,
-    async(readRpc,intent,slot)=>sdk.state.after(readRpc,fromStored(intent),signature,slot));
+    async(readRpc,intent,slot)=>sdk.state.after(readRpc,fromStored(intent),signature,slot),undefined,3);
   try {return await store.exclusive(async()=>{
     const prior=await store.read();let expected,prepared;
     if(prior){expected=fromStored(prior.intent);validateManualExpected(expected);signature=prior.signed.signature;}
@@ -32,6 +32,14 @@ export async function executeSolanaManualRecovery(settings,ports=defaults) {
     }
     const beforeEffect=async()=>{await rpc.chain();await sdk.state.before(rpc.readRpc,expected,settings.maxNativeBalanceLamports);};
     const result=await runSolanaTransactionJournal(expected,{...store,...rpc,exclusive:work=>work(),
+      async observe(signed,intent){
+        const observation=await rpc.observe(signed,intent);
+        // Read the durable phase, including the journal's freshly persisted signed record.
+        if(observation.kind==='unknown'&&(await store.read())?.phase==='signed'){
+          return rpc.observe(signed,intent);
+        }
+        return observation;
+      },
       inspectSigned:async bytes=>sdk.inspectSigned(bytes,expected),
       async sign(){if(prior||!prepared){throw new Error('Existing manual recovery cannot be replaced');}await beforeEffect();
         const signed=await sdk.sign(prepared,expected,{testOnly:true,payerFile:settings.payerFile});signature=signed.signature;return signed;},
