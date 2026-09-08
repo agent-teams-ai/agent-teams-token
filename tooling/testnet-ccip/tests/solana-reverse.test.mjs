@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { REVERSE, reverseInstructions, verifyReverseIntent } from '../src/domain/solana-reverse.mjs';
 import { transferSolanaReverse } from '../src/composition/solana-reverse-transfer.mjs';
+// Captured generateUnsignedSendMessage payload, REVERSE-CANDIDATE-INPUT.json at 2026-09-08T03:22:54.531Z.
+const capturedSendHex='6cd886bff9ea2154d91ad9c94fba41de20000000000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df60000000001000000009d49372ba9140a49e384e7a023a8f5273e7b1b9f87033ceb5ce59c116e900200ca9a3b00000000000000000000000000000000000000000000000000000000000000000000000015000000181dcf1000000000000000000000000000000000010100000000';
 const address=REVERSE.payer;
 const expected={testOnly:true,cluster:'solana-devnet',payer:REVERSE.payer,mint:REVERSE.mint,
   ...Object.fromEntries(['pool','chain','signer','ata','registry','routerConfig','feeTokenConfig','routerPoolSigner','alt','sourceAta',
@@ -19,6 +21,24 @@ test('fixed reverse payload includes bounded approve + 31 accounts; rejects inst
     assert.throws(()=>verifyReverseIntent({feePayer:REVERSE.payer,instructions:changed},expected));
   }
   assert.throws(()=>reverseInstructions({...expected,quotedFee:'100000001'}));
+});
+test('captured SDK receiver is strictly left-padded ABI32 inside Borsh Vec',()=>{
+  const captured=Buffer.from(capturedSendHex,'hex');
+  assert.equal(captured.readUInt32LE(16),32);
+  assert.equal(captured.subarray(20,52).toString('hex'),'000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df6');
+  for(const approval of [true,false]){
+    const e={...expected,approval},instructions=reverseInstructions(e),send=instructions.at(-1);
+    assert.equal(Buffer.from(send.dataBase64,'base64').toString('hex'),capturedSendHex);
+    send.dataBase64=captured.toString('base64');
+    verifyReverseIntent({feePayer:REVERSE.payer,instructions},e);
+    const raw20=Buffer.concat([captured.subarray(0,16),Buffer.from('14000000','hex'),captured.subarray(32)]);
+    const wrongRecipient=Buffer.from(captured);wrongRecipient[51]^=1;
+    const nonzeroPadding=Buffer.from(captured);nonzeroPadding[20]=1;
+    for(const bad of [raw20,wrongRecipient,nonzeroPadding]){
+      send.dataBase64=bad.toString('base64');
+      assert.throws(()=>verifyReverseIntent({feePayer:REVERSE.payer,instructions},e),/payload/);
+    }
+  }
 });
 const settings={testOnly:true,journalFile:'/tmp/test-only-reverse/journal.json',maxNativeBalanceLamports:'1000000'};
 function fixture(){

@@ -23,8 +23,9 @@ export function reverseInstructions(e) {
     meta(e.sourceAta, true), meta(e.perTokenConfig), meta(e.chain, true),
     ...all.map((a, i) => meta(a, [3, 4, 7].includes(i)))];
   const extra = Buffer.concat([Buffer.from('181dcf10', 'hex'), Buffer.alloc(16), Buffer.from([1])]);
+  // CCIP EVM recipient is ABI32 inside a Borsh Vec; remote source pool stays raw20.
   const data = Buffer.concat([createHash('sha256').update('global:ccip_send').digest().subarray(0, 8),
-    u64(SEPOLIA_SELECTOR), bytes(Buffer.from(REVERSE.recipient.slice(2), 'hex')), bytes(Buffer.alloc(0)),
+    u64(SEPOLIA_SELECTOR), bytes(Buffer.from(REVERSE.recipient.slice(2).padStart(64, '0'), 'hex')), bytes(Buffer.alloc(0)),
     u32(1), solanaPublicKeyBytes(e.mint), u64(REVERSE.amount), solanaPublicKeyBytes(SYSTEM_PROGRAM), bytes(extra), bytes(Buffer.from([0]))]);
   const send = { programId: ROUTER_PROGRAM, accounts, dataBase64: data.toString('base64') };
   const approval = { programId: SPL_TOKEN_PROGRAM,

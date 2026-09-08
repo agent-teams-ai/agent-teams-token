@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 import { createSolanaReverseSdk } from '../src/adapters/solana-reverse-sdk.mjs';
 import { reverseInstructions } from '../src/domain/solana-reverse.mjs';
 import { altAddresses } from '../src/domain/solana-pool-config.ts';
+// Captured generateUnsignedSendMessage payload, REVERSE-CANDIDATE-INPUT.json at 2026-09-08T03:22:54.531Z.
+const capturedSendHex='6cd886bff9ea2154d91ad9c94fba41de20000000000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df60000000001000000009d49372ba9140a49e384e7a023a8f5273e7b1b9f87033ceb5ce59c116e900200ca9a3b00000000000000000000000000000000000000000000000000000000000000000000000015000000181dcf1000000000000000000000000000000000010100000000';
 const provider=process.env.AGTMAI_TEST_SOLANA_PROVIDER,ccip=process.env.AGTMAI_TEST_CCIP_PROVIDER;
 test('pinned native provider v0 rejects hidden instructions, lookup substitution, signer changes and invalid signatures',{skip:!provider||!ccip},async()=>{
   const sdk=await createSolanaReverseSdk({providerDirectory:provider,ccipProviderDirectory:ccip,recentSlot:'1'});
@@ -14,7 +16,7 @@ test('pinned native provider v0 rejects hidden instructions, lookup substitution
   const expected=sdk.derive('So11111111111111111111111111111111111111112',{approval:true,quotedFee:'5',sourceLamports:'1000000'});
   const native=ix=>new TransactionInstruction({programId:new PublicKey(ix.programId),data:Buffer.from(ix.dataBase64,'base64'),
     keys:ix.accounts.map(a=>({pubkey:new PublicKey(a.address),isSigner:a.isSigner,isWritable:a.isWritable}))});
-  const candidate={family:'SVM',mainIndex:1,instructions:reverseInstructions(expected).map(native),
+  const candidate={family:'SVM',mainIndex:1,instructions:reverseInstructions(expected).map((ix,i)=>native(i===1?{...ix,dataBase64:Buffer.from(capturedSendHex,'hex').toString('base64')}:ix)),
     lookupTables:[new AddressLookupTableAccount({key:new PublicKey(expected.alt),state:{deactivationSlot:(1n<<64n)-1n,lastExtendedSlot:0,
       lastExtendedSlotStartIndex:0,authority:new PublicKey(expected.payer),addresses:altAddresses(expected).map(a=>new PublicKey(a))}})]};
   const ccipRequire=createRequire(resolve(ccip,'package.json'));
@@ -22,7 +24,7 @@ test('pinned native provider v0 rejects hidden instructions, lookup substitution
   const official=await import(pathToFileURL(ccipRequire.resolve('@chainlink/ccip-sdk')).href);
   const {IDL}=await import(pathToFileURL(resolve(ccip,'node_modules/@chainlink/ccip-sdk/dist/solana/idl/1.6.0/CCIP_ROUTER.js')).href);
   const officialData=new BorshInstructionCoder(IDL).encode('ccipSend',{destChainSelector:new BN('16015286601757825753'),
-    message:{receiver:Buffer.from('275ee728c49100b56d4aa37c00e2dc8ffc5e5df6','hex'),data:Buffer.alloc(0),
+    message:{receiver:Buffer.from('000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df6','hex'),data:Buffer.alloc(0),
       tokenAmounts:[{token:new PublicKey(expected.mint),amount:new BN('1000000000')}],feeToken:new PublicKey('11111111111111111111111111111111'),
       extraArgs:Buffer.from(official.SolanaChain.encodeExtraArgs({gasLimit:0n,allowOutOfOrderExecution:true}).slice(2),'hex')},tokenIndexes:Buffer.from([0])});
   assert.deepEqual(candidate.instructions[1].data,officialData,'Independent Borsh bytes must match pinned official SDK/IDL');
@@ -46,6 +48,16 @@ test('pinned native provider v0 rejects hidden instructions, lookup substitution
     tx=>tx.message.staticAccountKeys[0]=new PublicKey(expected.mint)]){
     const tx=VersionedTransaction.deserialize(bytes);mutate(tx);
     assert.throws(()=>sdk.inspectSigned(Buffer.from(tx.serialize()).toString('base64'),expected));
+  }
+  const captured=Buffer.from(capturedSendHex,'hex');
+  const raw20=Buffer.concat([captured.subarray(0,16),Buffer.from('14000000','hex'),captured.subarray(32)]);
+  const tampered=Buffer.from(captured);tampered[51]^=1;
+  const padding=Buffer.from(captured);padding[20]=1;
+  for(const data of [raw20,tampered,padding]){
+    const instructions=candidate.instructions.map((ix,i)=>i===1?new TransactionInstruction({...ix,data}):ix);
+    assert.throws(()=>sdk.build({...candidate,instructions},expected,latest),/payload/);
+    const tx=VersionedTransaction.deserialize(bytes);tx.message.compiledInstructions[1].data=data;
+    assert.throws(()=>sdk.inspectSigned(Buffer.from(tx.serialize()).toString('base64'),expected),/Unexpected v0/);
   }
   const changed=[...candidate.instructions,candidate.instructions[0]];
   assert.throws(()=>sdk.build({...candidate,instructions:changed},expected,latest),/instruction list/);
