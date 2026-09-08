@@ -129,6 +129,17 @@ function blockFreshness(timestamp, now, maxAgeSeconds) {
   return { timestamp: valid ? timestamp : null, ageSeconds, maxAgeSeconds,
     fresh: valid && ageSeconds >= 0 && ageSeconds <= maxAgeSeconds };
 }
+/** Recheck original observations without restoring trust lost during collection. */
+export function refreshSnapshotFreshness(snapshot, now) {
+  if (!Number.isSafeInteger(now) || now < 0) { throw new Error('Invalid snapshot clock'); }
+  const freshness = Object.fromEntries([['ethereum', 1800], ['solana', 300], ['solanaRepeated', 300]].map(([chain, limit]) => {
+    const observation = snapshot.freshness?.[chain];
+    const current = blockFreshness(observation?.timestamp, now, limit);
+    return [chain, { ...observation, ...current, fresh: observation?.fresh === true && current.fresh }];
+  }));
+  return { ...snapshot, freshness, freshnessCheckedAt: new Date(now).toISOString(),
+    coherent: snapshot.coherent === true && Object.values(freshness).every(value => value.fresh) };
+}
 export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, now = Date.now) {
   const evm = jsonRpc(sepolia, fetcher), svm = jsonRpc(solana, fetcher), observer = createSepoliaRpc(sepolia, fetcher);
   return {

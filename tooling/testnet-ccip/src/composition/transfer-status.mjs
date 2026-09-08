@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createNativeStatus } from '../adapters/transfer-status-native.mjs';
+import { createNativeStatus, refreshSnapshotFreshness } from '../adapters/transfer-status-native.mjs';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { BURNMINT_PROGRAM } from '../domain/solana-pool-init.ts';
 import { FORWARD, FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA } from '../domain/evm-forward.mjs';
@@ -26,6 +26,14 @@ export function evmStatusChain(chain, getAddress) {
 }
 /** One-shot read-only CLI. Input contains public hashes and endpoints only. */
 const stringify = value => JSON.stringify(value, (_, item) => typeof item === 'bigint' ? item.toString() : item);
+export async function finalizeStatusReport(collect, cleanup, completeInventory, now = Date.now) {
+  let transfers, snapshot;
+  try { ({ transfers, snapshot } = await collect()); }
+  finally { await cleanup(); }
+  // No asynchronous work may follow the final age check on this response path.
+  const current = refreshSnapshotFreshness(snapshot, now());
+  return { transfers, accounting: accountTransfers(transfers, current, completeInventory), readOnly: true };
+}
 export async function runStatus(settings) {
   if (settings.testOnly !== true) {throw new Error('Bounded fixed test-fixture input required');}
   validateStatusTransfers(settings.transfers);
@@ -53,7 +61,7 @@ export async function runStatus(settings) {
   const sepolia = settings.sepoliaRpc ?? 'https://ethereum-sepolia-rpc.publicnode.com';
   const solana = settings.solanaRpc ?? 'https://api.devnet.solana.com';
   const native = createNativeStatus(sepolia, solana, lane), chains = {};
-  try {
+  return finalizeStatusReport(async () => {
     const logger = statusLogger();
     // fromUrl caches API clients by URL without logger context. Own this client explicitly.
     const api = new sdk.CCIPAPIClient(undefined, { logger });
@@ -72,8 +80,8 @@ export async function runStatus(settings) {
     const snapshot = await native.snapshot();
     const after = await inspect();
     snapshot.coherent &&= stringify(before) === stringify(after);
-    return { transfers: after, accounting: accountTransfers(after, snapshot, settings.completeFixtureInventory === true), readOnly: true };
-  } finally { await Promise.all(Object.values(chains).map(chain => chain.destroy())); }
+    return { transfers: after, snapshot };
+  }, () => Promise.all(Object.values(chains).map(chain => chain.destroy())), settings.completeFixtureInventory === true);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {

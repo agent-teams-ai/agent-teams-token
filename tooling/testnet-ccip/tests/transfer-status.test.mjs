@@ -428,3 +428,55 @@ test('missing Ethereum timestamp or unavailable Solana block time fails safely',
   assert.equal(value.freshness.ethereum.timestamp, null);
   await assert.rejects(freshnessFixture({ missing: 'solana' }), /Invalid native RPC response/);
 });
+
+test('report finalization rechecks all observation ages after inspection and cleanup', async () => {
+  const { finalizeStatusReport } = await import('../src/composition/transfer-status.mjs');
+  for (const [field, limit] of [['ethereum', 1800], ['solana', 300], ['repeated', 300]]) {
+    for (const phase of ['inspection', 'cleanup']) {
+      for (const delay of [5000, 6000]) {
+        let clock = 1700000000000;
+        const timestamp = clock / 1000 - limit + 5;
+        const options = { [field]: field === 'ethereum' ? '0x' + timestamp.toString(16) : timestamp };
+        // Keep the other Solana observation independently fresh.
+        if (field === 'solana') { options.repeated = 1700000000; }
+        const { snapshot: value } = await freshnessFixture(options);
+        assert.equal(accountTransfers([], value, true).status, 'exact');
+        const original = structuredClone(value);
+        const transfers = [{ status: 'settled', identity: { messageId: 'settled' }, pendingAmount: 0n, events: [] }];
+        const order = [];
+        const report = await finalizeStatusReport(async () => {
+          order.push('inspect');
+          await Promise.resolve();
+          if (phase === 'inspection') { clock += delay; }
+          return { transfers, snapshot: value };
+        }, async () => {
+          await Promise.resolve();
+          order.push('cleanup');
+          if (phase === 'cleanup') { clock += delay; }
+        }, true, () => { order.push('clock'); return clock; });
+        assert.deepEqual(order, ['inspect', 'cleanup', 'clock']);
+        assert.equal(report.accounting.status, delay === 5000 ? 'exact' : 'unknown', `${field}/${phase}/${delay}`);
+        assert.deepEqual(report.transfers, transfers);
+        assert.deepEqual(value, original);
+        if (delay === 5000) {
+          const audited = report.accounting.snapshot;
+          assert.equal(audited.observedAt, original.observedAt);
+          assert.equal(audited.freshnessCheckedAt, new Date(clock).toISOString());
+          assert.equal(audited.freshness[field === 'repeated' ? 'solanaRepeated' : field].ageSeconds, limit);
+        }
+      }
+    }
+  }
+});
+
+test('report finalization never restores incoherent or initially untrusted snapshots', async () => {
+  const { finalizeStatusReport } = await import('../src/composition/transfer-status.mjs');
+  for (const options of [{}, { ethereum: null }, { solana: null }, { repeated: null },
+    { ethereum: '0x6553f101' }, { solana: 1700000001 }, { repeated: 1700000001 }]) {
+    const { snapshot: value } = await freshnessFixture(options);
+    value.coherent = false;
+    const report = await finalizeStatusReport(async () => ({ transfers: [], snapshot: value }),
+      async () => {}, true, () => 1700000006000);
+    assert.equal(report.accounting.status, 'unknown');
+  }
+});
