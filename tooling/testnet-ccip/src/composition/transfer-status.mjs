@@ -34,10 +34,13 @@ export async function runStatus(settings) {
   const recipientAtas = Object.fromEntries([FORWARD.recipient, FORWARD_RECIPIENT_B].map(recipient => [recipient, getAssociatedTokenAddressSync(new PublicKey(REVERSE.mint), new PublicKey(recipient)).toBase58()]));
   if (recipientAtas[FORWARD_RECIPIENT_B] !== FORWARD_RECIPIENT_B_ATA) { throw new Error('Wrong independently derived B ATA'); }
   const derive = seed => PublicKey.findProgramAddressSync([Buffer.from(seed), new PublicKey(REVERSE.mint).toBuffer()], new PublicKey(BURNMINT_PROGRAM))[0].toBase58();
+  const solanaSigner = derive('ccip_tokenpool_signer');
+  const solanaPoolAta = getAssociatedTokenAddressSync(new PublicKey(REVERSE.mint), new PublicKey(solanaSigner), true).toBase58();
+  const solanaSpender = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], new PublicKey(ROUTER_PROGRAM))[0].toBase58();
   const { Interface } = await import(pathToFileURL(sdkRequire.resolve('ethers')).href);
   const routerAbi = new Interface(['function isOffRamp(uint64,address) view returns(bool)']);
-  const lane = { recipientAtas, allowedOffRamp: (selector, offRamp) => { const value = Buffer.alloc(8); value.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), value, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); },
-    isOffRampData: (selector, offRamp) => routerAbi.encodeFunctionData('isOffRamp', [selector, offRamp]), solanaPool: derive('ccip_tokenpool_config'), solanaSigner: derive('ccip_tokenpool_signer') };
+  const lane = { recipientAtas, solanaPoolAta, solanaSpender, allowedOffRamp: (selector, offRamp) => { const value = Buffer.alloc(8); value.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), value, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); },
+    isOffRampData: (selector, offRamp) => routerAbi.encodeFunctionData('isOffRamp', [selector, offRamp]), solanaPool: derive('ccip_tokenpool_config'), solanaSigner };
   const sepolia = settings.sepoliaRpc ?? 'https://ethereum-sepolia-rpc.publicnode.com';
   const solana = settings.solanaRpc ?? 'https://api.devnet.solana.com';
   const native = createNativeStatus(sepolia, solana, lane), chains = {};

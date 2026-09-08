@@ -29,10 +29,47 @@ export function evmEffect(receipt, kind) {
   if (logs.length !== 1) {throw new Error('Exact unique ERC20 effect missing');}
   return Number(BigInt(logs[0].logIndex));
 }
+function orderedSolanaInstructions(tx) {
+  const top = tx.transaction.message.instructions, groups = tx.meta.innerInstructions ?? [];
+  const seen = new Set();
+  for (const group of groups) {
+    if (!Number.isInteger(group.index) || group.index < 0 || group.index >= top.length || seen.has(group.index)) { throw new Error('Invalid SPL execution order'); }
+    seen.add(group.index);
+  }
+  return top.flatMap((ix, index) => [ix, ...(groups.find(group => group.index === index)?.instructions ?? [])]);
+}
+function verifyPoolBurnBalances(tx, owner, expectedAta, lane) {
+  const keys = tx.transaction.message.accountKeys.map(key => typeof key === 'string' ? key : key.pubkey);
+  for (const [account, authority, pre, post] of [[expectedAta, owner, REVERSE.amount.toString(), '0'], [lane.solanaPoolAta, lane.solanaSigner, '0', '0']]) {
+    const index = keys.indexOf(account);
+    if (index < 0 || keys.lastIndexOf(account) !== index) { throw new Error('Missing exact SPL account ownership'); }
+    for (const [values, amount] of [[tx.meta.preTokenBalances, pre], [tx.meta.postTokenBalances, post]]) {
+      const balances = (values ?? []).filter(value => value.accountIndex === index);
+      if (balances.length !== 1 || balances[0].mint !== REVERSE.mint || balances[0].owner !== authority || balances[0].programId !== TOKEN ||
+          balances[0].uiTokenAmount?.decimals !== 9 || balances[0].uiTokenAmount.amount !== amount) { throw new Error('SPL pool burn balances do not reconcile'); }
+    }
+  }
+}
+/** The official reverse CPI transfers A's tokens to the pool before burning. */
+function solanaPoolBurn(tx, owner, expectedAta, lane) {
+  if (owner !== FORWARD.recipient) { throw new Error('B reverse is not supported'); }
+  if (!expectedAta || !lane.solanaPoolAta || !lane.solanaSigner || !lane.solanaSpender || expectedAta === lane.solanaPoolAta) { throw new Error('Missing canonical burn lane'); }
+  const instructions = orderedSolanaInstructions(tx);
+  const candidates = types => instructions.map((ix, index) => ({ ix, index })).filter(({ ix }) =>
+    ix.programId === TOKEN && types.includes(ix.parsed?.type) && ix.parsed.info.mint === REVERSE.mint);
+  const transfers = candidates(['transferChecked']), burns = candidates(['burn', 'burnChecked']);
+  if (transfers.length !== 1 || burns.length !== 1) { throw new Error('Exact unique SPL pool transfer/burn missing'); }
+  const transfer = transfers[0].ix.parsed.info, burn = burns[0].ix.parsed.info;
+  if (transfers[0].index >= burns[0].index || transfer.source !== expectedAta || transfer.destination !== lane.solanaPoolAta ||
+      transfer.authority !== lane.solanaSpender || transfer.tokenAmount?.amount !== REVERSE.amount.toString() || transfer.tokenAmount.decimals !== 9 ||
+      burns[0].ix.parsed.type !== 'burn' || burn.account !== lane.solanaPoolAta || burn.authority !== lane.solanaSigner || burn.amount !== REVERSE.amount.toString()) { throw new Error('Wrong canonical SPL pool transfer/burn'); }
+  verifyPoolBurnBalances(tx, owner, expectedAta, lane);
+  return burns[0].index;
+}
 /** Parsed instructions are native RPC decoding of actual transaction bytes, not CCIP metadata. */
-export function solanaEffect(tx, kind, recipient = FORWARD.recipient, expectedAta) {
+export function solanaEffect(tx, kind, recipient = FORWARD.recipient, expectedAta, lane = {}) {
   const owner = forwardRecipient(recipient);
-  if (kind === 'burn' && owner !== FORWARD.recipient) { throw new Error('B reverse is not supported'); }
+  if (kind === 'burn') { return solanaPoolBurn(tx, owner, expectedAta, lane); }
   const instructions = [...tx.transaction.message.instructions, ...(tx.meta.innerInstructions ?? []).flatMap(group => group.instructions)];
   const matches = instructions.map((ix, index) => ({ ix, index })).filter(({ ix }) => {
     const parsed = ix.parsed, info = parsed?.info;
@@ -86,7 +123,7 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch) 
       if (!tx || tx.meta?.err !== null || status?.err !== null || status?.confirmationStatus !== 'finalized' || status.slot !== tx.slot || tx.transaction.signatures[0] !== hash) {throw new Error('Solana transaction not successful finalized');}
       const block = await svm('getBlock', [tx.slot, { commitment: 'finalized', transactionDetails: 'signatures', rewards: false, maxSupportedTransactionVersion: 0 }]);
       if (!block?.signatures?.includes(hash)) {throw new Error('Solana canonical block does not contain transaction');}
-      return { transaction: tx.transaction, programLogs: tx.meta.logMessages, eventIndex: solanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient]), blockHash: block.blockhash, blockHeight: BigInt(tx.slot) };
+      return { transaction: tx.transaction, programLogs: tx.meta.logMessages, eventIndex: solanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient], lane), blockHash: block.blockhash, blockHeight: BigInt(tx.slot) };
     },
     async snapshot() {
       if (BigInt(await evm('eth_chainId', [])) !== 11155111n || await svm('getGenesisHash', []) !== 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG') {throw new Error('Wrong accounting chains');}

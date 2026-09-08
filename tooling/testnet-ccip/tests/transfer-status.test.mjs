@@ -169,3 +169,52 @@ test('recipient B mint requires B owner and canonical B ATA; A cannot satisfy it
   tx.meta.postTokenBalances[0].owner = FORWARD.recipient;
   assert.throws(() => solanaEffect(tx, 'mint', FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA), /ownership/);
 });
+
+test('captured reverse native transfer-to-pool then burn reconciles strict A and pool balances', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { tx } = JSON.parse(await readFile(new URL('./fixtures/reverse-native-burn.json', import.meta.url), 'utf8'));
+  const ata = 'BDW4fQh6QGDnTbZATEjTCcu1PQaKvKSE5GzmQTGe9Kvh';
+  const lane = { solanaPoolAta: 'ETmid1DpsTNnZGueaiK68hWqfcs6rJii1YFgjKxrcVzF',
+    solanaSigner: '8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX', solanaSpender: '2AjuzTy6z2webxEUu7eZ1DkAyLagZaqH2dgzhbBYjJiG' };
+  const prove = (value, bindings = lane) => solanaEffect(value, 'burn', REVERSE.payer, ata, bindings);
+  assert.equal(tx.slot, 494910753);
+  assert.equal(prove(tx), 3);
+  const cases = {
+    transferAuthority: value => { value.meta.innerInstructions[0].instructions[0].parsed.info.authority = REVERSE.payer; },
+    burnAuthority: value => { value.meta.innerInstructions[0].instructions[1].parsed.info.authority = REVERSE.payer; },
+    transferSource: value => { value.meta.innerInstructions[0].instructions[0].parsed.info.source = lane.solanaPoolAta; },
+    transferDestination: value => { value.meta.innerInstructions[0].instructions[0].parsed.info.destination = ata; },
+    directUserBurn: value => { value.meta.innerInstructions[0].instructions[1].parsed.info.account = ata; },
+    missingTransfer: value => { value.meta.innerInstructions[0].instructions.shift(); },
+    duplicateTransfer: value => { value.meta.innerInstructions[0].instructions.unshift(value.meta.innerInstructions[0].instructions[0]); },
+    duplicateBurn: value => { value.meta.innerInstructions[0].instructions.push(value.meta.innerInstructions[0].instructions[1]); },
+    reversedOrder: value => { value.meta.innerInstructions[0].instructions.reverse(); },
+    transferDecimals: value => { value.meta.innerInstructions[0].instructions[0].parsed.info.tokenAmount.decimals = 8; },
+    transferAmount: value => { value.meta.innerInstructions[0].instructions[0].parsed.info.tokenAmount.amount = '1'; },
+    burnAmount: value => { value.meta.innerInstructions[0].instructions[1].parsed.info.amount = '1'; },
+    burnMint: value => { value.meta.innerInstructions[0].instructions[1].parsed.info.mint = 'wrong'; },
+    tokenProgram: value => { value.meta.innerInstructions[0].instructions[1].programId = 'wrong'; },
+    duplicateGroup: value => { value.meta.innerInstructions.push(value.meta.innerInstructions[0]); },
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const changed = structuredClone(tx); change(changed); assert.throws(() => prove(changed), undefined, name);
+  }
+  for (const phase of ['preTokenBalances', 'postTokenBalances']) {
+    for (const index of [0, 1]) {
+      for (const field of ['owner', 'mint', 'programId', 'amount', 'decimals', 'missing', 'duplicate']) {
+        const changed = structuredClone(tx), balances = changed.meta[phase], balance = balances[index];
+        if (field === 'amount') { balance.uiTokenAmount.amount = '7'; }
+        else if (field === 'decimals') { balance.uiTokenAmount.decimals = 8; }
+        else if (field === 'missing') { balances.splice(index, 1); }
+        else if (field === 'duplicate') { balances.push(structuredClone(balance)); }
+        else { balance[field] = 'wrong'; }
+        assert.throws(() => prove(changed), undefined, `${phase}/${index}/${field}`);
+      }
+    }
+  }
+  for (const field of Object.keys(lane)) {
+    assert.throws(() => prove(tx, { ...lane, [field]: undefined }));
+    assert.throws(() => prove(tx, { ...lane, [field]: 'wrong' }));
+  }
+  assert.throws(() => solanaEffect(tx, 'burn', REVERSE.payer, 'wrong', lane));
+});
