@@ -72,7 +72,49 @@ function roles(forward) {
   const sourceKind = forward ? 'lock' : 'burn', destinationKind = forward ? 'mint' : 'release';
   return { sourceName, destinationName, sourceKind, destinationKind };
 }
-export async function inspectTransfer({ sourceHash, direction, recipient }, chains, native, api, successState) {
+// Base58 has a unique representation when leading zero bytes are counted.
+function base58Bytes(value, bytes) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  if (typeof value !== 'string' || value.length < bytes || value.length > Math.ceil(bytes * 8 / Math.log2(58))) { return false; }
+  let number = 0n;
+  for (const char of value) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) { return false; }
+    number = number * 58n + BigInt(digit);
+  }
+  let length = 0;
+  for (; length < value.length && value[length] === '1'; length++) {}
+  while (number > 0n) { length++; number >>= 8n; }
+  return length === bytes;
+}
+function validReceiptHint(hint, forward) {
+  return hint !== null && typeof hint === 'object' && !Array.isArray(hint) &&
+    Object.keys(hint).length === 2 && Object.hasOwn(hint, 'transactionHash') && Object.hasOwn(hint, 'offRamp') &&
+    (forward ? base58Bytes(hint.transactionHash, 64) && base58Bytes(hint.offRamp, 32) :
+      typeof hint.transactionHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hint.transactionHash) &&
+      typeof hint.offRamp === 'string' && /^0x[0-9a-fA-F]{40}$/.test(hint.offRamp));
+}
+function selectReceipt(metadata, destinationReceipt, forward) {
+  const apiReceipt = metadata?.receiptTransactionHash && metadata.offRamp ?
+    { transactionHash: metadata.receiptTransactionHash, offRamp: metadata.offRamp } : undefined;
+  const same = (a, b) => forward ? a === b : typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
+  if (apiReceipt && destinationReceipt && (!same(apiReceipt.transactionHash, destinationReceipt.transactionHash) ||
+      !same(apiReceipt.offRamp, destinationReceipt.offRamp))) {
+    return { destinationError: 'Destination receipt discovery conflict; destination unproven' };
+  }
+  const receipt = apiReceipt ?? destinationReceipt;
+  return { receipt, discoveryOrigin: receipt ? (apiReceipt ? 'ccip-api' : 'operator-receipt-hint') : undefined };
+}
+async function discoverReceipt(api, messageId, destinationReceipt, forward) {
+  if (destinationReceipt !== undefined && !validReceiptHint(destinationReceipt, forward)) {
+    return { destinationError: 'Destination receipt hint malformed; destination unproven' };
+  }
+  let metadata, discoveryError;
+  try { metadata = (await api.getMessageById(messageId, { signal: AbortSignal.timeout(20_000) })).metadata; }
+  catch { discoveryError = 'CCIP discovery unavailable; no retry authorized'; }
+  return { metadata, discoveryError, ...selectReceipt(metadata, destinationReceipt, forward) };
+}
+export async function inspectTransfer({ sourceHash, direction, recipient, destinationReceipt }, chains, native, api, successState) {
   const selectedRecipient = statusRecipient(direction, recipient);
   const forward = direction === 'ethereum-to-solana';
   const { sourceName, destinationName, sourceKind, destinationKind } = roles(forward);
@@ -89,23 +131,23 @@ export async function inspectTransfer({ sourceHash, direction, recipient }, chai
   const event = (chain, kind, hash, evidence) => ({ ...identity, chain, kind, transactionId: hash,
     eventIndex: evidence.eventIndex, blockHash: evidence.blockHash, blockHeight: evidence.blockHeight, finality: 'finalized' });
   const events = [event(sourceName, sourceKind, sourceHash, proof)];
-  let metadata, discoveryError, destinationError;
-  try { metadata = (await api.getMessageById(identity.messageId, { signal: AbortSignal.timeout(20_000) })).metadata; }
-  catch { discoveryError = 'CCIP discovery unavailable; no retry authorized'; }
-  if (metadata?.receiptTransactionHash && metadata.offRamp) {
+  const discovery = await discoverReceipt(api, identity.messageId, destinationReceipt, forward);
+  const { metadata, discoveryError, receipt, discoveryOrigin } = discovery;
+  let { destinationError } = discovery;
+  if (receipt) {
     try {
-      const hash = metadata.receiptTransactionHash;
-      await native.authorizeOffRamp(destinationName, metadata.offRamp, request.lane.sourceChainSelector);
-      const execution = await chains[destinationName].getExecutionReceiptInTx(hash, { offRamp: metadata.offRamp,
+      const hash = receipt.transactionHash;
+      await native.authorizeOffRamp(destinationName, receipt.offRamp, request.lane.sourceChainSelector);
+      const execution = await chains[destinationName].getExecutionReceiptInTx(hash, { offRamp: receipt.offRamp,
         messageId: identity.messageId, sourceChainSelector: request.lane.sourceChainSelector });
       verifyExecution(execution, identity, request, hash, successState);
       const destination = await native[destinationName](hash, destinationKind, selectedRecipient);
-      bindExecution(destination, execution.log, destinationName, metadata.offRamp);
+      bindExecution(destination, execution.log, destinationName, receipt.offRamp);
       events.push(event(destinationName, destinationKind, hash, destination));
     } catch { destinationError = 'Destination finality, execution identity or token effect unproven'; }
   }
   return { sourceHash, ...projectMessage(identity, events, metadata?.readyForManualExecution === true || metadata?.status === 'FAILED'),
-    events, discoveryStatus: metadata?.status ?? 'UNKNOWN', discoveryError, destinationError };
+    events, ...(discoveryOrigin ? { discoveryOrigin } : {}), discoveryStatus: metadata?.status ?? 'UNKNOWN', discoveryError, destinationError };
 }
 export function accountTransfers(transfers, snapshot, completeInventory = false) {
   if (!completeInventory || !snapshot.coherent || transfers.some(t => t.pendingAmount === null) ||

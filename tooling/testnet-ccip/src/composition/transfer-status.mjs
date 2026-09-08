@@ -15,6 +15,15 @@ export function statusLogger(write = text => process.stderr.write(text)) {
   const log = (...args) => { write(format(...args) + '\n'); };
   return { debug: log, info: log, warn: log, error: log };
 }
+/** SDK 1.13.0 compares EVM log addresses strictly; keep normalization at this boundary. */
+export function evmStatusChain(chain, getAddress) {
+  return {
+    getMessagesInTx: (...args) => chain.getMessagesInTx(...args),
+    getExecutionReceiptInTx: (hash, filters) => chain.getExecutionReceiptInTx(hash,
+      { ...filters, offRamp: getAddress(filters.offRamp) }),
+    destroy: () => chain.destroy(),
+  };
+}
 /** One-shot read-only CLI. Input contains public hashes and endpoints only. */
 const stringify = value => JSON.stringify(value, (_, item) => typeof item === 'bigint' ? item.toString() : item);
 export async function runStatus(settings) {
@@ -37,7 +46,7 @@ export async function runStatus(settings) {
   const solanaSigner = derive('ccip_tokenpool_signer');
   const solanaPoolAta = getAssociatedTokenAddressSync(new PublicKey(REVERSE.mint), new PublicKey(solanaSigner), true).toBase58();
   const solanaSpender = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], new PublicKey(ROUTER_PROGRAM))[0].toBase58();
-  const { Interface } = await import(pathToFileURL(sdkRequire.resolve('ethers')).href);
+  const { Interface, getAddress } = await import(pathToFileURL(sdkRequire.resolve('ethers')).href);
   const routerAbi = new Interface(['function isOffRamp(uint64,address) view returns(bool)']);
   const lane = { recipientAtas, solanaPoolAta, solanaSpender, allowedOffRamp: (selector, offRamp) => { const value = Buffer.alloc(8); value.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), value, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); },
     isOffRampData: (selector, offRamp) => routerAbi.encodeFunctionData('isOffRamp', [selector, offRamp]), solanaPool: derive('ccip_tokenpool_config'), solanaSigner };
@@ -49,7 +58,7 @@ export async function runStatus(settings) {
     // fromUrl caches API clients by URL without logger context. Own this client explicitly.
     const api = new sdk.CCIPAPIClient(undefined, { logger });
     const context = { logger, apiClient: api };
-    chains.ethereum = await sdk.EVMChain.fromUrl(sepolia, context);
+    chains.ethereum = evmStatusChain(await sdk.EVMChain.fromUrl(sepolia, context), getAddress);
     chains.solana = await sdk.SolanaChain.fromUrl(solana, context);
     const inspect = async () => {
       const results = [];

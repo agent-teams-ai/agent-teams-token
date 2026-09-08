@@ -218,3 +218,143 @@ test('captured reverse native transfer-to-pool then burn reconciles strict A and
   }
   assert.throws(() => solanaEffect(tx, 'burn', REVERSE.payer, 'wrong', lane));
 });
+
+async function receiptHintFixture(forward = false) {
+  const { inspectTransfer } = await import('../src/domain/transfer-status.mjs');
+  const { FORWARD } = await import('../src/domain/evm-forward.mjs');
+  const { ROUTER_PROGRAM } = await import('../src/domain/solana-registration.ts');
+  const sourceHash = 'source', messageId = '0x' + '22'.repeat(32), encoded = Buffer.from('12345678event').toString('base64');
+  const hint = forward ? { transactionHash: '1'.repeat(64), offRamp: '1'.repeat(32) } :
+    { transactionHash: '0x' + '33'.repeat(32), offRamp: '0x' + '44'.repeat(20) };
+  const source = forward ? 'ethereum' : 'solana', destination = forward ? 'solana' : 'ethereum';
+  const log = { transactionHash: sourceHash, index: 1, address: forward ? '0xabc' : ROUTER_PROGRAM,
+    data: forward ? '0x1234' : encoded, topics: forward ? [] : ['0x3132333435363738'] };
+  const request = { tx: { hash: sourceHash, from: REVERSE.payer }, log,
+    lane: { sourceChainSelector: forward ? 16015286601757825753n : FORWARD.selector,
+      destChainSelector: forward ? FORWARD.selector : 16015286601757825753n, onRamp: '0xabc' },
+    message: { data: '0x', messageId, sequenceNumber: 7n,
+      sender: forward ? FORWARD.administrator : REVERSE.payer,
+      receiver: forward ? '11111111111111111111111111111111' : REVERSE.recipient,
+      tokenReceiver: FORWARD.recipient,
+      tokenAmounts: [{ amount: FORWARD.amount, destTokenAddress: forward ? REVERSE.mint : FORWARD.token,
+        sourcePoolAddress: forward ? FORWARD.pool : 'pool' }] } };
+  Object.assign(request.message, { sourceChainSelector: request.lane.sourceChainSelector, destChainSelector: request.lane.destChainSelector });
+  const execution = { receipt: { messageId, sequenceNumber: 7n, sourceChainSelector: request.lane.sourceChainSelector, state: 2 },
+    log: { transactionHash: hint.transactionHash, address: hint.offRamp, index: 1,
+      data: forward ? encoded : '0xab', topics: forward ? ['0x3132333435363738'] : [] } };
+  const calls = [];
+  const native = { lane: { solanaPool: 'pool' },
+    authorizeOffRamp: async (...args) => { calls.push('authorize'); assert.deepEqual(args, [destination, hint.offRamp, request.lane.sourceChainSelector]); },
+    [source]: async () => ({ eventIndex: 0, blockHeight: 1n, blockHash: 'source-block',
+      transaction: { to: FORWARD.router, from: FORWARD.administrator,
+        message: { accountKeys: [{ pubkey: REVERSE.payer, signer: true }], instructions: [{ programId: ROUTER_PROGRAM }] } },
+      logs: [{ logIndex: '0x1', address: log.address, data: log.data, topics: log.topics }],
+      programLogs: [`Program ${ROUTER_PROGRAM} invoke [1]`, 'Program data: ' + encoded, `Program ${ROUTER_PROGRAM} success`] }),
+    [destination]: async () => { calls.push('effect'); return { eventIndex: 0, blockHeight: 2n, blockHash: 'destination-block',
+      logs: [{ logIndex: '0x1', address: hint.offRamp, data: '0xab', topics: [] }],
+      programLogs: [`Program ${hint.offRamp} invoke [1]`, 'Program data: ' + encoded, `Program ${hint.offRamp} success`] }; } };
+  const chains = { [source]: { getMessagesInTx: async () => [request] },
+    [destination]: { getExecutionReceiptInTx: async (hash, options) => {
+      calls.push('sdk'); assert.equal(hash, hint.transactionHash);
+      assert.deepEqual(options, { offRamp: hint.offRamp, messageId, sourceChainSelector: request.lane.sourceChainSelector });
+      return execution;
+    } } };
+  const api = { getMessageById: async () => { throw new Error('MESSAGE_ID_NOT_FOUND secret diagnostic'); } };
+  const transfer = { sourceHash, direction: forward ? 'ethereum-to-solana' : 'solana-to-ethereum', destinationReceipt: hint };
+  return { hint, transfer, api, native, execution, calls, destination, chains, run: () => inspectTransfer(transfer, chains, native, api, 2) };
+}
+test('operator receipt discovery settles both chains only through native verification during API absence', async () => {
+  for (const forward of [false, true]) {
+    for (const metadata of [undefined, {}, { status: 'PROCESSING', offRamp: 'incomplete' }]) {
+      const f = await receiptHintFixture(forward);
+      if (metadata) { f.api.getMessageById = async () => ({ metadata }); }
+      const result = await f.run();
+      assert.equal(result.status, 'settled'); assert.equal(result.pendingAmount, 0n);
+      assert.equal(result.discoveryOrigin, 'operator-receipt-hint');
+      assert.equal(result.discoveryStatus, metadata?.status ?? 'UNKNOWN');
+      assert.deepEqual(f.calls, ['authorize', 'sdk', 'effect']);
+    }
+  }
+});
+test('hint cannot bypass authorization, SDK identity, native finality/effects or log binding', async () => {
+  for (const forward of [false, true]) {
+    for (const failure of ['offRamp', 'messageId', 'sequenceNumber', 'sourceChainSelector', 'state', 'transactionHash', 'finality', 'token', 'binding']) {
+      const f = await receiptHintFixture(forward);
+      if (failure === 'offRamp') { f.native.authorizeOffRamp = async () => { throw new Error('private detail'); }; }
+      else if (['finality', 'token'].includes(failure)) { f.native[f.destination] = async () => { throw new Error('private detail'); }; }
+      else if (failure === 'binding') { f.execution.log.data = 'tampered'; }
+      else if (failure === 'transactionHash') { f.execution.log.transactionHash = 'wrong'; }
+      else { f.execution.receipt[failure] = 'wrong'; }
+      const result = await f.run();
+      assert.equal(result.status, 'pending', failure); assert.equal(result.events.length, 1);
+      assert.match(result.destinationError, /unproven/); assert.doesNotMatch(result.destinationError, /private/);
+    }
+  }
+});
+test('complete API and hint conflicts fail closed; matching receipts remain verifiable', async () => {
+  for (const forward of [false, true]) {
+    for (const field of ['transactionHash', 'offRamp']) {
+      const f = await receiptHintFixture(forward);
+      const receipt = { ...f.hint, [field]: 'different' };
+      f.api.getMessageById = async () => ({ metadata: { status: 'SUCCESS', receiptTransactionHash: receipt.transactionHash, offRamp: receipt.offRamp } });
+      const result = await f.run();
+      assert.equal(result.status, 'pending'); assert.match(result.destinationError, /conflict/); assert.deepEqual(f.calls, []);
+    }
+  }
+  const f = await receiptHintFixture();
+  f.api.getMessageById = async () => ({ metadata: { receiptTransactionHash: f.hint.transactionHash, offRamp: f.hint.offRamp } });
+  const result = await f.run();
+  assert.equal(result.discoveryOrigin, 'ccip-api'); assert.equal(result.status, 'settled');
+});
+test('API outage without hint preserves pending and malformed hints never read destination', async () => {
+  const absent = await receiptHintFixture(); delete absent.transfer.destinationReceipt;
+  const pendingResult = await absent.run();
+  assert.equal(pendingResult.status, 'pending'); assert.equal(pendingResult.discoveryStatus, 'UNKNOWN');
+  assert.equal(pendingResult.destinationError, undefined); assert.deepEqual(absent.calls, []);
+  for (const forward of [false, true]) {
+    const f = await receiptHintFixture(forward);
+    for (const hint of [null, [], {}, 'receipt', { ...f.hint, extra: true },
+      ...['transactionHash', 'offRamp'].flatMap(field => [0, '', '0', ' ' + f.hint[field], f.hint[field] + '1', f.hint[field].slice(1), '1'.repeat(10000)].map(value => ({ ...f.hint, [field]: value })))]) {
+      f.transfer.destinationReceipt = hint;
+      const result = await f.run();
+      assert.equal(result.status, 'pending'); assert.match(result.destinationError, /malformed/);
+      assert.deepEqual(f.calls, []);
+    }
+  }
+});
+
+test('EVM adapter normalizes lower/checksummed hints while preserving native checks and SDK receiver', async () => {
+  const { evmStatusChain } = await import('../src/composition/transfer-status.mjs');
+  const canonical = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0';
+  for (const address of [canonical.toLowerCase(), canonical]) {
+    const f = await receiptHintFixture();
+    f.hint.offRamp = address;
+    f.execution.log.address = canonical;
+    const raw = Object.freeze({
+      getMessagesInTx(hash) { assert.equal(this, raw); return hash; },
+      getExecutionReceiptInTx(hash, filters) {
+        assert.equal(this, raw); assert.equal(hash, f.hint.transactionHash);
+        assert.deepEqual(filters, { offRamp: canonical, messageId: f.execution.receipt.messageId,
+          sourceChainSelector: f.execution.receipt.sourceChainSelector });
+        f.calls.push('sdk'); return f.execution;
+      },
+      destroy() { assert.equal(this, raw); return 'destroyed'; },
+    });
+    const normalized = [];
+    f.chains.ethereum = evmStatusChain(raw, value => {
+      normalized.push(value); assert.equal(value.toLowerCase(), canonical.toLowerCase()); return canonical;
+    });
+    assert.equal(f.chains.ethereum.getMessagesInTx('source'), 'source');
+    assert.equal((await f.run()).status, 'settled');
+    assert.deepEqual(normalized, [address]);
+    assert.deepEqual(f.calls, ['authorize', 'sdk', 'effect']);
+    f.execution.log.data = 'tampered';
+    assert.equal((await f.run()).status, 'pending');
+    f.native.authorizeOffRamp = async () => { throw new Error('Unauthorized'); };
+    const count = normalized.length;
+    assert.equal((await f.run()).status, 'pending');
+    assert.equal(normalized.length, count);
+    assert.equal(f.chains.ethereum.destroy(), 'destroyed');
+    assert.equal(f.hint.offRamp, address);
+  }
+});
