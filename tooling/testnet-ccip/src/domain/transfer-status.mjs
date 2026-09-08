@@ -1,11 +1,22 @@
 import { projectMessage } from '../../../../packages/domain/src/features/ccip-status/message.ts';
 import { reconcileSupply } from '../../../../packages/domain/src/supply.ts';
-import { FORWARD } from './evm-forward.mjs';
+import { FORWARD, forwardRecipient } from './evm-forward.mjs';
 import { REVERSE } from './solana-reverse.mjs';
 import { ROUTER_PROGRAM } from './solana-registration.ts';
 const equal = (a, b) => typeof a === 'string' && (b.startsWith('0x') ? a.toLowerCase() === b : a === b);
-function validForwardReceiver(forward, message) { return message.data === '0x' && (!forward || message.tokenReceiver === FORWARD.recipient); }
-export function matchRequest(request, direction, hash) {
+export function statusRecipient(direction, recipient) {
+  const selected = forwardRecipient(recipient);
+  if (direction === 'solana-to-ethereum' && selected !== FORWARD.recipient) { throw new Error('Reverse fixture supports only recipient A'); }
+  if (!['ethereum-to-solana', 'solana-to-ethereum'].includes(direction)) { throw new Error('Invalid transfer direction'); }
+  return selected;
+}
+export function validateStatusTransfers(transfers) {
+  if (!Array.isArray(transfers) || transfers.length > 3) { throw new Error('At most three fixed fixture transfers required'); }
+  const slots = transfers.map(transfer => `${transfer.direction}:${statusRecipient(transfer.direction, transfer.recipient)}`);
+  if (new Set(slots).size !== slots.length || new Set(transfers.map(transfer => transfer.sourceHash)).size !== transfers.length) { throw new Error('Duplicate fixture transfer'); }
+}
+function validForwardReceiver(forward, message, recipient) { return message.data === '0x' && (!forward || (message.tokenReceiver === recipient && equal(message.tokenAmounts?.[0]?.sourcePoolAddress, FORWARD.pool))); }
+export function matchRequest(request, direction, hash, recipient = FORWARD.recipient) {
   const forward = direction === 'ethereum-to-solana', message = request.message;
   const source = forward ? 16015286601757825753n : FORWARD.selector;
   const destination = forward ? FORWARD.selector : 16015286601757825753n;
@@ -13,9 +24,9 @@ export function matchRequest(request, direction, hash) {
     request.lane.destChainSelector === destination && message.sourceChainSelector === source && message.destChainSelector === destination &&
     equal(message.sender, forward ? FORWARD.administrator : REVERSE.payer) &&
     equal(message.receiver, forward ? '11111111111111111111111111111111' : REVERSE.recipient) &&
-    validForwardReceiver(forward, message) && message.tokenAmounts?.length === 1 &&
+    validForwardReceiver(forward, message, recipient) && message.tokenAmounts?.length === 1 &&
     message.tokenAmounts[0].amount === FORWARD.amount && equal(message.tokenAmounts[0].destTokenAddress, forward ? REVERSE.mint : FORWARD.token) &&
-    (!forward || equal(message.tokenAmounts[0].sourcePoolAddress, FORWARD.pool)) && /^0x[0-9a-fA-F]{64}$/.test(message.messageId);
+    /^0x[0-9a-fA-F]{64}$/.test(message.messageId);
 }
 function bindProgramLog(proof, log, program) {
   const stack = [], matches = [];
@@ -61,20 +72,20 @@ function roles(forward) {
   const sourceKind = forward ? 'lock' : 'burn', destinationKind = forward ? 'mint' : 'release';
   return { sourceName, destinationName, sourceKind, destinationKind };
 }
-export async function inspectTransfer({ sourceHash, direction }, chains, native, api, successState) {
-  if (!['ethereum-to-solana', 'solana-to-ethereum'].includes(direction)) {throw new Error('Invalid transfer direction');}
+export async function inspectTransfer({ sourceHash, direction, recipient }, chains, native, api, successState) {
+  const selectedRecipient = statusRecipient(direction, recipient);
   const forward = direction === 'ethereum-to-solana';
   const { sourceName, destinationName, sourceKind, destinationKind } = roles(forward);
   const proof = await native[sourceName](sourceHash, sourceKind);
   if (forward && (proof.transaction.to !== FORWARD.router || proof.transaction.from !== FORWARD.administrator)) {throw new Error('Wrong native source sender/router');}
   const requests = await chains[sourceName].getMessagesInTx(sourceHash);
-  const matching = requests.filter(request => matchRequest(request, direction, sourceHash));
+  const matching = requests.filter(request => matchRequest(request, direction, sourceHash, selectedRecipient));
   if (matching.length !== 1 || requests.length !== 1) {throw new Error('Source message identity is not unique/exact');}
   const request = matching[0];
   verifyNativeSource(forward, proof, request, native.lane);
   const identity = { messageId: request.message.messageId, direction, amount: FORWARD.amount,
     sourceToken: forward ? FORWARD.token : REVERSE.mint, destinationToken: forward ? REVERSE.mint : FORWARD.token,
-    recipient: forward ? FORWARD.recipient : REVERSE.recipient };
+    recipient: forward ? selectedRecipient : REVERSE.recipient };
   const event = (chain, kind, hash, evidence) => ({ ...identity, chain, kind, transactionId: hash,
     eventIndex: evidence.eventIndex, blockHash: evidence.blockHash, blockHeight: evidence.blockHeight, finality: 'finalized' });
   const events = [event(sourceName, sourceKind, sourceHash, proof)];
@@ -88,7 +99,7 @@ export async function inspectTransfer({ sourceHash, direction }, chains, native,
       const execution = await chains[destinationName].getExecutionReceiptInTx(hash, { offRamp: metadata.offRamp,
         messageId: identity.messageId, sourceChainSelector: request.lane.sourceChainSelector });
       verifyExecution(execution, identity, request, hash, successState);
-      const destination = await native[destinationName](hash, destinationKind);
+      const destination = await native[destinationName](hash, destinationKind, selectedRecipient);
       bindExecution(destination, execution.log, destinationName, metadata.offRamp);
       events.push(event(destinationName, destinationKind, hash, destination));
     } catch { destinationError = 'Destination finality, execution identity or token effect unproven'; }

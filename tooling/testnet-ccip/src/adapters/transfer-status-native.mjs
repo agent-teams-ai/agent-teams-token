@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { createSepoliaRpc } from './evm-rpc.ts';
-import { FORWARD } from '../domain/evm-forward.mjs';
+import { FORWARD, forwardRecipient } from '../domain/evm-forward.mjs';
 import { REVERSE } from '../domain/solana-reverse.mjs';
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
@@ -30,7 +30,9 @@ export function evmEffect(receipt, kind) {
   return Number(BigInt(logs[0].logIndex));
 }
 /** Parsed instructions are native RPC decoding of actual transaction bytes, not CCIP metadata. */
-export function solanaEffect(tx, kind) {
+export function solanaEffect(tx, kind, recipient = FORWARD.recipient, expectedAta) {
+  const owner = forwardRecipient(recipient);
+  if (kind === 'burn' && owner !== FORWARD.recipient) { throw new Error('B reverse is not supported'); }
   const instructions = [...tx.transaction.message.instructions, ...(tx.meta.innerInstructions ?? []).flatMap(group => group.instructions)];
   const matches = instructions.map((ix, index) => ({ ix, index })).filter(({ ix }) => {
     const parsed = ix.parsed, info = parsed?.info;
@@ -39,9 +41,10 @@ export function solanaEffect(tx, kind) {
   });
   if (matches.length !== 1) {throw new Error('Exact unique SPL mint/burn instruction missing');}
   const { ix, index } = matches[0], account = ix.parsed.info.account;
+  if (expectedAta !== undefined && account !== expectedAta) { throw new Error('Wrong canonical recipient ATA'); }
   const keys = tx.transaction.message.accountKeys.map(key => typeof key === 'string' ? key : key.pubkey);
   const accountIndex = keys.indexOf(account);
-  const balance = values => values.filter(value => value.accountIndex === accountIndex && value.mint === REVERSE.mint && value.owner === REVERSE.payer && value.programId === TOKEN);
+  const balance = values => values.filter(value => value.accountIndex === accountIndex && value.mint === REVERSE.mint && value.owner === owner && value.programId === TOKEN);
   const before = balance(tx.meta.preTokenBalances ?? []), after = balance(tx.meta.postTokenBalances ?? []);
   if (accountIndex < 0 || after.length !== 1 || before.length > 1 || (kind === 'burn' && before.length !== 1)) {throw new Error('Missing exact SPL account ownership');}
   const delta = BigInt(after[0].uiTokenAmount.amount) - BigInt(before[0]?.uiTokenAmount.amount ?? 0);
@@ -75,7 +78,7 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch) 
       if (receipt.blockHash !== observation.receipt.blockHash || receipt.transactionHash !== hash || BigInt(receipt.status) !== 1n) {throw new Error('Receipt changed');}
       return { transaction: observation.transaction, logs: receipt.logs, eventIndex: evmEffect(receipt, kind), blockHash: receipt.blockHash, blockHeight: BigInt(receipt.blockNumber) };
     },
-    async solana(hash, kind) {
+    async solana(hash, kind, recipient = FORWARD.recipient) {
       if (await svm('getGenesisHash', []) !== 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG') {throw new Error('Wrong Solana cluster');}
       const tx = await svm('getTransaction', [hash, { commitment: 'finalized', encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]);
       const statuses = await svm('getSignatureStatuses', [[hash], { searchTransactionHistory: true }]);
@@ -83,7 +86,7 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch) 
       if (!tx || tx.meta?.err !== null || status?.err !== null || status?.confirmationStatus !== 'finalized' || status.slot !== tx.slot || tx.transaction.signatures[0] !== hash) {throw new Error('Solana transaction not successful finalized');}
       const block = await svm('getBlock', [tx.slot, { commitment: 'finalized', transactionDetails: 'signatures', rewards: false, maxSupportedTransactionVersion: 0 }]);
       if (!block?.signatures?.includes(hash)) {throw new Error('Solana canonical block does not contain transaction');}
-      return { transaction: tx.transaction, programLogs: tx.meta.logMessages, eventIndex: solanaEffect(tx, kind), blockHash: block.blockhash, blockHeight: BigInt(tx.slot) };
+      return { transaction: tx.transaction, programLogs: tx.meta.logMessages, eventIndex: solanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient]), blockHash: block.blockhash, blockHeight: BigInt(tx.slot) };
     },
     async snapshot() {
       if (BigInt(await evm('eth_chainId', [])) !== 11155111n || await svm('getGenesisHash', []) !== 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG') {throw new Error('Wrong accounting chains');}

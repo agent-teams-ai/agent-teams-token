@@ -44,6 +44,11 @@ test('API SUCCESS and execution Success cannot settle without native destination
     message: { data: '0x', messageId, sourceChainSelector: 16015286601757825753n, destChainSelector: FORWARD.selector,
       sender: FORWARD.administrator, receiver: '11111111111111111111111111111111', tokenReceiver: FORWARD.recipient,
       sequenceNumber: 7n, tokenAmounts: [{ amount: FORWARD.amount, destTokenAddress: REVERSE.mint, sourcePoolAddress: FORWARD.pool }] } };
+  const { FORWARD_RECIPIENT_B } = await import('../src/domain/evm-forward.mjs');
+  assert.equal(matchRequest(request, 'ethereum-to-solana', hash, FORWARD_RECIPIENT_B), false);
+  const bRequest = { ...request, message: { ...request.message, tokenReceiver: FORWARD_RECIPIENT_B } };
+  assert.equal(matchRequest(bRequest, 'ethereum-to-solana', hash), false);
+  assert.equal(matchRequest(bRequest, 'ethereum-to-solana', hash, FORWARD_RECIPIENT_B), true);
   const native = { authorizeOffRamp: async () => {}, ethereum: async () => ({ transaction: { to: FORWARD.router, from: FORWARD.administrator },
     logs: [{ logIndex: '0x1', address: '0xabc', data: '0x1234', topics: [] }], eventIndex: 0, blockHash: hash, blockHeight: 1n }),
     solana: async () => { throw new Error('Not finalized'); } };
@@ -134,4 +139,33 @@ test('SDK diagnostic logger sends all levels to its dedicated stream', async () 
   const logger = statusLogger(text => diagnostics.push(text));
   for (const level of ['debug', 'info', 'warn', 'error']) { logger[level]('fetched %d', 200); }
   assert.deepEqual(diagnostics, Array(4).fill('fetched 200\n'));
+});
+test('fixed three-message inventory preserves historical A and excludes B reverse', async () => {
+  const { validateStatusTransfers, statusRecipient } = await import('../src/domain/transfer-status.mjs');
+  const { FORWARD, FORWARD_RECIPIENT_B } = await import('../src/domain/evm-forward.mjs');
+  const entries = [{ direction: 'ethereum-to-solana', sourceHash: 'a-forward' },
+    { direction: 'solana-to-ethereum', sourceHash: 'a-reverse' },
+    { direction: 'ethereum-to-solana', recipient: FORWARD_RECIPIENT_B, sourceHash: 'b-forward' }];
+  validateStatusTransfers(entries);
+  assert.equal(statusRecipient('ethereum-to-solana'), FORWARD.recipient);
+  assert.throws(() => validateStatusTransfers([...entries, entries[0]]), /three/);
+  assert.throws(() => validateStatusTransfers([entries[0], { ...entries[0], sourceHash: 'another' }]), /Duplicate/);
+  assert.throws(() => statusRecipient('solana-to-ethereum', FORWARD_RECIPIENT_B), /only recipient A/);
+  assert.throws(() => statusRecipient('ethereum-to-solana', 'arbitrary'), /fixed forward/);
+  const settled = entries.map((entry, i) => ({ identity: { messageId: String(i), direction: entry.direction }, pendingAmount: 0n, events: [] }));
+  const result = accountTransfers(settled, { ...snapshot, supplyOnSolana: 1_000_000_000n }, true);
+  assert.equal(result.status, 'exact'); assert.equal(result.adjustedGlobalSupply, 100_000_000_000n);
+});
+test('recipient B mint requires B owner and canonical B ATA; A cannot satisfy it', async () => {
+  const { FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA, FORWARD } = await import('../src/domain/evm-forward.mjs');
+  const token = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const tx = { transaction: { message: { accountKeys: [FORWARD_RECIPIENT_B_ATA], instructions: [] } }, meta: {
+    innerInstructions: [{ instructions: [{ programId: token, parsed: { type: 'mintTo', info: { mint: REVERSE.mint, account: FORWARD_RECIPIENT_B_ATA, amount: '1000000000' } } }] }],
+    postTokenBalances: [{ accountIndex: 0, mint: REVERSE.mint, owner: FORWARD_RECIPIENT_B, programId: token, uiTokenAmount: { amount: '1000000000' } }] } };
+  assert.equal(solanaEffect(tx, 'mint', FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA), 0);
+  assert.throws(() => solanaEffect(tx, 'mint', FORWARD.recipient, FORWARD_RECIPIENT_B_ATA), /ownership/);
+  assert.throws(() => solanaEffect(tx, 'mint', FORWARD_RECIPIENT_B, 'wrong-ata'), /canonical/);
+  assert.throws(() => solanaEffect(tx, 'burn', FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA), /B reverse/);
+  tx.meta.postTokenBalances[0].owner = FORWARD.recipient;
+  assert.throws(() => solanaEffect(tx, 'mint', FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA), /ownership/);
 });

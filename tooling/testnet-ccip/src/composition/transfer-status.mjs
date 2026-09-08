@@ -7,8 +7,9 @@ import { pathToFileURL } from 'node:url';
 import { createNativeStatus } from '../adapters/transfer-status-native.mjs';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { BURNMINT_PROGRAM } from '../domain/solana-pool-init.ts';
+import { FORWARD, FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA } from '../domain/evm-forward.mjs';
 import { REVERSE } from '../domain/solana-reverse.mjs';
-import { inspectTransfer, accountTransfers } from '../domain/transfer-status.mjs';
+import { inspectTransfer, accountTransfers, validateStatusTransfers } from '../domain/transfer-status.mjs';
 /** SDK 1.13.0 ChainContext/WithLogger; stdout belongs exclusively to report JSON. */
 export function statusLogger(write = text => process.stderr.write(text)) {
   const log = (...args) => { write(format(...args) + '\n'); };
@@ -17,7 +18,8 @@ export function statusLogger(write = text => process.stderr.write(text)) {
 /** One-shot read-only CLI. Input contains public hashes and endpoints only. */
 const stringify = value => JSON.stringify(value, (_, item) => typeof item === 'bigint' ? item.toString() : item);
 export async function runStatus(settings) {
-  if (settings.testOnly !== true || !Array.isArray(settings.transfers) || settings.transfers.length > 2) {throw new Error('Bounded fixed test-fixture input required');}
+  if (settings.testOnly !== true) {throw new Error('Bounded fixed test-fixture input required');}
+  validateStatusTransfers(settings.transfers);
   const directory = settings.sdkDirectory;
   for (const [file, hash] of Object.entries({ 'package.json': '8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb',
     'package-lock.json': '1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f' })) {
@@ -28,10 +30,13 @@ export async function runStatus(settings) {
   const sdk = await import(pathToFileURL(entry).href);
   const sdkRequire = createRequire(entry);
   const { PublicKey } = await import(pathToFileURL(sdkRequire.resolve('@solana/web3.js')).href);
+  const { getAssociatedTokenAddressSync } = await import(pathToFileURL(sdkRequire.resolve('@solana/spl-token')).href);
+  const recipientAtas = Object.fromEntries([FORWARD.recipient, FORWARD_RECIPIENT_B].map(recipient => [recipient, getAssociatedTokenAddressSync(new PublicKey(REVERSE.mint), new PublicKey(recipient)).toBase58()]));
+  if (recipientAtas[FORWARD_RECIPIENT_B] !== FORWARD_RECIPIENT_B_ATA) { throw new Error('Wrong independently derived B ATA'); }
   const derive = seed => PublicKey.findProgramAddressSync([Buffer.from(seed), new PublicKey(REVERSE.mint).toBuffer()], new PublicKey(BURNMINT_PROGRAM))[0].toBase58();
   const { Interface } = await import(pathToFileURL(sdkRequire.resolve('ethers')).href);
   const routerAbi = new Interface(['function isOffRamp(uint64,address) view returns(bool)']);
-  const lane = { allowedOffRamp: (selector, offRamp) => { const value = Buffer.alloc(8); value.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), value, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); },
+  const lane = { recipientAtas, allowedOffRamp: (selector, offRamp) => { const value = Buffer.alloc(8); value.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), value, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); },
     isOffRampData: (selector, offRamp) => routerAbi.encodeFunctionData('isOffRamp', [selector, offRamp]), solanaPool: derive('ccip_tokenpool_config'), solanaSigner: derive('ccip_tokenpool_signer') };
   const sepolia = settings.sepoliaRpc ?? 'https://ethereum-sepolia-rpc.publicnode.com';
   const solana = settings.solanaRpc ?? 'https://api.devnet.solana.com';
