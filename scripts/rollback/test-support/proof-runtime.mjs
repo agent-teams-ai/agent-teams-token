@@ -337,7 +337,7 @@ test("local Git filters, attributes, includes, hooks and semantic overrides fail
       } else if (authority === "malformed") {
         appendFileSync(join(fixture.root, ".git", "config"), "[malformed\n");
       } else if (authority === "worktree") {
-        writeFileSync(join(fixture.root, ".git", "config.worktree"), "[core]\n");
+        writeFileSync(join(fixture.root, ".git", "config.worktree"), "[core]\n\tfsmonitor = forbidden\n");
       } else {
         rawGitConfig(fixture.root, "fsck.skipList", join(fixture.boundary, "skip-list"));
       }
