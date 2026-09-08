@@ -123,13 +123,13 @@ test('snapshot pins mint authority while finalized heads may advance', async () 
   const fetcher = async (_, options) => {
     const { id, method, params } = JSON.parse(options.body);
     const results = { eth_chainId: '0xaa36a7', getGenesisHash: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG',
-      eth_getBlockByNumber: { hash: 'block', number: '0xa' }, getSlot: 10, getAccountInfo: { value: mint } };
+      eth_getBlockByNumber: { hash: 'block', number: '0xa', timestamp: '0x6553f100' }, getBlockTime: 1700000000, getSlot: 10, getAccountInfo: { value: mint } };
     let result = results[method];
     if (method === 'eth_call') { result = params[0].data === '0x18160ddd' ? '0x174876e800' : '0x0'; }
     if (method === 'getTokenSupply') { result = { context: { slot: supplySlot++ }, value: { decimals: 9, amount: '0' } }; }
     return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }));
   };
-  const native = createNativeStatus('https://sepolia.invalid', 'https://solana.invalid', { solanaSigner: 'pool-signer' }, fetcher);
+  const native = createNativeStatus('https://sepolia.invalid', 'https://solana.invalid', { solanaSigner: 'pool-signer' }, fetcher, () => 1700000000000);
   assert.equal((await native.snapshot()).coherent, true);
   mint.data.parsed.info.mintAuthority = 'attacker'; await assert.rejects(native.snapshot(), /mint identity/);
 });
@@ -357,4 +357,74 @@ test('EVM adapter normalizes lower/checksummed hints while preserving native che
     assert.equal(f.chains.ethereum.destroy(), 'destroyed');
     assert.equal(f.hint.offRamp, address);
   }
+});
+
+async function freshnessFixture({ ethereum = '0x6553f100', solana = 1700000000, repeated = solana, endSlot = 21, missing } = {}) {
+  const { createNativeStatus } = await import('../src/adapters/transfer-status-native.mjs');
+  const calls = [];
+  let supplies = 0;
+  const fetcher = async (_, options) => {
+    const { id, method, params } = JSON.parse(options.body);
+    calls.push({ method, params });
+    const results = { eth_chainId: '0xaa36a7', getGenesisHash: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG',
+      eth_getBlockByNumber: { hash: 'block', number: '0xa', timestamp: ethereum }, getSlot: 10,
+      getAccountInfo: { value: { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: { parsed: { type: 'mint',
+        info: { decimals: 9, isInitialized: true, freezeAuthority: null, mintAuthority: 'pool-signer' } } } } } };
+    let result = results[method];
+    if (method === 'eth_call') {
+      assert.deepEqual(params[1], { blockHash: 'block', requireCanonical: true });
+      result = params[0].data === '0x18160ddd' ? '0x174876e800' : '0x0';
+    }
+    if (method === 'getTokenSupply') { result = { context: { slot: supplies++ === 0 ? 20 : endSlot }, value: { decimals: 9, amount: '0' } }; }
+    if (method === 'getBlockTime') {
+      assert.ok(params[0] === 20 || params[0] === endSlot);
+      result = params[0] === 20 ? solana : repeated;
+    }
+    if (missing === 'ethereum' && method === 'eth_getBlockByNumber') { delete result.timestamp; }
+    if (missing === 'solana' && method === 'getBlockTime') { result = undefined; }
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }));
+  };
+  const native = createNativeStatus('https://sepolia.invalid', 'https://solana.invalid', { solanaSigner: 'pool-signer' }, fetcher, () => 1700000000000);
+  return { snapshot: await native.snapshot(), calls };
+}
+test('current supply freshness accepts inclusive boundaries and audits actual supply slots', async () => {
+  const { snapshot: value, calls } = await freshnessFixture({ ethereum: '0x' + (1700000000 - 1800).toString(16), solana: 1700000000 - 300 });
+  assert.equal(accountTransfers([], value, true).status, 'exact');
+  assert.equal(value.observedAt, '2023-11-14T22:13:20.000Z');
+  assert.equal(value.freshness.ethereum.ageSeconds, 1800);
+  assert.equal(value.freshness.solana.ageSeconds, 300);
+  assert.equal(value.freshness.solana.timestamp, 1699999700);
+  assert.equal(value.freshness.solanaRepeated.slot, 21);
+  assert.deepEqual(calls.filter(call => call.method === 'getBlockTime').map(call => call.params), [[20], [21]]);
+  const frozen = await freshnessFixture({ endSlot: 20 });
+  assert.equal(accountTransfers([], frozen.snapshot, true).status, 'exact');
+  assert.deepEqual(frozen.calls.filter(call => call.method === 'getBlockTime').map(call => call.params), [[20]]);
+});
+test('frozen old RPC supply cannot be exact despite a fresh local observation', async () => {
+  const { snapshot: value } = await freshnessFixture({ ethereum: '0x1', solana: 1, endSlot: 20 });
+  assert.equal(value.coherent, false);
+  assert.equal(accountTransfers([], value, true).status, 'unknown');
+  assert.equal(value.freshness.ethereum.timestamp, 1);
+  assert.equal(value.freshness.solana.fresh, false);
+});
+test('expired, future, missing and malformed current block times cannot be exact', async () => {
+  for (const ethereum of ['0x' + (1700000000 - 1801).toString(16), '0x6553f101', null, '', '1700000000', 1700000000,
+    '0x', '0x01', '-0x1', '0x1.1', ' 0x6553f100', '0x20000000000000', true, {}]) {
+    const { snapshot: value } = await freshnessFixture({ ethereum });
+    assert.equal(accountTransfers([], value, true).status, 'unknown', JSON.stringify(ethereum));
+    assert.equal(value.freshness.ethereum.fresh, false);
+  }
+  for (const time of [1699999699, 1700000001, null, -1, 1700000000.5, '1700000000', '', true, {}, Number.MAX_SAFE_INTEGER + 1]) {
+    for (const field of ['solana', 'repeated']) {
+      const { snapshot: value } = await freshnessFixture({ [field]: time });
+      assert.equal(accountTransfers([], value, true).status, 'unknown', `${field}: ${JSON.stringify(time)}`);
+    }
+  }
+});
+
+test('missing Ethereum timestamp or unavailable Solana block time fails safely', async () => {
+  const { snapshot: value } = await freshnessFixture({ missing: 'ethereum' });
+  assert.equal(accountTransfers([], value, true).status, 'unknown');
+  assert.equal(value.freshness.ethereum.timestamp, null);
+  await assert.rejects(freshnessFixture({ missing: 'solana' }), /Invalid native RPC response/);
 });

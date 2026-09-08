@@ -91,7 +91,13 @@ export function solanaEffect(tx, kind, recipient = FORWARD.recipient, expectedAt
 function verifyMint(mintAccount, mint, lane) {
       if (mintAccount?.value?.owner !== TOKEN || mint?.type !== 'mint' || mint.info.decimals !== 9 || mint.info.isInitialized !== true || mint.info.freezeAuthority !== null || !lane.solanaSigner || mint.info.mintAuthority !== lane.solanaSigner) {throw new Error('Unexpected mint identity/state');}
 }
-export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch) {
+function blockFreshness(timestamp, now, maxAgeSeconds) {
+  const valid = Number.isSafeInteger(timestamp) && timestamp >= 0;
+  const ageSeconds = valid ? now / 1000 - timestamp : null;
+  return { timestamp: valid ? timestamp : null, ageSeconds, maxAgeSeconds,
+    fresh: valid && ageSeconds >= 0 && ageSeconds <= maxAgeSeconds };
+}
+export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, now = Date.now) {
   const evm = jsonRpc(sepolia, fetcher), svm = jsonRpc(solana, fetcher), observer = createSepoliaRpc(sepolia, fetcher);
   return {
     lane,
@@ -138,9 +144,19 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch) 
       const supply = await svm('getTokenSupply', [REVERSE.mint, { commitment: 'finalized', minContextSlot: slot }]);
       const end = await evm('eth_getBlockByNumber', [block.number, false]);
       const endSupply = await svm('getTokenSupply', [REVERSE.mint, { commitment: 'finalized', minContextSlot: supply.context.slot }]);
+      const supplyTime = await svm('getBlockTime', [supply.context.slot]);
+      const endSupplyTime = endSupply.context.slot === supply.context.slot ? supplyTime : await svm('getBlockTime', [endSupply.context.slot]);
+      const observedAt = now();
+      if (!Number.isSafeInteger(observedAt) || observedAt < 0) { throw new Error('Invalid snapshot clock'); }
+      // Fixed-fixture acceptance thresholds, not protocol finality guarantees.
+      const ethereumTime = typeof block.timestamp === 'string' && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(block.timestamp) ? Number(block.timestamp) : null;
+      const freshness = { ethereum: blockFreshness(ethereumTime, observedAt, 30 * 60),
+        solana: { slot: supply.context.slot, ...blockFreshness(supplyTime, observedAt, 5 * 60) },
+        solanaRepeated: { slot: endSupply.context.slot, ...blockFreshness(endSupplyTime, observedAt, 5 * 60) } };
       if (total !== 100_000_000_000n || supply.value.decimals !== 9) {throw new Error('Immutable supply/decimals mismatch');}
       return { fixedSupply: total, lockedOnEthereum: locked, supplyOnSolana: BigInt(supply.value.amount),
-        ethereumBlock: block.hash, ethereumHeight: BigInt(block.number), solanaSlot: supply.context.slot, coherent: end.hash === block.hash && supply.context.slot >= slot && endSupply.context.slot >= supply.context.slot && endSupply.value.amount === supply.value.amount, observedAt: new Date().toISOString() };
+        ethereumBlock: block.hash, ethereumHeight: BigInt(block.number), solanaSlot: supply.context.slot, freshness,
+        coherent: Object.values(freshness).every(value => value.fresh) && end.hash === block.hash && supply.context.slot >= slot && endSupply.context.slot >= supply.context.slot && endSupply.value.amount === supply.value.amount, observedAt: new Date(observedAt).toISOString() };
     },
   };
 }
