@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { createSepoliaRpc } from './evm-rpc.ts';
 import { FORWARD, forwardRecipient } from '../domain/evm-forward.mjs';
@@ -6,17 +7,48 @@ import { REVERSE } from '../domain/solana-reverse.mjs';
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const topic = address => '0x' + address.slice(2).padStart(64, '0');
-export function jsonRpc(endpoint, fetcher = fetch) {
+const STATUS_READ_METHODS = new Set([
+  'eth_call', 'eth_chainId', 'eth_getTransactionReceipt', 'eth_getBlockByNumber',
+  'getAccountInfo', 'getGenesisHash', 'getTransaction', 'getSignatureStatuses',
+  'getBlock', 'getSlot', 'getTokenSupply', 'getBlockTime',
+]);
+function rpcRateLimited(response, body, requestId) {
+  return response.status === 429 || (response.ok && body?.id === requestId && body.jsonrpc === '2.0' &&
+    !('result' in body) && body.error?.code === 429 && typeof body.error.message === 'string');
+}
+function retryDelay(response) {
+  const header = response.headers.get('retry-after');
+  if (header === null) { return 1000; }
+  if (!/^\d+(?:\.\d+)?$/.test(header)) { return null; }
+  const seconds = Number(header);
+  return seconds <= 10 ? seconds * 1000 : null;
+}
+async function rpcBody(response) {
+  try { return await response.json(); }
+  catch (error) {
+    if (response.status !== 429 || !(error instanceof SyntaxError)) { throw error; }
+    return null;
+  }
+}
+function rpcResult(response, body, requestId) {
+  if (!response.ok || !body || body.id !== requestId || body.jsonrpc !== '2.0' || body.error || !('result' in body)) { throw new Error('Invalid native RPC response'); }
+  return body.result;
+}
+export function jsonRpc(endpoint, fetcher = fetch, wait = sleep) {
   let id = 0;
   const url = new URL(endpoint);
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {throw new Error('Invalid RPC URL');}
   return async (method, params) => {
     const requestId = ++id;
-    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: requestId, method, params }), signal: AbortSignal.timeout(20_000), redirect: 'error' });
-    const body = await response.json();
-    if (!response.ok || body.id !== requestId || body.jsonrpc !== '2.0' || body.error || !('result' in body)) {throw new Error('Invalid native RPC response');}
-    return body.result;
+    const requestBody = JSON.stringify({ jsonrpc: '2.0', id: requestId, method, params });
+    for (let attempt = 0; ; attempt++) {
+      const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: requestBody, signal: AbortSignal.timeout(20_000), redirect: 'error' });
+      const body = await rpcBody(response);
+      const delay = attempt === 0 && STATUS_READ_METHODS.has(method) && rpcRateLimited(response, body, requestId) ? retryDelay(response) : null;
+      if (delay === null) { return rpcResult(response, body, requestId); }
+      await wait(delay);
+    }
   };
 }
 export function evmEffect(receipt, kind) {
