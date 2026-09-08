@@ -25,6 +25,43 @@ self-service BurnMint pool на Solana, initial remote supply 0, freeze None.
 Тестовые supply и recipients берутся из явно test-only fixture и не принимают
 production allocations/rights. Никакого собственного bridge, relayer или program.
 
+### Продуктовая testnet приёмка завершена, 8 сентября 2026
+
+Все три сообщения E->A, A->E и E->B по 1 AGTMAI settled. PUBLIC
+`product-final-three-message-proof-success.json` фиксирует coherent fresh snapshot
+`2026-09-08T05:04:14.470Z`: F=100, L=1, S=1, pending=0, backing surplus=0;
+Ethereum height 11658930, Solana slot 494943575. Native finalized effects связаны
+с точной SDK message identity. `product-final-balances-and-b-ata-proof.json`
+на `05:04:59.366Z` подтверждает E wallet=99, A=0, B=1 AGTMAI, B native SOL=0.
+B не финансировался и не подписывал транзакции. ATA создан отдельно стандартным
+Associated Token Program перед официальным автоматическим Execute, тем же
+payer/signer; ATA не создавался CPI OffRamp. Точные IDs, balances и fees:
+[ledger/runbook](../tooling/testnet-ccip/transfer-status.md#public-transfer-ledger).
+B approval nonce 8 и send nonce 9 succeeded; inventory всех трёх сообщений
+полный. Сохранять journals; source transfers никогда не повторять.
+
+Первый E->A восстановлен вручную по исходному message. Reverse API всё ещё
+HTTP 404, но UNTRUSTED `destinationReceipt: {transactionHash, offRamp}` позволяет
+discovery с обязательной native/SDK authentication, finality, effects и binding.
+Обычный full native status CLI успешно проверяет все три settled сообщения.
+P2 stale snapshot исправлен в `1f44039`, независимый review ACCEPT: Ethereum
+не старше 30 минут, Solana не старше 5 минут; missing/future/invalid/stale
+timestamps запрещают exact accounting. Реальный Solana RPC 429 с Retry-After 10
+обработан в `d06f816`: ровно один retry, максимум 10 секунд, только allowlisted
+read-only methods, без write retries. SDK уже фильтрует InProgress.
+
+31 status/RPC test passed; на `3fd2fd3` default suite 171 tests, 0 skips,
+lint 0 diagnostics и typecheck pass. Deployed-pool negative rate-limit `eth_call`
+остаётся simulation, не broadcast router rejection. Main `370c` интегрирован
+в `255138f`; burn review `8e` ACCEPT, artifact approval ACCEPT_REFRESH;
+`e403d49` прошёл 141 local-EVM + 7 native checks. Полный `pnpm check` на
+`ab69885` прошёл, включая 416 rollback tests с 1 skip. Последующий sealed proof
+остановился только на forge fmt двух test statements; исправлено в `c370232`.
+Повторный sealed proof, final-head Linux/CI и итоговый review ещё требуют
+release evidence; результаты прежних SHA не доказывают новый HEAD.
+Product testnet acceptance complete; delivery qualification остаётся отдельной.
+Это fixture 100 AGTMAI, не production launch; mainnet вне scope, MVP не расширен.
+
 ### Подтверждённый формат Solana registry, 8 сентября 2026
 
 Реальный owner-propose-administrator создал TokenAdminRegistry v2: 170 bytes,
@@ -45,7 +82,7 @@ EVM remote token остаётся ABI32; remote pool должен быть raw20
 
 ### Подтверждённая ошибка source pool encoding, 8 сентября 2026
 
-Первый реальный Sepolia -> Solana перевод финализирован на source и заблокировал
+Исторически первый Sepolia -> Solana перевод финализировался на source и заблокировал
 1 AGTMAI, но destination завершился InvalidSourcePoolAddress (6007), supply Solana 0.
 Фактический CPI передаёт raw20 pool `24508e2eb3bedc086318abc054153fd83823a4e2`,
 а append сохранил padded32. Официальный common.rs сравнивает Vec побайтово.
@@ -58,8 +95,12 @@ Read-only simulation official edit в slot 494886698 успешна: 183 -> 171 
 оба rate buckets неизменны. realloc::zero=false оставляет строго доказанный slack
 `0200000000ca9a3b000000000000000000000000000000000000000000000000`.
 Fresh account допускает zero slack; произвольные trailing bytes запрещены.
-Simulation не доказывает onchain repair или доставку; acceptance требует отдельной
-финализации repair и исполнения того же исходного CCIP message без нового source send.
+Эта simulation сама по себе не доказывала onchain repair или доставку.
+Теперь официальный edit финализирован с signature
+`N2Ch32vM2j5ATjUTdSTa8JtRGuZX3sv47dz8MLfAwodV8bgPXrzGnikUCQ92S8SmhFUJyEvfpU1xJPsmECx75qJ`.
+Исходный message исполнен вручную, без replacement source transfer: signature
+`4apQ7wSFwRSRtbMRdmEPe9eko6VawQrJnktmStGe8qsAGpQcEWevGy8W9dNAao4SkGPcdPW8Y9wgpZVh8Q4rKcEk`.
+Native finalized proof подтверждает mint, затем reverse pool burn и Ethereum release.
 
 ### Порядок доставки
 

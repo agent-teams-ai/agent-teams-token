@@ -13,6 +13,54 @@ checkpoints before running anything: missing journals are not permission to
 recreate already deployed contracts or repeat transfers. Never put key material
 or private settings in this document.
 
+## Public transfer ledger
+
+[Recorded native status, balances and ATA provenance](../../docs/reports/AGTMAI-TESTNET-E2E-2026-09-08.json) preserve the exact observed checkpoint.
+
+Product testnet acceptance is complete. PUBLIC
+`product-final-three-message-proof-success.json` records all three 1 AGTMAI
+messages settled at `2026-09-08T05:04:14.470Z`, through the normal native status
+CLI. Coherent fresh accounting: F=100, L=1, S=1, pending=0, backing surplus=0;
+Ethereum height 11658930, Solana slot 494943575. The earlier
+`product-roundtrip-finalized-native-proof.json` snapshot at
+`2026-09-08T04:06:35.696Z` (F=100, L=0, S=0, pending=0; Ethereum 11658652,
+Solana 494922690) records the first round trip before E->B.
+
+| Leg | Public source / message / destination identities | Evidence |
+| --- | --- | --- |
+| E->A | Source `0x9d2e2a7503c12a08c5e57317470fdc7ed8f1f82575c9c695de58c6cc36ea50fa`; message `0x9aa9c02072640c7926c740f15282c004f8748789c94462d2cc84338458a60dd4`; destination `4apQ7wSFwRSRtbMRdmEPe9eko6VawQrJnktmStGe8qsAGpQcEWevGy8W9dNAao4SkGPcdPW8Y9wgpZVh8Q4rKcEk` | Finalized lock at Sepolia 11658108 and mint at Devnet slot 494905812; original message manually executed. |
+| A->E | Source `5FhfyCdtWEt2kdTG139DRxd2MW6DRxSUSCrD42dd3GTbZWAuorJuWG3WSooRhuHFfr3s5D5d23b7D3A7NtevakAP`; message `0xc9a6a702960bd6b44f9c06b17298f7ad2d8869a7d6b03fa25a42257c95d14f3a`; destination `0x375a00cef1637801fd1c11926f9c32c2a1853ee6386b06d078c77253f7ed4886` | Finalized pool burn at Devnet slot 494910753 and Ethereum release at 11658569; API still HTTP 404, discovery UNKNOWN, settlement proven natively. |
+| E->B | Source `0x8b3891c0d263df5634f760f74ed538abfcb75e48b6d808e8d2d77cc94367fde1`; message `0x654d44e9aa25e2d9048c614de7398caa22eddf4006ae66e1a13483d36ce057a6`; sequence 11208; destination `3Gc1mJJo8wMqZCZq2ei1E9vphBzh7w8XA3EW1JPD1C33AhWTkuNJgcKjuwxE1igMfRXt1SEM3hdWoizVA4Lt72jc` | Finalized lock at exact Sepolia block 11658811 and mint at Devnet slot 494936383; official automatic Execute. |
+
+Historical initial `InvalidSourcePoolAddress` was repaired by official edit
+`N2Ch32vM2j5ATjUTdSTa8JtRGuZX3sv47dz8MLfAwodV8bgPXrzGnikUCQ92S8SmhFUJyEvfpU1xJPsmECx75qJ`.
+The E->A destination signature above executed the original message; there was
+no replacement source transfer. PUBLIC `product-b-pre-send-proof.json` at
+`2026-09-08T04:08:07.493Z` records B ATA absent at slot 494923246, E=100,
+A=0 and allowance=0, before approval. B approval nonce 8
+`0x0f243ad3e73968a0825b3bb78cab620f2b300f8797ea48398bb3247d0813a94e`
+and send nonce 9 succeeded in their source journals. All three inventory entries
+are complete. Preserve journals and never rerun these source transfers.
+
+PUBLIC `product-final-balances-and-b-ata-proof.json`, observed at
+`2026-09-08T05:04:59.366Z`, records:
+
+- B ATA still absent at `2026-09-08T04:24:27.571Z`, slot 494929164.
+- Separate ATA creation transaction
+  `3LgX6equruDuoeK5Ej94iZvMotFa821jk8uFXtTBt51jwVyJtZf439rmxzpJz624zhzgV7XuJrjwDXMY6YMdKnT8`,
+  slot 494936340, invokes the standard Associated Token Program
+  `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` at stack height 1.
+  Payer `3av6U8FGbv4W3ib6XGKaPxuKR96BsqXAo2FVhsTnwow6` is the same signer
+  as the later official OffRamp Execute. Creation fee: 5009 lamports;
+  rent: 1488440 lamports. OffRamp CPI itself did not create the ATA.
+- Execution at slot 494936383 costs 5147 lamports. The recorded EVM message
+  fee is 241528998328777 wei.
+- Ethereum wallet: 99000000000 base units (99 AGTMAI), at block hash
+  `0xc2ffa4d1e693872fb67b4090bb0d4a3c6fe351246155a596a85d0ae5250277a8`.
+  Solana slot 494943844: A=0, B=1000000000 base units (1 AGTMAI),
+  mint supply=1000000000 base units, B native balance=0 lamports.
+  B was not funded and signed neither transaction.
+
 ## Fixture and prerequisites
 
 | Identity | Fixed public value |
@@ -64,7 +112,9 @@ operation per invocation; do not advance until its predecessor is successfully
 finalized and freshly readable. Existing pool addresses, remote peers, mint
 authority and ALT must match before a transfer can sign.
 
-## Transfer sequence
+## Completed transfer sequence (historical procedure)
+
+The recorded sequence below is complete; do not rerun its source operations.
 
 1. **E->A:** run the forward command below with `testOnly: true`,
    `providerDirectory` pointing to the reviewed CCIP SDK, `signer`, distinct
@@ -114,27 +164,62 @@ Public settings:
 }
 ```
 
-For the return trip append `solana-to-ethereum` with its real source signature. At most three distinct fixture entries are accepted: E->A, A->E and E->B. Omitted `recipient` preserves historical A interpretation. For E->B set `recipient` to `QBqP2WraLUKU1G6tohJusxQ7iG15utpXLVZvvks3sNV` on that forward entry. Only these two fixed public keys are accepted; B reverse and duplicate fixture entries/source hashes are rejected. Native mint proof binds the selected wallet owner and independently derived canonical ATA (B: `2HGSh7v8thLVyxVSizQtvicsfKFrbYeL2sTSGjWzbCDE`). Optional `sepoliaRpc` and `solanaRpc` select native read endpoints; observed chain identity remains fixed. No wallets, secrets, signing, execution or broadcasting are used. No replacement/retry is authorized by any output.
+For the return trip append `solana-to-ethereum` with its real source signature. At most three distinct fixture entries are accepted: E->A, A->E and E->B. Omitted `recipient` preserves historical A interpretation. For E->B set `recipient` to `QBqP2WraLUKU1G6tohJusxQ7iG15utpXLVZvvks3sNV` on that forward entry. Only these two fixed public keys are accepted; B reverse and duplicate fixture entries/source hashes are rejected. Native mint proof binds the selected wallet owner and independently derived canonical ATA (B: `2HGSh7v8thLVyxVSizQtvicsfKFrbYeL2sTSGjWzbCDE`). Optional `sepoliaRpc` and `solanaRpc` select native read endpoints; observed chain identity remains fixed. No wallets, secrets, signing, execution or broadcasting are used. No replacement or write retry is authorized by any output.
 
-CCIP metadata discovers destination receipt hashes only. Settlement requires successful finalized native transactions, exact decoded unique message identity and successful destination execution, plus actual token lock/mint/burn/release effects. Missing evidence stays unknown or pending. Manual execution preserves pending supply. Repeated invocations recover from public source transaction identity without erasing earlier journal entries; command never writes the submission journal.
+CCIP metadata discovers destination receipt hashes only. The optional
+per-transfer `destinationReceipt` is an **UNTRUSTED discovery hint**; receipt discovery retains full native/SDK authentication,
+finality, token effects and exact message binding. For the recorded reverse leg:
+
+```json
+{
+  "destinationReceipt": {
+    "transactionHash": "0x375a00cef1637801fd1c11926f9c32c2a1853ee6386b06d078c77253f7ed4886",
+    "offRamp": "0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0"
+  }
+}
+```
+
+This field belongs on the `solana-to-ethereum` transfer entry. Reverse API HTTP
+404 remains discovery UNKNOWN; a hint or API result cannot establish settlement.
+
+Settlement requires successful finalized native transactions, exact decoded unique message identity and successful destination execution, plus actual token lock/mint/burn/release effects. Missing evidence stays unknown or pending. Manual execution preserves pending supply. Repeated invocations recover from public source transaction identity without erasing earlier journal entries; command never writes the submission journal.
 
 Conservation reuses existing domain reconciliation with immutable Ethereum supply 100 AGTMAI, locked pool balance and finalized Solana mint supply. Snapshot is bracketed by repeated message observations and stable Solana supply; Ethereum reads bind a canonical block hash. Normal finalized head advancement is allowed. `completeFixtureInventory: true` is an explicit operator assertion that the list contains every fixture transfer; default accounting remains unknown. It is not discovery of all historical token movements. Unknown, incoherent or stale observations cannot report exact backing. Exit 0 requires exact accounting; 2 means a non-exact report; 1 means unavailable input/RPC/provider.
 
-After all three real messages settle, expected conservation is Ethereum fixed100 AGTMAI, locked1, Solana supply1, pending0. Root delivery evidence must additionally prove Ethereum wallet99, A0, B1 and actual official ATA creation provenance; status settlement alone does not prove who created or funded the ATA. B is receive-only.
-
+Freshness is mandatory: Ethereum snapshot age <=1800 seconds and both Solana
+observations <=300 seconds. Missing, future, invalid or stale timestamps prevent
+exact accounting. The final proof records ages 878.4700000286102 seconds for
+Ethereum and 6.4700000286102295 seconds for both Solana observations.
+P2 correction `1f44039` received independent ACCEPT. A real full-status request
+hit Solana RPC HTTP 429 with Retry-After 10; `d06f816` allows exactly one retry
+with a maximum 10-second delay, only for allowlisted read-only methods. There
+are no write retries. SDK already filters InProgress. The normal full native
+status CLI now succeeds for all three messages; reverse API discovery remains
+UNKNOWN while authenticated native settlement is proven.
 
 ## Acceptance and remaining evidence
 
-Keep all three source identities in the status settings once submitted. Set
-`completeFixtureInventory: true` only after checking that this is the complete
-fixture history. Do not remove a pending transfer to obtain an exact report.
-Acceptance requires all three destinations settled and independently verified
-final balances: E=99, A=0, B=1 AGTMAI, Ethereum supply=100, locked=Solana supply=1,
-pending=0. Retain actual official ATA creation provenance as well as balances.
-A negative `eth_call` against the actual pool proves that rejection only; it is
-not a router-level E2E negative test.
+The complete three-message inventory and independently verified balances above
+satisfy product testnet acceptance: E=99, A=0, B=1 AGTMAI, fixed supply=100,
+locked=Solana supply=1, pending=0, backing surplus=0. Keep all three identities
+in status settings with `completeFixtureInventory: true`; never omit a transfer
+to obtain an exact report. B remains receive-only. The negative rate-limit
+`eth_call` against the deployed pool proves simulation rejection only, not a
+broadcast router rejection. This remains a 100 AGTMAI test fixture, with no
+production launch or mainnet authorization and no expansion of MVP scope.
 
-Recorded checkpoint at `2026-09-08T02:17:11Z`, not a live success claim:
+31 status/RPC tests passed. On `3fd2fd3`, the default suite passed 171 tests
+with 0 skips, lint had 0 diagnostics and typecheck passed. Main `370c` is
+integrated in `255138f`; burn review `8e` is ACCEPT and independent artifact
+approval is ACCEPT_REFRESH. Pin refresh `e403d49` passed 141 local-EVM and
+7 native checks. Full `pnpm check` passed on `ab69885`, including 416 rollback
+tests with 1 skip. The subsequent sealed proof failed only on forge fmt for two
+test statements, fixed in `c370232`; its rerun remains pending. Final delivery
+qualification still requires release evidence for final-head Linux/CI, sealed
+rollback and final review. Historical full `75418030` and `ab69885` results
+qualify their respective SHAs only; no final-head green result is inferred.
+
+Historical pre-repair checkpoint at `2026-09-08T02:17:11Z`, superseded by the ledger above:
 E->A source transaction
 `0x9d2e2a7503c12a08c5e57317470fdc7ed8f1f82575c9c695de58c6cc36ea50fa`
 reached `SOURCE_FINALIZED`, with native lock of 1 AGTMAI verified. Message

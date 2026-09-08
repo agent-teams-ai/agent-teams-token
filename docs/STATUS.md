@@ -1,7 +1,45 @@
 # Активный продуктовый статус, 8 сентября 2026
 
-Цель: настоящий AGTMAI Sepolia -> Solana Devnet -> Sepolia через CCIP,
-с accounting/status. Граница и автономия: [PLAN](PLAN.md).
+**Продуктовая testnet приёмка завершена:** настоящий AGTMAI Sepolia -> Solana
+Devnet -> Sepolia round trip и третий E->B settled через официальный CCIP.
+Это 100 AGTMAI test fixture, не production launch; mainnet вне scope.
+Граница: [PLAN](PLAN.md). Точные identities и ATA provenance:
+[public ledger](../tooling/testnet-ccip/transfer-status.md#public-transfer-ledger) и
+[сохранённый JSON evidence](reports/AGTMAI-TESTNET-E2E-2026-09-08.json).
+
+- PUBLIC `product-final-three-message-proof-success.json`, `2026-09-08T05:04:14.470Z`:
+  все три сообщения settled; coherent fresh F=100, L=1, S=1, pending=0,
+  backing surplus=0. Ethereum height 11658930, Solana slot 494943575.
+- PUBLIC `product-final-balances-and-b-ata-proof.json`, `05:04:59.366Z`:
+  E wallet=99, A=0, B=1 AGTMAI; B native SOL=0, без B funding/signatures.
+  Стандартный Associated Token Program создал ATA отдельной транзакцией
+  перед официальным автоматическим Execute, с тем же payer/signer.
+  OffRamp CPI не создавал ATA. B approval nonce 8 и send nonce 9 succeeded;
+  inventory complete, journals сохраняются, source transfers не повторять.
+- Первый E->A восстановлен вручную после official remote-pool repair,
+  без replacement source. Reverse API всё ещё HTTP 404; UNTRUSTED receipt hint
+  работает с native/SDK authentication, finality, effects и message binding.
+  Full native status всех трёх сообщений успешно выполнен обычным CLI.
+- P2 stale snapshot исправлен `1f44039`, независимый ACCEPT: Ethereum <=30 min,
+  Solana <=5 min; missing/future/invalid/stale timestamps исключают exact.
+  После реального Solana RPC 429 / Retry-After 10, `d06f816` добавляет ровно один
+  retry <=10 sec только allowlisted read-only methods; write retries отсутствуют.
+  SDK уже фильтрует InProgress. 31 status/RPC test passed; `3fd2fd3`:
+  171 default tests, 0 skips, lint 0 diagnostics, typecheck pass.
+- Negative deployed-pool rate-limit `eth_call` — simulation rejection,
+  не broadcast router rejection. Минимальный MVP scope не расширен.
+- Main `370c` интегрирован в `255138f`; burn review `8e` ACCEPT, artifact
+  approval ACCEPT_REFRESH; `e403d49`: 141 local-EVM + 7 native checks passed.
+  Полный `pnpm check` на `ab69885` прошёл, включая 416 rollback tests с 1 skip.
+  Последующий sealed proof failed только на forge fmt двух test statements;
+  исправлено `c370232`, повторный proof ещё ожидается. Final-head Linux/CI,
+  sealed rollback и итоговый review квалифицируются по release evidence;
+  их успешное завершение для нового HEAD пока не заявляется. Исторический
+  полный proof `75418030` остаётся evidence только своего SHA.
+
+## Исторические setup/checkpoint evidence, 8 сентября
+
+Ниже исходные наблюдения до settlement; текущие balances и remaining work выше.
 
 - Solana Devnet mint `13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau` создан.
   Journal/RPC подтвердили exact finalized transaction, standard SPL, decimals 9,
@@ -29,7 +67,7 @@
   transaction: `0x8d7731e8fa00d1ccc42c810da65ecd1d1c50602a57d7b5e35e92f7b5716e2a5d`.
   EVM remote configuration отправлена:
   `0x886aa9cc62b2740f7a9f75e072e10b3dd909597b29803f710fd271b83e232c54`,
-  финальность ожидается. CCIP transfer пока не отправлен.
+  на том checkpoint финальность ещё ожидалась, до первого CCIP transfer.
 - Solana pool ATA, proposal/accept administrator и передача mint authority
   официальному pool signer финализированы. Authority signature:
   `QacXkW3hAjKof1K7zCGHhjRKrLFXweNhcxmLXzntQ2V6Mzs7uL7hzk5YCKW2L44rBp8wB9hDZ9gtkh6VMFJprzB`.
@@ -59,11 +97,8 @@
   locked 0, Solana supply 0, backing surplus 0. Это исходное состояние,
   не доказательство межсетевой доставки.
 - Pinned SDK подготовил unsigned forward 1 AGTMAI и exact bounded approval;
-  calldata независимо сверена, send не подписан. Котировка комиссии сохраняется
+  calldata независимо сверена; на том checkpoint send ещё не был подписан. Котировка комиссии сохраняется
   как evidence подготовки и должна обновиться перед реальным подписанием.
-- Осталось: завершить pool registration/configuration, accounting/status consumer,
-  round trip, второй recipient/ATA и bounded negative flow, затем main/CI/review/runbook.
-  Реальных CCIP message IDs и доказанного round trip пока нет.
 - Mainnet, tokenomics/allocations и liquidity остаются вне текущего этапа.
 
 Ниже сохранён исторический статус с его исходным объёмом evidence.
@@ -76,7 +111,7 @@ it must not be read as a current exact-head full-gate pass.
 ## Current execution checkpoint
 
 This bounded correction uses clean base `ec980e345275285144b28135eb3793e1072128c8`.
-Root supplied the integration evidence below; it does not qualify the edited
+The recorded integration evidence below does not qualify the edited
 head. This checkpoint supersedes older current-state claims and job observations.
 
 - Proven on clean Linux `ab97c6b9f1aab20c0acbe740ad2a6692b90cacde`: the actual
@@ -88,9 +123,9 @@ head. This checkpoint supersedes older current-state claims and job observations
 - Actual EVM process tests passed 23/23 on both Mac and Linux `ab97c6b9`, with
   zero skips. The parent-publication worker passed 187/187 using synthetic
   analysis inputs and protocol responses; that is simulated, not Docker evidence.
-- Root's full Mac Slither suite is not green: 622 total, 577 passed, 32 failed,
+- The recorded full Mac Slither suite is not green: 622 total, 577 passed, 32 failed,
   13 Linux-only skips. Of the failures, 31 new fixture failures came from the
-  `/tmp` versus `/private/tmp` seam identity and belong to a separate writer.
+  `/tmp` versus `/private/tmp` seam identity and were tracked separately.
   The one existing Python 5s timeout passed in isolation at 3.49s; that retry
   does not convert the full run into a pass.
 - Solana focused Mac tests passed 53/53 with zero skips; typecheck and
@@ -150,7 +185,7 @@ false rejection;115 corrects only ancestors, keeping owned targets strict.
 
 14:58 UTC:111 returned a full unapplied source patch, testsNOTRUN after bwrap;
 one real process-test fixture was absent from its packet and still needs
-adaptation by the integrator.112/113 remain observed alive. Root is progressing.
+adaptation by the integrator.112/113 remain observed alive. Integration was still in progress at that checkpoint.
 
 14:56 UTC: EVM review109 ACCEPT integrated at31e909f7 with cleanup regression
 registered in the root command; TS7/lint pass, combined actual EVM86/86,0skips.
