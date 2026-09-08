@@ -6,7 +6,7 @@ import { createJournalFile } from '../adapters/evm-journal-file.ts';
 import { readRemoteConfigSnapshot } from '../adapters/evm-remote-config-rpc.ts';
 import { nextRemoteConfigStep } from '../domain/evm-remote-config.ts';
 import { canonicalIntentJson, validateSepoliaIntent } from '../domain/evm-intent.ts';
-import { FORWARD, boundedAllowance, forwardIntent, forwardTarget } from '../domain/evm-forward.mjs';
+import { FORWARD, boundedAllowance, forwardIntent, forwardTarget, forwardRecipient } from '../domain/evm-forward.mjs';
 import { executeSepoliaIntent } from './execute-sepolia.ts';
 const defaults = {
   sdk: createEvmForwardSdk, snapshot: readRemoteConfigSnapshot, execute: executeSepoliaIntent,
@@ -18,13 +18,13 @@ export async function transferEvmForward(settings, ports = defaults) {
   const target = forwardTarget(settings);
   if (resolve(settings.approvalJournal) === resolve(settings.sendJournal)) { throw new Error('Journal paths alias'); }
   return ports.exclusive(settings.sendJournal, async () => {
-    const sdk = await ports.sdk(settings.providerDirectory);
+    const sdk = await ports.sdk(settings.providerDirectory, forwardRecipient(settings.recipient));
     const ready = async () => {
       if (nextRemoteConfigStep(await ports.snapshot(target), target) !== 'complete') {
         throw new Error('Finalized remote registration/configuration required');
       }
     };
-    const resume = async (record, step, file, nonce) => {
+    const storedIntent = (record, step, nonce) => {
       const fee = BigInt(record.intent.value);
       if (step === 'send' && (fee <= 0n || fee > 10000000000000000n)) { throw new Error('Stored native fee outside bound'); }
       const tx = { from: record.intent.from, to: record.intent.to, data: record.intent.data, value: fee };
@@ -33,6 +33,10 @@ export async function transferEvmForward(settings, ports = defaults) {
       if (canonicalIntentJson(validateSepoliaIntent(intent, intent)) !== canonicalIntentJson(record.intent)) {
         throw new Error('Stored forward intent conflict');
       }
+      return intent;
+    };
+    const resume = async (record, step, file, nonce) => {
+      const intent = storedIntent(record, step, nonce);
       // Only phase signed can have its first broadcast. All later phases reconcile despite progressed state.
       if (record.phase === 'signed') {
         await ready();
@@ -44,6 +48,8 @@ export async function transferEvmForward(settings, ports = defaults) {
     try {
       const sendRecord = await ports.read(settings.sendJournal);
       const approvalRecord = await ports.read(settings.approvalJournal);
+      // Reject a different recipient before any approval journal can have an effect.
+      if (sendRecord) { storedIntent(sendRecord, 'send', settings.sendNonce); }
       if (approvalRecord) {
         const result = await resume(approvalRecord, 'approval', settings.approvalJournal, settings.approvalNonce);
         if (result.status !== 'succeeded') { return { ...result, step: 'approval' }; }

@@ -3,7 +3,15 @@ export const FORWARD = Object.freeze({ token: '0xbee91ba3ca94dd7c639ee6c1b1c2fc1
   pool: '0x24508e2eb3bedc086318abc054153fd83823a4e2', administrator: '0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6',
   router: '0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59', selector: 16423721717087811551n,
   recipient: '8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t', amount: 1000000000n });
+/** Receive-only second fixture; default A remains byte-for-byte compatible with old journals. */
+export const FORWARD_RECIPIENT_B = 'QBqP2WraLUKU1G6tohJusxQ7iG15utpXLVZvvks3sNV';
+export const FORWARD_RECIPIENT_B_ATA = '2HGSh7v8thLVyxVSizQtvicsfKFrbYeL2sTSGjWzbCDE';
+export function forwardRecipient(recipient = FORWARD.recipient) {
+  if (recipient !== FORWARD.recipient && recipient !== FORWARD_RECIPIENT_B) { throw new Error('Only fixed forward recipients A or B are allowed'); }
+  return recipient;
+}
 export function forwardTarget(settings) {
+  forwardRecipient(settings.recipient);
   if (settings.testOnly !== true || settings.signer.testOnly !== true ||
     !/^(0|[1-9][0-9]*)$/.test(settings.approvalNonce) || !/^(0|[1-9][0-9]*)$/.test(settings.sendNonce) ||
     BigInt(settings.sendNonce) !== BigInt(settings.approvalNonce) + 1n ||

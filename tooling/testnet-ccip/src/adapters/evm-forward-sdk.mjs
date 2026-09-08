@@ -3,17 +3,18 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FORWARD, boundedAllowance } from '../domain/evm-forward.mjs';
+import { FORWARD, boundedAllowance, forwardRecipient } from '../domain/evm-forward.mjs';
 const RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const ZERO = '0x' + '00'.repeat(20);
 const ABI = ['function approve(address spender,uint256 amount)',
   'function ccipSend(uint64 destinationChainSelector,(bytes receiver,bytes data,(address token,uint256 amount)[] tokenAmounts,address feeToken,bytes extraArgs) message) payable returns(bytes32)'];
 /** Independent ABI authority, deliberately does not use SDK encoders or interfaces. */
-export function createForwardDecoder(ethers) {
+export function createForwardDecoder(ethers, recipientValue) {
+  const tokenReceiver = forwardRecipient(recipientValue);
   const iface = new ethers.Interface(ABI), coder = ethers.AbiCoder.defaultAbiCoder();
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   let recipient = 0n;
-  for (const char of FORWARD.recipient) { recipient = recipient * 58n + BigInt(alphabet.indexOf(char)); }
+  for (const char of tokenReceiver) { recipient = recipient * 58n + BigInt(alphabet.indexOf(char)); }
   const extra = '0x1f3b3aba' + coder.encode(['tuple(uint32,uint64,bool,bytes32,bytes32[])'],
     [[0n, 0n, true, '0x' + recipient.toString(16).padStart(64, '0'), []]]).slice(2);
   const expected = { approval: iface.encodeFunctionData('approve', [FORWARD.router, FORWARD.amount]),
@@ -32,7 +33,8 @@ export function createForwardDecoder(ethers) {
     return tx;
   };
 }
-export async function createEvmForwardSdk(directory) {
+export async function createEvmForwardSdk(directory, recipientValue) {
+  const recipient = forwardRecipient(recipientValue);
   const hashes = { 'package.json': '8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb',
     'package-lock.json': '1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f' };
   for (const [file, hash] of Object.entries(hashes)) {
@@ -46,7 +48,7 @@ export async function createEvmForwardSdk(directory) {
   const sdkRequire = createRequire(sdkEntry);
   const ethers = await import(pathToFileURL(sdkRequire.resolve('ethers')).href);
   if (ethers.version !== '6.17.0') { throw new Error('Wrong independent ABI dependency version'); }
-  const verify = createForwardDecoder(ethers);
+  const verify = createForwardDecoder(ethers, recipient);
   const rpc = new ethers.JsonRpcProvider(RPC);
   const chain = await sdk.EVMChain.fromUrl(RPC);
   const token = new ethers.Contract(FORWARD.token, ['function allowance(address,address) view returns(uint256)'], rpc);
@@ -61,7 +63,7 @@ export async function createEvmForwardSdk(directory) {
         approveMax: false, message: { receiver: '11111111111111111111111111111111', data: '0x',
           tokenAmounts: [{ token: FORWARD.token, amount: FORWARD.amount }], feeToken: ZERO,
           extraArgs: { computeUnits: 0n, accountIsWritableBitmap: 0n, allowOutOfOrderExecution: true,
-            tokenReceiver: FORWARD.recipient, accounts: [] } } };
+            tokenReceiver: recipient, accounts: [] } } };
       const fee = await chain.getFee(opts);
       if (typeof fee !== 'bigint' || fee <= 0n || fee > 10000000000000000n) { throw new Error('Native fee outside testnet bound'); }
       const candidate = await chain.generateUnsignedSendMessage({ ...opts, message: { ...opts.message, fee } });

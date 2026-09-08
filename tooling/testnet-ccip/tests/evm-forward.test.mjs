@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { transferEvmForward } from '../src/composition/transfer-evm-forward.mjs';
-import { FORWARD, boundedAllowance, forwardIntent, forwardTarget } from '../src/domain/evm-forward.mjs';
+import { FORWARD, FORWARD_RECIPIENT_B, forwardRecipient, boundedAllowance, forwardIntent, forwardTarget } from '../src/domain/evm-forward.mjs';
 import { validateSepoliaIntent } from '../src/domain/evm-intent.ts';
 import { SOLANA_REMOTE } from '../src/domain/evm-remote-config.ts';
 const settings = { testOnly: true, signer: { testOnly: true }, approvalNonce: '7', sendNonce: '8',
@@ -59,4 +59,16 @@ test('registered remote state is mandatory before preparing operations', async (
   const f = fixture(); f.ports.snapshot = async () => ({ ...snapshot, token: '0x' });
   await assert.rejects(transferEvmForward(settings, f.ports), /Conflicting/);
   assert.equal(f.executed.length, 0);
+});
+
+test('recipient B is explicit opt-in; default remains A and other recipients fail before provider access', async () => {
+  assert.equal(forwardRecipient(), FORWARD.recipient);
+  assert.equal(forwardRecipient(FORWARD_RECIPIENT_B), FORWARD_RECIPIENT_B);
+  for (const recipient of [null, '', 'A', 'B', FORWARD.router, FORWARD.recipient + '1']) {
+    assert.throws(() => forwardRecipient(recipient), /fixed forward recipients/);
+    await assert.rejects(transferEvmForward({ ...settings, recipient }, { sdk: async () => { throw new Error('must not call'); } }), /fixed forward recipients/);
+  }
+  const f = fixture();
+  f.ports.sdk = async (_directory, selected) => { assert.equal(selected, FORWARD_RECIPIENT_B); return f.sdk; };
+  assert.equal((await transferEvmForward({ ...settings, recipient: FORWARD_RECIPIENT_B }, f.ports)).step, 'send');
 });
