@@ -7,8 +7,8 @@
   Journal/RPC подтвердили exact finalized transaction, standard SPL, decimals 9,
   supply 0, mint authority тестового payer, freeze None. Signature:
   `3piZtyGu7R16EgNBDdpdYURmoQjMJ7pdzExBhoXCRkhLmcQfVAATVS6qnMGfbubzYJ31RVezTXGpAEHDN8ZkT9bp`.
-- Sepolia token `0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9` mined status 1;
-  finalized reconciliation ещё ожидается. Transaction:
+- Sepolia token `0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9` подтверждён
+  exact-finalized-receipt. Transaction:
   `0xb4abc127a893bbe451fedf71a51d9a6e90b4e186b29775e5dea79398ea0b1837`.
   Canonical block-bound calls подтвердили supply 100 тестовых AGTMAI, decimals 9,
   весь fixture balance у тестового администратора и ожидаемый getCCIPAdmin.
@@ -16,9 +16,18 @@
   операцией с тем же nonce 0 и теми же deployment bytes. Оба журнала сохранены;
   использовать fee-recovery settings для reconciliation и pool prerequisite.
   Production supply/allocations не менялись; faucet funding получено в обеих сетях.
-- Официальный Solana BurnMint initialize-pool прошёл live simulation (24294 CU).
-  Это ещё не создание pool. Remote pool identity для EVM: Pool Config PDA,
-  а не общий program ID. Нужные адреса и ABI calldata подготовлены.
+- Solana BurnMint pool `DQ2LpgGVwXc62NNkqrwmhLMkUWuxVzMJhyt4p2Yw5aiJ`
+  инициализирован и финализирован. Exact transaction и 368-byte State/BaseConfig
+  проверены по mint/owner/signers/ATA/router/RMN/defaults. Signature:
+  `5PyfuSbAUMEsybeFxLGyXWNsp8sS4qm3S85eJJPAEJa1L5s34S6DfXNis3Ui39WHYwDsN647XoDTxQcXiUdXFuT7`.
+- EVM LockRelease pool `0x24508e2eb3bedc086318abc054153fd83823a4e2` mined status 1,
+  финальность пока ожидается. Tx:
+  `0xd6b574e9dc7391d00cf7b2ca4addb7593f32aeb2ce39c146f48a46126dd21521`.
+  Canonical block calls подтвердили token/owner/decimals/router/RMN.
+- Remote pool identity для EVM: raw 32-byte Solana Pool Config PDA. ABI calldata
+  подготовлено; registration, remote configuration и transfer ещё не выполнены.
+- `f9d5613`: 82 focused Linux tests и отдельный native SDK signature/layout test
+  прошли без skips; strict TS/lint прошли, независимый bounded review ACCEPT.
 - EVM LockRelease deployment CLI и extraction на `f1600ae` получили независимый
   bounded ACCEPT без найденных P0/P1/P2. Registration CLI реализует отдельные
   register-admin/accept-admin/set-pool journals и finalized prerequisites;
@@ -26,7 +35,7 @@
 - Исторический полный proof `7541803056db1815258a418459c450510e81640a` сохраняется:
   Mac20, Linux check:linux, sealed rollback, Docker Slither. Это не proof нового HEAD.
   Новые focused gates на `f1600ae`: 61 test, strict TS и lint прошли.
-- Осталось: реальные pools/register/configuration, accounting/status consumer,
+- Осталось: завершить pool registration/configuration, accounting/status consumer,
   round trip, второй recipient/ATA и bounded negative flow, затем main/CI/review/runbook.
   Реальных CCIP message IDs и доказанного round trip пока нет.
 - Mainnet, tokenomics/allocations и liquidity остаются вне текущего этапа.
