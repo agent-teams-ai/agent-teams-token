@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { BURNMINT_PROGRAM } from "../domain/solana-pool-init.ts";
 import { ROUTER_PROGRAM } from "../domain/solana-registration.ts";
-import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, REMOTE_POOL, REMOTE_TOKEN, altAddresses, remoteBytes } from "../domain/solana-pool-config.ts";
+import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, REMOTE_POOL, REMOTE_TOKEN, altAddresses, remoteBytes, remotePoolBytes } from "../domain/solana-pool-config.ts";
+// Exact residual bytes observed from official edit realloc::zero=false (183 -> 171).
+export const REPAIRED_CHAIN_SLACK = Buffer.from("0200000000ca9a3b000000000000000000000000000000000000000000000000", "hex");
 const discriminator = name => createHash("sha256").update("account:" + name).digest().subarray(0, 8);
 function data(raw, owner) {
   if (!raw || raw.owner !== owner || raw.executable !== false || !Array.isArray(raw.data) || raw.data.length !== 2 ||
@@ -20,9 +22,27 @@ function rate(bytes, offset, enabled) {
   }
 }
 function chainRates(bytes, offset, before, op) {
-  const enabled = ["create-lookup-table", "set-pool"].includes(op) || op === "set-chain-rate-limit" && !before;
+  const enabled = ["create-lookup-table", "set-pool", "repair-remote-pool-encoding"].includes(op) || op === "set-chain-rate-limit" && !before;
   const effective = !before && ["init-chain-remote-config", "append-remote-pool-addresses"].includes(op) ? bytes[offset + 16] === 1 : enabled;
   rate(bytes, offset, effective); rate(bytes, offset + 33, effective);
+}
+function chainPeers(bytes, legacy) {
+  const count = bytes.readUInt32LE(8);
+
+  const stride = legacy ? 36 : 24;
+  if (count > 1 || bytes.length !== 147 + count * stride) { throw new Error("Wrong bounded remote pool allocation"); }
+  const tail = bytes.subarray(115 + count * stride);
+  if (!tail.equals(Buffer.alloc(32)) && !(count === 1 && !legacy && tail.equals(REPAIRED_CHAIN_SLACK))) { throw new Error("Wrong remote pool allocation slack"); }
+  let offset = 12;
+  if (count === 1) {
+    const address = legacy ? remoteBytes(REMOTE_POOL) : remotePoolBytes();
+    if (bytes.readUInt32LE(offset) !== address.length || !bytes.subarray(offset + 4, offset + stride).equals(address)) { throw new Error("Wrong remote pool encoding"); }
+    offset += stride;
+  }
+  if (bytes.readUInt32LE(offset) !== 32 || !bytes.subarray(offset + 4, offset + 36).equals(remoteBytes(REMOTE_TOKEN)) || bytes[offset + 36] !== 9) {
+    throw new Error("Wrong remote token or decimals");
+  }
+  return { count, offset, tail };
 }
 function verifyChain(raw, expected, phase) {
   const before = phase === "before", op = expected.operation;
@@ -32,28 +52,20 @@ function verifyChain(raw, expected, phase) {
   }
   const bytes = data(raw, BURNMINT_PROGRAM);
   if (bytes.length < 147 || !bytes.subarray(0, 8).equals(discriminator("ChainConfig"))) { throw new Error("Wrong chain layout"); }
-  const count = bytes.readUInt32LE(8);
-  // Rust RemoteAddress::INIT_SPACE reserves64 bytes for token_address, while this
-  // EVM address serializes32. Allocation is147+36*N, payload115+36*N.
-  // This fresh append-only flow leaves exactly32 zero bytes of allocation slack.
-  if (count > 1 || bytes.length !== 147 + count * 36) { throw new Error("Wrong bounded remote pool allocation"); }
-  if (!bytes.subarray(115 + count * 36).equals(Buffer.alloc(32))) { throw new Error("Wrong remote pool allocation slack"); }
-  let offset = 12;
-  if (count === 1) {
-    if (bytes.readUInt32LE(offset) !== 32 || !bytes.subarray(offset + 4, offset + 36).equals(remoteBytes(REMOTE_POOL))) { throw new Error("Wrong padded remote pool"); }
-    offset += 36;
-  }
-  if (bytes.readUInt32LE(offset) !== 32 || !bytes.subarray(offset + 4, offset + 36).equals(remoteBytes(REMOTE_TOKEN)) || bytes[offset + 36] !== 9) {
-    throw new Error("Wrong remote token or decimals");
-  }
+  const { count, offset: tokenOffset, tail } = chainPeers(bytes, before && op === "repair-remote-pool-encoding");
+  let offset = tokenOffset;
   if (before && op === "append-remote-pool-addresses" ? count !== 0 : op !== "init-chain-remote-config" && count !== 1) { throw new Error("Wrong remote pool phase"); }
   offset += 37;
   chainRates(bytes, offset, before, op);
+  if (op === "repair-remote-pool-encoding" && !bytes.subarray(offset, offset + 66).equals(Buffer.from(expected.repairRateLimitsBase64, "base64"))) {
+    throw new Error("Repair must preserve exact rate-limit buckets");
+  }
+  if (op === "repair-remote-pool-encoding" && !before && !tail.equals(REPAIRED_CHAIN_SLACK)) { throw new Error("Wrong repaired allocation slack"); }
 }
   function altTiming(extended, e, slot, transactionSlot, phase) {
     if (phase === "after" && (!Number.isSafeInteger(transactionSlot) || transactionSlot <= 0 || transactionSlot > slot)) { throw new Error("Exact finalized ALT transaction slot required"); }
     if (phase === "after" && e.operation === "set-pool" && BigInt(transactionSlot) <= extended) { throw new Error("Set pool transaction must be in a later actual slot"); }
-    if (extended < BigInt(e.recentSlot) || extended > BigInt(slot) || e.operation === "set-pool" && extended >= BigInt(slot) ||
+    if (extended < BigInt(e.recentSlot) || extended > BigInt(slot) || ["set-pool", "repair-remote-pool-encoding"].includes(e.operation) && extended >= BigInt(slot) ||
       e.operation === "create-lookup-table" && transactionSlot > 0 && extended !== BigInt(transactionSlot)) { throw new Error("ALT requires finalized extension and a later actual slot before use"); }
   }
 export function createPoolConfigStateVerifier(provider, poolSdk, registrationSdk) {
@@ -80,7 +92,7 @@ export function createPoolConfigStateVerifier(provider, poolSdk, registrationSdk
   }
   function registry(raw, e, phase) {
     const decoded = registrationSdk.decodeRegistry(raw);
-    const attached = phase === "after" && e.operation === "set-pool";
+    const attached = e.operation === "repair-remote-pool-encoding" || phase === "after" && e.operation === "set-pool";
     const bitmap = Buffer.alloc(32); if (attached) { bitmap[15] = 0x19; }
     if (decoded.administrator !== e.payer || decoded.pendingAdministrator !== zero || decoded.mint !== e.mint || decoded.supportsAutoDerivation !== false ||
       decoded.lookupTable !== (attached ? e.alt : zero) || decoded.writableIndexes !== "0x" + bitmap.toString("hex")) { throw new Error("Wrong accepted registry phase"); }

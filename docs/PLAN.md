@@ -38,12 +38,28 @@ proposal transaction уже finalized успешно и должна быть re
 
 ### Подтверждённая аллокация Solana ChainConfig
 
-Реальная init-chain-remote-config финализирована в slot 494854806. Для
-32-byte EVM token сериализованные поля занимают 115 + 36*N bytes, но
-RemoteAddress.address имеет max_len(64): официальный init выделяет
-147 + 36*N bytes. В текущем fresh append-only flow проверять точные поля
-и дополнительные 32 нулевых байта, не считать allocation slack новым полем.
-Не повторять успешную транзакцию из-за прежней ошибки длины в observer.
+Реальная init-chain-remote-config финализирована в slot 494854806: пустой
+pool vector выделяет 147 bytes при payload 115, поскольку token max_len(64).
+EVM remote token остаётся ABI32; remote pool должен быть raw20, поэтому
+канонический account занимает 171 bytes (payload 139 и slack 32).
+
+### Подтверждённая ошибка source pool encoding, 8 сентября 2026
+
+Первый реальный Sepolia -> Solana перевод финализирован на source и заблокировал
+1 AGTMAI, но destination завершился InvalidSourcePoolAddress (6007), supply Solana 0.
+Фактический CPI передаёт raw20 pool `24508e2eb3bedc086318abc054153fd83823a4e2`,
+а append сохранил padded32. Официальный common.rs сравнивает Vec побайтово.
+Исправление: fresh append raw20 и отдельный `repair-remote-pool-encoding` через
+официальный edit_chain_remote_config; старый append32 journal исторический,
+его нельзя переписывать или повторять. Repair сохраняет token ABI32, decimals 9,
+точные rate buckets, mint authority, supply 0, registry и существующий ALT.
+
+Read-only simulation official edit в slot 494886698 успешна: 183 -> 171 bytes,
+оба rate buckets неизменны. realloc::zero=false оставляет строго доказанный slack
+`0200000000ca9a3b000000000000000000000000000000000000000000000000`.
+Fresh account допускает zero slack; произвольные trailing bytes запрещены.
+Simulation не доказывает onchain repair или доставку; acceptance требует отдельной
+финализации repair и исполнения того же исходного CCIP message без нового source send.
 
 ### Порядок доставки
 

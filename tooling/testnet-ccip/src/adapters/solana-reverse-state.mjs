@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { REVERSE, BURNMINT_PROGRAM } from '../domain/solana-reverse.mjs';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { POOL_GLOBAL } from '../domain/solana-pool-init.ts';
-import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, altAddresses, REMOTE_POOL, REMOTE_TOKEN, remoteBytes } from '../domain/solana-pool-config.ts';
+import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, altAddresses, REMOTE_TOKEN, remoteBytes, remotePoolBytes } from '../domain/solana-pool-config.ts';
+import { REPAIRED_CHAIN_SLACK } from './solana-pool-config-state.mjs';
   function layout(b, name, size) {
     if (b.length !== size || !b.subarray(0,8).equals(createHash('sha256').update('account:' + name).digest().subarray(0,8))) {
       throw new Error('Wrong reverse ' + name + ' layout');
@@ -67,10 +68,11 @@ export function createReverseState(provider, poolSdk) {
       !reg.subarray(105,137).equals(bitmap) || key(reg,137) !== e.mint || reg[169] !== 0) { throw new Error('Wrong registered pool/ALT'); }
   }
   function remote(chainRaw) {
-    const chain = account(chainRaw,BURNMINT_PROGRAM).data; layout(chain,'ChainConfig',151);
-    if (chain.readUInt32LE(8) !== 1 || chain.readUInt32LE(12) !== 32 || !chain.subarray(16,48).equals(remoteBytes(REMOTE_POOL)) ||
-      chain.readUInt32LE(48) !== 32 || !chain.subarray(52,84).equals(remoteBytes(REMOTE_TOKEN)) || chain[84] !== 9) { throw new Error('Wrong remote peers'); }
-    for (const offset of [85,118]) {
+    const chain = account(chainRaw,BURNMINT_PROGRAM).data; layout(chain,'ChainConfig',171);
+    if (chain.readUInt32LE(8) !== 1 || chain.readUInt32LE(12) !== 20 || !chain.subarray(16,36).equals(remotePoolBytes()) ||
+      chain.readUInt32LE(36) !== 32 || !chain.subarray(40,72).equals(remoteBytes(REMOTE_TOKEN)) || chain[72] !== 9) { throw new Error('Wrong remote peers'); }
+    if (!chain.subarray(139).equals(Buffer.alloc(32)) && !chain.subarray(139).equals(REPAIRED_CHAIN_SLACK)) { throw new Error('Wrong remote allocation slack'); }
+    for (const offset of [73,106]) {
       if (chain[offset+16] !== 1 || chain.readBigUInt64LE(offset+17) !== 10000000000n || chain.readBigUInt64LE(offset+25) !== REVERSE.amount ||
         chain.readBigUInt64LE(offset) > 10000000000n) { throw new Error('Wrong remote rate limits'); }
     }

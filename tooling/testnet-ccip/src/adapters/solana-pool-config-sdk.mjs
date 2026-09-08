@@ -17,7 +17,7 @@ export async function createSolanaPoolConfigSdk(providerDirectory) {
     const pda = (seeds, owner) => PublicKey.findProgramAddressSync(seeds, new PublicKey(owner));
     const chain = pda([Buffer.from("ccip_tokenpool_chainconfig"), u64(SEPOLIA_SELECTOR), mint.toBuffer()], program)[0].toBase58();
     let recentSlot = null, alt = null, altBump = null;
-    if (["create-lookup-table", "set-pool"].includes(input.operation)) {
+    if (["create-lookup-table", "set-pool", "repair-remote-pool-encoding"].includes(input.operation)) {
       if (typeof input.recentSlot !== "string" || !/^[1-9][0-9]*$/.test(input.recentSlot) || BigInt(input.recentSlot) > BigInt(Number.MAX_SAFE_INTEGER)) {
         throw new Error("Persisted finalized ALT recentSlot required");
       }
@@ -28,7 +28,7 @@ export async function createSolanaPoolConfigSdk(providerDirectory) {
     return { ...registration, operation: input.operation, chain,
       feeTokenConfig: pda([Buffer.from("fee_billing_token_config"), mint.toBuffer()], FEE_QUOTER_PROGRAM)[0].toBase58(),
       routerPoolSigner: pda([Buffer.from("external_token_pools_signer"), program.toBuffer()], ROUTER_PROGRAM)[0].toBase58(),
-      recentSlot, alt, altBump };
+      recentSlot, alt, altBump, ...(input.repairRateLimitsBase64 !== undefined ? { repairRateLimitsBase64: input.repairRateLimitsBase64 } : {}) };
   }
   function validate(intent, expected) {
     const canonical = derive(expected);

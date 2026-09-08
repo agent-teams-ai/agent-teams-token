@@ -4,9 +4,26 @@ import { resolve } from "node:path";
 import { createSolanaPoolConfigSdk } from "../src/adapters/solana-pool-config-sdk.mjs";
 import { BURNMINT_PROGRAM } from "../src/domain/solana-pool-init.ts";
 import { ROUTER_PROGRAM } from "../src/domain/solana-registration.ts";
-import { REMOTE_POOL, REMOTE_TOKEN, ALT_PROGRAM, altAddresses, remoteBytes } from "../src/domain/solana-pool-config.ts";
+import { REMOTE_POOL, REMOTE_TOKEN, ALT_PROGRAM, altAddresses, remoteBytes, remotePoolBytes } from "../src/domain/solana-pool-config.ts";
+import { REPAIRED_CHAIN_SLACK } from "../src/adapters/solana-pool-config-state.mjs";
+export const repairRates = Buffer.alloc(66);
+for (const offset of [0, 33]) { repairRates[offset + 16] = 1; repairRates.writeBigUInt64LE(10_000_000_000n, offset + 17); repairRates.writeBigUInt64LE(1_000_000_000n, offset + 25); }
   const anchor = (name, size) => { const bytes = Buffer.alloc(size); createHash("sha256").update("account:" + name).digest().copy(bytes, 0, 0, 8); bytes[8] = 1; return bytes; };
   const raw = (data, owner) => ({ data: [data.toString("base64"), "base64"], owner, executable: false, lamports: 10_000_000, rentEpoch: 0 });
+  const chainBytes = (operation, before) => {
+    const count = operation === "init-chain-remote-config" || operation === "append-remote-pool-addresses" && before ? 0 : 1;
+    const legacy = operation === "repair-remote-pool-encoding" && before, stride = legacy ? 36 : 24;
+    const chain = Buffer.alloc(147 + count * stride); createHash("sha256").update("account:ChainConfig").digest().copy(chain, 0, 0, 8);
+    chain.writeUInt32LE(count, 8); let offset = 12;
+    if (count) { chain.writeUInt32LE(legacy ? 32 : 20, offset); (legacy ? remoteBytes(REMOTE_POOL) : remotePoolBytes()).copy(chain, offset + 4); offset += stride; }
+    chain.writeUInt32LE(32, offset); remoteBytes(REMOTE_TOKEN).copy(chain, offset + 4); chain[offset + 36] = 9; offset += 37;
+    const enabled = ["create-lookup-table", "set-pool", "repair-remote-pool-encoding"].includes(operation) || operation === "set-chain-rate-limit" && !before;
+    if (enabled) {
+      for (const at of [offset, offset + 33]) { chain[at + 16] = 1; chain.writeBigUInt64LE(10_000_000_000n, at + 17); chain.writeBigUInt64LE(1_000_000_000n, at + 25); }
+    }
+    if (operation === "repair-remote-pool-encoding" && !before) { REPAIRED_CHAIN_SLACK.copy(chain, 139); }
+    return chain;
+  };
 export async function poolConfigFixture(provider) {
   const sdk = await createSolanaPoolConfigSdk(provider), require = createRequire(resolve(provider, "package.json"));
   const web3 = require("@solana/web3.js"), spl = require("@solana/spl-token");
@@ -29,18 +46,9 @@ export async function poolConfigFixture(provider) {
   const registry = anchor("TokenAdminRegistry", 170); registry[8] = 2; key(registry, 41, expected.payer); key(registry, 137, expected.mint);
   const registryAccepted = Buffer.from(registry); registryAccepted.fill(0, 41, 73); key(registryAccepted, 9, expected.payer);
   const values = (e, phase) => {
-    const operation = e.operation, before = phase === "before";
-    const count = operation === "init-chain-remote-config" || operation === "append-remote-pool-addresses" && before ? 0 : 1;
-    const chain = Buffer.alloc(147 + count * 36); createHash("sha256").update("account:ChainConfig").digest().copy(chain, 0, 0, 8);
-    chain.writeUInt32LE(count, 8); let offset = 12;
-    if (count) { chain.writeUInt32LE(32, offset); remoteBytes(REMOTE_POOL).copy(chain, offset + 4); offset += 36; }
-    chain.writeUInt32LE(32, offset); remoteBytes(REMOTE_TOKEN).copy(chain, offset + 4); chain[offset + 36] = 9; offset += 37;
-    const enabled = ["create-lookup-table", "set-pool"].includes(operation) || operation === "set-chain-rate-limit" && !before;
-    if (enabled) {
-      for (const at of [offset, offset + 33]) { chain[at + 16] = 1; chain.writeBigUInt64LE(10_000_000_000n, at + 17); chain.writeBigUInt64LE(1_000_000_000n, at + 25); }
-    }
+    const operation = e.operation, before = phase === "before", chain = chainBytes(operation, before);
     const reg = Buffer.from(registryAccepted);
-    if (operation === "set-pool" && !before) { key(reg, 73, e.alt); reg[120] = 0x19; }
+    if (operation === "repair-remote-pool-encoding" || operation === "set-pool" && !before) { key(reg, 73, e.alt); reg[120] = 0x19; }
     const result = [raw(mintBytes, spl.TOKEN_PROGRAM_ID.toBase58()), raw(pool, BURNMINT_PROGRAM), raw(ata, spl.TOKEN_PROGRAM_ID.toBase58()),
       raw(reg, ROUTER_PROGRAM), raw(global, BURNMINT_PROGRAM), raw(config, ROUTER_PROGRAM),
       before && operation === "init-chain-remote-config" ? null : raw(chain, BURNMINT_PROGRAM)];
@@ -53,3 +61,10 @@ export async function poolConfigFixture(provider) {
   };
   return { sdk, expected, latest, payer, mint, web3, spl, Transaction, values };
 }
+
+// Official read-only edit simulation, slot494886698; account bytes only, no keys.
+export const observedPoolRepair = {
+  "slot": 494886698,
+  "before": "DbHpjdQdlDgBAAAAIAAAAAAAAAAAAAAAAAAAACRQji6zvtwIYxirwFQVP9g4I6TiIAAAAAAAAAAAAAAAAAAAAL7pG6PKlN18Y57mwbHC/BoZls3JCQDkC1QCAAAAZV+fagAAAAABAOQLVAIAAAAAypo7AAAAAADkC1QCAAAAZV+fagAAAAABAOQLVAIAAAAAypo7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "after": "DbHpjdQdlDgBAAAAFAAAACRQji6zvtwIYxirwFQVP9g4I6TiIAAAAAAAAAAAAAAAAAAAAL7pG6PKlN18Y57mwbHC/BoZls3JCQDkC1QCAAAAZV+fagAAAAABAOQLVAIAAAAAypo7AAAAAADkC1QCAAAAZV+fagAAAAABAOQLVAIAAAAAypo7AAAAAAIAAAAAypo7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+};

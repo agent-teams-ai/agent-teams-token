@@ -5,13 +5,28 @@ explicit operation per invocation:
 
 1. `init-chain-remote-config`: selector `16015286601757825753`, zero remote pools,
    token `0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9`, nine decimals.
-2. `append-remote-pool-addresses`: exactly one 32-byte left-padded address for
+2. `append-remote-pool-addresses`: exactly one raw 20-byte address for
    EVM pool `0x24508e2eb3bedc086318abc054153fd83823a4e2`.
 3. `set-chain-rate-limit`: inbound and outbound enabled, capacity `10000000000`,
    rate `1000000000` in local base units.
 4. `create-lookup-table`: one atomic create+extend transaction with the canonical
    ten addresses. Its PDA binds payer and the explicitly persisted recent slot.
 5. `set-pool`: exact finalized ALT and writable indexes `[3,4,7]`.
+
+Explicit repair, outside the fresh setup sequence: `repair-remote-pool-encoding`
+uses official `edit_chain_remote_config` to replace the known legacy padded32
+pool with raw20, preserving ABI32 remote token and nine decimals. It requires
+`expected.recentSlot` from the existing finalized set-pool checkpoint plus
+`expected.repairRateLimitsBase64`: the exact 66 serialized bucket bytes read
+from the legacy chain account at offsets85..151. Both enabled configurations,
+counters and timestamps must match those persisted bytes before and after.
+The mint must still have zero supply and its existing authority; the registry
+and existing ALT remain attached and checked. No pending token is minted here.
+The repair has its own `repair-remote-pool-encoding.json` durable journal.
+Legacy append32/config journals remain historical evidence: no overwrite,
+replacement or replay. The new append20 allowlist deliberately rejects old
+append32 signed bytes. Repair independently reconciles the exact historical
+set-pool transaction and verifies the current legacy repair prerequisite.
 
 Settings contain `testOnly: true`, `providerDirectory`, `payerFile`, dedicated
 `journalDirectory`, `registrationJournalFile`, and `expected: { testOnly: true,
@@ -51,7 +66,7 @@ node --test tooling/testnet-ccip/tests/solana-pool-config.test.ts \
 ```
 
 Native validation must run with the provider present; a skipped test is not
-proof. The fixtures compare all five messages to the official pinned builders,
+proof. The fixtures compare all six messages to the official pinned builders,
 including both ALT instructions, and reject malformed variable layouts/rates.
 Provider source: BS58 generator commit `4c8d008a0990f1135da1e2b8bf511edba94904de`;
 Solana onchain layout/rate/registry reference commit
@@ -62,10 +77,16 @@ Solana onchain layout/rate/registry reference commit
 Pinned Rust `base-token-pool/src/common.rs` uses `#[max_len(64)]` for
 `RemoteAddress.address`. Accordingly `ChainConfig::INIT_SPACE` allocates
 147 bytes for an empty pool vector, although its EVM32 token payload serializes
-to115 bytes. Appending one32-byte pool allocates183 bytes and serializes151.
-The fresh append-only verifier requires the exact allocation and32 zero trailing
-bytes; it does not treat those bytes as a field or accept compact accounts.
-`burnmint-token-pool/src/context.rs` initialization and append realloc formulas
-preserve that32-byte difference. The native regression includes the public147-byte
-account from finalized init transaction slot494854806; its original signature
-must be reconciled, never replaced or resent because an observer rejected layout.
+to115 bytes. Appending one raw20 pool allocates171 bytes and serializes139.
+Fresh allocation has32 zero trailing bytes. Official edit shrinks the previous
+183-byte padded32 account with realloc::zero=false, leaving the exact observed
+32-byte residual `0200000000ca9a3b000000000000000000000000000000000000000000000000`.
+The decoder accepts only zero or that proven residual; repair specifically
+requires the residual after and zero slack on the exact legacy183 account before.
+It never accepts arbitrary slack or compact serialized-only accounts.
+
+Public evidence: init slot494854806; repair read-only simulation slot494886698,
+after-account SHA256 `05193b6432a06f85dc5aba6dd62f747a920f9c74cd241460a17c3c674eec78ce`.
+The actual source-pool CPI uses20 bytes and failed against the32-byte stored
+value with InvalidSourcePoolAddress6007. Simulation is not onchain finality.
+Do not resend the existing finalized source transfer while repairing its destination.

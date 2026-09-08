@@ -8,12 +8,15 @@ import type { SolanaObservation } from "../src/application/solana-transaction-jo
 import { readPoolConfigSnapshot } from "../src/adapters/solana-pool-config-rpc.ts";
 const key = (n: number) => "1".repeat(31) + "123456789ABCDEFG"[n];
 function expectation(operation: SolanaPoolConfigExpectation["operation"]): SolanaPoolConfigExpectation {
-  const withAlt = operation === "create-lookup-table" || operation === "set-pool";
+  const withAlt = ["create-lookup-table", "set-pool", "repair-remote-pool-encoding"].includes(operation);
+  const rates = Buffer.alloc(66);
+  for (const offset of [0, 33]) { rates[offset + 16] = 1; rates.writeBigUInt64LE(10_000_000_000n, offset + 17); rates.writeBigUInt64LE(1_000_000_000n, offset + 25); }
   return { testOnly: true, cluster: "solana-devnet", operation, payer: key(1), mint: key(2), pool: key(3), chain: key(4),
     signer: key(5), ata: key(6), registry: key(7), routerConfig: key(8), feeTokenConfig: key(9), routerPoolSigner: key(10),
+    ...(operation === "repair-remote-pool-encoding" ? { repairRateLimitsBase64: rates.toString("base64") } : {}),
     alt: withAlt ? key(11) : null, recentSlot: withAlt ? "100" : null, altBump: withAlt ? 255 : null };
 }
-test("all five instruction allowlists reject altered bytes, accounts/privileges, extras and ALT identity mutation", () => {
+test("all six instruction allowlists reject altered bytes, accounts/privileges, extras and ALT identity mutation", () => {
   for (const operation of POOL_CONFIG_OPERATIONS) {
     const expected = expectation(operation), instructions = poolConfigInstructions(expected);
     const verify = (ixs = instructions) => verifySolanaPoolConfigIntent({ feePayer: expected.payer, instructions: ixs }, expected);
@@ -90,4 +93,21 @@ test("coherent pool config read propagates actual finalized slot and rejects sta
     await assert.rejects(readPoolConfigSnapshot(async () => result, sdk, e, "after", 200));
   }
   assert.equal(called, 1);
+});
+
+
+test("append accepts literal raw20 pool, ABI32 token remains unchanged and legacy append journal fails closed", async () => {
+  const e = expectation("append-remote-pool-addresses"), instructions = poolConfigInstructions(e);
+  const bytes = Buffer.from(instructions[0].dataBase64, "base64");
+  assert.equal(bytes.readUInt32LE(48), 1); assert.equal(bytes.readUInt32LE(52), 20);
+  assert.equal(bytes.subarray(56).toString("hex"), "24508e2eb3bedc086318abc054153fd83823a4e2");
+  const repair = Buffer.from(poolConfigInstructions(expectation("repair-remote-pool-encoding"))[0].dataBase64, "base64");
+  assert.equal(repair.readUInt32LE(76), 32);
+  assert.equal(repair.subarray(80, 112).toString("hex"), "000000000000000000000000bee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9");
+  assert.equal(repair[112], 9);
+  const f = setup("append-remote-pool-addresses"); await f.run();
+  const legacy = Buffer.concat([bytes.subarray(0, 52), Buffer.from([32, 0, 0, 0]), Buffer.alloc(12), bytes.subarray(56)]);
+  f.state.record = { ...f.state.record!, intent: { ...f.state.record!.intent, instructions: [{ ...instructions[0], dataBase64: legacy.toString("base64") }] } };
+  await assert.rejects(f.run(), /instructions/);
+  assert.equal(f.state.signs, 1); assert.equal(f.state.sends, 1);
 });
