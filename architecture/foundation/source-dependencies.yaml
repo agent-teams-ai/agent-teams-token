@@ -1,0 +1,19 @@
+schemaVersion: 2
+workspace: {kind: pnpm, manifest: pnpm-workspace.yaml}
+packageRoots: [packages]
+governedRoots: [packages/domain/src]
+boundaries:
+  - id: token-domain
+    dependencyMode: runtime
+    roots: [packages/domain/src/supply.ts]
+    entrypoints: [packages/domain/src/supply.ts]
+    allow: {boundaries: [], packages: [], builtins: [], runtimeReferences: []}
+  - id: token-domain-tests
+    dependencyMode: development
+    roots: [packages/domain/src/supply.test.ts]
+    entrypoints: []
+    allow:
+      boundaries: [token-domain]
+      packages: []
+      builtins: [node:assert/strict, node:test]
+      runtimeReferences: []

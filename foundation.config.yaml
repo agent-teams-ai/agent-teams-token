@@ -1,0 +1,5 @@
+schemaVersion: 1
+project: {id: agent-teams-token}
+capabilities:
+  architecture.source-dependencies:
+    configPath: architecture/foundation/source-dependencies.yaml
