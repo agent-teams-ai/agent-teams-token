@@ -99,8 +99,10 @@ rollback_assert_git_authority() {
   local rollback_git_directory
   rollback_git_directory=$(rollback_git_inspect rev-parse --path-format=absolute --git-dir)
   if [[ -e "$rollback_git_directory/config.worktree" || -L "$rollback_git_directory/config.worktree" ]]; then
-    printf 'ROLLBACK_GIT_WORKTREE_CONFIG_FORBIDDEN\n' >&2
-    return 1
+    if ! rollback_assert_inert_worktree_config "$rollback_git_directory/config.worktree"; then
+      printf 'ROLLBACK_GIT_WORKTREE_CONFIG_FORBIDDEN\n' >&2
+      return 1
+    fi
   fi
   local rollback_path rollback_name
   if [[ -d "$rollback_common_directory/hooks" ]]; then
@@ -123,6 +125,26 @@ rollback_assert_git_authority() {
       fi
     done
   fi
+}
+
+rollback_assert_inert_worktree_config() {
+  # checkout's sparse-checkout disable leaves this file after removing the
+  # extension. Local config policy above still forbids that extension. Empty
+  # files have no authority; every nonempty record must be a literal false.
+  [[ -f "$1" && ! -L "$1" ]] || return 1
+  local rollback_file rollback_record
+  rollback_file=$(/usr/bin/mktemp /tmp/agtmai-worktree-config.XXXXXX) || return 1
+  if ! rollback_git_inspect config --file "$1" --no-includes --null --list >"$rollback_file"; then
+    /bin/rm -f -- "$rollback_file"
+    return 1
+  fi
+  while IFS= read -r -d '' rollback_record; do
+    case "$rollback_record" in
+      core.sparsecheckout$'\n'false|core.sparsecheckoutcone$'\n'false|index.sparse$'\n'false) ;;
+      *) /bin/rm -f -- "$rollback_file"; return 1 ;;
+    esac
+  done <"$rollback_file"
+  /bin/rm -f -- "$rollback_file"
 }
 
 rollback_git_canonical() {

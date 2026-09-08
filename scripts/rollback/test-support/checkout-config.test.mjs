@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { assertRecoveryGitAuthority, canonicalGitEnvironment } from "../../toolc
 
 const history = fileURLToPath(new URL("../../assert-complete-history.sh", import.meta.url));
 
-export const checkoutConfigTests = test("checkout v7.0.1 gc.auto is exact in both Git authority validators", () => {
+export const checkoutConfigTests = test("checkout v7.0.1 gc.auto and inert sparse leftovers are exact in both Git authority validators", () => {
   const root = mkdtempSync(join(tmpdir(), "agtmai-checkout-config-"));
   const env = canonicalGitEnvironment({ PATH: "/usr/bin:/bin" });
   const git = (...args) => {
@@ -60,6 +60,67 @@ export const checkoutConfigTests = test("checkout v7.0.1 gc.auto is exact in bot
       git("config", "--local", key, "0");
       verify(false, key === "core.worktree");
     }
+    writeFileSync(config, original);
+    const worktreeConfig = join(root, ".git/config.worktree");
+    const verifyWorktree = (allowed) => {
+      const result = spawnSync("/bin/bash", [history, head, head], { cwd: root, env, encoding: "utf8" });
+      if (allowed) {
+        assert.equal(result.status, 0, result.stderr);
+        assert.match(result.stdout, /ROLLBACK_HISTORY_OK/u);
+        assert.doesNotThrow(() => assertRecoveryGitAuthority(root));
+      } else {
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /ROLLBACK_GIT_WORKTREE_CONFIG_FORBIDDEN/u);
+        assert.throws(() => assertRecoveryGitAuthority(root), /TOOLCHAIN_GIT_WORKTREE_CONFIG_FORBIDDEN/u);
+      }
+    };
+    // Reproduce actions/checkout, using Git itself rather than a guessed file.
+    git("sparse-checkout", "disable");
+    git("config", "--local", "--unset-all", "extensions.worktreeConfig");
+    const leftover = readFileSync(worktreeConfig);
+    assert.match(leftover.toString(), /sparseCheckout = false/u);
+    verifyWorktree(true);
+    for (const enabled of ["true", "false"]) {
+      git("config", "--local", "extensions.worktreeConfig", enabled);
+      verify(false);
+      writeFileSync(config, original);
+    }
+    // Empty regular files and arbitrary order/repeated false values are inert.
+    writeFileSync(worktreeConfig, "");
+    verifyWorktree(true);
+    const keys = ["core.sparseCheckout", "core.sparseCheckoutCone", "index.sparse"];
+    for (const key of keys.toReversed()) {
+      git("config", "--file", worktreeConfig, "--add", key, "false");
+      git("config", "--file", worktreeConfig, "--add", key, "false");
+    }
+    verifyWorktree(true);
+    for (const key of keys) {
+      for (const values of [["true"], ["true", "false"], ["false", "true"],
+        ["0"], [""], ["false\n"], ["false\ninclude.path=/tmp/hostile"]]) {
+        writeFileSync(worktreeConfig, "");
+        for (const value of values) {git("config", "--file", worktreeConfig, "--add", key, value);}
+        verifyWorktree(false);
+      }
+    }
+    for (const key of ["include.path", "includeIf.gitdir:/.path", "core.hooksPath", "core.worktree", "user.name", "extensions.worktreeConfig"]) {
+      writeFileSync(worktreeConfig, leftover);
+      git("config", "--file", worktreeConfig, "--add", key, "false");
+      verifyWorktree(false);
+    }
+    for (const malformed of ["[core", "[core]\nsparseCheckout\n", '[core]\nsparseCheckout = "false\\nindex.sparse\\nfalse"\n']) {
+      writeFileSync(worktreeConfig, malformed);
+      verifyWorktree(false);
+    }
+    rmSync(worktreeConfig);
+    mkdirSync(worktreeConfig);
+    verifyWorktree(false);
+    rmSync(worktreeConfig, { recursive: true });
+    const target = join(root, "inert-config");
+    writeFileSync(target, leftover);
+    symlinkSync(target, worktreeConfig);
+    verifyWorktree(false);
+    rmSync(target);
+    verifyWorktree(false); // dangling symlinks must not count as absent
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

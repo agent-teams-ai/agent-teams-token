@@ -206,8 +206,30 @@ export function assertRecoveryGitAuthority(workingDirectory) {
   }
   assertGitAdministrativeFiles(repository.commonDirectory);
   const worktreeConfig = join(repository.gitDirectory, "config.worktree");
-  if (existsSync(worktreeConfig)) {
-    throw new Error("TOOLCHAIN_GIT_WORKTREE_CONFIG_FORBIDDEN");
+  const worktreeEntry = lstatSync(worktreeConfig, { throwIfNoEntry: false });
+  if (worktreeEntry !== undefined) {
+    if (!worktreeEntry.isFile() || worktreeEntry.isSymbolicLink()) {
+      throw new Error("TOOLCHAIN_GIT_WORKTREE_CONFIG_FORBIDDEN");
+    }
+    // checkout removes the extension after sparse-checkout disable. Local
+    // policy still forbids the extension; admit only its inert leftover (or
+    // an empty file). Inspect every NUL-delimited record, including duplicates.
+    const worktreeResult = spawnSync("/usr/bin/git", [
+      ...canonicalGitArguments,
+      "-c", `safe.directory=${repository.worktree}`,
+      "--git-dir", repository.gitDirectory,
+      "config", "--file", worktreeConfig, "--no-includes", "--null", "--list",
+    ], { cwd: workingDirectory, env: environment, encoding: null,
+      maxBuffer: 4 * 1024 * 1024, timeout: 15_000 });
+    const output = Buffer.from(worktreeResult.stdout ?? Buffer.alloc(0)).toString("utf8");
+    const allowedRecords = new Set([
+      "core.sparsecheckout\nfalse", "core.sparsecheckoutcone\nfalse", "index.sparse\nfalse",
+    ]);
+    if (worktreeResult.error || worktreeResult.status !== 0
+      || (output !== "" && (!output.endsWith("\0")
+        || output.slice(0, -1).split("\0").some((record) => !allowedRecords.has(record))))) {
+      throw new Error("TOOLCHAIN_GIT_WORKTREE_CONFIG_FORBIDDEN");
+    }
   }
 }
 
