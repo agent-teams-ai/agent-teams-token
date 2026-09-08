@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "purpose": "AGTMAI testnet only; no production allocation approval",
+  "token": {
+    "name": "Agent Teams AI",
+    "symbol": "AGTMAI",
+    "decimals": 9,
+    "canonicalContract": "AGTMAICCIPToken",
+    "initialRemoteSupply": "0"
+  },
+  "ethereum": {
+    "chainId": "11155111",
+    "selector": "16015286601757825753",
+    "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+    "router": "0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59",
+    "rmnProxy": "0xba3f6251de62dED61Ff98590cB2fDf6871FbB991",
+    "tokenAdminRegistry": "0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82",
+    "registryModule": "0xa3c796d480638d7476792230da1E2ADa86e031b0",
+    "poolPackage": "@chainlink/contracts-ccip",
+    "poolVersion": "1.6.1",
+    "backingHolder": "deployedLockReleasePool",
+    "compiler": {
+      "version": "0.8.36",
+      "evmVersion": "paris",
+      "optimizerRuns": 200
+    }
+  },
+  "solana": {
+    "network": "devnet",
+    "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    "selector": "16423721717087811551",
+    "rpc": "https://api.devnet.solana.com",
+    "router": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+    "rmn": "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7",
+    "feeQuoter": "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi",
+    "burnMintProgram": "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "freezeAuthority": null,
+    "mintAuthorityAfterSetup": "verifiedPoolSignerPda"
+  },
+  "testFlow": {
+    "transferAmountBaseUnits": "1000000000",
+    "rateLimitCapacityBaseUnits": "10000000000",
+    "rateLimitPerSecondBaseUnits": "1000000000"
+  },
+  "sources": [
+    "https://docs.chain.link/ccip/directory/testnet/chain/ethereum-testnet-sepolia",
+    "https://docs.chain.link/ccip/directory/testnet/chain/solana-devnet"
+  ],
+  "requiredBeforeSigning": "Recheck directory, chain identity, deployed programs, exact peers/authorities and decoded intent. This configuration alone is not deployment evidence."
+}

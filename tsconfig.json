@@ -1,16 +1,11 @@
 {
+  "extends": "@agent-teams/engineering-foundation/presets/typescript/node.json",
   "files": [],
   "references": [
-    { "path": "packages/domain" }
+    { "path": "packages/domain" },
+    { "path": "packages/contexts/supply" }
   ],
   "compilerOptions": {
-    "composite": true,
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noImplicitOverride": true,
-    "useUnknownInCatchVariables": true,
-    "verbatimModuleSyntax": true
+    "composite": true
   }
 }
-

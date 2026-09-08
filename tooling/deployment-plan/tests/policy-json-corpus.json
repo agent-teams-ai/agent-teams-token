@@ -1,0 +1,17 @@
+{
+  "malformed": [
+    { "name": "duplicate-key", "source": "{\"value\":1,\"value\":1}" },
+    { "name": "decimal-fraction", "source": "{\"value\":1.0}" },
+    { "name": "exponent", "source": "{\"value\":1e0}" },
+    { "name": "leading-zero", "source": "{\"value\":01}" },
+    { "name": "negative-zero", "source": "{\"value\":-0}" }
+  ],
+  "wrapperExtras": ["unexpectedRoot", "unexpectedNativeBuild"],
+  "limits": {
+    "bytes": 65536,
+    "depth": 32,
+    "members": 256,
+    "arrayItems": 1024,
+    "stringBytes": 16384
+  }
+}

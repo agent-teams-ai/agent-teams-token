@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { test } from "node:test";
+import type { AnalysisInput, GateManifest, PolicyDecision } from "../src/domain/model.ts";
+import { ExclusiveDirectoryPublication, writeEnvironmentFailure, writeFailureEvidence, writeReadyEvidence } from "../src/adapters/evidence.ts";
+import { makeTestDirectory } from "./test-directory.ts";
+import { schemaDirectory, writeCanonicalFixture } from "./evidence-canonical-fixture.ts";
+import { testPublication } from "./test-publication.ts";
+import { makeCompilerEvidence } from "./test-compiler-evidence.ts";
+
+const testBuild = makeCompilerEvidence("contract A {}\n");
+const bytecode = testBuild.compilerEvidence.creationBytecodeSha256;
+const manifest: GateManifest = { schemaVersion: 1, targets: [{ path: "contracts/evm/src/A.sol", contract: "A" }], expectedContracts: ["A"], sources: [{ path: "contracts/evm/src/A.sol", sha256: "1".repeat(64) }], config: [], compiler: { version: "0.8.36+commit.8a079791", evmVersion: "paris", optimizerEnabled: true, optimizerRuns: 200, bytecodeHash: "ipfs", cborMetadata: true, useLiteralContent: false, viaIR: false, experimental: false, remappings: ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/", "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"] }, tools: { forgeArchiveSha256: "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57", forgeBinarySha256: "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f", solcBinarySha256: "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6" }, creationBytecodeSha256: bytecode, vulnerableFixture: testBuild.vulnerableFixture, detectorInventory: { path: "detectors.json", sha256: "d".repeat(64) } };
+const detectors = Array.from({ length: 101 }, (_, index) => `d-${index}`);
+const input: AnalysisInput = { success: true, findings: [], analyzedContracts: ["A"], analyzedSources: ["src/A.sol"], closure: [], detectorInventory: detectors, compiler: manifest.compiler, creationBytecodeSha256: bytecode, freshFoundryCreationBytecodeSha256: bytecode, analysisErrors: [], forgeBinarySha256: manifest.tools.forgeBinarySha256, solcBinarySha256: manifest.tools.solcBinarySha256, compilerEvidence: testBuild.compilerEvidence, fixtureProof: testBuild.fixtureProof };
+const decision: PolicyDecision = { category: "clean", exitCode: 0, blocking: [], visible: [], suppressed: [], errors: [] };
+const precondition = async (): Promise<void> => {};
+const readyRequest = async (output: string, parent: string) => {
+  const canonicalDirectory = join(parent, "canonical");
+  const hashes = await writeCanonicalFixture(canonicalDirectory, manifest, input);
+  return { output, candidateSha: "a".repeat(40), manifest: hashes.manifest, input, decision, hashes: { config: hashes.config, policy: hashes.policy }, triageHash: hashes.triage, schemaDirectory, canonicalDirectory, assertReadyPrecondition: precondition, publication: testPublication() };
+};
+
+test("evidence is sanitised, exact-SHA-bound and READY-last", async () => {
+  const parent = await makeTestDirectory("evidence-"); const output = join(parent, "bundle");
+  try {
+    await writeReadyEvidence(await readyRequest(output, parent));
+    const evidence = JSON.parse(await readFile(join(output, "evidence.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(evidence.ready, true); assert.equal(evidence.candidateSha, "a".repeat(40)); assert.equal(evidence.sanitised, true);
+    assert.equal((await readFile(join(output, "READY"))).length, 0);
+    assert.match(await readFile(join(output, "summary.md"), "utf8"), /Result: clean/u);
+    assert.equal(JSON.stringify(evidence).includes(process.cwd()), false);
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+test("minimal environment failures also produce READY envelopes", async () => {
+  const parent = await makeTestDirectory("failure-"); const output = join(parent, "bundle");
+  try { await writeEnvironmentFailure({ output, candidateSha: "d".repeat(40), stage: "image-preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory, assertReadyPrecondition: precondition, publication: testPublication() }); const value = JSON.parse(await readFile(join(output, "environment-failure.json"), "utf8")) as { exitCode: unknown }; assert.equal(value.exitCode, 50); assert.equal((await readFile(join(output, "READY"))).length, 0); }
+  finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+test("evidence writers reject stale or redirected output paths", async () => {
+  const parent = await makeTestDirectory("redirect-"); const output = join(parent, "bundle");
+  try {
+    const request = { output, candidateSha: "d".repeat(40), stage: "image-preflight", errorCode: "IMAGE_UNAVAILABLE", schemaDirectory, assertReadyPrecondition: precondition, publication: testPublication() } as const;
+    await writeEnvironmentFailure(request);
+    await assert.rejects(writeEnvironmentFailure(request));
+    await assert.rejects(writeReadyEvidence(await readyRequest(output, parent)));
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+test("malformed analysis output has a distinct READY-last exit-40 envelope", async () => {
+  const parent = await makeTestDirectory("output-failure-"); const output = join(parent, "bundle");
+  try {
+    await writeFailureEvidence({ output, candidateSha: "e".repeat(40), category: "output-failure", exitCode: 40, stage: "artifact-parsing", errorCode: "MALFORMED_JSON", schemaDirectory, assertReadyPrecondition: precondition, publication: testPublication() });
+    const value = JSON.parse(await readFile(join(output, "output-failure.json"), "utf8")) as { category: unknown; exitCode: unknown };
+    assert.equal(value.category, "output-failure"); assert.equal(value.exitCode, 40); assert.equal((await readFile(join(output, "READY"))).length, 0);
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+test("analyzer runtime failures have a distinct READY-last exit-30 envelope", async () => {
+  const parent = await makeTestDirectory("tool-failure-"); const output = join(parent, "bundle");
+  try {
+    await writeFailureEvidence({ output, candidateSha: "e".repeat(40), category: "tool-failure", exitCode: 30, stage: "analysis-runtime", errorCode: "ANALYZER_RUNTIME_FAILED", schemaDirectory, assertReadyPrecondition: precondition, publication: testPublication() });
+    const value = JSON.parse(await readFile(join(output, "tool-failure.json"), "utf8")) as { category: unknown; exitCode: unknown };
+    assert.equal(value.category, "tool-failure"); assert.equal(value.exitCode, 30); assert.equal((await readFile(join(output, "READY"))).length, 0);
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
+test("publication capability is explicit and cannot fall back to a production stub", async () => {const parent=await makeTestDirectory("no-capability-");try{const request=await readyRequest(join(parent,"bundle"),parent);delete (request as Partial<typeof request>).publication;await assert.rejects(writeReadyEvidence(request as never),/publication capability/u);}finally{await rm(parent,{recursive:true,force:true});}});
+
+test("publication rejects a foreign staging entry injected after validation", async () => {
+  const parent = await makeTestDirectory("foreign-publication-"); const output = join(parent, "bundle");
+  try {
+    const request = await readyRequest(output, parent); const delegate = new ExclusiveDirectoryPublication();
+    const publication = {publishNoReplace: async (staging: string, destination: string, expected: readonly string[]) => {
+      await writeFile(join(staging, "foreign"), "injected", {mode: 0o600});
+      await delegate.publishNoReplace(staging, destination, expected);
+    }};
+    await assert.rejects(
+      writeReadyEvidence({...request, publication}),
+      /foreign entries/u,
+    );
+    await assert.rejects(readFile(output));
+  } finally {await rm(parent, {recursive: true, force: true});}
+});
+
+test("schema validation and final precondition both happen before READY", async () => {
+  const parent = await makeTestDirectory("schema-before-ready-");
+  try {
+    const invalidOutput = join(parent, "invalid");
+    await assert.rejects(writeReadyEvidence({ ...await readyRequest(invalidOutput, parent), candidateSha: "not-a-sha" }), /pattern mismatch/u);
+    await assert.rejects(readFile(join(invalidOutput, "READY")));
+    const dirtyOutput = join(parent, "dirty");
+    await assert.rejects(writeReadyEvidence({ ...await readyRequest(dirtyOutput, parent), assertReadyPrecondition: async () => {throw new Error("dirty");} }), /dirty/u);
+    await assert.rejects(readFile(join(dirtyOutput, "READY")));
+  } finally {await rm(parent, { recursive: true, force: true });}
+});

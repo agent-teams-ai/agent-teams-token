@@ -1,6 +1,6 @@
 # ADR template
 
-This template is for new four-digit ADRs. Existing accepted `ADR-NNN` records
+This template is for new four-digit ADRs. Existing accepted `ADR-NNNN` records
 retain their original IDs, filenames, headings, and bytes.
 
 ```markdown

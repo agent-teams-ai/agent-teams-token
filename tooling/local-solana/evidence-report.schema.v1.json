@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentteams.ai/schemas/local-solana-evidence-report.v1.json",
+  "title": "AGTMAI local Solana SPL fixture evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "identity", "programId", "decimals", "testAmountBaseUnits", "initialSupply", "intermediateSupply", "finalSupply", "freezeAuthority", "payerAddress", "mintAddress", "tokenAccountAddress", "ownerAddress", "mintAuthority", "formerFreezeAuthority", "genesisHash", "validatorVersion", "rpcListener", "snapshots", "transactions", "assertions"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": { "const": "READY" },
+    "identity": { "const": { "name": "Agent Teams AI", "symbol": "AGTMAI" } },
+    "programId": { "const": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
+    "decimals": { "const": 9 },
+    "testAmountBaseUnits": { "const": "1000000000000" },
+    "initialSupply": { "const": "0" },
+    "intermediateSupply": { "const": "1000000000000" },
+    "finalSupply": { "const": "0" },
+    "freezeAuthority": { "type": "null" },
+    "payerAddress": { "$ref": "#/$defs/address" },
+    "mintAddress": { "$ref": "#/$defs/address" },
+    "tokenAccountAddress": { "$ref": "#/$defs/address" },
+    "ownerAddress": { "$ref": "#/$defs/address" },
+    "mintAuthority": { "$ref": "#/$defs/address" },
+    "formerFreezeAuthority": { "$ref": "#/$defs/address" },
+    "genesisHash": { "$ref": "#/$defs/address" },
+    "validatorVersion": { "type": "string", "minLength": 1 },
+    "rpcListener": { "type": "object", "additionalProperties": false, "required": ["scope"], "properties": { "scope": { "enum": ["ipv4-loopback", "ipv6-loopback", "wildcard"] } } },
+    "snapshots": {
+      "type": "object", "additionalProperties": false,
+      "required": ["initialMint", "afterRevokeMint", "afterMint", "afterMintTokenAccount", "finalMint", "finalTokenAccount"],
+      "properties": {
+        "initialMint": { "$ref": "#/$defs/mintSnapshot" }, "afterRevokeMint": { "$ref": "#/$defs/mintSnapshot" }, "afterMint": { "$ref": "#/$defs/mintSnapshot" }, "finalMint": { "$ref": "#/$defs/mintSnapshot" },
+        "afterMintTokenAccount": { "$ref": "#/$defs/tokenSnapshot" }, "finalTokenAccount": { "$ref": "#/$defs/tokenSnapshot" }
+      }
+    },
+    "transactions": {
+      "type": "array", "minItems": 7, "maxItems": 7, "prefixItems": [
+        { "$ref": "#/$defs/createMint" }, { "$ref": "#/$defs/revokeFreeze" }, { "$ref": "#/$defs/createAta" }, { "$ref": "#/$defs/mint" }, { "$ref": "#/$defs/burn" }, { "$ref": "#/$defs/restoreFreezeAttempt" }, { "$ref": "#/$defs/freezeAttempt" }
+      ], "items": false
+    },
+    "assertions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["exactLoopbackRpc", "productionAuthorityProven", "ccip", "publicNetwork", "realAssetCostUsd", "mintAuthorityRevoked", "authorityKeyRetained", "remintPossibleUntilTeardown", "productionHardCapProven", "signedRestoreReachedTokenProgramAndFailed", "signedFreezeReachedTokenProgramAndFailed"],
+      "properties": {
+        "exactLoopbackRpc": { "const": true },
+        "productionAuthorityProven": { "const": false }, "ccip": { "const": false }, "publicNetwork": { "const": false }, "realAssetCostUsd": { "const": 0 },
+        "mintAuthorityRevoked": { "const": false }, "authorityKeyRetained": { "const": false }, "remintPossibleUntilTeardown": { "const": true }, "productionHardCapProven": { "const": false },
+        "signedRestoreReachedTokenProgramAndFailed": { "const": true }, "signedFreezeReachedTokenProgramAndFailed": { "const": true }
+      }
+    }
+  },
+  "$defs": {
+    "address": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "integer": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "nullableAddress": { "anyOf": [{ "$ref": "#/$defs/address" }, { "type": "null" }] },
+    "mintSnapshot": {
+      "type": "object", "additionalProperties": false, "required": ["address", "programOwner", "decimals", "supply", "mintAuthority", "freezeAuthority"],
+      "properties": { "address": { "$ref": "#/$defs/address" }, "programOwner": { "const": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, "decimals": { "const": 9 }, "supply": { "$ref": "#/$defs/integer" }, "mintAuthority": { "$ref": "#/$defs/nullableAddress" }, "freezeAuthority": { "$ref": "#/$defs/nullableAddress" } }
+    },
+    "tokenSnapshot": {
+      "type": "object", "additionalProperties": false, "required": ["address", "mint", "owner", "amount"],
+      "properties": { "address": { "$ref": "#/$defs/address" }, "mint": { "$ref": "#/$defs/address" }, "owner": { "$ref": "#/$defs/address" }, "amount": { "$ref": "#/$defs/integer" } }
+    },
+    "instruction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["programId", "programIdIndex", "instructionIndex", "innerInstructionIndex", "innerGroupIndex", "kind", "accounts", "accountIndices", "dataHex", "mint", "tokenAccount", "owner", "newAccount", "authority", "newAuthority", "authorityType", "amountBaseUnits", "decimals"],
+      "properties": {
+        "programId": { "$ref": "#/$defs/address" }, "programIdIndex": { "type": "integer", "minimum": 0 }, "instructionIndex": { "type": "integer", "minimum": 0 }, "innerInstructionIndex": { "type": ["integer", "null"], "minimum": 0 }, "innerGroupIndex": { "type": ["integer", "null"], "minimum": 0 }, "kind": { "type": "string", "minLength": 1 },
+        "accounts": { "type": "array", "items": { "$ref": "#/$defs/address" } }, "accountIndices": { "type": "array", "items": { "type": "integer", "minimum": 0 } }, "dataHex": { "type": "string", "pattern": "^(?:[0-9a-f]{2})*$" }, "mint": { "$ref": "#/$defs/nullableAddress" }, "tokenAccount": { "$ref": "#/$defs/nullableAddress" }, "owner": { "$ref": "#/$defs/nullableAddress" }, "newAccount": { "$ref": "#/$defs/nullableAddress" }, "authority": { "$ref": "#/$defs/nullableAddress" }, "newAuthority": { "$ref": "#/$defs/nullableAddress" },
+        "authorityType": { "type": ["string", "null"] }, "amountBaseUnits": { "anyOf": [{ "$ref": "#/$defs/integer" }, { "type": "null" }] }, "decimals": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "innerInstructionGroup": { "type": "object", "additionalProperties": false, "required": ["groupIndex", "outerInstructionIndex"], "properties": { "groupIndex": { "type": "integer", "minimum": 0 }, "outerInstructionIndex": { "type": "integer", "minimum": 0 } } },
+    "error": { "type": "object", "additionalProperties": false, "required": ["instructionIndex", "code"], "properties": { "instructionIndex": { "type": "integer", "minimum": 0 }, "code": { "type": "string", "minLength": 1 } } },
+    "transaction": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "signature", "slot", "confirmationStatus", "error", "signers", "accountKeys", "instructions", "innerInstructionGroups", "genesisHash"],
+      "properties": { "operation": { "type": "string" }, "signature": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,88}$" }, "slot": { "$ref": "#/$defs/integer" }, "confirmationStatus": { "const": "finalized" }, "error": { "anyOf": [{ "$ref": "#/$defs/error" }, { "type": "null" }] }, "signers": { "type": "array", "items": { "$ref": "#/$defs/address" } }, "accountKeys": { "type": "array", "items": { "$ref": "#/$defs/address" } }, "instructions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/instruction" } }, "innerInstructionGroups": { "type": "array", "items": { "$ref": "#/$defs/innerInstructionGroup" } }, "genesisHash": { "$ref": "#/$defs/address" } }
+    },
+    "createMint": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "createMint" } } }] },
+    "revokeFreeze": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "revokeFreeze" } } }] },
+    "createAta": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "createAta" } } }] },
+    "mint": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "mint" } } }] },
+    "burn": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "burn" } } }] },
+    "restoreFreezeAttempt": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "restoreFreezeAttempt" } } }] },
+    "freezeAttempt": { "allOf": [{ "$ref": "#/$defs/transaction" }, { "properties": { "operation": { "const": "freezeAttempt" } } }] }
+  }
+}

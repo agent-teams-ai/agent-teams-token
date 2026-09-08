@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.ai/schemas/unsigned-deployment-bundle.v3.json",
+  "title": "Unsigned local deployment bundle artifacts with native provenance",
+  "oneOf": [
+    { "$ref": "#/$defs/plan" },
+    { "$ref": "#/$defs/quote" },
+    { "$ref": "#/$defs/nativeNoReplaceEvidence" },
+    { "$ref": "#/$defs/ready" }
+  ],
+  "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "maxLength": 78,
+      "$comment": "V2 readers MUST additionally reject values greater than 2^256-1."
+    },
+    "hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "planId", "identity", "broadcastAllowed", "testOnly", "productionApproved", "mainnetAllowed"],
+      "properties": { "schemaVersion": { "const": 2 }, "kind": { "const": "deployment-plan" }, "planId": { "$ref": "#/$defs/hash" }, "identity": { "$ref": "#/$defs/identity" }, "broadcastAllowed": { "const": false }, "testOnly": { "const": true }, "productionApproved": { "const": false }, "mainnetAllowed": { "const": false } }
+    },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contractFqn", "buildProfile", "sourceDependencyClosure", "rawBuildInfoSha256", "canonicalBuildInfoSha256", "compilerInputSha256", "artifactSha256", "abiSha256", "fixtureSha256", "fixtureReadySha256", "buildInfoSolcVersion", "compilerSettings", "creationBytecodeHash", "constructorAbiBytes", "constructorAbiHash", "constructorArguments", "constructorArgumentsHash", "creationInput", "creationInputHash", "chainId", "from", "value", "capPolicy", "broadcastAllowed"],
+      "properties": {
+        "contractFqn": { "type": "string", "minLength": 1 }, "buildProfile": { "type": "string", "minLength": 1 }, "sourceDependencyClosure": { "type": "object", "additionalProperties": { "$ref": "#/$defs/hash" } },
+        "rawBuildInfoSha256": { "$ref": "#/$defs/hash" }, "canonicalBuildInfoSha256": { "$ref": "#/$defs/hash" }, "compilerInputSha256": { "$ref": "#/$defs/hash" }, "artifactSha256": { "$ref": "#/$defs/hash" }, "abiSha256": { "$ref": "#/$defs/hash" }, "fixtureSha256": { "$ref": "#/$defs/hash" }, "fixtureReadySha256": { "$ref": "#/$defs/hash" },
+        "buildInfoSolcVersion": { "const": "0.8.36" }, "compilerSettings": { "type": "object" }, "creationBytecodeHash": { "$ref": "#/$defs/hash" },
+        "constructorAbiBytes": { "type": "string", "pattern": "^0x([0-9a-f]{2})*$" }, "constructorAbiHash": { "$ref": "#/$defs/hash" }, "constructorArguments": { "type": "string", "pattern": "^0x([0-9a-f]{2})*$" }, "constructorArgumentsHash": { "$ref": "#/$defs/hash" }, "creationInput": { "type": "string", "pattern": "^0x([0-9a-f]{2})*$" }, "creationInputHash": { "$ref": "#/$defs/hash" },
+        "chainId": { "const": "31337" }, "from": { "type": "string", "pattern": "^0x[0-9a-f]{40}$" }, "value": { "const": "0" }, "capPolicy": { "type": "object", "additionalProperties": false, "required": ["maximumWorstCaseWei", "testOnly"], "properties": { "maximumWorstCaseWei": { "$ref": "#/$defs/decimal" }, "testOnly": { "const": true } } }, "broadcastAllowed": { "const": false }
+      }
+    },
+    "quote": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "planId", "creationInputHash", "observation", "bufferBps", "gasLimit", "effectiveFeePerGas", "estimatedWei", "worstCaseWei", "expiresAt"],
+      "properties": { "schemaVersion": { "const": 2 }, "kind": { "const": "fee-quote" }, "planId": { "$ref": "#/$defs/hash" }, "creationInputHash": { "$ref": "#/$defs/hash" }, "observation": { "$ref": "#/$defs/observation" }, "bufferBps": { "$ref": "#/$defs/decimal" }, "gasLimit": { "$ref": "#/$defs/decimal" }, "effectiveFeePerGas": { "$ref": "#/$defs/decimal" }, "estimatedWei": { "$ref": "#/$defs/decimal" }, "worstCaseWei": { "$ref": "#/$defs/decimal" }, "expiresAt": { "$ref": "#/$defs/decimal" } }
+    },
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["chainId", "blockNumber", "blockHash", "blockTimestamp", "currentHeadNumber", "currentHeadHash", "feeHistoryNewestBlock", "senderNonce", "expectedCreateAddress", "gasEstimate", "blockGasLimit", "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "observedAt"],
+      "properties": { "chainId": { "$ref": "#/$defs/decimal" }, "blockNumber": { "$ref": "#/$defs/decimal" }, "blockHash": { "$ref": "#/$defs/hash" }, "blockTimestamp": { "$ref": "#/$defs/decimal" }, "currentHeadNumber": { "$ref": "#/$defs/decimal" }, "currentHeadHash": { "$ref": "#/$defs/hash" }, "feeHistoryNewestBlock": { "$ref": "#/$defs/decimal" }, "senderNonce": { "$ref": "#/$defs/decimal" }, "expectedCreateAddress": { "type": "string", "pattern": "^0x[0-9a-f]{40}$" }, "gasEstimate": { "$ref": "#/$defs/decimal" }, "blockGasLimit": { "$ref": "#/$defs/decimal" }, "baseFeePerGas": { "$ref": "#/$defs/decimal" }, "maxPriorityFeePerGas": { "$ref": "#/$defs/decimal" }, "maxFeePerGas": { "$ref": "#/$defs/decimal" }, "observedAt": { "$ref": "#/$defs/decimal" } }
+    },
+    "nativeNoReplaceEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "platform", "sourcePath", "sourceSha256", "compileProfile", "compilerExecution", "compilerPath", "compilerSha256", "executableSha256", "approvalSha256"],
+      "properties": { "schemaVersion": { "const": 1 }, "kind": { "const": "native-no-replace-evidence" }, "platform": { "enum": ["darwin-arm64", "linux-x64"] }, "sourcePath": { "const": "tooling/deployment-plan/native/no-replace.c" }, "sourceSha256": { "$ref": "#/$defs/hash" }, "compileProfile": { "const": "c11-o2-werror-stdin-v1" }, "compilerExecution": { "enum": ["snapshot-fd", "verified-path"] }, "compilerPath": { "const": "/usr/bin/cc" }, "compilerSha256": { "$ref": "#/$defs/hash" }, "executableSha256": { "$ref": "#/$defs/hash" }, "approvalSha256": { "$ref": "#/$defs/hash" } }
+    },
+    "ready": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "planSha256", "quoteSha256", "nativeNoReplaceEvidenceSha256", "planId", "creationInputHash"],
+      "properties": { "schemaVersion": { "const": 3 }, "planSha256": { "$ref": "#/$defs/hash" }, "quoteSha256": { "$ref": "#/$defs/hash" }, "nativeNoReplaceEvidenceSha256": { "$ref": "#/$defs/hash" }, "planId": { "$ref": "#/$defs/hash" }, "creationInputHash": { "$ref": "#/$defs/hash" } }
+    }
+  }
+}

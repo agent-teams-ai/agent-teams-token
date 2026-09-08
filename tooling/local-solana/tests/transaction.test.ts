@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { base58Decode, base58Encode, signedFreezeAccountTransaction, signedRestoreFreezeTransaction } from "../src/adapters/transaction.ts";
+import type { RpcPort } from "../src/application/ports.ts";
+
+test("base58 codec preserves leading zero bytes", () => {
+  const bytes = Uint8Array.from([0, 0, 1, 2, 3, 254, 255]); assert.deepEqual(base58Decode(base58Encode(bytes)), bytes);
+});
+
+test("negative authority transactions contain exact classic SPL instruction bytes and two signatures", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-tx-test-"));
+  try {
+    const payer = Uint8Array.from({ length: 64 }, (_v, i) => i + 1); const authority = Uint8Array.from({ length: 64 }, (_v, i) => 200 - i);
+    const payerPath = join(directory, "payer.json"); const authorityPath = join(directory, "freeze.json");
+    await writeFile(payerPath, JSON.stringify([...payer])); await writeFile(authorityPath, JSON.stringify([...authority]));
+    const rpc = { latestBlockhash: async () => base58Encode(new Uint8Array(32)) } as unknown as RpcPort;
+    const mint = base58Encode(payer.slice(32)); const freeze = base58Encode(authority.slice(32));
+    const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: new AbortController().signal };
+    const restoreBytes = await signedRestoreFreezeTransaction({ ...context, mint, newAuthority: freeze });
+    const freezeBytes = await signedFreezeAccountTransaction({ ...context, account: mint, mint });
+    assert.equal(messageFacts(restoreBytes).instructionDataHex, "060101a8a7a6a5a4a3a2a1a09f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89");
+    assert.equal(messageFacts(freezeBytes).instructionDataHex, "0a");
+    for (const bytes of [restoreBytes, freezeBytes]) {
+      assert.equal(bytes[0], 2); assert.equal(bytes.length > 200, true); assert.notDeepEqual(bytes.slice(1, 65), new Uint8Array(64)); assert.notDeepEqual(bytes.slice(65, 129), new Uint8Array(64));
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("message compilation deduplicates a mint that is also the freeze authority", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-tx-dedup-test-"));
+  try {
+    const payer = Uint8Array.from({ length: 64 }, (_value, index) => index + 1);
+    const authority = Uint8Array.from({ length: 64 }, (_value, index) => 200 - index);
+    const payerPath = join(directory, "payer.json"); const authorityPath = join(directory, "freeze.json");
+    await writeFile(payerPath, JSON.stringify([...payer])); await writeFile(authorityPath, JSON.stringify([...authority]));
+    const rpc = { latestBlockhash: async () => base58Encode(new Uint8Array(32)) } as unknown as RpcPort;
+    const mintAndAuthority = base58Encode(authority.slice(32));
+    const tokenAccount = base58Encode(Uint8Array.from({ length: 32 }, (_value, index) => 80 + index));
+    const context = { rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: new AbortController().signal };
+
+    const restore = messageFacts(await signedRestoreFreezeTransaction({ ...context, mint: mintAndAuthority, newAuthority: mintAndAuthority }));
+    assert.deepEqual(restore.header, [2, 0, 1]);
+    assert.equal(restore.accountCount, 3);
+    assert.deepEqual(restore.instructionAccounts, [1, 1]);
+
+    const freeze = messageFacts(await signedFreezeAccountTransaction({ ...context, account: tokenAccount, mint: mintAndAuthority }));
+    assert.deepEqual(freeze.header, [2, 1, 1]);
+    assert.equal(freeze.accountCount, 4);
+    assert.deepEqual(freeze.instructionAccounts, [2, 1, 1]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("abort returned with the blockhash prevents signing and transaction bytes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-tx-abort-test-"));
+  try {
+    const key = Uint8Array.from({ length: 64 }, (_value, index) => index + 1); const payerPath = join(directory, "payer.json"); const authorityPath = join(directory, "authority.json"); await writeFile(payerPath, JSON.stringify([...key])); await writeFile(authorityPath, JSON.stringify([...key]));
+    const controller = new AbortController(); let blockhashCalls = 0; const rpc = { async latestBlockhash() { blockhashCalls += 1; controller.abort(); return base58Encode(new Uint8Array(32)); } } as unknown as RpcPort;
+    const mint = base58Encode(key.slice(32)); await assert.rejects(signedRestoreFreezeTransaction({ rpc, rpcUrl: "http://127.0.0.1:8899/", payerPath, authorityPath, signal: controller.signal, mint, newAuthority: mint }), /SOLANA_COMMAND_ABORTED/u); assert.equal(blockhashCalls, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+function messageFacts(transaction: Uint8Array): {
+  readonly header: readonly number[];
+  readonly accountCount: number;
+  readonly instructionAccounts: readonly number[];
+  readonly instructionDataHex: string;
+} {
+  const signatureCount = transaction[0]!;
+  const messageOffset = 1 + signatureCount * 64;
+  const header = Array.from(transaction.slice(messageOffset, messageOffset + 3));
+  const accountCount = transaction[messageOffset + 3]!;
+  const instructionOffset = messageOffset + 4 + accountCount * 32 + 32;
+  assert.equal(transaction[instructionOffset], 1);
+  const accountIndexCount = transaction[instructionOffset + 2]!;
+  const dataLengthOffset = instructionOffset + 3 + accountIndexCount;
+  const dataLength = transaction[dataLengthOffset]!;
+  return {
+    header,
+    accountCount,
+    instructionAccounts: Array.from(transaction.slice(instructionOffset + 3, instructionOffset + 3 + accountIndexCount)),
+    instructionDataHex: Buffer.from(transaction.slice(dataLengthOffset + 1, dataLengthOffset + 1 + dataLength)).toString("hex"),
+  };
+}

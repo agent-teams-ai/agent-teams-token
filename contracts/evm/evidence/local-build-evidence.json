@@ -1,0 +1,32 @@
+{
+  "dateUtc": "2026-08-28",
+  "compiler": "solc 0.8.36+commit.8a079791.Linux.g++",
+  "evmVersion": "paris",
+  "optimizer": {
+    "enabled": true,
+    "runs": 200
+  },
+  "openzeppelinContractsSelectedVersion": "5.7.0",
+  "openzeppelinContractsSourceCommit": "cab19933c33c2ad1d4c7a84864a3601dddfd16f3",
+  "forge": "1.8.0",
+  "artifact": {
+    "path": "out/AGTMAIToken.sol/AGTMAIToken.json",
+    "sha256": "0eab21f9aa412c52aff557eeaf8a802306b57e21067c02748c9b6f9f7a87cb7c"
+  },
+  "buildInfoPolicy": "Each local run content-binds its exact build-info bytes and digest. Raw build-info file names and bytes are not claimed to be reproducible across clean Forge invocations.",
+  "sizesBytes": {
+    "initcode": 4284,
+    "runtime": 1945,
+    "initcodeLimit": 49152,
+    "runtimeLimit": 24576
+  },
+  "worstCase32AllocationDeployment": {
+    "gas": 1420877,
+    "localBlockGasLimit": 30000000,
+    "evidenceCommand": "forge test --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits -vvvv"
+  },
+  "notes": [
+    "The artifact path is a generated output and is intentionally ignored by Git; its digest records the reviewed clean Linux build.",
+    "The artifact hash is not a deployed-code hash; no deployment or public RPC was used."
+  ]
+}

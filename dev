@@ -1,21 +1,29 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-token_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-source "$token_repo_root/scripts/env.sh"
-
+token_dev_script=${BASH_SOURCE[0]}
+[[ "$token_dev_script" == */* ]] || token_dev_script="./$token_dev_script"
+token_repo_root=$(CDPATH='' cd -P -- "${token_dev_script%/*}" && pwd -P)
 token_command=${1:-help}
-shift || true
+if (($# > 0)); then
+  shift
+fi
 
+# Bootstrap recovery and inert help do not require a previously trusted install.
+# Doctor delegates to bootstrap so both offline verification and the diagnostic
+# execute through Node extracted from the checksum-pinned archive.
 case "$token_command" in
   bootstrap)
     exec "$token_repo_root/scripts/bootstrap.sh" "$@"
     ;;
   doctor)
-    exec node "$token_repo_root/scripts/doctor.mjs" "$@"
+    exec "$token_repo_root/scripts/bootstrap.sh" doctor "$@"
     ;;
   check)
-    exec pnpm check "$@"
+    exec "$token_repo_root/scripts/bootstrap.sh" run-pnpm check "$@"
+    ;;
+  solana)
+    exec "$token_repo_root/scripts/bootstrap.sh" run-solana "$@"
     ;;
   evm-up)
     exec docker compose -f "$token_repo_root/compose.yaml" up -d --wait anvil
@@ -23,24 +31,14 @@ case "$token_command" in
   evm-down)
     exec docker compose -f "$token_repo_root/compose.yaml" down
     ;;
-  solana)
-    mkdir -p "$token_repo_root/.local/solana-ledger"
-    exec solana-test-validator \
-      --reset \
-      --ledger "$token_repo_root/.local/solana-ledger" \
-      --rpc-port 8899 \
-      --faucet-port 9900 \
-      "$@"
-    ;;
   help|*)
     printf '%s\n' \
       'Usage: ./dev <command>' \
-      '  bootstrap  Install pinned project-local macOS arm64 tools' \
-      '  doctor     Verify toolchain pins and public-network guard' \
+      '  bootstrap  Fetch/install pinned darwin-arm64 or linux-x64 tools' \
+      '  doctor     Verify versions, checksums, platform and network guard' \
       '  check      Run lint, typecheck, and unit tests' \
       '  evm-up     Start the local Anvil container' \
       '  evm-down   Stop local containers' \
-      '  solana     Start native solana-test-validator'
+      '  solana     Run the pinned lease-aware local fixture'
     ;;
 esac
-

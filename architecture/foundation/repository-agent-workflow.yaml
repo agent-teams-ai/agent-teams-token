@@ -1,0 +1,77 @@
+schemaVersion: 1
+instructions:
+  canonical: AGENTS.md
+  claude: CLAUDE.md
+  gemini: GEMINI.md
+  copilot: .github/copilot-instructions.md
+scripts:
+  changed: check:changed
+  fast: check:fast
+  full: check
+changedChecks:
+  - id: lint
+    script: lint:files
+    extensions: [.js, .jsx, .mjs, .cjs, .ts, .tsx, .mts, .cts]
+  - id: typecheck
+    script: typecheck
+    extensions: [.ts, .tsx, .mts, .cts]
+    passPaths: false
+fullScanPaths:
+  - docs
+  - AGENTS.md
+  - README.md
+  - .agents/skills/docs-authoring
+  - .github/workflows
+  - .oxlintrc.json
+  - architecture/foundation
+  - architecture/rollback
+  - dev
+  - foundation.config.yaml
+  - package.json
+  - packages
+  - pnpm-lock.yaml
+  - pnpm-workspace.yaml
+  - scripts/assert-complete-history.sh
+  - scripts/bootstrap.sh
+  - scripts/doctor.mjs
+  - scripts/env.sh
+  - scripts/rollback
+  - scripts/tests/root-entrypoint.test.mjs
+  - scripts/tests/rollback-command-finalization.test.mjs
+  - scripts/tests/rollback-consumer-finalization.test.mjs
+  - scripts/tests/rollback-descriptor-acquisition.test.mjs
+  - scripts/tests/rollback-descriptor-teardown.test.mjs
+  - scripts/tests/rollback-directory-open.test.mjs
+  - scripts/tests/rollback-ci-history.test.mjs
+  - scripts/tests/rollback-cleanup-safety.test.mjs
+  - scripts/tests/rollback-evidence-custody.test.mjs
+  - scripts/tests/rollback-evidence.test.mjs
+  - scripts/tests/rollback-production-finalization.test.mjs
+  - scripts/tests/rollback-proof-construction.test.mjs
+  - scripts/tests/rollback-proof.test.mjs
+  - scripts/tests/rollback-routing.test.mjs
+  - scripts/tests/rollback-runtime-finalization.test.mjs
+  - scripts/tests/rollback-runtime-integration.test.mjs
+  - scripts/tests/rollback-temporary-finalization.test.mjs
+  - scripts/tests/toolchain-archive-finalization.test.mjs
+  - scripts/tests/toolchain-authority.test.mjs
+  - scripts/tests/toolchain-fixture.mjs
+  - scripts/tests/toolchain-hardening.test.mjs
+  - scripts/tests/toolchain-publication-transaction.test.mjs
+  - scripts/tests/toolchain.test.mjs
+  - scripts/tests/workflow.test.mjs
+  - scripts/toolchain-archive.mjs
+  - scripts/toolchain-cleanup.mjs
+  - scripts/toolchain-environment.mjs
+  - scripts/execution-environment/toolchain-environment.mjs
+  - scripts/toolchain-installation.mjs
+  - scripts/toolchain-policy.mjs
+  - scripts/toolchain-provenance.mjs
+  - scripts/toolchain-publication.mjs
+  - scripts/toolchain.mjs
+  - tooling/deployment-plan
+  - tooling/local-evm
+  - tooling/local-solana
+  - tooling/security/slither
+  - tooling/toolchain.lock.json
+  - tsconfig.json

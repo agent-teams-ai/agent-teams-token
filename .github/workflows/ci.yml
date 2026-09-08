@@ -10,23 +10,355 @@ permissions:
   contents: read
 
 concurrency:
-  group: token-ci-${{ github.workflow }}-${{ github.ref }}
+  group: genesis-core-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
+  foundation-and-typescript:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      SLITHER_REPOSITORY_ROOT: ${{ github.workspace }}
+      SLITHER_CANDIDATE_SHA: ${{ github.sha }}
+      SLITHER_DOCKER_PATH: /usr/bin/docker
+      SLITHER_FORGE_PATH: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge
+      SLITHER_SOLC_PATH: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
+    steps:
+      - name: Checkout complete history at exact head
+        env: &rollback-runner-environment
+          AGTMAI_ROLLBACK_TMPDIR: ${{ runner.temp }}
+          AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY: ${{ runner.temp }}/rollback-proof-${{ github.sha }}
+          SLITHER_EVIDENCE_DIRECTORY: ${{ runner.temp }}/rollback-proof-${{ github.sha }}
+        id: checkout-complete-history-at-exact-head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert complete history and exact clean checkout
+        env: *rollback-runner-environment
+        id: assert-complete-history-and-exact-clean-head-before
+        shell: bash
+        run: |
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Record workflow-dispatch exact-SHA evidence
+        env: *rollback-runner-environment
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          printf '%s\n' \
+            "event=$GITHUB_EVENT_NAME" \
+            "repository=$GITHUB_REPOSITORY" \
+            "workflow=$GITHUB_WORKFLOW" \
+            "run_id=$GITHUB_RUN_ID" \
+            "run_attempt=$GITHUB_RUN_ATTEMPT" \
+            "ref=$GITHUB_REF" \
+            "sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Fetch pinned Core and Solana prerequisites
+        env: *rollback-runner-environment
+        id: fetch-pinned-core-and-solana-prerequisites
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap fetch --scope=solana
+      - name: Install and verify pinned prerequisites offline
+        env: *rollback-runner-environment
+        id: offline-install-and-verify-pinned-prerequisites
+        shell: bash
+        run: |
+          ./dev bootstrap install --offline
+          ./dev bootstrap install --offline --scope=solana
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev bootstrap verify --offline --scope=solana
+          ./dev doctor --scope=core
+          test "$(command -v pnpm)" = "$PWD/.tools/bin/pnpm"
+          test "$(pnpm --version)" = "11.24.0"
+      - name: Install frozen workspace
+        env: *rollback-runner-environment
+        id: install-frozen-source-workspace-and-populate-store
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Preload pinned Slither image
+        env: *rollback-runner-environment
+        id: preload-pinned-slither-image
+        shell: bash
+        run: source scripts/env.sh && pnpm security:solidity:prepare-image
+      - name: Validate rollback environment and caches without pulling
+        env: *rollback-runner-environment
+        id: non-pulling-rollback-environment-cache-preflight
+        shell: bash
+        run: source scripts/env.sh && pnpm rollback:preflight --expected-sha="$GITHUB_SHA"
+      - name: Final repository check
+        env: *rollback-runner-environment
+        id: run-root-check-with-exact-rollback-proof
+        shell: bash
+        run: source scripts/env.sh && pnpm check:linux
+      - name: Reassert complete history and exact clean checkout
+        env: *rollback-runner-environment
+        id: assert-complete-history-and-exact-clean-head-after
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Validate sealed rollback proof and revalidate candidate inventory
+        env: *rollback-runner-environment
+        id: validate-rollback-proof
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          source scripts/env.sh
+          pnpm rollback:evidence:validate \
+            --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" \
+            --expected-sha="$GITHUB_SHA"
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Upload validated rollback proof artifact
+        env: *rollback-runner-environment
+        id: upload-rollback-proof-evidence
+        if: ${{ success() && steps.validate-rollback-proof.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rollback-proof-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rollback-proof-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+        continue-on-error: false
+      - name: Upload rollback failure diagnostics
+        env: *rollback-runner-environment
+        id: upload-rollback-failure-diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rollback-diagnostics-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/rollback-proof-${{ github.sha }}/diagnostics.json
+            ${{ runner.temp }}/rollback-proof-${{ github.sha }}/commands
+            ${{ runner.temp }}/rollback-proof-${{ github.sha }}/survivors
+          if-no-files-found: warn
+          retention-days: 14
+        continue-on-error: false
+
+  solidity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm rebuild
-      - run: pnpm check
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch pinned Linux toolchain
+        shell: bash
+        run: ./dev bootstrap fetch
+      - name: Install and verify without network fallback
+        shell: bash
+        run: |
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev doctor --scope=core
+      - name: Format, build, unit, fuzz, invariants and gas-size
+        working-directory: contracts/evm
+        shell: bash
+        run: |
+          source ../../scripts/env.sh
+          token_solc="$PWD/../../.tools/solc-v0.8.36-linux-x64/solc"
+          forge fmt --check
+          forge build --offline --no-auto-detect --sizes --use "$token_solc"
+          FOUNDRY_PROFILE=ci forge test --offline --no-auto-detect --no-match-path 'test/invariant/**' --use "$token_solc"
+          FOUNDRY_PROFILE=ci forge test --offline --no-auto-detect --match-path 'test/invariant/**' --use "$token_solc"
+          forge test --offline --no-auto-detect --gas-report --match-test testWorstCase32AllocationsFitsLocalBlockAndCodeLimits --use "$token_solc" -vvvv
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
 
+  local-evm-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [foundation-and-typescript, solidity]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch, install and verify pinned Linux toolchain
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev doctor --scope=core
+      - name: Install frozen workspace
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Run W3 isolated Anvil deploy and independent verifier seam
+        shell: bash
+        run: |
+          source scripts/env.sh
+          pnpm test:local-evm
+          pnpm test:local-evm:integration
+          pnpm genesis:verify:local
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+
+  local-solana-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch checksum-pinned Solana fixture toolchain
+        shell: bash
+        run: ./dev bootstrap fetch --scope=solana
+      - name: Install and verify without network fallback
+        shell: bash
+        run: |
+          ./dev bootstrap install --offline --scope=solana
+          source scripts/env.sh
+          ./dev bootstrap verify --offline --scope=solana
+      - name: Install frozen workspace
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Run isolated SPL lifecycle and independent verifier
+        shell: bash
+        env:
+          SOLANA_EVIDENCE_DIRECTORY: /tmp/agtmai-solana-evidence-${{ github.sha }}
+          AGTMAI_SOLANA_REAL_TESTS_REQUIRED: "1"
+        run: |
+          source scripts/env.sh
+          pnpm test:local-solana
+          pnpm solana:fixture:local -- --output "$SOLANA_EVIDENCE_DIRECTORY"
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+
+  deployment-plan-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: [foundation-and-typescript, solidity]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch, install and verify pinned Linux toolchain
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev doctor --scope=core
+      - name: Install frozen workspace
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Prove unsigned deployment plan against loopback Anvil
+        shell: bash
+        env:
+          AGTMAI_ANVIL_BINARY: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/anvil
+          AGTMAI_FORGE_BINARY: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge
+          AGTMAI_SOLC_BINARY: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
+          AGTMAI_CC_BINARY: /usr/bin/cc
+        run: source scripts/env.sh && pnpm test:deployment-plan
+      - name: Assert gates kept the exact checkout clean
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+
+  solidity-security:
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: [solidity]
+    permissions:
+      contents: read
+    env:
+      SLITHER_REPOSITORY_ROOT: ${{ github.workspace }}
+      SLITHER_CANDIDATE_SHA: ${{ github.sha }}
+      SLITHER_EVIDENCE_DIRECTORY: /tmp/slither-evidence-${{ github.sha }}
+      SLITHER_FORGE_PATH: ${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge
+      SLITHER_SOLC_PATH: ${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc
+      SLITHER_DOCKER_PATH: /usr/bin/docker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Assert solidity prerequisite completed successfully
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
+      - name: Assert exact clean checkout
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fetch, install and verify pinned Linux toolchain
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          source scripts/env.sh
+          ./dev bootstrap verify --offline
+          ./dev doctor --scope=core
+      - name: Install frozen workspace
+        if: ${{ needs.solidity.result == 'success' }}
+        shell: bash
+        run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Pull exact toolbox platform manifest
+        if: ${{ needs.solidity.result == 'success' }}
+        shell: bash
+        run: source scripts/env.sh && pnpm security:solidity:prepare-image
+      - name: Run exact Slither policy gate
+        if: ${{ needs.solidity.result == 'success' }}
+        shell: bash
+        run: source scripts/env.sh && pnpm security:solidity
+      - name: Assert gate kept the exact checkout clean
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Fail closed on solidity prerequisite result
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          test "${{ needs.solidity.result }}" = success || { printf "SOLIDITY_PREREQUISITE_FAILED result=${{ needs.solidity.result }}\n" >&2; exit 1; }
+      - name: Create minimal environment-failure evidence
+        if: ${{ always() }}
+        shell: bash
+        env:
+          SLITHER_FAILURE_STAGE: ci-prerequisite
+          SLITHER_FAILURE_CODE: ${{ needs.solidity.result != 'success' && 'CI_PREREQUISITE_FAILED' || 'UNEXPECTED_ENVIRONMENT_FAILURE' }}
+        run: |
+          if ! test -f "$SLITHER_EVIDENCE_DIRECTORY/READY"; then
+            source scripts/env.sh
+            .tools/bin/node tooling/security/slither/src/composition/record-environment-failure.ts
+          fi
+      - name: Validate finalized Slither evidence
+        id: validate-slither-evidence
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          source scripts/env.sh
+          .tools/bin/node tooling/security/slither/src/composition/validate-evidence.ts
+      - name: Upload immutable Slither evidence
+        if: ${{ always() && steps.validate-slither-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: slither-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/slither-evidence-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14

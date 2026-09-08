@@ -1,0 +1,299 @@
+schemaVersion: 1
+workspace:
+  kind: pnpm
+  manifest: pnpm-workspace.yaml
+governedRoots:
+  - packages/domain/src
+  - packages/contexts/supply/src
+  - tooling/local-solana/src
+  - tooling/deployment-plan/src
+  - tooling/security/slither/src
+  - scripts/execution-environment
+boundaries:
+  - id: tooling.execution-environment
+    roots:
+      - scripts/execution-environment
+    entrypoints:
+      - scripts/execution-environment/toolchain-environment.mjs
+    allow:
+      boundaries: []
+      packages: []
+      builtins:
+        - node:child_process
+        - node:fs
+        - node:path
+      runtimeReferences: []
+  - id: token.domain
+    roots:
+      - packages/domain/src
+    entrypoints:
+      - packages/domain/src/supply.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: supply.genesis-manifest.domain
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/domain
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/domain/model.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: supply.genesis-manifest.application
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/application
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/application/compiler.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/canonical.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: supply.genesis-manifest.adapters
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/adapters
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/strict-source.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/abi.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/artifact-store.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/digest.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.application
+        - supply.genesis-manifest.domain
+      packages:
+        - "@noble/hashes"
+        - yaml
+      builtins:
+        - node:crypto
+        - node:fs/promises
+        - node:path
+      runtimeReferences: []
+  - id: supply.genesis-manifest.composition
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/composition
+      - packages/contexts/supply/src/features/genesis-manifest/index.ts
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/index.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.application
+        - supply.genesis-manifest.adapters
+        - supply.genesis-manifest.domain
+      packages: []
+      builtins:
+        - node:fs/promises
+        - node:path
+      runtimeReferences: []
+  - id: tooling.local-solana.domain
+    roots:
+      - tooling/local-solana/src/domain
+    entrypoints:
+      - tooling/local-solana/src/domain/model.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.local-solana.application
+    roots:
+      - tooling/local-solana/src/application
+    entrypoints:
+      - tooling/local-solana/src/application/evidence.ts
+      - tooling/local-solana/src/application/ports.ts
+      - tooling/local-solana/src/application/runner.ts
+      - tooling/local-solana/src/application/verifier.ts
+    allow:
+      boundaries:
+        - tooling.local-solana.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.local-solana.adapters
+    roots:
+      - tooling/local-solana/src/adapters
+    entrypoints:
+      - tooling/local-solana/src/adapters/cli.ts
+      - tooling/local-solana/src/adapters/filesystem.ts
+      - tooling/local-solana/src/adapters/ports.ts
+      - tooling/local-solana/src/adapters/process-identity.ts
+      - tooling/local-solana/src/adapters/process.ts
+      - tooling/local-solana/src/adapters/rpc-parsers.ts
+      - tooling/local-solana/src/adapters/rpc.ts
+      - tooling/local-solana/src/adapters/toolchain.ts
+      - tooling/local-solana/src/adapters/transaction.ts
+    allow:
+      boundaries:
+        - tooling.local-solana.application
+        - tooling.local-solana.domain
+      packages: []
+      builtins:
+        - node:child_process
+        - node:crypto
+        - node:fs
+        - node:fs/promises
+        - node:http
+        - node:net
+        - node:os
+        - node:path
+        - node:timers/promises
+        - node:url
+      runtimeReferences: []
+  - id: tooling.local-solana.composition
+    roots:
+      - tooling/local-solana/src/composition
+    entrypoints:
+      - tooling/local-solana/src/composition/index.ts
+    allow:
+      boundaries:
+        - tooling.local-solana.adapters
+        - tooling.local-solana.application
+        - tooling.local-solana.domain
+      packages: []
+      builtins:
+        - node:path
+        - node:url
+      runtimeReferences: []
+  - id: tooling.deployment-plan.domain
+    roots:
+      - tooling/deployment-plan/src/domain
+    entrypoints:
+      - tooling/deployment-plan/src/domain/identity.ts
+      - tooling/deployment-plan/src/domain/model.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins:
+        - node:crypto
+      runtimeReferences: []
+  - id: tooling.deployment-plan.application
+    roots:
+      - tooling/deployment-plan/src/application
+    entrypoints:
+      - tooling/deployment-plan/src/application/builder.ts
+      - tooling/deployment-plan/src/application/ports.ts
+      - tooling/deployment-plan/src/application/verifier.ts
+    allow:
+      boundaries:
+        - tooling.deployment-plan.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.deployment-plan.adapters
+    roots:
+      - tooling/deployment-plan/src/adapters
+    entrypoints:
+      - tooling/deployment-plan/src/adapters/artifact.ts
+      - tooling/deployment-plan/src/adapters/native-no-replace.ts
+      - tooling/deployment-plan/src/adapters/rpc.ts
+      - tooling/deployment-plan/src/adapters/safe-output.ts
+      - tooling/deployment-plan/src/adapters/strict-json.ts
+    allow:
+      boundaries:
+        - tooling.deployment-plan.application
+        - tooling.deployment-plan.domain
+      packages: []
+      builtins:
+        - node:child_process
+        - node:crypto
+        - node:fs
+        - node:fs/promises
+        - node:os
+        - node:path
+        - node:url
+      runtimeReferences: []
+  - id: tooling.deployment-plan.composition
+    roots:
+      - tooling/deployment-plan/src/composition
+    entrypoints:
+      - tooling/deployment-plan/src/composition/index.ts
+    allow:
+      boundaries:
+        - tooling.deployment-plan.adapters
+        - tooling.deployment-plan.application
+        - tooling.deployment-plan.domain
+      packages: []
+      builtins:
+        - node:fs
+        - node:fs/promises
+        - node:path
+      runtimeReferences: []
+  - id: tooling.slither.domain
+    roots:
+      - tooling/security/slither/src/domain
+    entrypoints:
+      - tooling/security/slither/src/domain/model.ts
+    allow:
+      boundaries: []
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.slither.application
+    roots:
+      - tooling/security/slither/src/application
+    entrypoints:
+      - tooling/security/slither/src/application/coverage.ts
+      - tooling/security/slither/src/application/failure.ts
+      - tooling/security/slither/src/application/gate.ts
+      - tooling/security/slither/src/application/policy.ts
+      - tooling/security/slither/src/application/ports.ts
+      - tooling/security/slither/src/application/triage.ts
+    allow:
+      boundaries:
+        - tooling.slither.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []
+  - id: tooling.slither.adapters
+    roots:
+      - tooling/security/slither/src/adapters
+    entrypoints:
+      - tooling/security/slither/src/adapters/container-contract.ts
+      - tooling/security/slither/src/adapters/evidence.ts
+      - tooling/security/slither/src/adapters/evidence-bundle.ts
+      - tooling/security/slither/src/adapters/executable.ts
+      - tooling/security/slither/src/adapters/fingerprint.ts
+      - tooling/security/slither/src/adapters/image-preflight.ts
+      - tooling/security/slither/src/adapters/json-schema.ts
+      - tooling/security/slither/src/adapters/process.ts
+      - tooling/security/slither/src/adapters/repository.ts
+      - tooling/security/slither/src/adapters/runner.ts
+      - tooling/security/slither/src/adapters/slither-json.ts
+      - tooling/security/slither/src/adapters/validated-environment.ts
+    allow:
+      boundaries:
+        - tooling.execution-environment
+        - tooling.slither.application
+        - tooling.slither.domain
+      packages: []
+      builtins:
+        - node:async_hooks
+        - node:child_process
+        - node:crypto
+        - node:fs
+        - node:fs/promises
+        - node:os
+        - node:path
+      runtimeReferences: []
+  - id: tooling.slither.composition
+    roots:
+      - tooling/security/slither/src/composition
+    entrypoints:
+      - tooling/security/slither/src/composition/cli.ts
+      - tooling/security/slither/src/composition/prepare-image.ts
+      - tooling/security/slither/src/composition/record-environment-failure.ts
+      - tooling/security/slither/src/composition/validate-evidence.ts
+    allow:
+      boundaries:
+        - tooling.slither.adapters
+        - tooling.slither.application
+        - tooling.slither.domain
+      packages: []
+      builtins: []
+      runtimeReferences: []

@@ -1,36 +1,288 @@
 {
-  "schemaVersion": 1,
-  "retrievedAt": "2026-08-27T15:00:00Z",
+  "schemaVersion": 2,
+  "retrievedAt": "2026-08-29T00:00:00Z",
+  "platforms": ["darwin-arm64", "linux-x64"],
+  "coreTools": ["node", "foundry", "solc"],
+  "nativeBuilds": {
+    "noReplace": {
+      "schemaVersion": 1,
+      "kind": "native-no-replace-build-policy",
+      "sourcePath": "tooling/deployment-plan/native/no-replace.c",
+      "sourceSha256": "0xf3bd0279809e011933eb6ed92d55c2c7ee3bb28dedb2294ea47fe49a25483f09",
+      "compileProfile": "c11-o2-werror-stdin-v1",
+      "platforms": {
+        "darwin-arm64": { "strategy": "verified-path", "tuples": [{ "compilerPath": "/usr/bin/cc", "compilerSha256": "0x7588ceab299393618d6f8861502ac0588d1594025f301d9a61a898215b5571d3", "executableSha256": "0x333d90f849c3116bf477678e9439abce54bcf2eed1c724652e70172f69ae584e" }] },
+        "linux-x64": { "strategy": "snapshot-fd", "tuples": [{ "compilerPath": "/usr/bin/x86_64-linux-gnu-gcc-13", "compilerSha256": "0x1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26", "executableSha256": "0x814aba8dfb8f176c252a3fc8f4aa8564723c0790613ee101a9a45fc41f629e9b" }] }
+      }
+    }
+  },
+  "fixtureTools": ["agave"],
+  "policy": {
+    "node": ">=24.20.0 <25",
+    "pnpm": ">=11.24.0 <12",
+    "offlineInstallMayUsePath": false,
+    "floatingVersionsAllowed": false,
+    "publicNetworksEnabledByDefault": false
+  },
   "tools": {
     "node": {
+      "scope": "genesis-core",
       "version": "24.20.0",
-      "darwinArm64Url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz",
-      "sha256": "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8"
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz",
+          "checksumSource": "https://nodejs.org/dist/v24.20.0/SHASUMS256.txt",
+          "sha256": "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8",
+          "archive": "tar.gz",
+          "archiveName": "node-v24.20.0-darwin-arm64.tar.gz",
+          "installDirectory": "node-v24.20.0-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["bin/node"],
+          "versionChecks": [{"name": "node", "path": "bin/node", "args": ["--version"], "pattern": "^v24\\.20\\.0$"}]
+        },
+        "linux-x64": {
+          "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz",
+          "checksumSource": "https://nodejs.org/dist/v24.20.0/SHASUMS256.txt",
+          "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+          "archive": "tar.xz",
+          "archiveName": "node-v24.20.0-linux-x64.tar.xz",
+          "installDirectory": "node-v24.20.0-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["bin/node"],
+          "expectedFileSha256": {
+            "bin/node": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7"
+          },
+          "versionChecks": [{"name": "node", "path": "bin/node", "args": ["--version"], "pattern": "^v24\\.20\\.0$"}]
+        }
+      }
     },
     "pnpm": {
-      "version": "11.24.0"
+      "scope": "genesis-core-package-manager",
+      "version": "11.24.0",
+      "source": "https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz",
+      "sha256": "d1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f",
+      "archive": "tar.gz",
+      "archiveName": "pnpm-11.24.0.tgz",
+      "installDirectory": "pnpm-11.24.0",
+      "installationAuthority": "pinned-archive-complete-tree-v1",
+      "expectedFiles": ["bin/pnpm.cjs", "package.json"],
+      "integrityAuthority": "checksum-pinned npm archive; every extracted entry, normalized mode, file digest and symlink target is re-derived before checksum-pinned Node or pnpm executes"
     },
     "typescript": {
-      "version": "7.0.2"
+      "scope": "genesis-core-package",
+      "version": "7.0.2",
+      "source": "https://registry.npmjs.org/typescript/-/typescript-7.0.2.tgz",
+      "integrityAuthority": "pnpm-lock.yaml"
+    },
+    "oxlint": {
+      "scope": "genesis-core-package",
+      "version": "1.80.0",
+      "source": "https://registry.npmjs.org/oxlint/-/oxlint-1.80.0.tgz",
+      "integrityAuthority": "pnpm-lock.yaml"
+    },
+    "engineeringFoundation": {
+      "scope": "genesis-core-package",
+      "version": "0.20.0",
+      "source": "https://registry.npmjs.org/@agent-teams/engineering-foundation/-/engineering-foundation-0.20.0.tgz",
+      "integrityAuthority": "pnpm-lock.yaml"
     },
     "foundry": {
-      "version": "1.7.1",
-      "darwinArm64Url": "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_darwin_arm64.tar.gz",
-      "sha256": "eacdc67718fac857cad9e19c7f6729dd80de731d09df81856391d093cfcab547"
+      "scope": "genesis-core",
+      "version": "1.8.0",
+      "commit": "61ae26af36320d4fa1020f7db53785885e29eeb5",
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.tar.gz",
+          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_darwin_arm64.sha256",
+          "sha256": "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0",
+          "archive": "tar.gz",
+          "archiveName": "foundry-v1.8.0-darwin-arm64.tar.gz",
+          "installDirectory": "foundry-v1.8.0-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["forge", "cast", "anvil", "chisel"],
+          "expectedFileSha256": {
+            "forge": "ba5ac7ccd77ad3cacb9eef3d18b8b0ab7c16de2c4050c613a71ce9b7874d75d3",
+            "cast": "0f9621d496f145c60f761fa4232bc3801251210fa12cd9b75095f4e2d4026611",
+            "anvil": "baf2a5cd277f478906217737565fae50ec6c5fa4ffb6f57025b8ec16efe88a9d",
+            "chisel": "7c9300c33b125e3d4a3aea5e5ac77ff357e603cbd53cba8670d479e71bf6e7d4"
+          },
+          "versionChecks": [
+            {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "cast", "path": "cast", "args": ["--version"], "pattern": "^cast Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "anvil", "path": "anvil", "args": ["--version"], "pattern": "^anvil Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "chisel", "path": "chisel", "args": ["--version"], "pattern": "^chisel Version: 1\\.8\\.0(?:$|\\n)"}
+          ]
+        },
+        "linux-x64": {
+          "url": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_linux_amd64.tar.gz",
+          "checksumSource": "https://github.com/foundry-rs/foundry/releases/download/v1.8.0/foundry_v1.8.0_linux_amd64.sha256",
+          "sha256": "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57",
+          "archive": "tar.gz",
+          "archiveName": "foundry-v1.8.0-linux-amd64.tar.gz",
+          "installDirectory": "foundry-v1.8.0-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["forge", "cast", "anvil", "chisel"],
+          "expectedFileSha256": {
+            "forge": "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f",
+            "cast": "b59c2db2c53abe0cae7fb8ef2c78c9603e0b9f5fc600e9cb6d5294a6628b9ff8",
+            "anvil": "3144d22206af1df0f109ce7045837e56b5b354e269b4ba8f979786ee90471020",
+            "chisel": "0346e7c7a58f9755560b1816aefe92f7740b6daaad46243301822c02b9e01381"
+          },
+          "versionChecks": [
+            {"name": "forge", "path": "forge", "args": ["--version"], "pattern": "^forge Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "cast", "path": "cast", "args": ["--version"], "pattern": "^cast Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "anvil", "path": "anvil", "args": ["--version"], "pattern": "^anvil Version: 1\\.8\\.0(?:$|\\n)"},
+            {"name": "chisel", "path": "chisel", "args": ["--version"], "pattern": "^chisel Version: 1\\.8\\.0(?:$|\\n)"}
+          ]
+        }
+      }
+    },
+    "solc": {
+      "scope": "genesis-core",
+      "version": "0.8.36",
+      "build": "8a079791",
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://binaries.soliditylang.org/macosx-amd64/solc-macosx-amd64-v0.8.36+commit.8a079791",
+          "checksumSource": "https://binaries.soliditylang.org/macosx-amd64/list.json",
+          "sha256": "d4abcf0b3e24b7948ddfd64c374d26c3214648717777790ecb936979054a129d",
+          "archive": "executable",
+          "archiveName": "solc-v0.8.36-darwin-amd64",
+          "installDirectory": "solc-v0.8.36-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["solc"],
+          "versionChecks": [{"name": "solc", "path": "solc", "args": ["--version"], "pattern": "Version: 0\\.8\\.36\\+commit\\.8a079791\\."}],
+          "requires": "Rosetta 2 because upstream publishes macosx-amd64"
+        },
+        "linux-x64": {
+          "url": "https://binaries.soliditylang.org/linux-amd64/solc-linux-amd64-v0.8.36+commit.8a079791",
+          "checksumSource": "https://binaries.soliditylang.org/linux-amd64/list.json",
+          "sha256": "c8d35afdddc3cd2743ee88b8f25e0fecd16e2bdd5f2120f37e52cd9cc45ae0e6",
+          "archive": "executable",
+          "archiveName": "solc-v0.8.36-linux-amd64",
+          "installDirectory": "solc-v0.8.36-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["solc"],
+          "versionChecks": [{"name": "solc", "path": "solc", "args": ["--version"], "pattern": "Version: 0\\.8\\.36\\+commit\\.8a079791\\."}]
+        }
+      }
     },
     "agave": {
+      "scope": "local-solana-fixture",
+      "enabledForCore": false,
       "version": "4.2.1",
-      "darwinArm64Url": "https://github.com/anza-xyz/agave/releases/download/v4.2.1/solana-release-aarch64-apple-darwin.tar.bz2",
-      "sha256": "9fb744917877acc68ae2421aef8d7f44f0d5eb16428e9d3db2c98b1ae61fd239"
+      "splTokenVersion": "5.6.1",
+      "sourceRelease": "https://github.com/anza-xyz/agave/releases/tag/v4.2.1",
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://github.com/anza-xyz/agave/releases/download/v4.2.1/solana-release-aarch64-apple-darwin.tar.bz2",
+          "checksumSource": "https://api.github.com/repos/anza-xyz/agave/releases/tags/v4.2.1",
+          "sha256": "9fb744917877acc68ae2421aef8d7f44f0d5eb16428e9d3db2c98b1ae61fd239",
+          "archive": "tar.bz2",
+          "archiveName": "solana-release-aarch64-apple-darwin.tar.bz2",
+          "installDirectory": "agave-v4.2.1-darwin-arm64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["bin/solana", "bin/solana-keygen", "bin/solana-test-validator", "bin/spl-token"],
+          "expectedFileSha256": {
+            "bin/solana": "77ac4b1d4a9f10c8f026217bb0943828358581aa26e65f66db53353a2edb04a2",
+            "bin/solana-keygen": "227b6122bc8d772b1ff8e20bcc58fb5f78ce8f66e0d78fcfab2fc95d35c8ba5c",
+            "bin/solana-test-validator": "5c4863af74480519570428099be32a7c3a76b45ec0c6e65d049372dbc4ab6402",
+            "bin/spl-token": "82a235ac3184aa09a482e0ec669f7424437083de6d8a25b9afe0cbf2c7942ac7"
+          },
+          "versionChecks": [
+            {"name": "solana", "path": "bin/solana", "args": ["--version"], "pattern": "^solana-cli 4\\.2\\.1 .*client:Agave\\)$"},
+            {"name": "solana-keygen", "path": "bin/solana-keygen", "args": ["--version"], "pattern": "^solana-keygen 4\\.2\\.1 .*client:Agave\\)$"},
+            {"name": "solana-test-validator", "path": "bin/solana-test-validator", "args": ["--version"], "pattern": "^solana-test-validator 4\\.2\\.1 .*client:Agave\\)$"},
+            {"name": "spl-token", "path": "bin/spl-token", "args": ["--version"], "pattern": "^spl-token-cli 5\\.6\\.1$"}
+          ]
+        },
+        "linux-x64": {
+          "url": "https://github.com/anza-xyz/agave/releases/download/v4.2.1/solana-release-x86_64-unknown-linux-gnu.tar.bz2",
+          "checksumSource": "https://api.github.com/repos/anza-xyz/agave/releases/tags/v4.2.1",
+          "sha256": "7f35f92c15861263bc540c001466678d2da228149a107b51d5b65ce497603074",
+          "archive": "tar.bz2",
+          "archiveName": "solana-release-x86_64-unknown-linux-gnu.tar.bz2",
+          "installDirectory": "agave-v4.2.1-linux-x64",
+          "installationAuthority": "pinned-archive-complete-tree-v1",
+          "expectedFiles": ["bin/solana", "bin/solana-keygen", "bin/solana-test-validator", "bin/spl-token"],
+          "expectedFileSha256": {
+            "bin/solana": "b7401a94540013670c7d5ab696842ca0bb3134e10120f7ce3d05438ec82202d8",
+            "bin/solana-keygen": "2734f545bd463847db64110201bef90273a08b3212e5fb0dd457fb1c971ab8fb",
+            "bin/solana-test-validator": "666a27216ab2222f874c45c0470d7b66b702dcf3dd38cc70f3be19cf723560bf",
+            "bin/spl-token": "27835fadd2792bef9af23b730efbf9e610ff1927325100ba40daff0551940cf6"
+          },
+          "versionChecks": [
+            {"name": "solana", "path": "bin/solana", "args": ["--version"], "pattern": "^solana-cli 4\\.2\\.1 .*client:Agave\\)$"},
+            {"name": "solana-keygen", "path": "bin/solana-keygen", "args": ["--version"], "pattern": "^solana-keygen 4\\.2\\.1 .*client:Agave\\)$"},
+            {"name": "solana-test-validator", "path": "bin/solana-test-validator", "args": ["--version"], "pattern": "^solana-test-validator 4\\.2\\.1 .*client:Agave\\)$"},
+            {"name": "spl-token", "path": "bin/spl-token", "args": ["--version"], "pattern": "^spl-token-cli 5\\.6\\.1$"}
+          ]
+        }
+      }
+    },
+    "splPrograms": {
+      "scope": "local-solana-fixture",
+      "buildTool": "cargo-build-sbf 4.1.0 with platform-tools 1.54",
+      "token": {
+        "version": "9.0.0",
+        "tag": "program@v9.0.0",
+        "source": "https://github.com/solana-program/token",
+        "commit": "dfb260231c761be7d9c8b63728e770a102b86495",
+        "path": "tooling/local-solana/programs/spl_token-v9.0.0.so",
+        "sha256": "773bb8e1c2883e373ab887d09920c85a0373098827ab938c13180f0901e8ea78"
+      },
+      "associatedToken": {
+        "version": "8.0.0",
+        "tag": "program@v8.0.0",
+        "source": "https://github.com/solana-program/associated-token-account",
+        "commit": "0b867b5340cd001e5980d8ca7928effc4e10015c",
+        "path": "tooling/local-solana/programs/spl_associated_token_account-v8.0.0.so",
+        "sha256": "80965251e946ad724fde2f2d448646a8822dcc1018ccdd85a93aed6654ce95c8"
+      }
     },
     "ccipSdk": {
+      "scope": "future-non-core",
+      "enabledForCore": false,
       "version": "1.13.0"
     },
     "ccipSolanaPrograms": {
+      "scope": "future-non-core",
+      "enabledForCore": false,
       "version": "1.6.3",
       "sourceRelease": "https://github.com/smartcontractkit/chainlink-ccip/releases/tag/solana-v1.6.3",
       "localArtifactsTag": "solana-artifacts-localtest-ea7ff77a0ddb",
       "localArtifactsSha256": "7072880e49ac873a7b6d6dbf5547b0517c87e17cd681e6143262a6c5fe803fc5"
+    }
+  },
+  "securityImages": {
+    "slither": {
+      "scope": "solidity-security",
+      "repository": "ghcr.io/trailofbits/eth-security-toolbox",
+      "sourceRepository": "https://github.com/trailofbits/eth-security-toolbox",
+      "sourceRevision": "8cad443280f7eeb5920a901b5f58f5a91872d9aa",
+      "tag": "nightly-20260824",
+      "indexDigest": "sha256:10c058d04f18a572f003e786ecf4e7f396a64137b2d6a9484fff2996621535a8",
+      "platform": "linux/amd64",
+      "manifestDigest": "sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0",
+      "versions": {
+        "slither": "0.11.6",
+        "cryticCompile": "0.4.2",
+        "solc": "0.8.36+commit.8a079791.Linux.g++",
+        "forge": "1.8.0"
+      },
+      "toolOverrides": {
+        "forge": "tools.foundry.platforms.linux-x64",
+        "solc": "tools.solc.platforms.linux-x64"
+      },
+      "runtime": {
+        "containerUser": "1000:1000",
+        "pythonPath": "/home/ethsec/.local/lib/python3.10/site-packages",
+        "forgeMountPath": "/tools/forge",
+        "solcMountPath": "/tools/solc"
+      },
+      "embeddedForgeVersion": "1.7.1",
+      "compatibilityMode": "official-image-with-read-only-pinned-project-tool-overrides",
+      "verifiedAt": "2026-08-29T00:00:00Z"
     }
   }
 }

@@ -1,0 +1,63 @@
+{
+  "success": true,
+  "error": null,
+  "results": {
+    "detectors": [
+      {
+        "elements": [
+          {
+            "type": "function",
+            "name": "destroy",
+            "source_mapping": {
+              "start": 154,
+              "length": 93,
+              "filename_relative": "src/Vulnerable.sol",
+              "filename_absolute": "/work/contracts/evm/src/Vulnerable.sol",
+              "filename_short": "src/Vulnerable.sol",
+              "is_dependency": false,
+              "lines": [
+                6,
+                7,
+                8
+              ],
+              "starting_column": 5,
+              "ending_column": 6
+            },
+            "type_specific_fields": {
+              "parent": {
+                "type": "contract",
+                "name": "Vulnerable",
+                "source_mapping": {
+                  "start": 128,
+                  "length": 121,
+                  "filename_relative": "src/Vulnerable.sol",
+                  "filename_absolute": "/work/contracts/evm/src/Vulnerable.sol",
+                  "filename_short": "src/Vulnerable.sol",
+                  "is_dependency": false,
+                  "lines": [
+                    5,
+                    6,
+                    7,
+                    8,
+                    9
+                  ],
+                  "starting_column": 1,
+                  "ending_column": 2
+                }
+              },
+              "signature": "destroy(address)"
+            }
+          }
+        ],
+        "description": "Vulnerable.destroy(address) (src/Vulnerable.sol#6-8) allows anyone to destruct the contract\n",
+        "markdown": "[Vulnerable.destroy(address)](src/Vulnerable.sol#L6-L8) allows anyone to destruct the contract\n",
+        "first_markdown_element": "src/Vulnerable.sol#L6-L8",
+        "id": "ec41ffabcec3eef8823f7bd387a96033570bdbe6e4cfbfcbd8ba83a63e5c5fd0",
+        "check": "suicidal",
+        "impact": "High",
+        "confidence": "High",
+        "reference": "https://github.com/crytic/slither/wiki/Detector-Documentation#suicidal"
+      }
+    ]
+  }
+}

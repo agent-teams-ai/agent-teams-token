@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "testOnly": true,
+  "productionApproved": false,
+  "mainnetAllowed": false,
+  "chainId": "31337",
+  "contractFqn": "src/features/token-genesis/AGTMAIToken.sol:AGTMAIToken",
+  "buildProfile": "default",
+  "from": "0x0000000000000000000000000000000000000001",
+  "maximumWorstCaseWei": "100000000000000000",
+  "gasBufferBps": "2000",
+  "quoteTtlSeconds": "60",
+  "maximumHeadLag": "2",
+  "buildInfoSolcVersion": "0.8.36",
+  "compilerInputSha256": "0x8936485001ce25e250f3ffe3612851426f98df860dc0a4aadaccee412b1723f2",
+  "compilerSettings": {
+    "optimizer": { "enabled": true, "runs": 200 },
+    "evmVersion": "paris",
+    "metadata": { "bytecodeHash": "ipfs", "appendCBOR": true }
+  },
+  "artifactSha256": "0x007b59a80bee113a7270bd5360207934042537620c214fa5dc2d3c648c5764c6",
+  "abiSha256": "0x437d23540c29545d78a654ffe3df8c45136eee6d9954fb7ebdce34ba922b4645",
+  "fixtureSha256": "0x91f81679ae94d51fd73d4d1d1a4c914b0aa01a54c95b7266007cd74d64bcc90e",
+  "fixtureReadySha256": "0x1a5c8647212a264368c1f9223d7edf6fdf3018278ea48fe505f7252071e518bd",
+  "constructorArgumentsHash": "0x1c880519977acb0e2dbe305ba1cbf04e1da972a92447734601083cf8df1df5ed",
+  "creationInputHash": "0x2e89e7966fb79b47e9a9652c98136d3067e2235dba64724d76943794afb2c10a",
+  "sourceDependencyClosure": {
+    "lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol": "0xfa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30",
+    "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol": "0x50f34ae16a067a41c2c1091445d11d63788e54c717677cb6d6b0e4cdea2ad21d",
+    "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol": "0x01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c",
+    "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol": "0x0b7132f17d14d1d84b41b0bb429be62dafdff00fd3470f68724d8018eb07f57a",
+    "lib/openzeppelin-contracts/contracts/utils/Context.sol": "0x847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6",
+    "src/features/token-genesis/AGTMAIToken.sol": "0xeae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989"
+  }
+}

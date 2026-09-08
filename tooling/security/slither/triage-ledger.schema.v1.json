@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
+  "required":["schemaVersion","findings"],"properties":{
+    "schemaVersion":{"const":1},"findings":{"type":"array","items":{"$ref":"#/$defs/triage"}}
+  },
+  "$defs":{"hash":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"triage":{"type":"object","additionalProperties":false,
+    "required":["schemaVersion","fingerprint","owner","disposition","rationale","reviewedAt"],
+    "properties":{"schemaVersion":{"const":1},"fingerprint":{"$ref":"#/$defs/hash"},"owner":{"type":"string","minLength":1},"disposition":{"enum":["accepted-design","false-positive","future-hardening"]},"rationale":{"type":"string","minLength":20},"reviewedAt":{"type":"string","format":"date-time"}}
+  }}
+}

@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createServer, type RequestListener, type Server } from "node:http";
+import test from "node:test";
+import { JsonRpcAdapter } from "../src/adapters/rpc.ts";
+import { assertLoopbackRpcUrl, parseFinalizedTransaction } from "../src/adapters/rpc-parsers.ts";
+import { CLASSIC_TOKEN_PROGRAM } from "../src/domain/model.ts";
+import { base58Encode } from "../src/adapters/transaction.ts";
+
+const payer = base58Encode(Uint8Array.from({ length: 32 }, () => 1));
+const mint = base58Encode(Uint8Array.from({ length: 32 }, () => 2));
+const ata = base58Encode(Uint8Array.from({ length: 32 }, () => 3));
+const signal = new AbortController().signal;
+async function listen(handler: RequestListener): Promise<{ readonly server: Server; readonly url: string }> { const server = createServer(handler); await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); }); const address = server.address(); if (typeof address === "string" || address === null) { throw new Error("missing port"); } return { server, url: `http://127.0.0.1:${address.port}/` }; }
+async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => { server.close((cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); }
+function parsed(kind = "mintTo", err: unknown = null) { return { slot: 42, meta: { err, innerInstructions: [] }, transaction: { message: { accountKeys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: mint, signer: true, writable: false }, { pubkey: ata, signer: false, writable: true }, { pubkey: CLASSIC_TOKEN_PROGRAM, signer: false, writable: false }], instructions: [{ programId: CLASSIC_TOKEN_PROGRAM, parsed: { type: kind, info: kind === "mintTo" ? { mint, account: ata, mintAuthority: mint, amount: "1000000000000" } : { amount: "1" } } }] } } }; }
+function compiled(err: unknown = null) { return { slot: 42, meta: { err, innerInstructions: [] }, transaction: { message: { accountKeys: [payer, mint, ata, CLASSIC_TOKEN_PROGRAM], instructions: [{ programIdIndex: 3, accounts: [1, 2, 1], data: "1" }] } } }; }
+
+async function rpcServer(transaction: ReturnType<typeof parsed>, raw = compiled(transaction.meta.err)) { return await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSignatureStatuses" ? { value: [{ confirmationStatus: "finalized" }] } : call.method === "getGenesisHash" ? payer : call.params?.[1]?.encoding === "json" ? raw : transaction; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); }); }
+
+test("RPC adapter retains and cross-binds compiled instruction bytes and indexes", async () => { const fixture = await rpcServer(parsed()); try { const fact = await new JsonRpcAdapter().finalizedTransaction(fixture.url, "4".repeat(64), signal); assert.equal(fact.operation, "mint"); assert.equal(fact.instructions[0]?.dataHex, "00"); assert.deepEqual(fact.instructions[0]?.accountIndices, [1, 2, 1]); assert.deepEqual(fact.instructions[0]?.accounts, [mint, ata, mint]); } finally { await close(fixture.server); } });
+
+test("RPC parser rejects parsed/raw account, program, result and group mismatches", () => { const base = parsed(); const mutations = [
+  { ...compiled(), transaction: { message: { ...compiled().transaction.message, accountKeys: [payer, ata, mint, CLASSIC_TOKEN_PROGRAM] } } },
+  { ...compiled(), transaction: { message: { ...compiled().transaction.message, instructions: [{ programIdIndex: 0, accounts: [1, 2, 1], data: "1" }] } } },
+  { ...compiled(), slot: 43 },
+  { ...compiled(), meta: { err: null, innerInstructions: [{ index: 0, instructions: [] }] } },
+]; for (const raw of mutations) { assert.throws(() => parseFinalizedTransaction(base, raw, "4".repeat(64), payer), /SOLANA_TRANSACTION_RAW_BINDING/u); } });
+
+test("RPC parser rejects unrelated Token instructions and malformed failure indices", () => { assert.throws(() => parseFinalizedTransaction(parsed("transfer"), compiled(), "4".repeat(64), payer), /SOLANA_TRANSACTION_SEMANTICS/u); const err = { InstructionError: [] }; assert.throws(() => parseFinalizedTransaction(parsed("freezeAccount", err), compiled(err), "4".repeat(64), payer), /SOLANA_TRANSACTION_ERROR/u); });
+
+test("RPC direct transport bypasses hostile proxy in a child process", async () => { let targetRequests = 0; let proxyRequests = 0; const target = await listen((_request, response) => { targetRequests += 1; response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: payer })); }); const proxy = await listen((_request, response) => { proxyRequests += 1; response.writeHead(502); response.end(); }); try { const script = `import { JsonRpcAdapter } from ${JSON.stringify(new URL("../src/adapters/rpc.ts", import.meta.url).href)}; await new JsonRpcAdapter().genesisHash(process.argv[1], new AbortController().signal);`; const child = spawn(process.execPath, ["--input-type=module", "-e", script, target.url], { env: { ...process.env, NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy.url, ALL_PROXY: proxy.url }, stdio: "ignore" }); const [code] = await once(child, "close"); assert.equal(code, 0); assert.equal(targetRequests, 1); assert.equal(proxyRequests, 0); } finally { await close(target.server); await close(proxy.server); } });
+
+test("RPC transport rejects redirects and non-loopback targets", async () => { const fixture = await listen((_request, response) => { response.writeHead(302, { location: "http://example.com/" }); response.end(); }); try { await assert.rejects(new JsonRpcAdapter().genesisHash(fixture.url, signal)); await assert.rejects(new JsonRpcAdapter().genesisHash("http://localhost:8899/", signal), /SOLANA_RPC_NON_LOOPBACK/u); } finally { await close(fixture.server); } });
+
+test("RPC readiness proves pinned local programs at a finalized post-genesis slot", async () => { const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); const result = call.method === "getSlot" ? 2 : { value: { executable: true, owner: "BPFLoaderUpgradeab1e11111111111111111111111" } }; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); }); try { await new JsonRpcAdapter().waitProgramsReady(fixture.url, [CLASSIC_TOKEN_PROGRAM], 1_000, signal); } finally { await close(fixture.server); } });
+
+test("RPC send uses bounded local delivery and one abort signal", async () => { const signature = "4".repeat(64); const calls: Array<{ readonly method: string; readonly params: readonly unknown[] }> = []; const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); calls.push(call); const result = call.method === "getLatestBlockhash" ? { value: { blockhash: payer } } : call.method === "sendTransaction" ? signature : { value: [{ confirmationStatus: "finalized" }] }; response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result })); }); }); try { const rpc = new JsonRpcAdapter(); assert.equal(await rpc.latestBlockhash(fixture.url, signal), payer); assert.equal(await rpc.sendSignedTransaction(fixture.url, Uint8Array.from([1]), signal), signature); assert.deepEqual(calls.map((call) => call.method), ["getLatestBlockhash", "sendTransaction", "getSignatureStatuses"]); assert.deepEqual(calls[0]?.params, [{ commitment: "processed" }]); assert.deepEqual(calls[1]?.params[1], { encoding: "base64", skipPreflight: true, preflightCommitment: "processed", maxRetries: 5 }); } finally { await close(fixture.server); } });
+
+test("abort during blockhash prevents later transaction bytes or send", async () => { let sends = 0; const controller = new AbortController(); const fixture = await listen((request, response) => { let body = ""; request.on("data", (chunk) => { body += chunk; }); request.on("end", () => { const call = JSON.parse(body); if (call.method === "sendTransaction") { sends += 1; } controller.abort(); response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { value: { blockhash: payer } } })); }); }); try { await assert.rejects(new JsonRpcAdapter().latestBlockhash(fixture.url, controller.signal), /SOLANA_COMMAND_ABORTED/u); assert.equal(sends, 0); } finally { await close(fixture.server); } });
+
+test("RPC parser preserves explicit default transport port 80", () => { assert.equal(assertLoopbackRpcUrl("http://127.0.0.1:80/").port, ""); });

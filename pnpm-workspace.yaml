@@ -1,6 +1,17 @@
 packages:
   - apps/*
   - packages/*
+  - packages/contexts/*
+
+catalogMode: strict
+autoInstallPeers: false
+catalog:
+  "@types/node": 24.13.3
+  "@noble/hashes": 2.4.0
+  oxlint: 1.80.0
+  typescript: 7.0.2
+  yaml: 2.9.0
 minimumReleaseAgeExclude:
-  - '@agent-teams/docs-protocol@0.2.0'
   - '@agent-teams/engineering-foundation@0.20.0'
+  - '@noble/hashes@2.4.0'
+  - '@agent-teams/docs-protocol@0.2.0'
