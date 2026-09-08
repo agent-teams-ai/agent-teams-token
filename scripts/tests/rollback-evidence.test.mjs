@@ -202,10 +202,7 @@ test("strict validator accepts a canonical sealed statement only after READY pub
   });
   assert.equal(beforeReady.proofDigestSha256, publication.seal.statement.canonicalSha256);
   publishReadyMarker(fixture.bundle, publication);
-  assert.equal(
-    validateEvidenceBundle({ bundlePath: fixture.bundle, expectedSha: candidateSha }).candidateSha,
-    candidateSha,
-  );
+  assert.deepEqual(validateEvidenceBundle({ bundlePath: fixture.bundle, expectedSha: candidateSha }), beforeReady);
 });
 
 test("field deletion, incomplete gates and post-seal artifact mutation fail closed", (context) => {
@@ -503,7 +500,7 @@ for (const substitution of ["root", "ancestor", "pending", "pending-bytes", "rea
   });
 }
 
-test("staged READY validation is explicitly provisional until terminal publication", (context) => {
+test("standalone CLI validates READY publication and rejects a literal pnpm separator", (context) => {
   const fixture = fixtureBundle();
   context.after(() => rmSync(fixture.bundle, { recursive: true, force: true }));
   const target = { custody: createDirectoryCustody(fixture.bundle, { owned: true }), path: fixture.bundle };
@@ -511,22 +508,11 @@ test("staged READY validation is explicitly provisional until terminal publicati
     recorder.finalize("passed");
     publishReadyMarker(target, publishEvidenceSeal(target, fixture.statement, schemaPath));
     assert.equal(standaloneValidation(fixture.bundle).status, 1);
-    const provisional = spawnSync(process.execPath, [
-      join(repositoryRoot, "scripts/rollback/validate-evidence.mjs"),
-      "--bundle=" + fixture.bundle, "--allow-pending-ready",
-    ], { encoding: "utf8" });
+    const provisional = standaloneValidation(fixture.bundle, ["--allow-pending-ready"]);
     assert.equal(provisional.status, 0, provisional.stderr);
     assert.match(provisional.stdout, /^RECOVERY_EVIDENCE_PROVISIONAL /u);
   });
   assert.equal(lstatSync(join(fixture.bundle, "READY.pending"), { throwIfNoEntry: false }), undefined);
-  assert.equal(standaloneValidation(fixture.bundle).status, 0);
-});
-
-test("standalone evidence CLI accepts CI argv and rejects a literal pnpm separator", (context) => {
-  const fixture = fixtureBundle();
-  context.after(() => rmSync(fixture.bundle, { recursive: true, force: true }));
-  const publication = publishEvidenceSeal(fixture.bundle, fixture.statement, schemaPath);
-  publishReadyMarker(fixture.bundle, publication);
   const valid = standaloneValidation(fixture.bundle);
   assert.equal(valid.status, 0, valid.stderr);
   assert.match(valid.stdout, /^RECOVERY_EVIDENCE_VALID /u);
