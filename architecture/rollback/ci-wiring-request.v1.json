@@ -18,11 +18,8 @@
       "contents": "read"
     },
     "environment": {
-      "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
-      "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
       "SLITHER_REPOSITORY_ROOT": "${{ github.workspace }}",
       "SLITHER_CANDIDATE_SHA": "${{ github.sha }}",
-      "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
       "SLITHER_DOCKER_PATH": "/usr/bin/docker",
       "SLITHER_FORGE_PATH": "${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge",
       "SLITHER_SOLC_PATH": "${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc"
@@ -36,63 +33,113 @@
           "ref": "${{ github.sha }}",
           "fetch-depth": 0,
           "persist-credentials": false
+        },
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
         }
       },
       {
         "id": "assert-complete-history-and-exact-clean-head-before",
         "position": "before-bootstrap",
         "shell": "bash",
-        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\""
+        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "fetch-pinned-core-and-solana-prerequisites",
         "position": "replace-core-only-fetch",
         "shell": "bash",
-        "run": "./dev bootstrap fetch\n./dev bootstrap fetch --scope=solana"
+        "run": "./dev bootstrap fetch\n./dev bootstrap fetch --scope=solana",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "offline-install-and-verify-pinned-prerequisites",
         "position": "replace-core-only-install-and-verify",
         "shell": "bash",
-        "run": "./dev bootstrap install --offline\n./dev bootstrap install --offline --scope=solana\nsource scripts/env.sh\n./dev bootstrap verify --offline\n./dev bootstrap verify --offline --scope=solana\n./dev doctor --scope=core"
+        "run": "./dev bootstrap install --offline\n./dev bootstrap install --offline --scope=solana\nsource scripts/env.sh\n./dev bootstrap verify --offline\n./dev bootstrap verify --offline --scope=solana\n./dev doctor --scope=core",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "install-frozen-source-workspace-and-populate-store",
         "position": "retain-before-root-check",
         "shell": "bash",
-        "run": "source scripts/env.sh && pnpm install --frozen-lockfile"
+        "run": "source scripts/env.sh && pnpm install --frozen-lockfile",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "preload-pinned-slither-image",
         "position": "after-frozen-workspace-install",
         "shell": "bash",
-        "run": "source scripts/env.sh && pnpm security:solidity:prepare-image"
+        "run": "source scripts/env.sh && pnpm security:solidity:prepare-image",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "non-pulling-rollback-environment-cache-preflight",
         "position": "after-slither-image-preload-before-root-check",
         "shell": "bash",
-        "run": "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\""
+        "run": "source scripts/env.sh && pnpm rollback:preflight -- --expected-sha=\"$GITHUB_SHA\"",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "run-root-check-with-exact-rollback-proof",
         "position": "retain-current-root-check",
         "shell": "bash",
-        "run": "source scripts/env.sh && pnpm check:linux"
+        "run": "source scripts/env.sh && pnpm check:linux",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "assert-complete-history-and-exact-clean-head-after",
         "position": "after-root-check",
         "if": "${{ always() }}",
         "shell": "bash",
-        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\""
+        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "validate-rollback-proof",
         "position": "after-post-gate-history-revalidation",
         "if": "${{ success() }}",
         "shell": "bash",
-        "run": "source scripts/env.sh\npnpm rollback:evidence:validate -- --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\""
+        "run": "source scripts/env.sh\npnpm rollback:evidence:validate -- --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "upload-rollback-proof-evidence",
@@ -105,7 +152,12 @@
           "if-no-files-found": "error",
           "retention-days": 14
         },
-        "continue-on-error": false
+        "continue-on-error": false,
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       },
       {
         "id": "upload-rollback-failure-diagnostics",
@@ -118,7 +170,12 @@
           "if-no-files-found": "warn",
           "retention-days": 14
         },
-        "continue-on-error": false
+        "continue-on-error": false,
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
       }
     ],
     "prohibitedChanges": [

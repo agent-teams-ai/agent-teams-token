@@ -32,7 +32,7 @@ test("portable root check and mandatory Linux proof wiring are integrated pendin
   assert.equal(patch.needsChange, "none");
   assert.deepEqual(patch.timeoutMinutes, { from: 15, to: 120 });
   assert.equal(
-    patch.environment.AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY,
+    patch.steps[0].env.AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY,
     "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
   );
   assert.equal(patch.environment.SLITHER_DOCKER_PATH, "/usr/bin/docker");

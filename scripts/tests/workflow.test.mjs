@@ -88,15 +88,28 @@ test("foundation job proves complete exact history and preflights every rollback
   assert.equal(job.needs, undefined);
   assert.deepEqual(job.permissions, { contents: "read" });
   assert.deepEqual(job.env, {
-    AGTMAI_ROLLBACK_TMPDIR: "${{ runner.temp }}",
-    AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
     SLITHER_REPOSITORY_ROOT: "${{ github.workspace }}",
     SLITHER_CANDIDATE_SHA: "${{ github.sha }}",
-    SLITHER_EVIDENCE_DIRECTORY: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
     SLITHER_DOCKER_PATH: "/usr/bin/docker",
     SLITHER_FORGE_PATH: "${{ github.workspace }}/.tools/foundry-v1.8.0-linux-x64/forge",
     SLITHER_SOLC_PATH: "${{ github.workspace }}/.tools/solc-v0.8.36-linux-x64/solc",
   });
+
+  // runner is available in step env, but unavailable in job env.
+  const request = JSON.parse(readFileSync(join(repositoryRoot, "architecture/rollback/ci-wiring-request.v1.json"), "utf8"));
+  assert.deepEqual(job.env, request.existingJobPatch.environment);
+  assert.doesNotMatch(JSON.stringify(job.env), /\$\{\{\s*runner\./u);
+  const runnerEnvironment = {
+    AGTMAI_ROLLBACK_TMPDIR: "${{ runner.temp }}",
+    AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+    SLITHER_EVIDENCE_DIRECTORY: "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+  };
+  for (const step of job.steps) {
+    assert.deepEqual(step.env, runnerEnvironment, step.name);
+  }
+  for (const step of request.existingJobPatch.steps) {
+    assert.deepEqual(step.env, runnerEnvironment, step.id);
+  }
 
   const byId = (id) => job.steps.find((step) => step.id === id);
   const checkout = byId("checkout-complete-history-at-exact-head");
