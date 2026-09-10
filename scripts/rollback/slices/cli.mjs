@@ -20,6 +20,7 @@ import {
   pendingGlobalManifestEvidence,
   repositoryRoot,
   rollbackBaselineSha,
+  rollbackHistoryAnchorSha,
   rollbackTemporaryRoot,
 } from "./config.mjs";
 import {
@@ -274,6 +275,7 @@ function assertCompleteHistory(candidateSha) {
     join(repositoryRoot, "scripts/assert-complete-history.sh"),
     candidateSha,
     rollbackBaselineSha,
+    rollbackHistoryAnchorSha,
   ], { cwd: repositoryRoot, timeout: 120_000 });
 }
 
@@ -352,6 +354,7 @@ function recordCandidate(recorder, expectedSha) {
       join(repositoryRoot, "scripts/assert-complete-history.sh"),
       sha,
       rollbackBaselineSha,
+      rollbackHistoryAnchorSha,
     ],
     { cwd: repositoryRoot, phase: "preflight", timeout: 120_000 },
   );

@@ -122,7 +122,7 @@ test("foundation job proves complete exact history and preflights every rollback
 
   const historyBefore = byId("assert-complete-history-and-exact-clean-head-before");
   assert.equal(historyBefore.run.trim(), [
-    'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45',
+    'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f',
     'scripts/assert-clean-head.sh "$GITHUB_SHA"',
   ].join("\n"));
   const fetch = byId("fetch-pinned-core-and-solana-prerequisites");
@@ -152,7 +152,7 @@ test("foundation job proves complete exact history and preflights every rollback
     validation.run.replace(/\\\r?\n\s*/gu, "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n"),
     'source scripts/env.sh\n'
       + 'pnpm rollback:evidence:validate --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" --expected-sha="$GITHUB_SHA"\n'
-      + 'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\n'
+      + 'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f\n'
       + 'scripts/assert-clean-head.sh "$GITHUB_SHA"',
   );
   assert.match(validation.run, /--expected-sha="\$GITHUB_SHA"/u);

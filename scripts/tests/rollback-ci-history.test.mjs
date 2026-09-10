@@ -26,6 +26,7 @@ const historyScript = join(repositoryRoot, "scripts/assert-complete-history.sh")
 const git = "/usr/bin/git";
 const bash = "/bin/bash";
 const baselineSha = "b7a868f85d89c4bb7a9aeed1d854a5f949306a45";
+const historyAnchorSha = "3231e8a918c6079c8b384b5389fef2be9f25d33f";
 
 function run(command, arguments_, options = {}) {
   const sourceEnvironment = { ...process.env, PATH: "/usr/bin:/bin", ...options.env };
@@ -107,7 +108,10 @@ test("integrated CI requires complete exact-head history before cache and qualit
     /id: checkout-complete-history-at-exact-head[\s\S]*?uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1[\s\S]*?ref: \$\{\{ github\.sha \}\}\n\s+fetch-depth: 0\n\s+persist-credentials: false/u,
   );
   const history = steps.find(({ id }) => id === "assert-complete-history-and-exact-clean-head-before");
-  assert.match(history.run, /assert-complete-history\.sh "\$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45/u);
+  assert.match(
+    history.run,
+    new RegExp(`assert-complete-history\\.sh "\\$GITHUB_SHA" ${baselineSha} ${historyAnchorSha}`, "u"),
+  );
   const offline = steps.find(
     ({ id }) => id === "offline-install-and-verify-pinned-prerequisites",
   );
@@ -218,7 +222,7 @@ test("integrated CI requires complete exact-head history before cache and qualit
 test("complete local history at the exact head passes", () => {
   const { boundary, checkout } = makeClone();
   try {
-    const result = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+    const result = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, new RegExp(`ROLLBACK_HISTORY_OK head=${candidateSha}`));
     assert.match(result.stdout, /inventoryEntries=[1-9][0-9]* inventorySha256=[a-f0-9]{64}/u);
@@ -253,7 +257,7 @@ test("history Git children reject hostile local filters, attributes, includes, h
         });
       }
       if (configured !== undefined) {assert.equal(configured.status, 0, configured.stderr);}
-      const result = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+      const result = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
       assert.notEqual(result.status, 0, authority);
       assert.match(
         result.stderr,
@@ -282,7 +286,7 @@ test("byte-complete inventory rejects a stat-cache-preserving tracked-file subst
     writeFileSync(target, forged);
     utimesSync(target, before.atime, before.mtime);
     assert.equal(statSync(target).size, before.size);
-    const result = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+    const result = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /ROLLBACK_INVENTORY_BYTES_MISMATCH/u);
     assert.doesNotMatch(result.stdout, /ROLLBACK_HISTORY_OK/u);
@@ -294,7 +298,7 @@ test("byte-complete inventory rejects a stat-cache-preserving tracked-file subst
 test("depth-one history fails before it can become rollback evidence", () => {
   const { boundary, checkout } = makeClone({ depth: 1 });
   try {
-    const result = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+    const result = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /ROLLBACK_HISTORY_SHALLOW/u);
     assert.doesNotMatch(result.stdout, /ROLLBACK_HISTORY_OK/u);
@@ -331,7 +335,7 @@ test("a missing pinned baseline and a promisor checkout both fail closed", () =>
 
     const config = run(git, ["config", "remote.origin.promisor", "true"], { cwd: checkout });
     assert.equal(config.status, 0, config.stderr);
-    const partial = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+    const partial = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
     assert.notEqual(partial.status, 0);
     assert.match(partial.stderr, /ROLLBACK_GIT_LOCAL_CONFIG_FORBIDDEN/u);
   } finally {
@@ -405,12 +409,12 @@ test("replacement refs and legacy grafts cannot make history ambiguous", () => {
     const replace = run(git, ["replace", candidateSha, replacement.stdout.trim()], { cwd: checkout });
     assert.equal(replace.status, 0, replace.stderr);
 
-    const replaced = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+    const replaced = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
     assert.notEqual(replaced.status, 0);
     assert.match(replaced.stderr, /ROLLBACK_HISTORY_REPLACEMENT_FORBIDDEN/u);
     assert.doesNotMatch(replaced.stdout, /ROLLBACK_HISTORY_OK/u);
 
-    const hidden = run(bash, [historyScript, candidateSha, baselineSha], {
+    const hidden = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], {
       cwd: checkout,
       env: {
         GIT_NAMESPACE: "hidden-namespace",
@@ -424,7 +428,7 @@ test("replacement refs and legacy grafts cannot make history ambiguous", () => {
     const deleteReplacement = run(git, ["replace", "-d", candidateSha], { cwd: checkout });
     assert.equal(deleteReplacement.status, 0, deleteReplacement.stderr);
     writeFileSync(join(checkout, ".git/info/grafts"), candidateSha + "\n");
-    const grafted = run(bash, [historyScript, candidateSha, baselineSha], { cwd: checkout });
+    const grafted = run(bash, [historyScript, candidateSha, baselineSha, historyAnchorSha], { cwd: checkout });
     assert.notEqual(grafted.status, 0);
     assert.match(grafted.stderr, /ROLLBACK_HISTORY_GRAFTS_FORBIDDEN/u);
     assert.doesNotMatch(grafted.stdout, /ROLLBACK_HISTORY_OK/u);

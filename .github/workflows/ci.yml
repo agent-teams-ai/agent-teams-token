@@ -42,7 +42,7 @@ jobs:
         id: assert-complete-history-and-exact-clean-head-before
         shell: bash
         run: |
-          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f
           scripts/assert-clean-head.sh "$GITHUB_SHA"
       - name: Record workflow-dispatch exact-SHA evidence
         env: *rollback-runner-environment
@@ -103,7 +103,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
-          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f
           scripts/assert-clean-head.sh "$GITHUB_SHA"
       - name: Validate sealed rollback proof and revalidate candidate inventory
         env: *rollback-runner-environment
@@ -115,7 +115,7 @@ jobs:
           pnpm rollback:evidence:validate \
             --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" \
             --expected-sha="$GITHUB_SHA"
-          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45
+          scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f
           scripts/assert-clean-head.sh "$GITHUB_SHA"
       - name: Upload validated rollback proof artifact
         env: *rollback-runner-environment

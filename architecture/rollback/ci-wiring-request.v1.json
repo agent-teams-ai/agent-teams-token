@@ -44,7 +44,7 @@
         "id": "assert-complete-history-and-exact-clean-head-before",
         "position": "before-bootstrap",
         "shell": "bash",
-        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
         "env": {
           "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
           "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
@@ -122,7 +122,7 @@
         "position": "after-root-check",
         "if": "${{ always() }}",
         "shell": "bash",
-        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "run": "scripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
         "env": {
           "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
           "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
@@ -134,7 +134,7 @@
         "position": "after-post-gate-history-revalidation",
         "if": "${{ success() }}",
         "shell": "bash",
-        "run": "source scripts/env.sh\npnpm rollback:evidence:validate --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
+        "run": "source scripts/env.sh\npnpm rollback:evidence:validate --bundle=\"$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY\" --expected-sha=\"$GITHUB_SHA\"\nscripts/assert-complete-history.sh \"$GITHUB_SHA\" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f\nscripts/assert-clean-head.sh \"$GITHUB_SHA\"",
         "env": {
           "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
           "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
@@ -190,7 +190,7 @@
   },
   "proofContract": {
     "candidate": "actions/checkout must detach the explicit github.sha with fetch-depth 0; GITHUB_SHA must equal the clean HEAD before and after the root check, and the proof independently checks the same identity before materialization",
-    "history": "the checkout must be non-shallow and non-partial, contain no replacement refs or legacy grafts, contain the pinned baseline b7a868f85d89c4bb7a9aeed1d854a5f949306a45, prove with replacement processing disabled that baseline is an ancestor of GITHUB_SHA, and contain every object reachable from the exact head; depth-one, grafted, replaced or ambiguous-ref evidence is invalid",
+    "history": "the checkout must be non-shallow and non-partial, contain no replacement refs or legacy grafts, contain and fully traverse the pinned content baseline b7a868f85d89c4bb7a9aeed1d854a5f949306a45, prove with replacement processing disabled that main-history anchor 3231e8a918c6079c8b384b5389fef2be9f25d33f is an ancestor of GITHUB_SHA, and contain every object reachable from the exact head; depth-one, grafted, replaced or ambiguous-ref evidence is invalid",
     "workspace": "the source frozen install populates the verified pnpm store; every disposable checkout runs pnpm install --frozen-lockfile --offline and may not fetch",
     "toolchain": "the proof copies checksum-verified cached core and Solana archives into each disposable checkout, then runs bootstrap install and verify offline",
     "slither": "SLITHER_DOCKER_PATH is the explicit absolute Docker CLI; prepare-image may preload but is not verification, so the subsequent rollback --preflight-only command must non-pullingly inspect the reachable daemon and exact linux/amd64 image digest, platform and source revision before the root check; the proof repeats that preflight before any phase=gate command",

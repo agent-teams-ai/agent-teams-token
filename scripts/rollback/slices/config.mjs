@@ -25,6 +25,7 @@ export const ROLLBACK_PATH_MAX_DEPTH = 128;
 export const ROLLBACK_REMOVAL_MAX_SLOTS = 4_096;
 export const ROLLBACK_SHARED_PATH_MAX_BYTES = 16 * 1024 * 1024;
 export const rollbackBaselineSha = "b7a868f85d89c4bb7a9aeed1d854a5f949306a45";
+export const rollbackHistoryAnchorSha = "3231e8a918c6079c8b384b5389fef2be9f25d33f";
 export const pendingGlobalManifestEvidence = "candidate-bound-manifests-pending-proof-completion";
 export const completedGlobalManifestEvidence = "candidate-bound-local-proof-complete-hosted-ci-pending";
 
