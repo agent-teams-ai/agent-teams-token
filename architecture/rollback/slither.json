@@ -113,7 +113,7 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "08030323737f2218ecf81485912186ffdcf1185ca30d214d56ff77023d7b55a2",
+      "beforeSha256": "041cf58a38451ad26527baeb9afa79808e69ad1b3b3d203d4d56e0c3799e6d02",
       "afterSha256": "0e4c60a305e56e16e7f59de3db84b2d969621b46345489fc6311169550efdf70"
     },
     {
@@ -123,12 +123,12 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "a0715db9da5ec14001f085e1f3f31048956e783427dd52934299b6240e3615f0",
-      "afterSha256": "efdb6bca7a89e147668018a0bfada613ff8f942df7b77e7e83270c66e8ef645a"
+      "beforeSha256": "3da9cedebaa39e5c040c751fdc2af713303ce918b69d05fdf57b58cb766828c3",
+      "afterSha256": "0da1ddc4975896cae7361b0f038ec866854f7dc93cdcbf184e213fb445ff0570"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "c633a63eabee1a4946b44311a856dbb32b09601fa32f832fbed024f4bd771c99",
+      "beforeSha256": "2ffd64e0175b0acb6a1b9e6c1eeaf5fc4fb08b1441faa29ae8687cc1140368c0",
       "afterSha256": "267e37afcbc23ddc1e4874cf9d950d637d8abd2e950a05a27c6180a4957b500f"
     },
     {
@@ -158,7 +158,7 @@
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",
-      "sha256": "f547dfbb7319cc7bc138e64146f4b6ba1eecb08f99f5ea79fedf90b052af502e",
+      "sha256": "9c2464af858f0a34c7d6bca0de91d9cc0943d2948b9fe5591dc879e38a74022d",
       "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"
     }
   ],
