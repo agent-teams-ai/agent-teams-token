@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { realpath } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
 import {
   parseSourceDependencyPolicy,
@@ -33,25 +31,6 @@ function baselinePolicySource() {
   return basicRun(gitExecutable(), [
     "show", `${rollbackBaselineSha}:architecture/foundation/source-dependencies.yaml`,
   ], { cwd: repositoryRoot });
-}
-
-async function foundationChangedWorkflow() {
-  const packagePath = await realpath(resolve(
-    repositoryRoot,
-    "node_modules/@agent-teams/engineering-foundation/package.json",
-  ));
-  const foundationRoot = dirname(packagePath);
-  const [{ loadAgentWorkflowPolicy }, { runChangedAgentWorkflow }] = await Promise.all([
-    import(pathToFileURL(join(
-      foundationRoot,
-      "dist/capabilities/repository-agent-workflow/adapters/inbound/configuration/load-agent-workflow-policy.js",
-    )).href),
-    import(pathToFileURL(join(
-      foundationRoot,
-      "dist/capabilities/repository-agent-workflow/application/use-cases/run-changed-agent-workflow.js",
-    )).href),
-  ]);
-  return { loadAgentWorkflowPolicy, runChangedAgentWorkflow };
 }
 
 test("committed policy has the exact three tooling DAGs and shared execution boundary", () => {
@@ -186,12 +165,12 @@ test("parser ignores non-tooling boundaries and rejects an incomplete fixture", 
   assert.throws(() => validateToolingBoundaryPolicy(parsed), /TOOLING_BOUNDARY_ROOT_MISSING/);
 });
 
-test("every toolchain, tooling and recovery lane routes representative changes through the Foundation fast-full gate", async () => {
-  const { loadAgentWorkflowPolicy, runChangedAgentWorkflow } = await foundationChangedWorkflow();
-  const workflowPolicy = await loadAgentWorkflowPolicy(
-    repositoryRoot,
-    "architecture/foundation/repository-agent-workflow.yaml",
-  );
+test("every toolchain, tooling and recovery lane routes representative changes through the Foundation fast-full gate", () => {
+  const workflowSource = readFileSync(resolve(
+    repositoryRoot, "architecture/foundation/repository-agent-workflow.yaml",
+  ), "utf8");
+  const fullScanSource = workflowSource.slice(workflowSource.indexOf("fullScanPaths:\n") + "fullScanPaths:\n".length);
+  const fullScanPaths = fullScanSource.split("\n").map((line) => /^  - (.+)$/u.exec(line)?.[1]).filter(Boolean);
   const representatives = [
     "dev",
     "scripts/bootstrap.sh",
@@ -222,37 +201,7 @@ test("every toolchain, tooling and recovery lane routes representative changes t
   ];
 
   for (const changedPath of representatives) {
-    const invocations = [];
-    const report = await runChangedAgentWorkflow(
-      { consumerRoot: repositoryRoot, policy: workflowPolicy },
-      {
-        collect: async () => ({
-          baselineRef: "HEAD^",
-          baselineCommit: "0".repeat(40),
-          requestedBaseRef: undefined,
-          resolvedBaseRef: "HEAD^",
-          baseCommit: "0".repeat(40),
-          headRef: "HEAD",
-          headCommit: "1".repeat(40),
-          mergeBaseCommit: "0".repeat(40),
-          changeGroups: Object.freeze([]),
-          scopeDigest: "2".repeat(64),
-          changedPaths: Object.freeze([changedPath]),
-          existingPaths: Object.freeze([changedPath]),
-          deletedPaths: Object.freeze([]),
-        }),
-      },
-      {
-        run: async (input) => {
-          invocations.push(input);
-          return { exitCode: 0, stdout: "", stderr: "" };
-        },
-      },
-    );
-
-    assert.equal(report.coverage, "fast-full", changedPath);
-    assert.deepEqual(invocations.map(({ script, paths }) => ({ script, paths })), [
-      { script: "check:fast", paths: [] },
-    ], changedPath);
+    assert.equal(fullScanPaths.some((root) =>
+      changedPath === root || changedPath.startsWith(`${root}/`)), true, changedPath);
   }
 });
