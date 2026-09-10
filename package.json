@@ -60,8 +60,9 @@
     "docs:protocol:check": "pnpm docs:check"
   },
   "devDependencies": {
-    "@agent-teams/docs-protocol": "0.2.0",
-    "@agent-teams/engineering-foundation": "0.20.0",
+    "@agent-teams/docs-protocol": "0.6.0",
+    "@agent-teams/docs-protocol-agent-teams": "0.2.3",
+    "@agent-teams/engineering-foundation": "1.1.1",
     "@types/node": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"
