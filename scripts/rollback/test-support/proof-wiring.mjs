@@ -61,7 +61,7 @@ test("portable root check and mandatory Linux proof wiring are integrated pendin
     validation.run.replace(/\\\r?\n\s*/gu, "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n"),
     'source scripts/env.sh\n'
       + 'pnpm rollback:evidence:validate --bundle="$AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY" --expected-sha="$GITHUB_SHA"\n'
-      + 'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45\n'
+      + 'scripts/assert-complete-history.sh "$GITHUB_SHA" b7a868f85d89c4bb7a9aeed1d854a5f949306a45 3231e8a918c6079c8b384b5389fef2be9f25d33f\n'
       + 'scripts/assert-clean-head.sh "$GITHUB_SHA"',
   );
   assert.match(validation.run, /assert-complete-history\.sh/u);

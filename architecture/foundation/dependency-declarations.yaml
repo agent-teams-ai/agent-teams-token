@@ -15,3 +15,4 @@ policies:
   exactRegistryDevelopmentOnlyPackages:
     - "@agent-teams/engineering-foundation"
     - "@agent-teams/docs-protocol"
+    - "@agent-teams/docs-protocol-agent-teams"

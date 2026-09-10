@@ -4,6 +4,9 @@ set -euo pipefail
 # CI invokes this after env.sh restricts PATH to pinned tool directories.
 rollback_expected_sha=${1:?expected commit SHA is required}
 rollback_baseline_sha=${2:?baseline commit SHA is required}
+rollback_uses_separate_history_anchor=false
+if (( $# >= 3 )); then rollback_uses_separate_history_anchor=true; fi
+rollback_history_anchor_sha=${3:-$rollback_baseline_sha}
 rollback_git=/usr/bin/git
 rollback_safe_directory=$(pwd -P)
 
@@ -158,9 +161,10 @@ if [[ ! -x "$rollback_git" ]]; then
 fi
 
 if [[ ! "$rollback_expected_sha" =~ ^[a-f0-9]{40}$ ]] \
-  || [[ ! "$rollback_baseline_sha" =~ ^[a-f0-9]{40}$ ]]; then
-  printf 'ROLLBACK_HISTORY_SHA_INVALID expected=%s baseline=%s\n' \
-    "$rollback_expected_sha" "$rollback_baseline_sha" >&2
+  || [[ ! "$rollback_baseline_sha" =~ ^[a-f0-9]{40}$ ]] \
+  || [[ ! "$rollback_history_anchor_sha" =~ ^[a-f0-9]{40}$ ]]; then
+  printf 'ROLLBACK_HISTORY_SHA_INVALID expected=%s baseline=%s anchor=%s\n' \
+    "$rollback_expected_sha" "$rollback_baseline_sha" "$rollback_history_anchor_sha" >&2
   exit 1
 fi
 
@@ -209,16 +213,27 @@ if ! rollback_git_canonical cat-file -e "$rollback_baseline_sha^{commit}" 2>/dev
   exit 1
 fi
 
-if ! rollback_git_canonical merge-base --is-ancestor "$rollback_baseline_sha" "$rollback_expected_sha"; then
-  printf 'ROLLBACK_HISTORY_BASELINE_NOT_ANCESTOR baseline=%s head=%s\n' \
-    "$rollback_baseline_sha" "$rollback_expected_sha" >&2
+if ! rollback_git_canonical cat-file -e "$rollback_history_anchor_sha^{commit}" 2>/dev/null; then
+  printf 'ROLLBACK_HISTORY_ANCHOR_UNAVAILABLE anchor=%s\n' \
+    "$rollback_history_anchor_sha" >&2
+  exit 1
+fi
+
+if ! rollback_git_canonical merge-base --is-ancestor "$rollback_history_anchor_sha" "$rollback_expected_sha"; then
+  if [[ "$rollback_uses_separate_history_anchor" == true ]]; then
+    printf 'ROLLBACK_HISTORY_ANCHOR_NOT_ANCESTOR anchor=%s head=%s\n' \
+      "$rollback_history_anchor_sha" "$rollback_expected_sha" >&2
+  else
+    printf 'ROLLBACK_HISTORY_BASELINE_NOT_ANCESTOR baseline=%s head=%s\n' \
+      "$rollback_baseline_sha" "$rollback_expected_sha" >&2
+  fi
   exit 1
 fi
 
 # A non-shallow flag is insufficient for a partial or corrupt object graph.
-# Traverse and fsck every object reachable from the exact candidate head.
-rollback_git_canonical rev-list --objects "$rollback_expected_sha" >/dev/null
-rollback_git_canonical fsck --strict --no-dangling "$rollback_expected_sha" >/dev/null
+# Traverse and fsck every object reachable from the candidate and content baseline.
+rollback_git_canonical rev-list --objects "$rollback_expected_sha" "$rollback_baseline_sha" >/dev/null
+rollback_git_canonical fsck --strict --no-dangling "$rollback_expected_sha" "$rollback_baseline_sha" >/dev/null
 
 # Bind every tracked path's type, executable mode and bytes to the validated
 # candidate tree before this verifier returns control to any checkout-provided
