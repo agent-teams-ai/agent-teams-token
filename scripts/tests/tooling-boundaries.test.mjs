@@ -44,7 +44,7 @@ async function foundationChangedWorkflow() {
   const [{ loadAgentWorkflowPolicy }, { runChangedAgentWorkflow }] = await Promise.all([
     import(pathToFileURL(join(
       foundationRoot,
-      "dist/capabilities/repository-agent-workflow/contract/config.js",
+      "dist/capabilities/repository-agent-workflow/adapters/inbound/configuration/load-agent-workflow-policy.js",
     )).href),
     import(pathToFileURL(join(
       foundationRoot,
