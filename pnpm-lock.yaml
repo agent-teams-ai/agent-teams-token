@@ -30,11 +30,11 @@ importers:
         specifier: 0.6.0
         version: 0.6.0
       '@agent-teams/docs-protocol-agent-teams':
-        specifier: 0.2.3
-        version: 0.2.3
+        specifier: 0.2.7
+        version: 0.2.7
       '@agent-teams/engineering-foundation':
-        specifier: 1.1.1
-        version: 1.1.1(@types/node@24.13.3)
+        specifier: 1.2.0
+        version: 1.2.0(@types/node@24.13.3)
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
@@ -58,8 +58,8 @@ importers:
 
 packages:
 
-  '@agent-teams/docs-protocol-agent-teams@0.2.3':
-    resolution: {integrity: sha512-06faihpc/s86i/+leI+TmvVPCbVgEC30wSLfYvw4h360rbRNSLgY1pQEeY7W8+pQMi+LdYopt6fkBl0Z7ZGJrg==}
+  '@agent-teams/docs-protocol-agent-teams@0.2.7':
+    resolution: {integrity: sha512-YhgXKwsq2JlFisS+vaXBriDvbD+8wEQErMJqZCRaE4DEaZ+z+AWMgVYbpe4lTv2Zkexl4CCkVB74U3LqyUwegg==}
     engines: {node: '>=24.18.0 <25', pnpm: '>=11.17.0 <12'}
     hasBin: true
 
@@ -72,8 +72,8 @@ packages:
     resolution: {integrity: sha512-LdNT8VHPQxXvuyXsCblFSeCmbEEZcXwiCTY1E+c0ZEWWJG0V2qoi95F8fHAwI4ngZLDmLr/yzHGyDqwkd9GBrA==}
     engines: {node: '>=24.18.0 <25', pnpm: '>=11.17.0 <12'}
 
-  '@agent-teams/engineering-foundation@1.1.1':
-    resolution: {integrity: sha512-tBVsRkm92KN/Um1c2S+3N8DTEBU2Ki7VgfuZWJ/SEhyNwP24ElMQxlSOaV/TrClBsEnjVkDsbGQxLP8jRJqmEw==}
+  '@agent-teams/engineering-foundation@1.2.0':
+    resolution: {integrity: sha512-TBUH9TdTv3RepCbSt9RrIAAEnShYiUDxIotcbkbRkT0HjM+yAzBYNmBlC9qRfPqY3GPutDwTy0uZnPxEesi7vg==}
     engines: {node: '>=24.18.0 <25', pnpm: '>=11.17.0 <12'}
     hasBin: true
 
@@ -702,7 +702,7 @@ packages:
 
 snapshots:
 
-  '@agent-teams/docs-protocol-agent-teams@0.2.3':
+  '@agent-teams/docs-protocol-agent-teams@0.2.7':
     dependencies:
       '@agent-teams/docs-protocol': 0.6.0
       '@agent-teams/repository-mutation': 0.2.0
@@ -725,7 +725,7 @@ snapshots:
       ajv: 8.20.0
       yaml: 2.9.0
 
-  '@agent-teams/engineering-foundation@1.1.1(@types/node@24.13.3)':
+  '@agent-teams/engineering-foundation@1.2.0(@types/node@24.13.3)':
     dependencies:
       '@agent-teams/document-authoring': 0.3.0
       '@agent-teams/repository-mutation': 0.2.0
