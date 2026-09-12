@@ -112,5 +112,7 @@ Candidates, in useful order:
 3. Classify `tooling/local-evm`. `model.ts` is pure; `runner.ts` uses
    `fs` and `child_process`. Do not paint the whole directory as domain.
    Split like `local-solana`, or keep one honest adapter boundary.
-4. Classify remaining `scripts/` except `execution-environment`
-   (rollback, toolchain, security, genesis, and similar).
+4. Classify remaining `scripts/` except `execution-environment`,
+   including `scripts/rollback` and `scripts/tests`.
+5. Classify tails in `tooling/security` outside `slither/src`, plus extra
+   files in `tooling/local-solana` and `tooling/deployment-plan`.
