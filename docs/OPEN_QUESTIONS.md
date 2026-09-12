@@ -86,7 +86,8 @@ This checklist cannot be waived merely because gas happens to be cheap:
 ## Later engineering: Foundation TypeScript coverage
 
 Not launch-blocking. Think later. Do not treat this as a current delivery
-slice.
+slice. The current slice is
+[Source v3 coverage goal](architecture/source-v3-coverage-goal.md).
 
 Green CI today means the declared source graph matches the declared
 allowlists. It does not yet mean every Token TypeScript root is in that

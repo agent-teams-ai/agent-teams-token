@@ -31,6 +31,8 @@ Start with:
 - `docs/NON_NEGOTIABLES.md`
 - `docs/OPEN_QUESTIONS.md`
 - `docs/STATUS.md`
+- `docs/architecture/source-v3-coverage-goal.md` for the current
+  source-v3 coverage slice
 
 Documentation authoring route:
 
