@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { restoreArchitectureBoundarySource } from "../rollback/slices/transforms.mjs";
 
 const foundationManifestPath = fileURLToPath(
   import.meta.resolve("@agent-teams/engineering-foundation/package.json"),
@@ -30,6 +31,16 @@ test("live source policy is schema v3 with root package and workspace package ro
   assert.match(policySource, /^  - packages\/domain\/tests$/m);
   assert.match(policySource, /^  - packages\/contexts\/supply\/tests$/m);
   assert.match(policySource, /^  - scripts\/execution-environment$/m);
+});
+
+test("applied schema v1 restore does not require a second header demotion", () => {
+  const applied = restoreArchitectureBoundarySource(policySource, policySource, "local-solana");
+  assert.match(applied, /^schemaVersion: 1$/m);
+  assert.doesNotMatch(applied, /^packageRoots:/m);
+  assert.equal(
+    restoreArchitectureBoundarySource(applied, policySource, "local-solana"),
+    applied,
+  );
 });
 
 test("source v3 rejects includeRootPackage as an unknown public field", async () => {

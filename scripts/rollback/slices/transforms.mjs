@@ -49,13 +49,18 @@ export function restoreArchitectureBoundarySource(source, baseline, sliceId) {
   }
   // Slice apply deletes the slice's source files. Schema v3 treats missing
   // boundary roots as invalid input, so the applied policy must be schema v1.
-  current = replaceExactly(current, "schemaVersion: 3\n", "schemaVersion: 1\n", "schemaVersion");
-  current = replaceExactly(
-    current,
-    "packageRoots:\n  - packages/contexts/supply\n  - packages/domain\nrootPackage: true\n",
-    "",
-    "v3-package-roots",
-  );
+  // Linux-parity rereads the applied file, so header demotion is idempotent.
+  if (current.startsWith("schemaVersion: 3\n")) {
+    current = replaceExactly(current, "schemaVersion: 3\n", "schemaVersion: 1\n", "schemaVersion");
+    current = replaceExactly(
+      current,
+      "packageRoots:\n  - packages/contexts/supply\n  - packages/domain\nrootPackage: true\n",
+      "",
+      "v3-package-roots",
+    );
+  } else if (!current.startsWith("schemaVersion: 1\n")) {
+    throw new Error("ROLLBACK_SOURCE_SCHEMA_UNSUPPORTED");
+  }
   return current;
 }
 
