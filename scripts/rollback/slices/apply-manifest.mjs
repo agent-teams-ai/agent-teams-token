@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 
 import { basicRun, gitExecutable } from "../runtime/candidate.mjs";
-import { repositoryRoot, sliceRoots } from "./config.mjs";
+import { repositoryRoot } from "./config.mjs";
 import { requireArray, validateExactPath } from "./manifests.mjs";
 import {
   closeRollbackRemovalQuarantine,
@@ -195,7 +193,6 @@ function applyManifestInQuarantine(context, quarantine) {
     quarantine,
     { onBoundary: context.onBoundary, orderedDirectories: context.orderedDirectories },
   );
-  restoreSliceSourceBoundaryDirectories(context.root, context.manifest.sliceId);
   assertDeclaredSharedDigests(context, "afterSha256", "ROLLBACK_SHARED_EDIT_RESULT_DRIFT");
   return rollbackApplicationReport(quarantine, directoryCleanup);
 }
@@ -226,18 +223,6 @@ function restoreBaselinePaths(context) {
     for (const path of manifest.restoreFromBaseline) {
       const content = run("git", ["show", `${manifest.baselineSha}:${path}`], { cwd: root });
       restoreRollbackSharedFile(root, path, sharedPlan, workspaceHandle, content);
-    }
-  });
-}
-
-function restoreSliceSourceBoundaryDirectories(root, sliceId) {
-  const ownedRoot = sliceRoots[sliceId];
-  if (typeof ownedRoot !== "string") {
-    throw new Error("ROLLBACK_SLICE_SOURCE_ROOT_UNKNOWN slice=" + sliceId);
-  }
-  runRollbackRemovalPhase("source-boundary-directories", () => {
-    for (const layer of ["domain", "application", "adapters", "composition"]) {
-      mkdirSync(join(root, ownedRoot, "src", layer), { recursive: true });
     }
   });
 }
