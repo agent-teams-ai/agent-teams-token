@@ -1,10 +1,16 @@
-schemaVersion: 1
+schemaVersion: 3
 workspace:
   kind: pnpm
   manifest: pnpm-workspace.yaml
+packageRoots:
+  - packages/contexts/supply
+  - packages/domain
+rootPackage: true
 governedRoots:
   - packages/domain/src
+  - packages/domain/tests
   - packages/contexts/supply/src
+  - packages/contexts/supply/tests
   - tooling/local-solana/src
   - tooling/deployment-plan/src
   - tooling/security/slither/src
@@ -28,6 +34,7 @@ boundaries:
       - packages/domain/src
     entrypoints:
       - packages/domain/src/supply.ts
+      - packages/domain/src/features/ccip-status/message.ts
     allow:
       boundaries: []
       packages: []
@@ -81,6 +88,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/index.ts
     entrypoints:
       - packages/contexts/supply/src/features/genesis-manifest/index.ts
+      - packages/contexts/supply/src/features/genesis-manifest/composition/compile-local.ts
     allow:
       boundaries:
         - supply.genesis-manifest.application
@@ -296,4 +304,42 @@ boundaries:
         - tooling.slither.domain
       packages: []
       builtins: []
+      runtimeReferences: []
+  - id: token.domain.tests
+    dependencyMode: development
+    roots:
+      - packages/domain/tests
+    entrypoints:
+      - packages/domain/tests/ccip-status.test.ts
+      - packages/domain/tests/supply.test.ts
+    allow:
+      boundaries:
+        - token.domain
+      packages: []
+      builtins:
+        - node:assert/strict
+        - node:test
+      runtimeReferences: []
+  - id: supply.genesis-manifest.tests
+    dependencyMode: development
+    roots:
+      - packages/contexts/supply/tests
+    entrypoints:
+      - packages/contexts/supply/tests/artifact-store.test.ts
+      - packages/contexts/supply/tests/genesis-manifest.test.ts
+      - packages/contexts/supply/tests/package-consumer.test.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.adapters
+        - supply.genesis-manifest.application
+        - supply.genesis-manifest.composition
+        - supply.genesis-manifest.domain
+      packages: []
+      builtins:
+        - node:assert/strict
+        - node:child_process
+        - node:fs/promises
+        - node:path
+        - node:test
+        - node:url
       runtimeReferences: []
