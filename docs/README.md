@@ -14,6 +14,7 @@ Start with the product and implementation state:
 2. [Architecture baseline](ARCHITECTURE.md)
 3. [Open product decisions](OPEN_QUESTIONS.md)
 4. [Current status](STATUS.md)
+5. [Source v3 coverage goal](architecture/source-v3-coverage-goal.md)
 
 Decision inputs:
 
@@ -32,6 +33,7 @@ the generated Skill, caller workflow, package pins, and managed state.
 ## Complete document catalog
 
 - [Architecture](ARCHITECTURE.md)
+- [Source v3 coverage goal](architecture/source-v3-coverage-goal.md)
 - [Transparent token release contracts](CONTRACTS.md)
 - [Decision register](DECISIONS.md)
 - [AGTMAI Genesis Core: подробный план локальной реализации](GENESIS_CORE_LOCAL_PLAN.md)

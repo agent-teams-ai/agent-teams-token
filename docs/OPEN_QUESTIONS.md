@@ -1,6 +1,7 @@
 # Open product decisions
 
-Only decisions that materially change the implementation are listed here.
+Product decisions that materially change the implementation are listed first.
+Non-blocking engineering follow-up sits at the end.
 
 ## P0 before rights/ABI freeze or mainnet genesis
 
@@ -81,3 +82,37 @@ This checklist cannot be waived merely because gas happens to be cheap:
 1. Community-grant policy, budget cadence and reporting format.
 2. Whether the code is published under Apache-2.0 and how brand assets are
    separately protected.
+
+## Later engineering: Foundation TypeScript coverage
+
+Not launch-blocking. Think later. Do not treat this as a current delivery
+slice. The current slice is
+[Source v3 coverage goal](architecture/source-v3-coverage-goal.md).
+
+Green CI today means the declared source graph matches the declared
+allowlists. It does not yet mean every Token TypeScript root is in that
+graph. Solidity and Rust stay outside this gate by design.
+
+Keep these invariants when the work is picked up:
+
+- `EXPECTED_TOOLING_BOUNDARIES` stays exactly 13 `tooling.*` IDs. Extra
+  `tooling.*` IDs fail rollback. New coverage must use other ID prefixes
+  such as `ccip.*` or `token.*`.
+- `packageRoots` stay `packages/domain` and `packages/contexts/supply`.
+- Do not mkdir empty leftover directories to satisfy schema v3.
+
+Candidates, in useful order:
+
+1. Add a coverage ratchet so every `tsconfig` and production `*.ts` /
+   `*.mjs` is in `governedRoots` plus a boundary, or is explicit
+   `test|fixture|generated`.
+2. Classify `tooling/testnet-ccip`. It already has `src/domain`,
+   `application`, `adapters`, `composition`, and tests, but it is absent
+   from `architecture/foundation/source-dependencies.yaml`.
+3. Classify `tooling/local-evm`. `model.ts` is pure; `runner.ts` uses
+   `fs` and `child_process`. Do not paint the whole directory as domain.
+   Split like `local-solana`, or keep one honest adapter boundary.
+4. Classify remaining `scripts/` except `execution-environment`,
+   including `scripts/rollback` and `scripts/tests`.
+5. Classify tails in `tooling/security` outside `slither/src`, plus extra
+   files in `tooling/local-solana` and `tooling/deployment-plan`.
