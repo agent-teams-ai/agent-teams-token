@@ -8,6 +8,10 @@
     {
       "path": "contracts/evm/src/features/token-genesis/AGTMAICCIPToken.sol",
       "contract": "AGTMAICCIPToken"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
+      "contract": "GrantAccounting"
     }
   ],
   "expectedContracts": [
@@ -15,6 +19,7 @@
     "AGTMAIToken",
     "Context",
     "ERC20",
+    "GrantAccounting",
     "IERC1155Errors",
     "IERC20",
     "IERC20Errors",
@@ -49,6 +54,10 @@
     {
       "path": "contracts/evm/lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol",
       "sha256": "fa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
+      "sha256": "52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d"
     }
   ],
   "config": [
