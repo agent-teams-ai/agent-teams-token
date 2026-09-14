@@ -35,6 +35,10 @@ const manifest = parseGateManifest(manifestRaw);
 const triageRaw = await readFile(`${schemaDirectory}/tests/fixtures/triage.8977f78.json`, "utf8");
 assert.equal(sha256(triageRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/triage.v1.json`)!.sha256,
   "historical compiler replay requires triage bytes pinned by the 8977f78 manifest");
+const policyRaw = await readFile(`${schemaDirectory}/tests/fixtures/suppressions.8977f78.json`, "utf8");
+assert.equal(sha256(policyRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/suppressions.v1.json`)!.sha256,
+  "historical replay requires the byte-exact empty policy pinned by 8977f78");
+assert.deepEqual(JSON.parse(policyRaw), { schemaVersion: 1, suppressions: [] });
 type Json = Record<string, unknown>;
 type Pair = { build: string; artifact: string };
 const captured: Pair = { build: buildRaw, artifact: artifactRaw };
@@ -69,12 +73,12 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
   for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory]) {
     const destination = join(canonicalDirectory, entry.path);
     await mkdir(dirname(destination), { recursive: true });
-    await writeFile(destination, entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : await readFile(entry.path));
+    await writeFile(destination, entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : entry.path === `${schemaDirectory}/suppressions.v1.json` ? policyRaw : await readFile(entry.path));
   }
   await mkdir(dirname(join(canonicalDirectory, accepted.vulnerableFixture.source.path)), { recursive: true });
   await writeFile(join(canonicalDirectory, accepted.vulnerableFixture.source.path), synthetic.fixtureSource);
   for (const name of ["slither.config.json", "suppressions.v1.json", "triage.v1.json"]) {
-    await writeFile(join(canonicalDirectory, name), name === "triage.v1.json" ? triageRaw : await readFile(`${schemaDirectory}/${name}`));
+    await writeFile(join(canonicalDirectory, name), name === "triage.v1.json" ? triageRaw : name === "suppressions.v1.json" ? policyRaw : await readFile(`${schemaDirectory}/${name}`));
   }
   await writeFile(join(canonicalDirectory, "production-closure.v1.json"), JSON.stringify(accepted));
   const detectorInventory = (parse(await readFile(manifest.detectorInventory.path, "utf8")).detectors as string[]);
@@ -98,7 +102,7 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
   assert.equal(decision.visible.length, 12);
   assert.equal(decision.suppressed.length, 0);
   await writeReadyEvidence({ output, candidateSha: base, manifest: accepted, input, decision,
-    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(await readFile(`${schemaDirectory}/suppressions.v1.json`)) },
+    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(policyRaw) },
     triageHash: sha256(triageRaw), schemaDirectory, canonicalDirectory,
     assertReadyPrecondition: async () => {}, publication: testPublication() });
   return { output, canonicalDirectory };
@@ -125,7 +129,7 @@ test("captured Foundry output preserves exact raw bytes, all 9 compiler commits 
     assert.equal(result.evidence.rawBuildInfo, buildRaw); assert.equal(result.evidence.rawArtifact, artifactRaw);
     assert.equal(result.evidence.abiSha256, sha256(JSON.stringify(artifact.abi)));
     assert.deepEqual(result.evidence.sourceHashes, manifest.sources.map(({ path, sha256: hash }) => ({ path: path.replace(/^contracts\/evm\//u, ""), sha256: hash })).toSorted((a, b) => a.path.localeCompare(b.path)));
-    for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory]) {assert.equal(sha256(entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : await readFile(entry.path)), entry.sha256, entry.path);}
+    for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory]) {assert.equal(sha256(entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : entry.path === `${schemaDirectory}/suppressions.v1.json` ? policyRaw : await readFile(entry.path)), entry.sha256, entry.path);}
   } finally {await rm(parent, { recursive: true, force: true });}
 });
 

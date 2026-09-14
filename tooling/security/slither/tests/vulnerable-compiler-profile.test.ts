@@ -26,6 +26,10 @@ const manifest = parseGateManifest(manifestRaw);
 const triageRaw = await readFile(`${fixtureDirectory}/triage.8977f78.json`, "utf8");
 assert.equal(sha256(triageRaw), "da21f8a8a21ef827e4c96afc0d1a6a4527c63c5f66c6c1f7d46a915ad34c2cfe");
 assert.equal(sha256(triageRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/triage.v1.json`)!.sha256);
+const policyRaw = await readFile(`${schemaDirectory}/tests/fixtures/suppressions.8977f78.json`, "utf8");
+assert.equal(sha256(policyRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/suppressions.v1.json`)!.sha256,
+  "historical replay requires the byte-exact empty policy pinned by 8977f78");
+assert.deepEqual(JSON.parse(policyRaw), { schemaVersion: 1, suppressions: [] });
 type Json = Record<string, unknown>;
 type Pair = { readonly build: string; readonly artifact: string };
 const object = (value: unknown): Json => value as Json;
@@ -81,19 +85,19 @@ async function bundle(parent: string): Promise<string> {
   assert.equal(decision.exitCode, 0, JSON.stringify(decision.errors));
   const canonicalDirectory = join(parent, "canonical");
   for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory, manifest.vulnerableFixture.source]) {
-    const raw = entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : await readFile(entry.path);
+    const raw = entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : entry.path === `${schemaDirectory}/suppressions.v1.json` ? policyRaw : await readFile(entry.path);
     assert.equal(sha256(raw), entry.sha256, entry.path);
     const destination = join(canonicalDirectory, entry.path);
     await mkdir(dirname(destination), { recursive: true });
     await writeFile(destination, raw);
   }
   for (const name of ["slither.config.json", "suppressions.v1.json", "triage.v1.json"]) {
-    await writeFile(join(canonicalDirectory, name), name === "triage.v1.json" ? triageRaw : await readFile(`${schemaDirectory}/${name}`));
+    await writeFile(join(canonicalDirectory, name), name === "triage.v1.json" ? triageRaw : name === "suppressions.v1.json" ? policyRaw : await readFile(`${schemaDirectory}/${name}`));
   }
   await writeFile(join(canonicalDirectory, "production-closure.v1.json"), manifestRaw);
   const output = join(parent, "bundle");
   await writeReadyEvidence({ output, candidateSha, manifest, input, decision, schemaDirectory, canonicalDirectory,
-    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(await readFile(`${schemaDirectory}/suppressions.v1.json`)) },
+    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(policyRaw) },
     triageHash: sha256(triageRaw), assertReadyPrecondition: async () => {}, publication: testPublication() });
   return output;
 }

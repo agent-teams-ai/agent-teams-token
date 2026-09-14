@@ -27,7 +27,7 @@ test("production triage pins the exact current captured findings without suppres
     findings: FindingTriage[];
   };
   const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
-    suppressions: unknown[];
+    suppressions: { fingerprint: string; detectorId: string; sourceHash: string }[];
   };
   const expected = [
     "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
@@ -63,7 +63,11 @@ test("production triage pins the exact current captured findings without suppres
   assert.ok(document.findings.every(({ owner }) => owner === "project-security"));
   assert.deepEqual(document.findings.map(({ reviewedAt }) => reviewedAt), reviewedDates);
   assert.ok(document.findings.every(({ rationale }) => rationale.trim().length >= 20));
-  assert.deepEqual(suppressions.suppressions, []);
+  assert.deepEqual(suppressions.suppressions.map(({ fingerprint, detectorId, sourceHash }) => ({ fingerprint, detectorId, sourceHash })), [{
+    fingerprint: "sha256:704c6fd405b64b61d8f0712240be87d8ce8b180287dc75322e25459bd3cea098",
+    detectorId: "divide-before-multiply",
+    sourceHash: "sha256:52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d",
+  }]);
 });
 
 // A live ledger update must never silently re-authorize historical captured output.

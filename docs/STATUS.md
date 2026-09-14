@@ -7,6 +7,13 @@ The new core is 137 lines; the three test files total 515 lines. Pinned Foundry
 CI-profile validation passed all 37 Solidity tests, including 10,000 runs per
 fuzz test and 65,536 generated grant operations (512 invariant sequences).
 
+Slither reports one Medium `divide-before-multiply` warning for the exact
+quotient/remainder formula. It is retained as a [source-bound exception](../tooling/security/slither/suppressions.v1.json):
+the remainder restores exact floor division and uint64 duration bounds prevent
+overflow. The detector remains enabled, changed source/tuple bytes are rejected,
+and the exception requires review before 2026-12-14 (expires 2027-03-14).
+This is an explicitly reviewed warning, not a claim of zero analyzer findings.
+
 This is accounting evidence, not custody or payout/refund E2E. Production
 wrappers, reserve budget enforcement, beneficiary transfer rights, cancellation
 authority and calendar compilation remain unfinished. Percentages and amounts

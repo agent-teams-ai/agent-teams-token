@@ -1,1 +1,21 @@
-{"schemaVersion":1,"suppressions":[]}
+{
+  "schemaVersion": 1,
+  "suppressions": [
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:704c6fd405b64b61d8f0712240be87d8ce8b180287dc75322e25459bd3cea098",
+      "detectorId": "divide-before-multiply",
+      "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
+      "start": 5597,
+      "length": 783,
+      "sourceHash": "sha256:52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d",
+      "snippetHash": "sha256:addb3c243d2beeba7e0fcb7f4ab337216896ce73935bad6b9bd52e130323af5b",
+      "findingIdentityHash": "sha256:fa25b38ae2b10a1b7002748fcd3b5eb908c5c6edf1e814488980e86eceacd1ca",
+      "reason": "Exact arithmetic false positive: write A = q*d + r with q = floor(A/d) and 0 <= r < d. Then q*x + floor(r*x/d) = floor(A*x/d); the remainder correction restores the precision lost by division. The interior branch guarantees 0 < x < d <= uint64.max. Thus r*x < 2^128, q*x <= A, and the final sum <= A, so uint256 intermediates cannot overflow. Authorization is source- and tuple-specific and requires finite review before reviewAt; it is not detector-wide acceptance.",
+      "owner": "project-security",
+      "reviewAt": "2026-12-14T00:00:00Z",
+      "expiresAt": "2027-03-14T00:00:00Z",
+      "regressionEvidence": "contracts/evm/test/features/contributor-grants/GrantAccounting.t.sol: testMaximumAllocationIndependentVectors, testFuzzCurveIndependentMultiplication, testFuzzFullWidthCurveAndCancellation; independent core reviews ACCEPT of c70bd192ec263a744a78e0ae13745a9883e8a2b9, exact GrantAccounting.sol source SHA-256 52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d. Actual Slither capture slither-c70bd19-final/evidence.json and slither.json records 13 findings: 1 Medium and 12 Informational."
+    }
+  ]
+}
