@@ -1,5 +1,15 @@
 # Open product decisions
 
+## Agreed accounting slice, 2026-09-14
+
+Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
+and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
+Founder/team use individual 12-to-48-month curves; founder is non-revocable,
+team unvested revocation preserves vested debt and the original reserve.
+Public authority, transfer rights, cap rules and deployment remain open.
+
+
+
 Product decisions that materially change the implementation are listed first.
 Non-blocking engineering follow-up sits at the end.
 
@@ -31,7 +41,8 @@ release gate, not an open naming choice.
 8. Set the global 30/90-day liquidization ceiling and outstanding committed-but-
    unreleased ceiling. Per-vault commitment caps do not prevent synchronized
    future unlocks.
-9. Decide whether initial-team unvested grants are revocable. Recommended:
+9. Team-service unvested revocation and founder non-revocability are accepted.
+   Exact cancellation authority, effective time and any delay remain open. Earlier proposal:
    service grants may return only unvested value after a timelocked cancellation;
    vested value remains owed. Founder vesting stays non-revocable.
 10. Approve or reject splitting the 1% liquidity allocation into a physically
