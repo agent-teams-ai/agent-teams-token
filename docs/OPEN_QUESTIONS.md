@@ -19,9 +19,10 @@ Non-blocking engineering follow-up sits at the end.
 release gate, not an open naming choice.
 
 1. Confirm or replace the `100,000,000` fixed-supply default; keep `9` decimals.
-2. Keep or amend the provisional `45/25/15/8/6/1` model. Founder is capped at 3%
-   inside the 15% contributor allocation; proposed schedules are founder 18→72
-   and team 12→60 without cliff catch-up. This is recorded but not final.
+2. Confirm allocation percentages and reserve caps; `45/25/15/8/6/1` and the
+   founder sub-allocation remain proposals. Founder/team schedules are accepted:
+   individual T0, zero through month 12, then linear to month 48 without catch-up.
+   See [accepted grant rules](DECISIONS.md#owner-decisions-2026-09-14).
 3. Define initial utility that exists at launch without promising investment
    return or project ownership.
 4. Choose legal entity and launch jurisdictions and approve the exact holder

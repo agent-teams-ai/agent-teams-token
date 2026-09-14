@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { validateFindingTriage } from "../src/application/triage.ts";
-import { findingFingerprint, normalizedIdentityHash, sourceLocation } from "../src/adapters/fingerprint.ts";
+import { findingFingerprint, normalizedIdentityHash, sha256, sourceLocation } from "../src/adapters/fingerprint.ts";
 import { assertSerializedAgainstSchema } from "../src/adapters/json-schema.ts";
+import { parseSlitherJson } from "../src/adapters/slither-json.ts";
 import type { Finding, FindingTriage } from "../src/domain/model.ts";
 
 const source = "contract A {}";
@@ -33,7 +34,7 @@ test("production triage pins the exact current captured findings without suppres
     "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
     "sha256:3e9bbd4f4becbedeaf399132a78aae873c16832f014081535116f8d9a71b58bf",
     "sha256:41a24f69881fa7e61a657184f095cca8f63b0294157d67d51f53c35fa205be6a",
-    "sha256:467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742",
+    "sha256:1984beab07d7343449c4de1df91a23a9b13ea3bb48654667c87229fe10a901e6",
     "sha256:6968e5dfe430c2af75b3853c25e887ca502f113bf9bda91f9534c82162306811",
     "sha256:8263a454f64d24c9db2b6ba6d64e2f87cd69bd6a25d40eeb480da1133e77acfa",
     "sha256:83f6581c3996d4e9b5968b277ce1ff495a578911f308179538cc8f86ed788d8c",
@@ -47,7 +48,7 @@ test("production triage pins the exact current captured findings without suppres
     "2026-08-29T00:00:00.000Z",
     "2026-08-29T00:00:00.000Z",
     "2026-08-29T00:00:00.000Z",
-    "2026-09-08T05:52:55.734Z",
+    "2026-09-14T17:48:07.425Z",
     "2026-08-29T00:00:00.000Z",
     "2026-09-08T05:52:55.734Z",
     "2026-08-29T00:00:00.000Z",
@@ -63,4 +64,18 @@ test("production triage pins the exact current captured findings without suppres
   assert.deepEqual(document.findings.map(({ reviewedAt }) => reviewedAt), reviewedDates);
   assert.ok(document.findings.every(({ rationale }) => rationale.trim().length >= 20));
   assert.deepEqual(suppressions.suppressions, []);
+});
+
+// A live ledger update must never silently re-authorize historical captured output.
+test("historical captured findings require retained triage and reject current triage", async () => {
+  const historicalRaw = await readFile("tooling/security/slither/tests/fixtures/triage.8977f78.json", "utf8");
+  assert.equal(sha256(historicalRaw), "da21f8a8a21ef827e4c96afc0d1a6a4527c63c5f66c6c1f7d46a915ad34c2cfe");
+  const historical = JSON.parse(historicalRaw) as { findings: FindingTriage[] };
+  const current = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as { findings: FindingTriage[] };
+  const parsed = await parseSlitherJson(await readFile("tooling/security/slither/tests/fixtures/slither-0.11.6-production.json", "utf8"), process.cwd());
+  assert.deepEqual(validateFindingTriage(parsed.findings, historical.findings), []);
+  const errors = validateFindingTriage(parsed.findings, current.findings);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.some((error) => error.includes("467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742 requires exactly one")));
+  assert.ok(errors.some((error) => error.includes("1984beab07d7343449c4de1df91a23a9b13ea3bb48654667c87229fe10a901e6 is stale")));
 });

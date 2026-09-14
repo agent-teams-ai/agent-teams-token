@@ -10,8 +10,8 @@ their original purpose reserve; vested-but-unclaimed value remains owed. Safe
 See [owner decisions](DECISIONS.md#owner-decisions-2026-09-14) and
 [revocation](DECISIONS.md#grant-revocation-decision-2026-09-14).
 
-The authorized next implementation is an internal Solidity grant-accounting
-library with independent unit/fuzz/sequence tests. Amounts and exact UTC instants
+This checkpoint implements an internal Solidity grant-accounting library
+with independent unit/fuzz/sequence tests. Amounts and exact UTC instants
 are explicit inputs; no provisional percentages or production dates are baked
 in. It does not implement token custody, payout/refund effects, reserve caps,
 Safe authorization, transfer rights or a public deployment ABI. Those remain

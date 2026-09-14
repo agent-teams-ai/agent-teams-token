@@ -35,11 +35,11 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:1984beab07d7343449c4de1df91a23a9b13ea3bb48654667c87229fe10a901e6",
+      "fingerprint": "sha256:467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742",
       "owner": "project-security",
       "disposition": "accepted-design",
-      "rationale": "Pinned OpenZeppelin compatibility pragmas and both tokens' and GrantAccounting's exact 0.8.36 pragmas compile together under verified solc 0.8.36+commit.8a079791, Paris, optimizer 200, viaIR=false, IPFS metadata and CBOR enabled. The aggregate identity now includes GrantAccounting.sol; the finding describes differing source constraints, not differing executed compilers.",
-      "reviewedAt": "2026-09-14T17:48:07.425Z"
+      "rationale": "Pinned OpenZeppelin compatibility pragmas and both tokens' exact 0.8.36 pragmas compile together under verified solc 0.8.36+commit.8a079791, Paris, optimizer 200, viaIR=false, IPFS metadata and CBOR enabled. The finding describes differing source constraints, not differing executed compilers.",
+      "reviewedAt": "2026-09-08T05:52:55.734Z"
     },
     {
       "schemaVersion": 1,
