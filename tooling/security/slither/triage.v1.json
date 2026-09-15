@@ -35,11 +35,11 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:1984beab07d7343449c4de1df91a23a9b13ea3bb48654667c87229fe10a901e6",
+      "fingerprint": "sha256:f395435ae8382a9eb4bc8f3ee2c1dd920aa1736be8d305e12a37207ef71472a9",
       "owner": "project-security",
       "disposition": "accepted-design",
-      "rationale": "Pinned OpenZeppelin compatibility pragmas and both tokens' and GrantAccounting's exact 0.8.36 pragmas compile together under verified solc 0.8.36+commit.8a079791, Paris, optimizer 200, viaIR=false, IPFS metadata and CBOR enabled. The aggregate identity now includes GrantAccounting.sol; the finding describes differing source constraints, not differing executed compilers.",
-      "reviewedAt": "2026-09-14T17:48:07.425Z"
+      "rationale": "Pinned OpenZeppelin compatibility pragmas and both tokens', GrantAccounting's and GrantVault's exact 0.8.36 pragmas compile together under verified solc 0.8.36+commit.8a079791, Paris, optimizer 200, viaIR=false, IPFS metadata and CBOR enabled. The finding describes differing source constraints, not differing executed compilers.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
     },
     {
       "schemaVersion": 1,
@@ -96,6 +96,78 @@
       "disposition": "accepted-design",
       "rationale": "The pinned OpenZeppelin draft IERC-6093 file keeps its upstream compiler compatibility range.",
       "reviewedAt": "2026-08-29T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:1b33a698b01a9588c2bfec6ab5c8d99b225d34821f174554f641cea86ff593a2",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "GrantVault deliberately rejects block timestamps that cannot be represented by its uint64 accounting clock before narrowing the value.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:5a4b67c294acc3ba734748554fb15f29296b9891f20cd24cd62e61f05cb908b0",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Funding intentionally compares trusted chain time with the immutable grant start so a reserve cannot activate a backdated schedule.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:6a9eb1b35262e570240d647216f6240aaf9f3eb1c0b615e3542f48e96da43396",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Construction intentionally compares trusted chain time with the supplied grant start and rejects schedules that are already backdated.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:6cba562ee91147d937d6c16b1094a83f333df909e852a027a4c6a4a463777443",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "TOKEN is an intentionally uppercase public immutable binding in GrantVault's reviewed fixed-binding ABI and has no reassignment path.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:7ea3b090f6f4b90c801214b373cbbc46e2cca220e127347e382744940042cb50",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "ORIGINAL_RESERVE is an intentionally uppercase public immutable binding in GrantVault's reviewed fixed-binding ABI and has no reassignment path.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:9f0e4495f3006b7bb7fed724098975f75fd3bcccff3280c5adb0df856aca2dcf",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "CONTROLLER is an intentionally uppercase public immutable binding in GrantVault's reviewed fixed-binding ABI and has no reassignment path.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:ce70f4037558f57df4f3b299af5765113c5fa6ada98b6b6a94d33fd6d36d1d26",
+      "owner": "project-security",
+      "disposition": "false-positive",
+      "rationale": "The refund comparison only skips a zero-value ERC20 transfer; refund is the accounting result and the timestamp-dependent entitlement is already fixed by GrantAccounting.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:d5b879fba117edb58befc8d6fc53ae3adf138e611a7327c5332e65a692664ccc",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "BENEFICIARY is an intentionally uppercase public immutable binding in GrantVault's reviewed fixed-binding ABI and has no reassignment path.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:efd8f5efafa87c1fad1e76342676ba8f2eb7122649f114a86e52179845e748c5",
+      "owner": "project-security",
+      "disposition": "false-positive",
+      "rationale": "The movement helper receives only token balance snapshots and an amount; its comparisons enforce exact debit and credit and do not read or compare a timestamp.",
+      "reviewedAt": "2026-09-15T07:56:21.125Z"
     }
   ]
 }

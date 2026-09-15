@@ -16,6 +16,22 @@
       "reviewAt": "2026-12-14T00:00:00Z",
       "expiresAt": "2027-03-14T00:00:00Z",
       "regressionEvidence": "contracts/evm/test/features/contributor-grants/GrantAccounting.t.sol: testMaximumAllocationIndependentVectors, testFuzzCurveIndependentMultiplication, testFuzzFullWidthCurveAndCancellation; independent core reviews ACCEPT of c70bd192ec263a744a78e0ae13745a9883e8a2b9, exact GrantAccounting.sol source SHA-256 52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d. Actual Slither capture slither-c70bd19-final/evidence.json and slither.json records 13 findings: 1 Medium and 12 Informational."
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:4827979f6c7702c447c128b9ee3a92daf133e21a3c4c1ae04ea84b73db49d20c",
+      "detectorId": "arbitrary-send-erc20",
+      "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
+      "start": 2859,
+      "length": 934,
+      "sourceHash": "sha256:673cad0516c8e0068aa495e8fa5e93ae43cc84547b57c9bd824daec292e56a80",
+      "snippetHash": "sha256:602cfa2520d0c9a1d7a00b16d00cbcc6bdc17cf35020ea713b1747f1b796a633",
+      "findingIdentityHash": "sha256:f39150adf489652d75ac7d07ae9b391b11d849355740cb280e726357f2928581",
+      "reason": "Exact authorization false positive: fund rejects unless msg.sender equals the immutable ORIGINAL_RESERVE before any token call, and transferFrom debits that same immutable address. The caller cannot select the sender, recipient or amount; the destination is this vault and the amount comes from immutable grant terms. The reserve must both approve this exact vault and invoke fund itself. Authorization is source- and tuple-specific and requires finite review before reviewAt; it is not detector-wide acceptance.",
+      "owner": "project-security",
+      "reviewAt": "2026-12-15T00:00:00Z",
+      "expiresAt": "2027-03-15T00:00:00Z",
+      "regressionEvidence": "contracts/evm/test/features/contributor-grants/GrantVault.t.sol: testFundingAuthorizationFailuresDeadlineRetryAndDuplicate approves from ORIGINAL_RESERVE, then proves an allowance-only STRANGER call reverts Unauthorized without funding or moving tokens; testCCIPTokenCustodyAndContractCallerCompatibility proves the bound reserve contract can fund. Actual pinned Slither 0.11.6 capture at candidate f12c92e00717cf255f45db4166fafb99c099129d produced this exact arbitrary-send-erc20 tuple."
     }
   ]
 }

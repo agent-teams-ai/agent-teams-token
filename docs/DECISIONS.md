@@ -95,4 +95,6 @@ that same immutable reserve receives an unvested refund.
 
 These choices resolve wrapper routing, authority and time for this slice. They do
 not approve actual addresses, allocations, dates, reserve caps, production
-genesis or deployment. A refund neither calls a reserve nor restores its budget.
+genesis or deployment. `GrantVault` makes no reserve callback or external
+budget-counter update. Preserving reserve spending limits when a refund arrives
+is the reserve implementation's responsibility.

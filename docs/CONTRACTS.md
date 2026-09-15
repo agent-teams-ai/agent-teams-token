@@ -21,9 +21,11 @@ available()  zero before funding, otherwise current claimable amount
 Bindings have no update API. Founder cancellation always fails. Team cancellation
 freezes entitlement at transaction time, sends only unvested tokens to the bound
 reserve and leaves vested-but-unreleased debt claimable. Transfers require exact
-balance deltas and share a reentrancy guard. Refunds perform no reserve callback
-and cannot reset an external budget. The controller address is intended for the
-selected Safe 2-of-3; the contract does not verify its owners or threshold.
+balance deltas and share a reentrancy guard. `GrantVault` makes no reserve
+callback or external budget-counter update. Preserving reserve spending limits
+when a refund arrives is the reserve implementation's responsibility. The
+controller address is intended for the selected Safe 2-of-3; the contract does
+not verify its owners or threshold.
 
 Status: the bounded `GrantVault` custody slice is implemented locally, but no
 contract in this document is deployed or approved for mainnet. Broader

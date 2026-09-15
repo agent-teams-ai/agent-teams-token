@@ -515,6 +515,66 @@ contract GrantVaultTest is TestBase {
         assertEq(token.balanceOf(RESERVE), reserveBalance);
     }
 
+    function testReleaseRejectsInexactOutboundMovementAndRestoresLedgerAndBalances() public {
+        HostileToken.Mode[3] memory modes = [
+            HostileToken.Mode.TrueNoMovement,
+            HostileToken.Mode.WrongDebit,
+            HostileToken.Mode.WrongCredit
+        ];
+        for (uint256 i; i < modes.length; ++i) {
+            vm.warp(START);
+            HostileToken asset = new HostileToken();
+            asset.mint(RESERVE, ALLOCATION);
+            GrantVault target = _deploy(
+                asset, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
+            );
+            _approveAndFund(asset, target, RESERVE);
+            vm.warp(130);
+            bytes32 beforeState = _digest(target);
+            uint256 vaultBalance = asset.balanceOf(address(target));
+            uint256 beneficiaryBalance = asset.balanceOf(BENEFICIARY);
+            asset.configure(modes[i], address(0), "");
+
+            _assertError(
+                _reverted(BENEFICIARY, target, abi.encodeCall(GrantVault.release, ())),
+                abi.encodeWithSelector(GrantVault.TokenDeltaMismatch.selector)
+            );
+            assertEq(_digest(target), beforeState);
+            assertEq(asset.balanceOf(address(target)), vaultBalance);
+            assertEq(asset.balanceOf(BENEFICIARY), beneficiaryBalance);
+        }
+    }
+
+    function testPositiveRefundRejectsInexactOutboundMovementAndRestoresLedgerAndBalances() public {
+        HostileToken.Mode[3] memory modes = [
+            HostileToken.Mode.TrueNoMovement,
+            HostileToken.Mode.WrongDebit,
+            HostileToken.Mode.WrongCredit
+        ];
+        for (uint256 i; i < modes.length; ++i) {
+            vm.warp(START);
+            HostileToken asset = new HostileToken();
+            asset.mint(RESERVE, ALLOCATION);
+            GrantVault target = _deploy(
+                asset, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
+            );
+            _approveAndFund(asset, target, RESERVE);
+            vm.warp(130);
+            bytes32 beforeState = _digest(target);
+            uint256 vaultBalance = asset.balanceOf(address(target));
+            uint256 reserveBalance = asset.balanceOf(RESERVE);
+            asset.configure(modes[i], address(0), "");
+
+            _assertError(
+                _reverted(CONTROLLER, target, abi.encodeCall(GrantVault.cancel, ())),
+                abi.encodeWithSelector(GrantVault.TokenDeltaMismatch.selector)
+            );
+            assertEq(_digest(target), beforeState);
+            assertEq(asset.balanceOf(address(target)), vaultBalance);
+            assertEq(asset.balanceOf(RESERVE), reserveBalance);
+        }
+    }
+
     function testEveryTokenCallbackSeesCommonReentrancyGuard() public {
         bytes[3] memory calls = [
             abi.encodeCall(GrantVault.fund, ()),
