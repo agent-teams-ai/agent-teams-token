@@ -9,6 +9,7 @@ interface Vm {
     function expectPartialRevert(bytes4 selector) external;
     function expectRevert(bytes calldata revertData) external;
     function prank(address sender) external;
+    function warp(uint256 newTimestamp) external;
 }
 
 abstract contract TestBase {

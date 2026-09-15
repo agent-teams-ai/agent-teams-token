@@ -1,4 +1,27 @@
-# Grant accounting checkpoint, 2026-09-14
+# Contributor-grant custody implementation, 2026-09-15
+
+Implemented one immutable, fully funded `GrantVault` per contributor grant on
+top of the unchanged `GrantAccounting` library. The vault performs exact ERC-20
+funding, beneficiary releases and team refunds atomically; fixes beneficiary,
+originating reserve and controller; permanently rejects founder cancellation;
+and preserves vested-but-unreleased team debt after cancellation.
+
+Local tests cover canonical `AGTMAIToken` and `AGTMAICCIPToken` custody without
+invoking CCIP, the `360/60/180/120` cancellation regression, hostile token return
+and delta behavior, reentrancy callbacks, time and authorization boundaries,
+donations, role aliases, smart-contract callers and grant isolation. A two-slot
+stateful handler checks principal conservation, donation separation, frozen debt,
+immutable terms/bindings and fixed token supply with an independent vesting
+oracle. Exact final command evidence is recorded in the implementation handoff.
+
+This is implemented local custody behavior, not configured or deployment-
+qualified production. Canonical deployment/token identity, beneficiary,
+originating reserve, controller Safe 2-of-3 and its owners, allocation, purpose
+and exact UTC schedule remain unset. Reserve caps, production genesis wiring,
+audit, committed-candidate Slither and Linux rollback qualification remain
+separate gates. No public network or blockchain transaction was used.
+
+## Historical accounting-only checkpoint, 2026-09-14
 
 Implemented the internal contributor-grant ledger and test-only harness:
 fixed allocation, per-grant schedule inputs, partial releases, non-revocable
@@ -14,11 +37,11 @@ overflow. The detector remains enabled, changed source/tuple bytes are rejected,
 and the exception requires review before 2026-12-14 (expires 2027-03-14).
 This is an explicitly reviewed warning, not a claim of zero analyzer findings.
 
-This is accounting evidence, not custody or payout/refund E2E. Production
-wrappers, reserve budget enforcement, beneficiary transfer rights, cancellation
-authority and calendar compilation remain unfinished. Percentages and amounts
-remain open. The accepted rules and implementation boundary are in
-[PLAN](PLAN.md#agreed-accounting-slice-2026-09-14).
+This paragraph retains the historical accounting-only claim. The later custody
+slice above supersedes its wrapper-status description; reserve budget enforcement,
+calendar compilation, percentages, amounts and deployment remain unfinished.
+The current boundary is in
+[PLAN](PLAN.md#approved-contributor-grant-custody-slice-2026-09-15).
 
 # Активный продуктовый статус, 8 сентября 2026
 

@@ -2,6 +2,21 @@
 
 Status: working baseline, 2026-08-27.
 
+## Contributor-grant custody
+
+The contributor-grants feature uses one immutable, fully funded `GrantVault`
+per grant. The vault owns ERC-20 custody, fixed address authorization and trusted
+chain time; unchanged `GrantAccounting` owns schedule validation, vesting
+arithmetic, releases and cancellation state. The originating reserve performs
+the one-time exact funding pull, the immutable beneficiary claims to itself, and
+an immutable controller address intended for a Safe 2-of-3 may cancel only team
+grants. See [ADR-0006](decisions/0006-immutable-grant-custody.md).
+
+This boundary has no factory, manager, proxy, governance, reserve-cap ledger or
+deployment path. Actual parties, allocation and UTC schedule remain deployment
+inputs. The older proposed direct-genesis-mint flow cannot activate a vault whose
+funding invariant is an exact reserve debit and requires later production wiring.
+
 ## Product boundary
 
 Ethereum is the canonical chain. The fixed supply is minted once into named

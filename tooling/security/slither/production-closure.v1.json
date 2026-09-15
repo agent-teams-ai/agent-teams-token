@@ -12,6 +12,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
       "contract": "GrantAccounting"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
+      "contract": "GrantVault"
     }
   ],
   "expectedContracts": [
@@ -20,6 +24,7 @@
     "Context",
     "ERC20",
     "GrantAccounting",
+    "GrantVault",
     "IERC1155Errors",
     "IERC20",
     "IERC20Errors",
@@ -58,6 +63,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
       "sha256": "52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
+      "sha256": "673cad0516c8e0068aa495e8fa5e93ae43cc84547b57c9bd824daec292e56a80"
     }
   ],
   "config": [
@@ -83,7 +92,7 @@
     },
     {
       "path": "tooling/security/slither/suppressions.v1.json",
-      "sha256": "5db6b22f7216b6472eb8b186f4e0c7b2302b353cd98bcdc086f15c5cc5b731fc"
+      "sha256": "03215f43c6baff5e3d01b8b309f6a7a66b0ee720399d2d2ff61d7638bc9a1bc7"
     },
     {
       "path": "tooling/security/slither/suppression-ledger.schema.v1.json",
@@ -91,7 +100,7 @@
     },
     {
       "path": "tooling/security/slither/triage.v1.json",
-      "sha256": "f065af629e42dc3b16a4630484511b3de30fbbe535a662130cedf0fc9858afa1"
+      "sha256": "6188d4ab5620ccbf0f762ddb5c5ea939e46beb00380b6bb81a308ee121a6e41d"
     },
     {
       "path": "tooling/security/slither/triage-ledger.schema.v1.json",

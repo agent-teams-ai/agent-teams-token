@@ -81,3 +81,20 @@ accepted `12 -> 48 months` schedule. The contract cannot detect employment
 departure itself: cancellation authority, effective-time rules and any delay
 must be specified in the bounded implementation design. Investor conditions,
 allocation amounts, reserve caps and production deployment remain open.
+
+## Custody implementation decisions, 2026-09-15
+
+For the bounded production-code custody slice, each founder/team grant uses one
+immutable `GrantVault` with no beneficiary, controller or ownership transfer.
+The immutable controller address is intended for the selected Safe 2-of-3 and is
+authorized by ordinary caller equality; Safe owners and signatures are not
+implemented or certified. Team cancellation is effective at the successful
+transaction timestamp with no vault-embedded delay. The originating reserve
+alone activates the vault through an exact full-allocation ERC-20 pull, and only
+that same immutable reserve receives an unvested refund.
+
+These choices resolve wrapper routing, authority and time for this slice. They do
+not approve actual addresses, allocations, dates, reserve caps, production
+genesis or deployment. `GrantVault` makes no reserve callback or external
+budget-counter update. Preserving reserve spending limits when a refund arrives
+is the reserve implementation's responsibility.

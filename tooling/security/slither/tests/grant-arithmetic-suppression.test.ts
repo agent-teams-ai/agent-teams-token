@@ -28,6 +28,8 @@ const finding: Finding = {
 };
 const policyRaw = await readFile(`${directory}/suppressions.v1.json`, "utf8");
 const { suppressions } = JSON.parse(policyRaw) as { suppressions: Suppression[] };
+const arithmeticSuppressions = suppressions.filter(({ fingerprint }) =>
+  fingerprint === finding.fingerprint);
 const manifest = parseGateManifest(await readFile(`${directory}/production-closure.v1.json`, "utf8"));
 const detectors = (JSON.parse(await readFile(manifest.detectorInventory.path, "utf8")) as { detectors: string[] }).detectors;
 // Policy seam only: closure/compiler values below are synthetic, not a fresh analysis.
@@ -42,15 +44,16 @@ const input: AnalysisInput = {
   freshFoundryCreationBytecodeSha256: manifest.creationBytecodeSha256,
   forgeBinarySha256: manifest.tools.forgeBinarySha256, solcBinarySha256: manifest.tools.solcBinarySha256,
 };
-const decide = (findings: readonly Finding[], ledger = suppressions, now = "2026-09-14T00:00:00Z") =>
+const decide = (findings: readonly Finding[], ledger = arithmeticSuppressions, now = "2026-09-14T00:00:00Z") =>
   evaluatePolicy({ input: { ...input, findings }, manifest, expectedDetectors: detectors, suppressions: ledger, now: new Date(now) });
 
 test("only the observed source-bound arithmetic Medium is authorized and remains surfaced", async () => {
   await assertSerializedAgainstSchema(policyRaw, `${directory}/suppression-ledger.schema.v1.json`);
-  assert.equal(suppressions.length, 1);
-  assert.equal(suppressions[0]?.owner, "project-security");
-  assert.equal(suppressions[0]?.reviewAt, "2026-12-14T00:00:00Z");
-  assert.equal(suppressions[0]?.expiresAt, "2027-03-14T00:00:00Z");
+  assert.equal(suppressions.length, 2);
+  assert.equal(arithmeticSuppressions.length, 1);
+  assert.equal(arithmeticSuppressions[0]?.owner, "project-security");
+  assert.equal(arithmeticSuppressions[0]?.reviewAt, "2026-12-14T00:00:00Z");
+  assert.equal(arithmeticSuppressions[0]?.expiresAt, "2027-03-14T00:00:00Z");
   assert.equal(sha256(policyRaw), manifest.config.find(({ path }) => path === `${directory}/suppressions.v1.json`)!.sha256);
   const source = await readFile(finding.location.path, "utf8");
   assert.deepEqual(sourceLocation(finding.location.path, 5597, 783, source), finding.location);
