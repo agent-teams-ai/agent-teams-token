@@ -8,7 +8,7 @@ CI-profile validation passed all 37 Solidity tests, including 10,000 runs per
 fuzz test and 65,536 generated grant operations (512 invariant sequences).
 
 Slither reports one Medium `divide-before-multiply` warning for the exact
-quotient/remainder formula. It is retained as a [source-bound exception](../tooling/security/slither/suppressions.v1.json):
+quotient/remainder formula. The candidate records it as a source-bound exception:
 the remainder restores exact floor division and uint64 duration bounds prevent
 overflow. The detector remains enabled, changed source/tuple bytes are rejected,
 and the exception requires review before 2026-12-14 (expires 2027-03-14).
