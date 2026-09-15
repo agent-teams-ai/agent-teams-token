@@ -79,7 +79,9 @@ export function parseProposal(text: string): ParsedSource<Record<string, unknown
   return all.length > 0 || object === undefined ? { diagnostics: all } : { diagnostics: all, value: object };
 }
 
-function parseStrict(text: string): StrictParse {
+export function parseStrict(text: string, profile: "configuration" | "deployment-evidence" = "configuration"): StrictParse {
+  const bounded = sourceBounds(text, profile === "deployment-evidence" ? 16_777_216 : 1_048_576);
+  if (bounded) { return { diagnostics: [problem(bounded, "", "source exceeds parsing limits")], positions: new Map() }; }
   if (text.trim().length === 0) {
     return { diagnostics: [problem("GENESIS_SOURCE_EMPTY", "", "source must not be empty")], positions: new Map() };
   }
@@ -102,6 +104,9 @@ function parseStrict(text: string): StrictParse {
     if (diagnostics.length === 0) {diagnostics.push(problem("GENESIS_SOURCE_EMPTY", "", "source must not be empty"));}
     return { diagnostics: diagnostics.toSorted(compareDiagnostics), positions: new Map() };
   }
+  if (!collectionsBounded(document.contents, profile === "deployment-evidence" ? 65_536 : 8192)) {
+    return { diagnostics: [problem("GENESIS_SOURCE_COLLECTION_LIMIT", "", "source exceeds collection limits")], positions: new Map() };
+  }
   visit(document, (_key, node) => inspectNode(node, lineCounter, diagnostics));
   if (diagnostics.length > 0) {
     return { diagnostics: dedupe(diagnostics), positions: new Map() };
@@ -120,6 +125,21 @@ function parseStrict(text: string): StrictParse {
       positions,
     };
   }
+}
+
+function collectionsBounded(contents: unknown, maxNodes: number): boolean {
+  const pending: { node: unknown; depth: number }[] = [{ node: contents, depth: 0 }];
+  let count = 0;
+  while (pending.length) {
+    const { node, depth } = pending.pop()!;
+    count++;
+    if (depth > 32 || count > maxNodes || ((isMap(node) || isSeq(node)) && node.items.length > 256)) {
+      return false;
+    }
+    if (isMap(node)) { for (const pair of node.items) { pending.push({ node: pair.key, depth: depth + 1 }, { node: pair.value, depth: depth + 1 }); } }
+    else if (isSeq(node)) { for (const item of node.items) { pending.push({ node: item, depth: depth + 1 }); } }
+  }
+  return true;
 }
 
 function inspectNode(node: unknown, lines: LineCounter, diagnostics: Diagnostic[]): void {
@@ -354,4 +374,28 @@ function rangeStart(value: unknown): number | undefined {
 
 function dedupe(items: Diagnostic[]): Diagnostic[] {
   return [...new Map(items.map((item) => [`${item.code}:${item.pointer}:${item.position?.offset ?? -1}:${item.message}`, item])).values()].toSorted(compareDiagnostics);
+}
+
+/** Bound work before the YAML parser builds an AST, including deeply nested flow input. */
+function sourceBounds(text: string, maxBytes: number): string | undefined {
+  if (new TextEncoder().encode(text).length > maxBytes) { return "GENESIS_SOURCE_SIZE_LIMIT"; }
+  let flowDepth = 0, quote = "", escaped = false;
+  for (const line of text.split("\n")) {
+    if (/^[ \t]{129}/.test(line)) { return "GENESIS_SOURCE_DEPTH_LIMIT"; }
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]!;
+      if (quote) {
+        if (escaped) { escaped = false; continue; }
+        if (quote === '"' && c === "\\") { escaped = true; continue; }
+        if (c !== quote) { continue; }
+        if (quote === "'" && line[i + 1] === "'") { i++; } else { quote = ""; }
+        continue;
+      }
+      if (c === "#") { break; }
+      else if (c === '"' || c === "'") { quote = c; }
+      else if (c === "[" || c === "{") { if (++flowDepth > 32) { return "GENESIS_SOURCE_DEPTH_LIMIT"; } }
+      else if (c === "]" || c === "}") { flowDepth--; }
+    }
+  }
+  return undefined;
 }

@@ -1,7 +1,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { ALLOCATION_DOMAIN, type LocalGenesisSource, type NormalizedAllocation } from "../domain/model.js";
+import { ALLOCATION_DOMAIN, type NormalizedAllocation } from "../domain/model.js";
 
-export function encodeAllocationCommitment(source: LocalGenesisSource, allocations: readonly NormalizedAllocation[]): { rawAbi: `0x${string}`; hash: `0x${string}` } {
+export function encodeAllocationCommitment(source: { readonly network: { readonly chainId: string }; readonly token: { readonly name: string; readonly symbol: string; readonly decimals: number; readonly initialSupplyBaseUnits: string } }, allocations: readonly NormalizedAllocation[]): { rawAbi: `0x${string}`; hash: `0x${string}` } {
   // This fixed encoder mirrors abi.encode for the normative v1 tuple. It is
   // intentionally not a reusable ABI framework; Keccak is supplied by the
   // exact-pinned, maintained @noble/hashes implementation.

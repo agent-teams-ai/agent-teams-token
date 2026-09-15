@@ -1,5 +1,17 @@
 # Open product decisions
 
+## Post-custody release prerequisites
+
+The [active implementation](PLAN.md#active-post-custody-implementation-2026-09-15)
+keeps production values unresolved until supplied and validated. Explicit
+prerequisites include approved supply/allocations/recipients, exact grant
+purposes and UTC schedules, leap-day policy, production reserve wiring, Safe
+configuration/control disclosure, bridge timelock policy, protocol qualification,
+rate limits, fee caps and independently selected configuration approval.
+ADR-0006 remains proposed; owner-approved custody semantics do not automatically
+change its lifecycle status. New local proofs and owned-testnet execution must
+qualify the changed candidate; historical evidence remains historical.
+
 ## Approved custody slice, 2026-09-15
 
 Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)

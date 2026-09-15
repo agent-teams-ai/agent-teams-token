@@ -30,7 +30,7 @@ export function compareDiagnostics(left: Diagnostic, right: Diagnostic): number 
   return compareText(left.pointer, right.pointer) || compareText(left.code, right.code) || (left.position?.offset ?? -1) - (right.position?.offset ?? -1) || compareText(left.message, right.message);
 }
 export function parseCanonicalUint(text: unknown, max = UINT256_MAX): bigint | undefined {
-  if (typeof text !== "string" || !/^(0|[1-9][0-9]*)$/.test(text)) {return undefined;}
+  if (typeof text !== "string" || text.length > 78 || !/^(0|[1-9][0-9]*)$/.test(text)) {return undefined;}
   const value = BigInt(text); return value <= max ? value : undefined;
 }
 export function encodeAllocationId(id: unknown): `0x${string}` | undefined {
@@ -43,12 +43,21 @@ function error(code: string, pointer: string, message: string): Diagnostic { ret
 
 export function normalizeLocalSource(value: LocalGenesisSource): { diagnostics: Diagnostic[]; allocations?: NormalizedAllocation[] } {
   const diagnostics: Diagnostic[] = [];
+  validateSourceProfile(value, diagnostics);
+  const normalized = normalizeAllocationSet(value.token.initialSupplyBaseUnits, value.allocations, "local-fixture");
+  const all = [...diagnostics, ...normalized.diagnostics].toSorted(compareDiagnostics);
+  return all.length ? { diagnostics: all } : normalized;
+}
+
+export function normalizeAllocationSet(supplyText: string, sourceAllocations: readonly SourceAllocation[], recipientProfile: "local-fixture" | "deployment"): { diagnostics: Diagnostic[]; allocations?: NormalizedAllocation[] } {
+  const diagnostics: Diagnostic[] = [];
   const allocations: NormalizedAllocation[] = [];
   const seenIds = new Set<string>();
   const seenRecipients = new Set<string>();
-  const sourceAllocations: readonly SourceAllocation[] = Array.isArray(value.allocations) ? value.allocations : [];
-  const supply = validateSourceProfile(value, diagnostics);
-  if (!Array.isArray(value.allocations) || sourceAllocations.length < 1 || sourceAllocations.length > 32) {
+  if (!Array.isArray(sourceAllocations)) { return { diagnostics: [error("GENESIS_ALLOCATION_COUNT_INVALID", "/allocations", "must contain 1 through 32 allocations")] }; }
+  const supply = parseCanonicalUint(supplyText, UINT64_MAX);
+  if (supply === undefined || supply === 0n) {diagnostics.push(error("GENESIS_AMOUNT_INVALID", "/token/initialSupplyBaseUnits", "must be a positive canonical uint64 decimal string"));}
+  if (sourceAllocations.length < 1 || sourceAllocations.length > 32) {
     diagnostics.push(error("GENESIS_ALLOCATION_COUNT_INVALID", "/allocations", "must contain 1 through 32 allocations"));
   }
   let sum = 0n;
@@ -57,7 +66,7 @@ export function normalizeLocalSource(value: LocalGenesisSource): { diagnostics: 
   for (const [index, allocation] of sourceAllocations.entries()) {
     const pointer = `/allocations/${index}`;
     const idBytes32 = validateAllocationId(allocation.id, pointer, seenIds, diagnostics);
-    const recipient = validateRecipient(allocation.recipient, pointer, seenRecipients, diagnostics);
+    const recipient = validateRecipient(allocation.recipient, pointer, seenRecipients, diagnostics, recipientProfile);
     const amount = validateAmount(allocation.amountBaseUnits, pointer, diagnostics);
     const bps = validateBps(allocation.bps, supply, amount, pointer, diagnostics);
     sum += amount ?? 0n;
@@ -106,7 +115,7 @@ function validateAllocationId(id: string, pointer: string, seen: Set<string>, di
   return encoded;
 }
 
-function validateRecipient(recipient: string, pointer: string, seen: Set<string>, diagnostics: Diagnostic[]): `0x${string}` | undefined {
+function validateRecipient(recipient: string, pointer: string, seen: Set<string>, diagnostics: Diagnostic[], profile: "local-fixture" | "deployment"): `0x${string}` | undefined {
   if (!/^0x[0-9a-f]{40}$/.test(recipient)) {
     diagnostics.push(error("GENESIS_RECIPIENT_INVALID", `${pointer}/recipient`, "must be lowercase 0x plus 40 hex digits"));
     return undefined;
@@ -119,7 +128,7 @@ function validateRecipient(recipient: string, pointer: string, seen: Set<string>
     diagnostics.push(error("GENESIS_RECIPIENT_DUPLICATE", `${pointer}/recipient`, "duplicate 20-byte recipient"));
     return undefined;
   }
-  if (!/^0x0{36}100[1-9]$/.test(recipient)) {
+  if (profile === "local-fixture" && !/^0x0{36}100[1-9]$/.test(recipient)) {
     diagnostics.push(error("GENESIS_RECIPIENT_NOT_ALLOWLISTED", `${pointer}/recipient`, "recipient is outside the local test address allowlist"));
     return undefined;
   }

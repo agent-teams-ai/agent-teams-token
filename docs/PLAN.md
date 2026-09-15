@@ -1,5 +1,46 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Active post-custody implementation, 2026-09-15
+
+The reviewed four-feature plan is being implemented from exact base
+`17136dc08fc928f3cebc6af89215e31f6f2bb537`: validated deploy-time configuration,
+resumable owned-testnet custody proof, read-only Ethereum/Solana readiness and
+deterministic manifest-derived passport/authority registry. The immutable token,
+GrantVault and GrantAccounting remain the onchain authorities. No supply,
+allocation, recipient, reserve limit or UTC schedule is a production default.
+
+Local calendar proofs use controlled Anvil time. Later owned-Sepolia proofs use
+explicitly accelerated test-only schedules and ordinary chain time. Offline
+captures and mocked deliveries do not establish public-chain CCIP E2E. Readiness
+and compilation produce unsigned artifacts and structurally forbid broadcast.
+Missing mainnet deployments, protocol qualification or product inputs remain
+explicit unresolved requirements. Production reserve wiring and bridge timelock
+policy remain release prerequisites.
+
+Corrections to the reviewed plan: its passport command remains redacted; the
+concrete alias will be `pnpm token:passport`. Compilation needs explicit
+`--artifacts` pins; `deployment:config materialize` turns verified creation
+evidence into the manifest. These fill missing command arguments/steps without
+changing acceptance. Clean committed-candidate/rollback qualification follows
+orchestrator review and commit; this implementation task explicitly leaves an
+uncommitted patch. ADR-0006 is still proposed; merged
+custody code does not accept it. The owner-approved custody semantics in
+DECISIONS remain applicable while its ADR lifecycle is resolved through the
+repository documentation process. Historical scope and proof below are retained
+as historical records, not qualification of the new implementation.
+
+The sandbox is offline. Retained pinned tool archives can be copied and verified
+locally; missing Safe/native-provider/Linux prerequisites must remain visible.
+No mainnet transaction or production secret is authorized. Final owned-testnet
+execution and independent exact-candidate review belong to later orchestration.
+
+The pinned cast 1.8.0 keystore path has an additional native prerequisite found
+while qualifying two ephemeral test signatures: it requires the existing user
+home location even with an explicit absolute `--keystore`. The narrow subprocess
+environment now preserves only that existing `HOME` alongside PATH/LANG; no home
+is reassigned, no default account is selected, and no environment is published.
+The keystore and password-file arguments remain explicit test-only inputs.
+
 ## Approved contributor-grant custody slice, 2026-09-15
 
 Current owner-approved rules: individual founder/team schedules are zero through

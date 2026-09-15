@@ -45,6 +45,8 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/domain
     entrypoints:
       - packages/contexts/supply/src/features/genesis-manifest/domain/model.ts
+      - packages/contexts/supply/src/features/genesis-manifest/domain/deployment.ts
+      - packages/contexts/supply/src/features/genesis-manifest/domain/grant-schedule.ts
     allow:
       boundaries: []
       packages: []
@@ -55,18 +57,29 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/application
     entrypoints:
       - packages/contexts/supply/src/features/genesis-manifest/application/compiler.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/compile-deployment.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/passport.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/canonical.ts
     allow:
       boundaries:
         - supply.genesis-manifest.domain
       packages: []
-      builtins: []
+      builtins:
+        - node:crypto
       runtimeReferences: []
   - id: supply.genesis-manifest.adapters
     roots:
       - packages/contexts/supply/src/features/genesis-manifest/adapters
     entrypoints:
       - packages/contexts/supply/src/features/genesis-manifest/adapters/strict-source.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-source.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-abi.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-store.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-observations.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-evidence.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/passport-render.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/abi.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/artifact-store.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/digest.ts
@@ -82,6 +95,18 @@ boundaries:
         - node:fs/promises
         - node:path
       runtimeReferences: []
+  - id: supply.deployment.public
+    roots:
+      - packages/contexts/supply/src/features/genesis-manifest/deployment.ts
+    entrypoints:
+      - packages/contexts/supply/src/features/genesis-manifest/deployment.ts
+    allow:
+      boundaries:
+        - supply.genesis-manifest.domain
+        - supply.genesis-manifest.application
+      packages: []
+      builtins: []
+      runtimeReferences: []
   - id: supply.genesis-manifest.composition
     roots:
       - packages/contexts/supply/src/features/genesis-manifest/composition
@@ -89,6 +114,8 @@ boundaries:
     entrypoints:
       - packages/contexts/supply/src/features/genesis-manifest/index.ts
       - packages/contexts/supply/src/features/genesis-manifest/composition/compile-local.ts
+      - packages/contexts/supply/src/features/genesis-manifest/composition/passport.ts
+      - packages/contexts/supply/src/features/genesis-manifest/composition/passport-cli.ts
     allow:
       boundaries:
         - supply.genesis-manifest.application
@@ -174,6 +201,7 @@ boundaries:
     entrypoints:
       - tooling/deployment-plan/src/domain/identity.ts
       - tooling/deployment-plan/src/domain/model.ts
+      - tooling/deployment-plan/src/domain/readiness.ts
     allow:
       boundaries: []
       packages: []
@@ -187,6 +215,7 @@ boundaries:
       - tooling/deployment-plan/src/application/builder.ts
       - tooling/deployment-plan/src/application/ports.ts
       - tooling/deployment-plan/src/application/verifier.ts
+      - tooling/deployment-plan/src/application/readiness.ts
     allow:
       boundaries:
         - tooling.deployment-plan.domain
@@ -202,6 +231,10 @@ boundaries:
       - tooling/deployment-plan/src/adapters/rpc.ts
       - tooling/deployment-plan/src/adapters/safe-output.ts
       - tooling/deployment-plan/src/adapters/strict-json.ts
+      - tooling/deployment-plan/src/adapters/readiness-rpc.ts
+      - tooling/deployment-plan/src/adapters/readiness-evm.ts
+      - tooling/deployment-plan/src/adapters/readiness-solana.ts
+      - tooling/deployment-plan/src/adapters/readiness-evidence.ts
     allow:
       boundaries:
         - tooling.deployment-plan.application
@@ -221,6 +254,7 @@ boundaries:
       - tooling/deployment-plan/src/composition
     entrypoints:
       - tooling/deployment-plan/src/composition/index.ts
+      - tooling/deployment-plan/src/composition/readiness.ts
     allow:
       boundaries:
         - tooling.deployment-plan.adapters
@@ -338,6 +372,7 @@ boundaries:
       builtins:
         - node:assert/strict
         - node:child_process
+        - node:fs
         - node:fs/promises
         - node:path
         - node:test

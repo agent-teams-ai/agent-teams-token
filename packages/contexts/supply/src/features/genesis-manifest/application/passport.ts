@@ -1,0 +1,43 @@
+import { canonicalJson } from "./canonical.js";
+import { deploymentBytes } from "./compile-deployment.js";
+import type { DeploymentManifest } from "./deployment-manifest.js";
+import type { JsonValue } from "./canonical.js";
+import { createHash } from "node:crypto";
+
+export interface PassportAuthorityObservation { readonly capability: string; readonly chain: string; readonly controlled: string; readonly observed?: string | null; readonly pending?: string | null; readonly evidence?: string | null; }
+export interface PassportObservation {
+  readonly schema: "agtmai-deployment-observations-v1"; readonly observedAt: string; readonly validUntil: string;
+  readonly authorities?: readonly PassportAuthorityObservation[];
+  readonly reconciliation?: { readonly status: string; readonly adjustedGlobalSupply?: string; readonly backingSurplus?: string };
+  readonly estimates?: { readonly status: string; readonly operations?: readonly unknown[] };
+  readonly unresolved?: readonly string[]; readonly [key: string]: unknown;
+}
+export interface AuthorityRegistryEntry { readonly capability: string; readonly chain: string; readonly controlled: string; readonly expected: string | null; readonly observed: string | null; readonly pending: string | null; readonly mechanism: "immutable" | "safe" | "pda" | "protocol" | "unknown"; readonly power: string; readonly limitation: string; readonly evidence: string | null; }
+export interface TokenPassport { readonly schema: "agtmai-token-passport-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly generated: { readonly observedAt: string; readonly validUntil: string }; readonly markdown: string; readonly authorityRegistry: { readonly schema: "agtmai-authority-registry-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly entries: readonly AuthorityRegistryEntry[] }; }
+const fail = (reason: string): never => { throw new Error(`PASSPORT_${reason}`); };
+const digest = (value: unknown): `0x${string}` => `0x${createHash("sha256").update(deploymentBytes(value)).digest("hex")}`;
+const validTime = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
+const escape = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("`", "\\`").replaceAll("\n", " ");
+function validateInputs(manifest: DeploymentManifest, observations: PassportObservation): void {
+  if (manifest.schema !== "agtmai-deployment-manifest-v1" || manifest.broadcastAllowed !== false) {fail("MANIFEST_REQUIRED");}
+  if (observations.schema !== "agtmai-deployment-observations-v1" || !validTime(observations.observedAt) || !validTime(observations.validUntil) || BigInt(observations.validUntil) < BigInt(observations.observedAt)) {fail("OBSERVATIONS_INVALID");}
+  if (/private|secret|password|keystore|seed|mnemonic|privatekey/i.test(JSON.stringify(observations))) {fail("PRIVATE_FIELD");}
+}
+function mechanism(capability: string, expected: string | null): AuthorityRegistryEntry["mechanism"] { const c = capability.toLowerCase(); return c.includes("safe") ? "safe" : c.includes("pda") || c.includes("mint authority") ? "pda" : c.includes("protocol") || c.includes("registry") ? "protocol" : expected ? "immutable" : "unknown"; }
+function registryEntries(manifest: DeploymentManifest, observations: PassportObservation): AuthorityRegistryEntry[] {
+  const c = manifest.configuration, observed = new Map((observations.authorities ?? []).map(a => [a.capability, a]));
+  const expected: Array<[string, string, string, string, string, string]> = [["token.ccip-admin", c.environment.evmChainId, manifest.token?.address ?? "unresolved", c.token.initialCCIPAdmin, "administrative token control", "Initial administrator is recorded separately from current registry administration"]];
+  for (const safe of c.custodySafes) {expected.push([`custody.safe.${safe.id}`, c.environment.evmChainId, safe.address, safe.address, "Safe CALL control", `threshold ${safe.threshold}; ${safe.beneficialControl}`]);}
+  const result: AuthorityRegistryEntry[] = expected.map(([capability, chain, controlled, expectedValue, power, limitation]) => { const a = observed.get(capability); return { capability, chain, controlled, expected: expectedValue, observed: a?.observed ?? null, pending: a?.pending ?? null, mechanism: mechanism(capability, expectedValue), power, limitation, evidence: a?.evidence ?? null }; });
+  for (const a of observations.authorities ?? []) { if (!result.some(e => e.capability === a.capability)) { result.push({ capability: a.capability, chain: a.chain, controlled: a.controlled, expected: null, observed: a.observed ?? null, pending: a.pending ?? null, mechanism: mechanism(a.capability, null), power: "unresolved", limitation: "No expected value is configured", evidence: a.evidence ?? null }); } }
+  return result.toSorted((a, b) => a.capability.localeCompare(b.capability));
+}
+export function generatePassport(manifest: DeploymentManifest, observations: PassportObservation): TokenPassport {
+  validateInputs(manifest, observations); const manifestSha256 = digest(manifest), observationsSha256 = digest(observations), entries = registryEntries(manifest, observations), registry = { schema: "agtmai-authority-registry-v1" as const, manifestSha256, observationsSha256, entries }, c = manifest.configuration;
+  const lines = ["# AGTMAI token passport", "", `- Environment: \`${escape(c.environment.mode)}\``, `- Deployment status: \`${escape(manifest.status)}\``, `- Manifest digest: \`${manifestSha256}\``, `- Observation digest: \`${observationsSha256}\``, "- Broadcast allowed: `false`", "", "## Token", "", `- Name: ${escape(c.token.name)}`, `- Symbol: ${escape(c.token.symbol)}`, `- Decimals: ${c.token.decimals}`, `- Fixed issuance: ${c.token.initialSupplyBaseUnits} base units`, `- Ethereum token: \`${manifest.token?.address ?? "unresolved"}\``, "", "## Grants", "", ...c.grants.map(cfg => { const deployed = manifest.grants.find(g => g.grantId === cfg.id); return `- ${escape(cfg.id)} (${cfg.kind}): ${cfg.amountBaseUnits} base units to \`${cfg.beneficiary}\`; schedule ${cfg.schedule.start}–${cfg.schedule.end}; vault \`${deployed?.address ?? "unresolved"}\`.`; }), "", "## Readiness", "", `- Observation interval: ${observations.observedAt}–${observations.validUntil}`, `- Reconciliation: ${escape(observations.reconciliation?.status ?? "unresolved")}`, `- Estimates: ${escape(observations.estimates?.status ?? "unresolved")}`, ...(observations.unresolved ?? []).toSorted().map(x => `- Unresolved: ${escape(x)}`), "", "## Authority registry", "", ...entries.map(e => `- ${escape(e.capability)} on ${escape(e.chain)}: expected ${escape(e.expected ?? "unresolved")}; observed ${escape(e.observed ?? "unresolved")}; ${escape(e.limitation)}.`)];
+  return { schema: "agtmai-token-passport-v1", manifestSha256, observationsSha256, generated: { observedAt: observations.observedAt, validUntil: observations.validUntil }, markdown: `${lines.join("\n")}\n`, authorityRegistry: registry };
+}
+export function checkPassport(manifest: DeploymentManifest, observations: PassportObservation, passport: TokenPassport, now?: string): void { const expected = generatePassport(manifest, observations); if (now !== undefined && (!validTime(now) || BigInt(now) < BigInt(observations.observedAt) || BigInt(now) > BigInt(observations.validUntil))) { fail("OBSERVATIONS_EXPIRED"); } if (passport.schema !== expected.schema || passport.manifestSha256 !== expected.manifestSha256 || passport.observationsSha256 !== expected.observationsSha256 || passport.markdown !== expected.markdown || canonicalJson(passport.authorityRegistry as unknown as JsonValue) !== canonicalJson(expected.authorityRegistry as unknown as JsonValue)) {fail("MISMATCH");} }
+export function checkPassportFreshness(observations: PassportObservation, now: string): void { if (!validTime(now) || !validTime(observations.observedAt) || !validTime(observations.validUntil) || BigInt(now) < BigInt(observations.observedAt) || BigInt(now) > BigInt(observations.validUntil)) { fail("OBSERVATIONS_EXPIRED"); } }
+export const generateTokenPassport = generatePassport;
+export const deriveAuthorityRegistry = (manifest: DeploymentManifest, observations: PassportObservation): TokenPassport["authorityRegistry"] => generatePassport(manifest, observations).authorityRegistry;
