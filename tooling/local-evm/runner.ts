@@ -6,7 +6,7 @@ import { finishWithCleanup } from "./cleanup.ts";
 import { canonicalJson, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
-import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
+import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_CONTRACT_SOURCE, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
 import { checkedCommand, command, CommandExitError, CommandSpawnError, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
 import { createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
 import { createInitializingRunDirectory, publishInitializedRun } from "./run-initialization.ts";
@@ -111,7 +111,7 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
     try {
       const forge = pinnedFoundryBinary(root, foundry, "forge");
       await checkedForgeBuild(forge, [
-        "build", "--offline", "--no-auto-detect", "--out", forgeOutput,
+        "build", APPROVED_CONTRACT_SOURCE, "--offline", "--no-auto-detect", "--out", forgeOutput,
         "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", forgeCache,
         "--use", solc.path,
       ], solc.path, {
@@ -275,7 +275,7 @@ function systemTemporaryRoot(): string {
 function assertApprovedBuild(artifact: string, abi: string, profile: string): void {
   const approved = artifact === APPROVED_CONTRACT_ARTIFACT_SHA256
     && abi === APPROVED_ABI_SHA256
-    && profile === "0xc64ebebb53f0a7756b14f6878038f32c7e126ffb302e2ff7f0a757eea2a2ab93";
+    && profile === "0xa84a4853e23bb51129f082adaaea088dedea2b35234555e24102f386ce706c1c";
   if (!approved) {throw new LocalEvmError("LOCAL_EVM_BUILD_NOT_APPROVED", "token artifact, ABI, or build approval differs from the committed test-only pins");}
 }
 async function toolVersions(repositoryRoot: string, foundry: FoundryBinaries, solc: PinnedSolc, signal: AbortSignal): Promise<Record<string, string>> {
