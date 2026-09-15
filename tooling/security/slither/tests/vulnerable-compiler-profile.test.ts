@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { evaluatePolicy, evaluateVulnerableFixture } from "../src/application/policy.ts";
 import type { CompiledOutput, VulnerableCompilerRequest } from "../src/adapters/compiler-output.ts";
@@ -19,7 +19,17 @@ import { testPublication } from "./test-publication.ts";
 const candidateSha = "035a1dd3845014ec764970849a498c35f127c189";
 const schemaDirectory = "tooling/security/slither";
 const fixtureDirectory = `${schemaDirectory}/tests/fixtures`;
-const manifest = parseGateManifest(await readFile(`${schemaDirectory}/production-closure.v1.json`, "utf8"));
+// Both compiler captures belong to the retained two-token closure at 8977f78.
+const manifestRaw = await readFile(`${fixtureDirectory}/production-closure.8977f78.json`, "utf8");
+assert.equal(sha256(manifestRaw), "77d21b9e415f111463a5b014ce6a2ecd65e33685469131821cedfb351c10119e");
+const manifest = parseGateManifest(manifestRaw);
+const triageRaw = await readFile(`${fixtureDirectory}/triage.8977f78.json`, "utf8");
+assert.equal(sha256(triageRaw), "da21f8a8a21ef827e4c96afc0d1a6a4527c63c5f66c6c1f7d46a915ad34c2cfe");
+assert.equal(sha256(triageRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/triage.v1.json`)!.sha256);
+const policyRaw = await readFile(`${schemaDirectory}/tests/fixtures/suppressions.8977f78.json`, "utf8");
+assert.equal(sha256(policyRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/suppressions.v1.json`)!.sha256,
+  "historical replay requires the byte-exact empty policy pinned by 8977f78");
+assert.deepEqual(JSON.parse(policyRaw), { schemaVersion: 1, suppressions: [] });
 type Json = Record<string, unknown>;
 type Pair = { readonly build: string; readonly artifact: string };
 const object = (value: unknown): Json => value as Json;
@@ -61,7 +71,7 @@ async function bundle(parent: string): Promise<string> {
   const fixtureResult = await compileFixture(join(parent, "fixture"));
   const parsed = await parseSlitherJson(await readFile(`${fixtureDirectory}/slither-0.11.6-production.json`, "utf8"), process.cwd());
   const detectorInventory = parse(await readFile(manifest.detectorInventory.path, "utf8")).detectors as string[];
-  const triage = parse(await readFile(`${schemaDirectory}/triage.v1.json`, "utf8")).findings as FindingTriage[];
+  const triage = parse(triageRaw).findings as FindingTriage[];
   const input: AnalysisInput = {
     success: parsed.success, findings: parsed.findings, analyzedContracts: manifest.expectedContracts,
     analyzedSources: manifest.sources.map(({ path }) => path.replace(/^contracts\/evm\//u, "")),
@@ -73,13 +83,25 @@ async function bundle(parent: string): Promise<string> {
   };
   const decision = evaluatePolicy({ input, manifest, expectedDetectors: detectorInventory, suppressions: [], triage });
   assert.equal(decision.exitCode, 0, JSON.stringify(decision.errors));
+  const canonicalDirectory = join(parent, "canonical");
+  for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory, manifest.vulnerableFixture.source]) {
+    const raw = entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : entry.path === `${schemaDirectory}/suppressions.v1.json` ? policyRaw : await readFile(entry.path);
+    assert.equal(sha256(raw), entry.sha256, entry.path);
+    const destination = join(canonicalDirectory, entry.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, raw);
+  }
+  for (const name of ["slither.config.json", "suppressions.v1.json", "triage.v1.json"]) {
+    await writeFile(join(canonicalDirectory, name), name === "triage.v1.json" ? triageRaw : name === "suppressions.v1.json" ? policyRaw : await readFile(`${schemaDirectory}/${name}`));
+  }
+  await writeFile(join(canonicalDirectory, "production-closure.v1.json"), manifestRaw);
   const output = join(parent, "bundle");
-  await writeReadyEvidence({ output, candidateSha, manifest, input, decision, schemaDirectory,
-    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(await readFile(`${schemaDirectory}/suppressions.v1.json`)) },
-    triageHash: sha256(await readFile(`${schemaDirectory}/triage.v1.json`)), assertReadyPrecondition: async () => {}, publication: testPublication() });
+  await writeReadyEvidence({ output, candidateSha, manifest, input, decision, schemaDirectory, canonicalDirectory,
+    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(policyRaw) },
+    triageHash: sha256(triageRaw), assertReadyPrecondition: async () => {}, publication: testPublication() });
   return output;
 }
-const validate = async (output: string): Promise<void> => await validateEvidenceBundleContents({ output, candidateSha, schemaDirectory, finalizationMode: "local" });
+const validate = async (output: string): Promise<void> => await validateEvidenceBundleContents({ output, candidateSha, schemaDirectory, canonicalDirectory: join(dirname(output), "canonical"), finalizationMode: "local" });
 
 test("actual isolated fixture preserves captures, source, compiler and bytecode pins and reaches policy exit 20", async () => {
   assert.equal(Buffer.byteLength(captured.build), 7635);

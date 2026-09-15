@@ -73,11 +73,15 @@
     "tooling/security/slither/tests/fixtures/foundry-1.8.0-vulnerable-artifact.json",
     "tooling/security/slither/tests/fixtures/foundry-1.8.0-vulnerable-build-info.json",
     "tooling/security/slither/tests/fixtures/golden-bundle-input.v1.json",
+    "tooling/security/slither/tests/fixtures/production-closure.8977f78.json",
     "tooling/security/slither/tests/fixtures/slither-0.11.6-detectors.txt",
     "tooling/security/slither/tests/fixtures/slither-0.11.6-production.json",
     "tooling/security/slither/tests/fixtures/slither-0.11.6-vulnerable.json",
+    "tooling/security/slither/tests/fixtures/suppressions.8977f78.json",
+    "tooling/security/slither/tests/fixtures/triage.8977f78.json",
     "tooling/security/slither/tests/gate.test.ts",
     "tooling/security/slither/tests/git-authority.test.ts",
+    "tooling/security/slither/tests/grant-arithmetic-suppression.test.ts",
     "tooling/security/slither/tests/helpers/observer.ts",
     "tooling/security/slither/tests/image-preflight.test.ts",
     "tooling/security/slither/tests/manifest.test.ts",
@@ -133,8 +137,8 @@
     },
     {
       "path": "tooling/toolchain.lock.json",
-      "beforeSha256": "3424cc0be06c88139dee3e83d2d2b55ad2c4cbcec6177331856d255258fe15f9",
-      "afterSha256": "da852601a36582b3c5dd88001a1f3a68cde76c6932bc27562fdcc925f097932a"
+      "beforeSha256": "77a8189d77428659d902471b90527150059eb9bfcea0eb3e2eb5dfa1e682eeab",
+      "afterSha256": "cbc21d4b05abc9db3b1c3040f620a7b915ab5dbb8a8f1869574a8a5a746d6ee3"
     },
     {
       "path": "tooling/security/slither/src/README.md",

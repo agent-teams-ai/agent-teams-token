@@ -4,7 +4,7 @@ import { publishInitialFile, readRegularFile } from "./safe-fs.ts";
 import { canonicalJson, keccak256, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { assertConstructorInputs, constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
-import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_SOURCE_SHA256, asError, LocalEvmError, type ApprovedBuildProfile, type DeploymentReport, type EvidenceCheck, type VerificationEvidence, type VerificationInput } from "./model.ts";
+import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_CONTRACT_SOURCE, APPROVED_SOURCE_SHA256, asError, LocalEvmError, type ApprovedBuildProfile, type DeploymentReport, type EvidenceCheck, type VerificationEvidence, type VerificationInput } from "./model.ts";
 import { assertPrivateRpcUrl, createRpcClient, type RpcClient } from "./rpc.ts";
 import { assertPinnedSolcVersionOutput } from "./toolchain.ts";
 import { deriveCreateAddress, parseTransactionNonce } from "./create-address.ts";
@@ -15,7 +15,7 @@ const HASH = /^0x[0-9a-f]{64}$/;
 const ZERO_ADDRESS = `0x${"0".repeat(40)}` as const;
 const ZERO_HASH = `0x${"0".repeat(64)}` as const;
 const TOOL_KEYS = ["anvil", "cast", "forge", "node", "pnpm", "solc"] as const;
-const CONTRACT_SOURCE = "src/features/token-genesis/AGTMAIToken.sol";
+const CONTRACT_SOURCE = APPROVED_CONTRACT_SOURCE;
 const CONTRACT_NAME = "AGTMAIToken";
 
 export async function verifyLocalDeployment(input: VerificationInput, suppliedRpc?: RpcClient): Promise<VerificationEvidence> {

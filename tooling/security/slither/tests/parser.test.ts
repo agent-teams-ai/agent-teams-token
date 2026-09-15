@@ -106,7 +106,10 @@ const productionBytes = await readFile(new URL("fixtures/slither-0.11.6-producti
 const detectorBytes = await readFile(new URL("fixtures/slither-0.11.6-detectors.txt", import.meta.url));
 const productionRaw = productionBytes.toString("utf8");
 const detectorRaw = detectorBytes.toString("utf8");
-const productionManifest = JSON.parse(await readFile("tooling/security/slither/production-closure.v1.json", "utf8")) as GateManifest;
+// Historical captures use the byte-exact 8977f78 authority, independently of live coverage.
+const manifestRaw = await readFile(new URL("fixtures/production-closure.8977f78.json", import.meta.url), "utf8");
+assert.equal(sha256(manifestRaw), "77d21b9e415f111463a5b014ce6a2ecd65e33685469131821cedfb351c10119e");
+const productionManifest = JSON.parse(manifestRaw) as GateManifest;
 
 interface RawDetector extends Record<string, unknown> {
   elements: { source_mapping: Record<string, unknown> }[];
@@ -141,7 +144,9 @@ test("captured pinned Slither 0.11.6 output parses all 12 production findings", 
   assert.equal(new Set(parsed.findings.map((finding) => finding.fingerprint)).size, 12);
   // The existing ledger was pinned before this parser change; parsing captured
   // output must reproduce those identities without adjusting policy or triage.
-  const triage = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as { findings: { fingerprint: string }[] };
+  const triageRaw = await readFile(new URL("fixtures/triage.8977f78.json", import.meta.url), "utf8");
+  assert.equal(sha256(triageRaw), "da21f8a8a21ef827e4c96afc0d1a6a4527c63c5f66c6c1f7d46a915ad34c2cfe");
+  const triage = JSON.parse(triageRaw) as { findings: { fingerprint: string }[] };
   assert.deepEqual(parsed.findings.map((finding) => finding.fingerprint), triage.findings.map((finding) => finding.fingerprint).toSorted());
   assert.deepEqual(parsed.findings.map((finding) => finding.detectorId).toSorted(), [
     "costly-loop", "costly-loop", "cyclomatic-complexity", "naming-convention", "naming-convention", "naming-convention",

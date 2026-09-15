@@ -1,5 +1,15 @@
 # Community-first tokenomics proposal
 
+## Agreed accounting slice, 2026-09-14
+
+Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
+and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
+Founder/team use individual 12-to-48-month curves; founder is non-revocable,
+team unvested revocation preserves vested debt and the original reserve.
+Public authority, transfer rights, cap rules and deployment remain open.
+
+
+
 Status: proposal, not a sale, airdrop, listing or launch announcement. No person
 has an entitlement until the relevant allocation, schedule and distribution are
 approved and executed onchain.
@@ -102,10 +112,10 @@ are accepted.
 deployment. Every schedule uses exact UTC seconds in the genesis manifest.
 
 - Founder: part of the shared contributor allocation, capped at 3%; claimable is
-  zero until `T0 + 18 months`, then reaches 100% at `T0 + 72 months`. The grant
+  zero through its grant-specific `start + 12 months`, then accrues from zero to 100% at `start + 48 months`. The 3% cap remains a proposal. The grant
   cannot be cancelled.
 - Team: claimable is zero until its grant-specific `start + 12 months`; the
-  stream then starts from zero and reaches 100% at `start + 60 months`.
+  stream then starts from zero and reaches 100% at `start + 48 months`. Team-service revocation is accepted: only unvested returns to the original reserve and vested-but-unclaimed remains owed.
 - Pre-launch service does not create a launch-day catch-up. The token-liquidity
   schedule starts no earlier than its declared post-`T0` schedule.
 - Existing contributor grants declare revocability. Future grants may cancel

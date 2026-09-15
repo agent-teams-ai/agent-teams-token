@@ -86,8 +86,8 @@
     },
     {
       "path": "tooling/toolchain.lock.json",
-      "beforeSha256": "3424cc0be06c88139dee3e83d2d2b55ad2c4cbcec6177331856d255258fe15f9",
-      "afterSha256": "b6df167cafa66b28b8886d3f995fd3df8439871a0cd2ce7bfa02e5e19daf96a1"
+      "beforeSha256": "77a8189d77428659d902471b90527150059eb9bfcea0eb3e2eb5dfa1e682eeab",
+      "afterSha256": "7ccc9e0e914dc3eecaedc4ca89b630eb079606ac160e0efb7b728163d410537f"
     },
     {
       "path": "tooling/local-solana/src/README.md",

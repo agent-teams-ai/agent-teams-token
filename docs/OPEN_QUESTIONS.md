@@ -1,5 +1,15 @@
 # Open product decisions
 
+## Agreed accounting slice, 2026-09-14
+
+Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
+and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
+Founder/team use individual 12-to-48-month curves; founder is non-revocable,
+team unvested revocation preserves vested debt and the original reserve.
+Public authority, transfer rights, cap rules and deployment remain open.
+
+
+
 Product decisions that materially change the implementation are listed first.
 Non-blocking engineering follow-up sits at the end.
 
@@ -9,9 +19,10 @@ Non-blocking engineering follow-up sits at the end.
 release gate, not an open naming choice.
 
 1. Confirm or replace the `100,000,000` fixed-supply default; keep `9` decimals.
-2. Keep or amend the provisional `45/25/15/8/6/1` model. Founder is capped at 3%
-   inside the 15% contributor allocation; proposed schedules are founder 18→72
-   and team 12→60 without cliff catch-up. This is recorded but not final.
+2. Confirm allocation percentages and reserve caps; `45/25/15/8/6/1` and the
+   founder sub-allocation remain proposals. Founder/team schedules are accepted:
+   individual T0, zero through month 12, then linear to month 48 without catch-up.
+   See [accepted grant rules](DECISIONS.md#owner-decisions-2026-09-14).
 3. Define initial utility that exists at launch without promising investment
    return or project ownership.
 4. Choose legal entity and launch jurisdictions and approve the exact holder
@@ -31,7 +42,8 @@ release gate, not an open naming choice.
 8. Set the global 30/90-day liquidization ceiling and outstanding committed-but-
    unreleased ceiling. Per-vault commitment caps do not prevent synchronized
    future unlocks.
-9. Decide whether initial-team unvested grants are revocable. Recommended:
+9. Team-service unvested revocation and founder non-revocability are accepted.
+   Exact cancellation authority, effective time and any delay remain open. Earlier proposal:
    service grants may return only unvested value after a timelocked cancellation;
    vested value remains owed. Founder vesting stays non-revocable.
 10. Approve or reject splitting the 1% liquidity allocation into a physically

@@ -1,5 +1,30 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Agreed accounting slice, 2026-09-14
+
+Current owner-approved rules: individual founder/team schedules are zero through
+month 12, then linear from zero to full at month 48. Founder grants cannot be
+revoked. On departure, team service grants may return only unvested value to
+their original purpose reserve; vested-but-unclaimed value remains owed. Safe
+2-of-3 is selected with one beneficial controller, not independent governance.
+See [owner decisions](DECISIONS.md#owner-decisions-2026-09-14) and
+[revocation](DECISIONS.md#grant-revocation-decision-2026-09-14).
+
+This checkpoint implements an internal Solidity grant-accounting library
+with independent unit/fuzz/sequence tests. Amounts and exact UTC instants
+are explicit inputs; no provisional percentages or production dates are baked
+in. It does not implement token custody, payout/refund effects, reserve caps,
+Safe authorization, transfer rights or a public deployment ABI. Those remain
+separate decisions/integration work. Recorded releases/refunds are accounting
+transitions, not observed token transfers. Production genesis stays disabled
+for proposals. No new framework, vendor integration, airdrop or sale platform.
+
+Older percentages, timelocks, beneficiary-transfer rules and governance proposals
+below are not adopted by this accounting slice. The future wrapper must bind
+the actual beneficiary/reserve, trusted time and authority and enforce atomic
+token effects and reserve constraints. This slice does not weaken those gates.
+
+
 ## Активная продуктовая граница, 8 сентября 2026
 
 Владелец прямо поручил изменить план и автономно доставить полезный продуктовый
@@ -366,10 +391,9 @@ subscription-аккаунты не являются дополнительным
 в отдельных workspace и не интегрированы. Продолжение начинается с чистого
 подтверждённого коммита, не с этих незавершённых деревьев.
 
-Токеномика остаётся предложением. Условия блокировки и выдачи токенов,
-получатели, ключи управления, CCIP и запуск в публичных сетях не входят
-в текущую реализацию и требуют отдельных решений. Упомянутый ниже vesting
-не является уже реализованной или окончательно утверждённой частью запуска.
+Исторический этап ниже не реализовывал вестинг. Текущий согласованный
+accounting slice описан в начале плана: график и правила отзыва уже приняты;
+проценты, получатели, публичные полномочия и запуск остаются отдельными решениями.
 
 Запрещённые anti-patterns и уже подтверждённые исторические ошибки собраны в
 [`NON_NEGOTIABLES.md`](NON_NEGOTIABLES.md). Любая реализация и review обязаны
@@ -935,7 +959,7 @@ Tokenomics является отдельным product/security workstream, а �
 | D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
 | D-05 | Utility на старте | Минимум одна live consumptive function до public distribution | Не проектировать публичный запуск только вокруг будущего roadmap |
 | D-06 | Allocations | Рабочее предложение `45/25/15/8/6/1`, ещё обсуждается | Governance reserve, distributions, all contributors, operations, ecosystem grants, liquidity |
-| D-07 | Vesting | Team: 12→60; founder: 18→72; оба без cliff catch-up; founder ≤3% внутри contributors | Не создавать отдельный свободный founder reserve и общий unlock cliff |
+| D-07 | Vesting | ✅ Founder и initial team: 12→48, отдельные старты, без catch-up; founder без отзыва; доли ещё обсуждаются | Не создавать отдельный свободный founder reserve и общий unlock cliff |
 | D-08 | Public sale | Нет на первом beta | Снижает legal и operational scope |
 | D-09 | Entity и target jurisdictions | Решить до rights/ABI freeze, mainnet genesis и public communications | Local/test-only neutral implementation разрешена раньше |
 | D-10 | Ethereum signer sets | Bridge/Treasury 3-of-5, Emergency 2-of-3; `|B∩T|≤1`, `E∩(B∪T)=0` | Изолировать custody, configuration и bounded cancellation |

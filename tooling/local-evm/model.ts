@@ -1,7 +1,8 @@
 export const EXPECTED_CHAIN_ID = "31337";
 export const REPORT_SCHEMA_VERSION = 1;
+export const APPROVED_CONTRACT_SOURCE = "src/features/token-genesis/AGTMAIToken.sol" as const;
 export const APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256 = "0x1a5c8647212a264368c1f9223d7edf6fdf3018278ea48fe505f7252071e518bd" as const;
-export const APPROVED_CONTRACT_ARTIFACT_SHA256 = "0x5e5db4066151065eb5b490cbf4088359d6248b58696522ce665dac3cf9f6434e" as const;
+export const APPROVED_CONTRACT_ARTIFACT_SHA256 = "0x007b59a80bee113a7270bd5360207934042537620c214fa5dc2d3c648c5764c6" as const;
 export const APPROVED_ABI_SHA256 = "0x437d23540c29545d78a654ffe3df8c45136eee6d9954fb7ebdce34ba922b4645" as const;
 export const APPROVED_SOURCE_SHA256 = "0xeae1b3bbeeb2d31168592805970abe03baa2775b30d9cab6561632a101188989" as const;
 
@@ -94,7 +95,7 @@ export interface ApprovedBuildProfile {
   readonly schemaVersion: 1;
   readonly purpose: "local-evm-verifier-build-approval";
   readonly status: "test-only";
-  readonly sourceName: "src/features/token-genesis/AGTMAIToken.sol";
+  readonly sourceName: typeof APPROVED_CONTRACT_SOURCE;
   readonly contractName: "AGTMAIToken";
   readonly solcVersion: "0.8.36+commit.8a079791";
   readonly settings: {

@@ -15,7 +15,7 @@ import { makeTestDirectory } from "./test-directory.ts";
 import { testPublication } from "./test-publication.ts";
 
 // Byte-exact compilerEvidence from product-slither-reviewed-capture.json,
-// reviewed 2026-09-08 for the current two-token closure.
+// reviewed 2026-09-08 for the historical two-token closure.
 // Image nightly-20260824@sha256:9c5836b2dfeecc09ca0ab537d8372eab82114d8365667356b7c9623317e282d0,
 // sourceRevision 8cad443280f7eeb5920a901b5f58f5a91872d9aa. This is replay,
 // not a newly observed container run or a real vulnerable-fixture acceptance.
@@ -25,7 +25,20 @@ const sourceName = "src/features/token-genesis/AGTMAIToken.sol";
 const version = "0.8.36+commit.8a079791";
 const buildRaw = await readFile(`${schemaDirectory}/tests/fixtures/foundry-1.8.0-production-build-info.json`, "utf8");
 const artifactRaw = await readFile(`${schemaDirectory}/tests/fixtures/foundry-1.8.0-production-artifact.json`, "utf8");
-const manifest = parseGateManifest(await readFile(`${schemaDirectory}/production-closure.v1.json`, "utf8"));
+// Exact retained bytes from 8977f78a016f06c4a32681c18a7e850a7535671e,
+// not today's expanded production closure. Never rewrite compiler captures to
+// match newly covered contracts; live manifest coverage has its own tests.
+const manifestRaw = await readFile(`${schemaDirectory}/tests/fixtures/production-closure.8977f78.json`, "utf8");
+assert.equal(sha256(manifestRaw), "77d21b9e415f111463a5b014ce6a2ecd65e33685469131821cedfb351c10119e");
+const manifest = parseGateManifest(manifestRaw);
+// Live triage now includes GrantAccounting; replay retains the exact historical ledger.
+const triageRaw = await readFile(`${schemaDirectory}/tests/fixtures/triage.8977f78.json`, "utf8");
+assert.equal(sha256(triageRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/triage.v1.json`)!.sha256,
+  "historical compiler replay requires triage bytes pinned by the 8977f78 manifest");
+const policyRaw = await readFile(`${schemaDirectory}/tests/fixtures/suppressions.8977f78.json`, "utf8");
+assert.equal(sha256(policyRaw), manifest.config.find(({ path }) => path === `${schemaDirectory}/suppressions.v1.json`)!.sha256,
+  "historical replay requires the byte-exact empty policy pinned by 8977f78");
+assert.deepEqual(JSON.parse(policyRaw), { schemaVersion: 1, suppressions: [] });
 type Json = Record<string, unknown>;
 type Pair = { build: string; artifact: string };
 const captured: Pair = { build: buildRaw, artifact: artifactRaw };
@@ -60,12 +73,12 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
   for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory]) {
     const destination = join(canonicalDirectory, entry.path);
     await mkdir(dirname(destination), { recursive: true });
-    await writeFile(destination, await readFile(entry.path));
+    await writeFile(destination, entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : entry.path === `${schemaDirectory}/suppressions.v1.json` ? policyRaw : await readFile(entry.path));
   }
   await mkdir(dirname(join(canonicalDirectory, accepted.vulnerableFixture.source.path)), { recursive: true });
   await writeFile(join(canonicalDirectory, accepted.vulnerableFixture.source.path), synthetic.fixtureSource);
   for (const name of ["slither.config.json", "suppressions.v1.json", "triage.v1.json"]) {
-    await writeFile(join(canonicalDirectory, name), await readFile(`${schemaDirectory}/${name}`));
+    await writeFile(join(canonicalDirectory, name), name === "triage.v1.json" ? triageRaw : name === "suppressions.v1.json" ? policyRaw : await readFile(`${schemaDirectory}/${name}`));
   }
   await writeFile(join(canonicalDirectory, "production-closure.v1.json"), JSON.stringify(accepted));
   const detectorInventory = (parse(await readFile(manifest.detectorInventory.path, "utf8")).detectors as string[]);
@@ -79,7 +92,7 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
     forgeBinarySha256: manifest.tools.forgeBinarySha256, solcBinarySha256: manifest.tools.solcBinarySha256,
     compilerEvidence: result.evidence, fixtureProof: synthetic.fixtureProof,
   };
-  const triage = parse(await readFile(`${schemaDirectory}/triage.v1.json`, "utf8")).findings as FindingTriage[];
+  const triage = parse(triageRaw).findings as FindingTriage[];
   const decision = evaluatePolicy({ input, manifest: accepted, expectedDetectors: detectorInventory, suppressions: [], triage });
   assert.equal(parsed.findings.length, 12);
   assert.equal(detectorInventory.length, 101);
@@ -89,8 +102,8 @@ async function makeBundle(parent: string): Promise<{ output: string; canonicalDi
   assert.equal(decision.visible.length, 12);
   assert.equal(decision.suppressed.length, 0);
   await writeReadyEvidence({ output, candidateSha: base, manifest: accepted, input, decision,
-    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(await readFile(`${schemaDirectory}/suppressions.v1.json`)) },
-    triageHash: sha256(await readFile(`${schemaDirectory}/triage.v1.json`)), schemaDirectory, canonicalDirectory,
+    hashes: { config: sha256(await readFile(`${schemaDirectory}/slither.config.json`)), policy: sha256(policyRaw) },
+    triageHash: sha256(triageRaw), schemaDirectory, canonicalDirectory,
     assertReadyPrecondition: async () => {}, publication: testPublication() });
   return { output, canonicalDirectory };
 }
@@ -116,7 +129,7 @@ test("captured Foundry output preserves exact raw bytes, all 9 compiler commits 
     assert.equal(result.evidence.rawBuildInfo, buildRaw); assert.equal(result.evidence.rawArtifact, artifactRaw);
     assert.equal(result.evidence.abiSha256, sha256(JSON.stringify(artifact.abi)));
     assert.deepEqual(result.evidence.sourceHashes, manifest.sources.map(({ path, sha256: hash }) => ({ path: path.replace(/^contracts\/evm\//u, ""), sha256: hash })).toSorted((a, b) => a.path.localeCompare(b.path)));
-    for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory]) {assert.equal(sha256(await readFile(entry.path)), entry.sha256, entry.path);}
+    for (const entry of [...manifest.sources, ...manifest.config, manifest.detectorInventory]) {assert.equal(sha256(entry.path === `${schemaDirectory}/triage.v1.json` ? triageRaw : entry.path === `${schemaDirectory}/suppressions.v1.json` ? policyRaw : await readFile(entry.path)), entry.sha256, entry.path);}
   } finally {await rm(parent, { recursive: true, force: true });}
 });
 

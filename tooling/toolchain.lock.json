@@ -82,8 +82,8 @@
     },
     "engineeringFoundation": {
       "scope": "genesis-core-package",
-      "version": "0.20.0",
-      "source": "https://registry.npmjs.org/@agent-teams/engineering-foundation/-/engineering-foundation-0.20.0.tgz",
+      "version": "1.2.0",
+      "source": "https://registry.npmjs.org/@agent-teams/engineering-foundation/-/engineering-foundation-1.2.0.tgz",
       "integrityAuthority": "pnpm-lock.yaml"
     },
     "foundry": {

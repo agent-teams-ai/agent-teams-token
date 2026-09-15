@@ -8,7 +8,7 @@ import { after, before, test } from "node:test";
 import { canonicalJson, keccak256, sha256, sha256HexBytes, strip0x } from "../crypto.ts";
 import { encodeConstructorArguments, reconstructCreationInput } from "../constructor.ts";
 import { encodeAllocationCommitment, readApprovedManifest } from "../manifest.ts";
-import { APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type DeploymentReport, type LocalManifest, type VerificationInput } from "../model.ts";
+import { APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_CONTRACT_SOURCE, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, type ConstructorInputs, type DeploymentReport, type LocalManifest, type VerificationInput } from "../model.ts";
 import type { RpcClient } from "../rpc.ts";
 import { reconstructRuntime, verifyLocalDeployment, writeEvidence } from "../verifier.ts";
 import { pinnedFoundryBinaries, pinnedSolc } from "../toolchain.ts";
@@ -42,7 +42,7 @@ before(async () => {
   const solc = pinnedSolc(repositoryRoot, await realpath(solcCustody));
   try {
     solc.assertReady();
-    await execute(forgeBinary, ["build", "--offline", "--no-auto-detect", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", solc.path], {
+    await execute(forgeBinary, ["build", APPROVED_CONTRACT_SOURCE, "--offline", "--no-auto-detect", "--out", forgeOut, "--build-info", "--build-info-path", forgeBuildInfo, "--cache-path", join(suiteRoot, "forge-cache"), "--use", solc.path], {
       cwd: join(repositoryRoot, "contracts/evm"), env: forgeEnvironment, timeout: 120_000, killSignal: "SIGKILL",
     });
     solc.assertReady();
@@ -242,6 +242,21 @@ test("clean approved deployment is independently proven without trusting deploye
   assert.equal(report.checks.some((check) => check.id === "rpc-proven-direct-creation"), true);
   assert.equal(context.rpc.calls.some((call) => call.method === "eth_getTransactionByHash"), true);
   assert.equal(context.rpc.calls.some((call) => call.method === "eth_getTransactionReceipt"), true);
+});
+
+test("approved token compilation is isolated from unrelated Solidity sources", async () => {
+  await readFile(join(repositoryRoot, "contracts/evm/src/features/contributor-grants/GrantAccounting.sol"));
+  const input = build.input as Record<string, unknown>;
+  const sources = input.sources as Record<string, unknown>;
+  assert.deepEqual(Object.keys(sources).toSorted(), [
+    "lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol",
+    "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol",
+    "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+    "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+    "lib/openzeppelin-contracts/contracts/utils/Context.sol",
+    APPROVED_CONTRACT_SOURCE,
+  ]);
+  assert.equal(sha256(await readFile(artifactSource)), APPROVED_CONTRACT_ARTIFACT_SHA256);
 });
 
 test("normalized evidence is identical across Linux and macOS solc identities", { timeout: 60_000 }, async () => {

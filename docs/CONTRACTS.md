@@ -1,5 +1,15 @@
 # Transparent token release contracts
 
+## Agreed accounting slice, 2026-09-14
+
+Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
+and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
+Founder/team use individual 12-to-48-month curves; founder is non-revocable,
+team unvested revocation preserves vested debt and the original reserve.
+Public authority, transfer rights, cap rules and deployment remain open.
+
+
+
 Status: design proposal for discussion. No contract in this document is deployed
 or approved for mainnet.
 
@@ -185,8 +195,8 @@ large first-day catch-up release and no beneficiary-change function.
 Calendar months are compiled to exact UTC seconds with month-end clamping and
 golden leap-day vectors. Team service earned before token launch does not create
 a catch-up release at launch: the token-release schedule begins no earlier than the
-public post-launch schedule. Initial-team revocability is still an explicit
-product choice; founder vesting is non-revocable.
+public post-launch schedule. Team-service revocability is accepted: only unvested value returns to the original
+reserve; vested-but-unclaimed remains owed. Founder vesting is non-revocable.
 
 For allocation `A`, cliff `C` and end `E`, vested is zero at `t <= C`, `A` at
 `t >= E`, otherwise `floor(A * (t - C) / (E - C))`. Releasable is vested minus

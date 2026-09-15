@@ -14,6 +14,7 @@ test("committed closure assigns every tracked production source to analysis", as
   assert.deepEqual(manifest.targets, [
     { path: "contracts/evm/src/features/token-genesis/AGTMAIToken.sol", contract: "AGTMAIToken" },
     { path: "contracts/evm/src/features/token-genesis/AGTMAICCIPToken.sol", contract: "AGTMAICCIPToken" },
+    { path: "contracts/evm/src/features/contributor-grants/GrantAccounting.sol", contract: "GrantAccounting" },
   ]);
   for (const target of manifest.targets) {
     assert.ok(manifest.expectedContracts.includes(target.contract));
