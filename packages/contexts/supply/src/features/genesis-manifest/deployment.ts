@@ -10,4 +10,4 @@ export { materializeDeploymentManifest, verifyDeploymentRuntime } from "./applic
 export type { DeploymentBlock, ContractDeploymentEvidence, DeploymentEvidence, DeploymentManifest, DeploymentManifestPorts } from "./application/deployment-manifest.js";
 export { parseCanonicalUint, UINT64_MAX, UINT256_MAX } from "./domain/model.js";
 export { generatePassport, generateTokenPassport, deriveAuthorityRegistry, checkPassport, checkPassportFreshness } from "./application/passport.js";
-export type { PassportObservation, PassportAuthorityObservation, TokenPassport, AuthorityRegistryEntry } from "./application/passport.js";
+export type { PassportHashPort, PassportObservation, PassportAuthorityObservation, TokenPassport, AuthorityRegistryEntry } from "./application/passport.js";

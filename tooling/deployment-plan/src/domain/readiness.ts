@@ -25,9 +25,11 @@ export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport 
   for (const timestamp of [quantity(evidence.ethereum.block.timestamp, "ethereum.block.timestamp"), quantity(evidence.solana.blockTime, "solana.blockTime")]) {
     if (timestamp < observedAt || timestamp > validUntil) { fail("OBSERVATION_OUTSIDE_INTERVAL"); }
   }
+  let reportValidUntil = validUntil;
   for (const op of evidence.estimates?.operations ?? []) {
     const expiresAt = quantity(op.expiresAt, `estimate.${op.id}.expiresAt`);
     if (expiresAt <= observedAt || expiresAt > validUntil) { fail("ESTIMATE_EXPIRY_OUTSIDE_INTERVAL"); }
+    if (expiresAt < reportValidUntil) { reportValidUntil = expiresAt; }
   }
   const reasons: string[] = [];
   if (evidence.ethereum.chainId !== "1") {reasons.push("ethereum-chain-mismatch");}
@@ -48,5 +50,5 @@ export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport 
   const estimatesComplete = evidence.estimates?.complete === true && (evidence.estimates.operations ?? []).every(op => quantity(op.estimatedNative, `estimate.${op.id}`) >= 0n && quantity(op.worstCaseNative, `estimate.${op.id}`) >= quantity(op.estimatedNative, `estimate.${op.id}`));
   if (!estimatesComplete) {reasons.push("estimates-incomplete");}
   const status = reasons.includes("backing-exceeds-fixed-supply") || reconciliationStatus === "under-backed" ? "inconsistent" : !evidence.ethereum.deployed || !evidence.solana.deployed ? "not-deployed" : reasons.length ? "incomplete" : "qualified";
-  return { schema: "agtmai-readiness-report-v1", broadcastAllowed: false, status, reasons: reasons.toSorted(), manifestSha256: evidence.manifestSha256, reconciliation: { adjustedGlobalSupply: adjusted?.toString() ?? null, backingSurplus: surplus?.toString() ?? null, status: reconciliationStatus }, authorityComplete: evidence.ethereum.authorityComplete && evidence.solana.authorityComplete, estimatesComplete, observedAt: observedAt.toString(), validUntil: validUntil.toString() };
+  return { schema: "agtmai-readiness-report-v1", broadcastAllowed: false, status, reasons: reasons.toSorted(), manifestSha256: evidence.manifestSha256, reconciliation: { adjustedGlobalSupply: adjusted?.toString() ?? null, backingSurplus: surplus?.toString() ?? null, status: reconciliationStatus }, authorityComplete: evidence.ethereum.authorityComplete && evidence.solana.authorityComplete, estimatesComplete, observedAt: observedAt.toString(), validUntil: reportValidUntil.toString() };
 }

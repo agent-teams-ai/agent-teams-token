@@ -31,6 +31,7 @@ export interface CustodyIntent {
 const invalid = (): never => { throw new Error("CUSTODY_INTENT_INVALID"); };
 const exactKeys = (value: object, keys: string): boolean => Object.keys(value).toSorted().join() === keys.split(",").toSorted().join();
 const bytes = (value: unknown): value is Hex => typeof value === "string" && /^0x(?:[0-9a-f]{2})+$/.test(value);
+const uintWord = (value: string): string => BigInt(value).toString(16).padStart(64, "0");
 const addressWord = (value: Hex): string => value.slice(2).padStart(64, "0");
 function validateDeployment(intent: CustodyIntent): void {
   const d = intent.deployment;
@@ -66,6 +67,18 @@ function validateSafe(intent: CustodyIntent): void {
     || safe.address !== intent.to || !isEvmAddress(safe.to) || !isDigest(safe.transactionHash) || parseCanonicalUint(safe.nonce) === undefined
     ) { invalid(); }
   if (BigInt(safe.safeTxGas) > BigInt(intent.gasLimit) || (intent.operation === "reject-founder-cancel" && safe.safeTxGas === "0")) { invalid(); }
+  validateSafeCalldata(safe, intent.data);
+}
+/** Decode the bounded execTransaction ABI used by the two-owner EOA custody profile. */
+function validateSafeCalldata(safe: CustodySafeCall, data: Hex): void {
+  if (data.slice(0, 10) !== "0x6a761202" || data.length !== 10 + 18 * 64) { invalid(); }
+  const words = data.slice(10).match(/.{64}/g)!;
+  const expected = [addressWord(safe.to), uintWord(safe.value), uintWord("320"), uintWord("0"),
+    uintWord(safe.safeTxGas), uintWord(safe.baseGas), uintWord(safe.gasPrice), addressWord(safe.gasToken),
+    addressWord(safe.refundReceiver), uintWord("384"), uintWord("4"), safe.data.slice(2).padEnd(64, "0"), uintWord("130")];
+  if (expected.some((value, index) => words[index] !== value)) { invalid(); }
+  const signatures = words.slice(13).join("");
+  if (!/^(?:[0-9a-f]{128}(?:1b|1c)){2}0{60}$/.test(signatures)) { invalid(); }
 }
 function validateSafeShape(safe: CustodySafeCall): void {
   const zero = "0x0000000000000000000000000000000000000000";

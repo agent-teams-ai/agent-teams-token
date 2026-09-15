@@ -3,7 +3,7 @@ import { deploymentBytes, isDigest, isEvmAddress, verifyDeploymentRuntime, type 
 import { deploymentCompilerPorts } from "@agent-teams/supply/deployment-files";
 import { verifyCustodySnapshot, verifyCustodyTransition, type CustodyGrantState, type CustodySnapshot, type CustodyTransition, type CustodyMovement } from "../domain/custody.ts";
 import { canonicalCustodyIntent, type CustodyIntent } from "../domain/custody-intent.ts";
-import { custodySelector, custodyTopic, custodySafeResult, safeInspectionCalls, verifyCustodySafe, type SafeProfile, type SafeInspection } from "./safe-custody.ts";
+import { custodySelector, custodyTopic, custodySafeHash, custodySafeResult, safeInspectionCalls, verifyCustodySafe, type SafeProfile, type SafeInspection } from "./safe-custody.ts";
 
 const fail = (code: string): never => { throw new Error(`CUSTODY_RPC_${code}`); };
 const object = (v: unknown): Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : fail("SHAPE");
@@ -60,7 +60,7 @@ function decodeWords(value: Hex, count: number): string[] {
 const boolWord = (v: string): boolean => v === word(0n) ? false : v === word(1n) ? true : fail("BOOLEAN");
 
 /** Separate read-only custody client; chain verification runs before every RPC request and after each capture. */
-export function createCustodyReader(endpoint: string, environment: "local-test" | "owned-testnet", mode: "offline" | "observe" = "observe", fetcher: typeof fetch = globalThis.fetch) {
+export function createCustodyReader(endpoint: string, environment: "local-test" | "owned-testnet", mode: "offline" | "observe" = "observe", fetcher: typeof fetch = globalThis.fetch, safeProfile?: SafeProfile) {
   if (!["local-test", "owned-testnet"].includes(environment)) { return fail("MAINNET_FORBIDDEN"); }
   const url = new URL(endpoint);
   if (environment === "local-test" && (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname))) { return fail("LOCAL_ENDPOINT"); }
@@ -74,6 +74,10 @@ export function createCustodyReader(endpoint: string, environment: "local-test" 
     if (!same(block(await read("eth_getBlockByNumber", [rpcNumber(at.number), false])), at)) { fail("REORG"); }
     const finalized = block(await read("eth_getBlockByNumber", ["finalized", false]));
     if (BigInt(finalized.number) < BigInt(at.number) || BigInt(finalized.timestamp) < BigInt(at.timestamp)) { fail("FINALITY_REQUIRED"); }
+    if (finalized.number === at.number && !same(finalized, at)) { fail("FINALITY_CONFLICT"); }
+    // Keep both heights bound to the canonical chain across the finalized-tag read.
+    if (!same(block(await read("eth_getBlockByNumber", [rpcNumber(finalized.number), false])), finalized)
+      || !same(block(await read("eth_getBlockByNumber", [rpcNumber(at.number), false])), at)) { fail("REORG"); }
     await check();
   }
   async function snapshot(manifest: DeploymentManifest, prepared: PreparedDeployment, selected?: DeploymentBlock): Promise<CustodySnapshot> {
@@ -103,10 +107,10 @@ export function createCustodyReader(endpoint: string, environment: "local-test" 
   }
   async function finalizedTransaction(hash: Hex) {
     const r = await receipt(hash), tx = object(await read("eth_getTransactionByHash", [hash]));
-    const at = block(await read("eth_getBlockByNumber", [rpcNumber(r.blockNumber), false]));
+    const header = object(await read("eth_getBlockByNumber", [rpcNumber(r.blockNumber), false])), at = block(header), parentHash = digest(header.parentHash);
     if (digest(tx.hash) !== hash || quantity(tx.chainId) !== chainId || digest(tx.blockHash) !== r.blockHash || quantity(tx.blockNumber) !== r.blockNumber || at.hash !== r.blockHash) { fail("TRANSACTION_BINDING"); }
     await canonical(at);
-    return { receipt: r, at, transaction: { hash, chainId, from: address(tx.from), to: tx.to === null ? null : address(tx.to), nonce: quantity(tx.nonce), value: quantity(tx.value), input: hex(tx.input) } };
+    return { receipt: r, at, parentHash, transaction: { hash, chainId, from: address(tx.from), to: tx.to === null ? null : address(tx.to), nonce: quantity(tx.nonce), value: quantity(tx.value), input: hex(tx.input) } };
   }
   async function creation(prepared: PreparedDeployment, hash: Hex, grantId: string | null, token: Hex | null): Promise<ContractDeploymentEvidence> {
     const tx = await finalizedTransaction(hash), r = tx.receipt, at = tx.at;
@@ -131,15 +135,28 @@ export function createCustodyReader(endpoint: string, environment: "local-test" 
   }
   async function transition(manifest: DeploymentManifest, prepared: PreparedDeployment, intent: CustodyIntent, grantId: string, hash: Hex): Promise<CustodyTransition> {
     canonicalCustodyIntent(intent);
+    if (intent.safe && custodySafeHash(intent.chainId, intent.safe) !== intent.safe.transactionHash) { fail("SAFE_HASH_MISMATCH"); }
     const tx = await finalizedTransaction(hash), r = tx.receipt;
     if (intent.kind !== "call" || ["deploy-token", "deploy-grant"].includes(intent.operation) || !same(tx.transaction, { hash, chainId: intent.chainId, from: intent.from, to: intent.to, nonce: intent.nonce, value: intent.value, input: intent.data })) { return fail("INTENT_MISMATCH"); }
-    const parent = block(await read("eth_getBlockByNumber", [rpcNumber((BigInt(tx.at.number) - 1n).toString()), false]));
+    const parent = block(await read("eth_getBlockByHash", [tx.parentHash, false]));
+    if (parent.hash !== tx.parentHash || BigInt(parent.number) + 1n !== BigInt(tx.at.number)) { fail("PARENT_BINDING"); }
+    if (intent.safe) {
+      const grant = manifest.configuration.grants.find(g => g.id === grantId);
+      const expected = manifest.configuration.custodySafes.find(s => s.id === grant?.controllerSafe);
+      const vault = manifest.grants.find(g => g.grantId === grantId);
+      if (!safeProfile) { return fail("SAFE_PROFILE_REQUIRED"); }
+      if (!expected || expected.address !== intent.safe.address || vault?.address !== intent.safe.to) { return fail("SAFE_BINDING"); }
+      // The caller selects the authenticated artifact profile independently of the intent/evidence.
+      const beforeSafe = await safe(expected, safeProfile, parent), afterSafe = await safe(expected, safeProfile, tx.at);
+      if (BigInt(beforeSafe.nonceResult).toString() !== intent.safe.nonce || BigInt(afterSafe.nonceResult) !== BigInt(intent.safe.nonce) + 1n) { fail("SAFE_NONCE"); }
+    }
     const before = await snapshot(manifest, prepared, parent), after = await snapshot(manifest, prepared, tx.at);
     const movements = receiptMovements(manifest.token!.address, r.logs);
     const result: CustodyTransition = { operationId: intent.operationId, operation: intent.operation as CustodyTransition["operation"], intent, transactionHash: hash, grantId, block: tx.at,
-      before, after, movements, receiptStatus: r.status, safeResult: intent.safe ? custodySafeResult(intent.safe, r.logs) : null, gasUsed: r.gasUsed, effectiveGasPrice: r.effectiveGasPrice };
+      before, after, movements, receiptStatus: r.status, safeResult: intent.safe ? custodySafeResult(intent.chainId, intent.safe, r.logs) : null, gasUsed: r.gasUsed, effectiveGasPrice: r.effectiveGasPrice };
     verifyCustodyTransition(manifest, result); verifyVaultEvent(result, r.logs);
-    await canonical(tx.at); if (!same(r, await receipt(hash))) { fail("RECEIPT_CHANGED"); }
+    if (!same(tx, await finalizedTransaction(hash))) { fail("TRANSACTION_CHANGED"); }
+    await canonical(parent); await canonical(tx.at);
     return result;
   }
   return { read, call, canonical, snapshot, receipt, finalizedTransaction, creation, safe, transition,

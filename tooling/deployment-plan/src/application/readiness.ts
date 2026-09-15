@@ -44,7 +44,8 @@ function assertReconciliation(reconciliation: Record<string, unknown>, reasons: 
   }
 }
 export function assertReadinessFreshness(evidence: ReadinessEvidence, now: string): void {
-  if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(evidence.observedAt) || BigInt(now) > BigInt(evidence.validUntil)) {
+  const report = evaluateReadiness(evidence);
+  if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(report.observedAt) || BigInt(now) > BigInt(report.validUntil)) {
     throw new Error("READINESS_EVIDENCE_STALE");
   }
 }

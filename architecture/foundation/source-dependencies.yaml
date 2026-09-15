@@ -65,8 +65,7 @@ boundaries:
       boundaries:
         - supply.genesis-manifest.domain
       packages: []
-      builtins:
-        - node:crypto
+      builtins: []
       runtimeReferences: []
   - id: supply.genesis-manifest.adapters
     roots:

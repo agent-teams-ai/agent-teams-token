@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { custodyNextAction, custodyVested, verifyCustodySnapshot, verifyCustodyTransition, type CustodyTransition } from "../src/domain/custody.ts";
 import type { CustodyIntent } from "../src/domain/custody-intent.ts";
-import { hash, blockHash, manifestFixture, snapshotFixture, stateFixture } from "./fixtures/custody.ts";
+import { hash, blockHash, manifestFixture, snapshotFixture, stateFixture, safeCalldataFixture } from "./fixtures/custody.ts";
 
 function cancellationFixture() {
   const manifest = manifestFixture(), team = manifest.configuration.grants.find(g => g.kind === "team")!;
@@ -20,7 +20,7 @@ function cancellationFixture() {
     nonce: "9", value: "0", data: "0x12345678", callerRole: "safe-executor", prerequisiteSha256: hash, gasLimit: "200000",
     maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "0", deployment: null, safe: { address: teamBefore.controller, nonce: "0", transactionHash: hash,
       to: teamBefore.address, value: "0", data: "0xea8a1af0", operation: "CALL", safeTxGas: "100000", baseGas: "0", gasPrice: "0", gasToken: zero, refundReceiver: zero } };
-  const transition: CustodyTransition = { operationId: intent.operationId, grantId: team.id, operation: "cancel-team", intent, transactionHash: hash,
+  const transition: CustodyTransition = { operationId: intent.operationId, grantId: team.id, operation: "cancel-team", intent: { ...intent, data: safeCalldataFixture(intent.safe!) }, transactionHash: hash,
     block: after.block, before, after, receiptStatus: 1, safeResult: "success", movements: [{ from: teamBefore.address, to: teamBefore.reserve, amount: "100000" }], gasUsed: "65000", effectiveGasPrice: "1000000000" };
   return { manifest, team, transition };
 }

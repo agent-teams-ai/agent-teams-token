@@ -86,7 +86,8 @@ export async function custodySafeCalldata(chainId: "31337" | "11155111", call: C
   return `${custodySelector("execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)")}${words.join("")}${dataTail}${word(BigInt(sigs.length / 2))}${sigs.padEnd(Math.ceil(sigs.length / 64) * 64, "0")}` as Hex;
 }
 export interface SafeReceiptLog { readonly address: Hex; readonly topics: readonly Hex[]; readonly data: Hex; readonly removed: boolean }
-export function custodySafeResult(call: CustodySafeCall, logs: readonly SafeReceiptLog[]): "success" | "failure" {
+export function custodySafeResult(chainId: "31337" | "11155111", call: CustodySafeCall, logs: readonly SafeReceiptLog[]): "success" | "failure" {
+  if (custodySafeHash(chainId, call) !== call.transactionHash) { return fail("TRANSACTION_IDENTITY"); }
   const success = custodyTopic("ExecutionSuccess(bytes32,uint256)"), failure = custodyTopic("ExecutionFailure(bytes32,uint256)");
   const matching = logs.filter(l => l.address === call.address && [success, failure].includes(l.topics[0]!));
   if (matching.length !== 1 || matching[0]!.topics.length !== 1 || matching[0]!.removed || matching[0]!.data !== `${call.transactionHash}${word(0n)}`) { return fail("INNER_RESULT_UNPROVEN"); }

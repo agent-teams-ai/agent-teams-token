@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertReadinessBundle } from "../src/application/readiness.ts";
+import { assertReadinessBundle, assertReadinessFreshness } from "../src/application/readiness.ts";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -158,4 +158,33 @@ test("estimate expiry must be canonical, later than observation and no later tha
     const evidence = { ...base(), estimates: { complete: true, operations: [{ id: "deploy", estimatedNative: "1", worstCaseNative: "2", expiresAt }] } };
     assert.equal(evaluateReadiness(evidence).status, "qualified");
   }
+});
+
+
+test("report and CLI freshness end at the earliest operation estimate expiry", async context => {
+  const evidence = { ...base(), estimates: { complete: true, operations: [
+    { id: "later", estimatedNative: "1", worstCaseNative: "2", expiresAt: "180" },
+    { id: "earliest", estimatedNative: "1", worstCaseNative: "2", expiresAt: "101" },
+  ] } };
+  const report = evaluateReadiness(evidence);
+  assert.equal(report.status, "qualified");
+  assert.equal(report.validUntil, "101");
+  assert.equal(evidence.validUntil, "200");
+  assertReadinessBundle(report, report.manifestSha256);
+  assertReadinessFreshness(evidence, "100");
+  assertReadinessFreshness(evidence, "101");
+  for (const now of ["99", "102", "150", "200"]) {
+    assert.throws(() => assertReadinessFreshness(evidence, now), /READINESS_EVIDENCE_STALE/);
+  }
+  const root = await mkdtemp(join(tmpdir(), "readiness-expiry-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const bundle = join(root, "report.json"); await writeFile(bundle, JSON.stringify(report));
+  for (const now of ["101", "150"]) {
+    const result = spawnSync(process.execPath, [resolve("tooling/deployment-plan/src/composition/readiness.ts"), "verify", "--bundle", bundle,
+      "--manifest-sha256", report.manifestSha256, "--now", now], { encoding: "utf8" });
+    assert.equal(result.status, now === "101" ? 0 : 2, result.stderr);
+    if (now === "150") { assert.equal(JSON.parse(result.stderr).reason, "READINESS_BUNDLE_STALE"); }
+  }
+  assert.equal(evaluateReadiness({ ...evidence, estimates: { ...evidence.estimates, complete: false } }).validUntil, "101");
+  assert.equal(evaluateReadiness(base()).validUntil, "200");
 });

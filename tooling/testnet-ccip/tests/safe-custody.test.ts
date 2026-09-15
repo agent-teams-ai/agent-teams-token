@@ -41,11 +41,13 @@ test("Safe inspection checks proxy/singleton, initialization, exact threshold, c
   }
 });
 test("successful outer receipt cannot hide Safe inner failure, wrong transaction hash or emitter", () => {
-  const log = { address: safe.address, topics: [custodyTopic("ExecutionFailure(bytes32,uint256)")], data: `${hash}${word(0n)}` as Hex, removed: false };
-  assert.equal(custodySafeResult(call, [log]), "failure");
-  assert.equal(custodySafeResult(call, [{ ...log, topics: [custodyTopic("ExecutionSuccess(bytes32,uint256)")] }]), "success");
+  const log = { address: safe.address, topics: [custodyTopic("ExecutionFailure(bytes32,uint256)")], data: `${custodySafeHash("31337", call)}${word(0n)}` as Hex, removed: false };
+  assert.equal(custodySafeResult("31337", { ...call, transactionHash: custodySafeHash("31337", call) }, [log]), "failure");
+  assert.equal(custodySafeResult("31337", { ...call, transactionHash: custodySafeHash("31337", call) }, [{ ...log, topics: [custodyTopic("ExecutionSuccess(bytes32,uint256)")] }]), "success");
+  assert.throws(() => custodySafeResult("31337", call, [{ ...log, data: `${hash}${word(0n)}` as Hex }]), /TRANSACTION_IDENTITY/);
+  assert.throws(() => custodySafeResult("11155111", { ...call, transactionHash: custodySafeHash("31337", call) }, [log]), /TRANSACTION_IDENTITY/);
   for (const logs of [[], [log, log], [{ ...log, address: address(9) }], [{ ...log, removed: true }], [{ ...log, data: `0x${word(0n)}${word(0n)}` as Hex }]]) {
-    assert.throws(() => custodySafeResult(call, logs), /INNER_RESULT_UNPROVEN/);
+    assert.throws(() => custodySafeResult("31337", { ...call, transactionHash: custodySafeHash("31337", call) }, logs), /INNER_RESULT_UNPROVEN/);
   }
 });
 test("two ephemeral keystore signatures independently agree with cast EIP-712 and exact execTransaction ABI", async t => {

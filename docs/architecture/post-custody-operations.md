@@ -21,6 +21,9 @@ mainnet readiness is claimed by the presence of this runbook.
 `@agent-teams/supply/deployment` owns pure validation, calendar arithmetic,
 unsigned preparation and verified deployment facts. Its parsing, hashing,
 artifact and filesystem adapters remain outside that public entrypoint.
+Passport generation and checking take a `PassportHashPort` with `sha256(bytes)`;
+the file composition supplies the existing SHA-256 adapter. Canonical bytes and
+passport digests retain their format.
 `tooling/testnet-ccip` owns custody/testnet execution; `tooling/deployment-plan`
 owns read-only readiness. Existing Solidity remains unchanged.
 
@@ -133,6 +136,15 @@ The pure transition checker reports `arithmetic-only`; it cannot establish
 testnet success. Debt releases after cancellation use the frozen entitlement,
 while `lastTransition` advances to the release timestamp.
 
+The read-only custody reader rejects a conflicting finalized hash at the receipt
+height and rechecks canonical block identities after capturing effects. The
+before-state block must match the receipt block's parent hash. Safe proofs decode
+the outer `execTransaction` calldata, bind every call field to the intended vault
+operation and recompute the EIP-712 transaction hash before accepting the result
+event. The reader requires an independently selected official Safe profile and
+checks proxy/singleton runtimes, owners, threshold, extensions and nonce progression
+at both blocks. Missing profile authentication cannot establish a Safe result.
+
 Readiness evidence requires JSON booleans for deployment, authority, protocol,
 coverage and estimate flags. String booleans are rejected. Report verification
 requires all canonical report fields, including explicit `authorityComplete` and
@@ -141,6 +153,8 @@ status, reasons and reconciliation. Regenerate earlier reports missing the
 required authority field. Adjusted supply and the implied fixed supply must be
 nonnegative. Chain timestamps must be inside `[observedAt, validUntil]`; estimate
 expiry must be after `observedAt` and at or before `validUntil`.
+The report's `validUntil` is capped at the earliest operation estimate expiry;
+freshness checks of evidence and reports enforce that shorter interval.
 Both verification commands read local files and cannot
 broadcast. Readiness verification checks report integrity under the supplied
 manifest digest; current chain observations remain separate evidence.

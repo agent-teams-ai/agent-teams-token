@@ -2,9 +2,17 @@
 import { readFileSync } from "node:fs";
 import { validateDeployment, type DeploymentManifest, type Hex } from "@agent-teams/supply/deployment";
 import type { CustodyGrantState, CustodySnapshot } from "../../src/domain/custody.ts";
+import type { CustodySafeCall } from "../../src/domain/custody-intent.ts";
 export const hash = `0x${"a".repeat(64)}` as Hex;
 export const blockHash = `0x${"b".repeat(64)}` as Hex;
 export const token = "0x0000000000000000000000000000000000000080" as Hex;
+const w = (v: string): string => BigInt(v).toString(16).padStart(64, "0");
+/** ABI fixture with synthetic signature bytes; never authorization to submit a transaction. */
+export function safeCalldataFixture(call: CustodySafeCall): Hex {
+  const signatures = `${w("1")}${w("1")}1b`.repeat(2).padEnd(320, "0");
+  return `0x6a761202${[w(call.to), w("0"), w("320"), w("0"), w(call.safeTxGas), w("0"), w("0"), w("0"), w("0"), w("384"),
+    w("4"), "ea8a1af0".padEnd(64, "0"), w("130"), signatures].join("")}`;
+}
 export function manifestFixture(): DeploymentManifest {
   const configuration = validateDeployment(JSON.parse(readFileSync(new URL("../../../../packages/contexts/supply/tests/fixtures/deployment/local-test.json", import.meta.url), "utf8"))).value;
   if (!configuration) { throw new Error("Fixture invalid"); }
