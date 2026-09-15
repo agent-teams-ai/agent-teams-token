@@ -102,3 +102,60 @@ test("read-only verify CLI rejects a forged partial report even without --now", 
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.deepEqual(JSON.parse(accepted.stdout), { status: "verified", broadcastAllowed: false });
 });
+
+test("canonical reports reject impossible supplies and contradictory status/reason combinations", () => {
+  const report = evaluateReadiness(base()), digest = report.manifestSha256;
+  for (const [adjustedGlobalSupply, backingSurplus, status, reasons] of [
+    ["-1", "0", "exact", []], ["-1", "1", "surplus", ["surplus"]],
+    ["-1", "-1", "under-backed", ["under-backed"]],
+    ["1", "-2", "under-backed", ["under-backed"]],
+  ] as const) {
+    const inconsistent = { ...report, status: status === "under-backed" ? "inconsistent" : reasons.length ? "incomplete" : "qualified",
+      reasons, reconciliation: { adjustedGlobalSupply, backingSurplus, status } };
+    assert.throws(() => assertReadinessBundle(inconsistent, digest), /READINESS_BUNDLE_INVALID/);
+  }
+  const reports = [report,
+    evaluateReadiness({ ...base(), ethereum: { ...base().ethereum, backing: "600" } }),
+    evaluateReadiness({ ...base(), ethereum: { ...base().ethereum, backing: "400" } }),
+    evaluateReadiness({ ...base(), ethereum: { ...base().ethereum, pendingEthereumToSolana: null } }),
+    evaluateReadiness({ ...base(), ethereum: { ...base().ethereum, deployed: false } }),
+  ];
+  for (const valid of reports) {
+    assertReadinessBundle(valid, digest);
+    for (const status of ["qualified", "incomplete", "inconsistent", "not-deployed"]) {
+      if (status !== valid.status) { assert.throws(() => assertReadinessBundle({ ...valid, status }, digest), /READINESS_BUNDLE_INVALID/); }
+    }
+    for (const reason of ["reconciliation-unknown", "surplus", "under-backed", "authority-observation-incomplete", "estimates-incomplete"]) {
+      const reasons = valid.reasons.includes(reason) ? valid.reasons.filter(r => r !== reason) : [...valid.reasons, reason].toSorted();
+      assert.throws(() => assertReadinessBundle({ ...valid, reasons }, digest), /READINESS_BUNDLE_INVALID/);
+    }
+  }
+  assert.throws(() => evaluateReadiness({ ...base(), ethereum: { ...base().ethereum, backing: "1501" } }), /READINESS_ADJUSTED_SUPPLY_NEGATIVE/);
+});
+
+test("both chain observations must fall within the declared interval, including its boundaries", () => {
+  for (const chain of ["ethereum", "solana"]) {
+    for (const timestamp of ["0", "99", "100", "150", "200", "201"]) {
+      const evidence = base();
+      if (chain === "ethereum") { evidence.ethereum.block.timestamp = timestamp; } else { evidence.solana.blockTime = timestamp; }
+      if (["100", "150", "200"].includes(timestamp)) { assert.equal(evaluateReadiness(evidence).status, "qualified"); }
+      else {
+        assert.throws(() => evaluateReadiness(evidence), /READINESS_OBSERVATION_OUTSIDE_INTERVAL/);
+        assert.throws(() => parseReadinessEvidence(new TextEncoder().encode(JSON.stringify(evidence))), /READINESS_OBSERVATION_OUTSIDE_INTERVAL/);
+      }
+    }
+  }
+});
+
+test("estimate expiry must be canonical, later than observation and no later than validUntil", () => {
+  for (const complete of [true, false]) {
+    for (const expiresAt of ["0", "99", "100", "201", "01", "-1", "invalid"]) {
+      const evidence = { ...base(), estimates: { complete, operations: [{ id: "deploy", estimatedNative: "1", worstCaseNative: "2", expiresAt }] } };
+      assert.throws(() => evaluateReadiness(evidence), /READINESS_ESTIMATE_EXPIRY_OUTSIDE_INTERVAL|expiresAt must be a canonical decimal string/);
+    }
+  }
+  for (const expiresAt of ["101", "150", "200"]) {
+    const evidence = { ...base(), estimates: { complete: true, operations: [{ id: "deploy", estimatedNative: "1", worstCaseNative: "2", expiresAt }] } };
+    assert.equal(evaluateReadiness(evidence).status, "qualified");
+  }
+});

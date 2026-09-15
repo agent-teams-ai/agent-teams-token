@@ -99,6 +99,9 @@ Other leaves are rejected before reading or publication. The pinned
 Foundry build must use repository compiler/optimizer/EVM settings. Compilation
 publishes the raw artifact/build-info files so later verification can authenticate
 runtime immutable slots against their hashes instead of trusting a claimed hash.
+Reads traverse each parent through held Linux directory descriptors and recheck
+their identities before returning bytes. Platforms without that traversal fail
+closed with `DEPLOYMENT_IO_DESCRIPTOR_TRAVERSAL_UNAVAILABLE`.
 
 Materialization requires bounded native creation evidence for each present
 contract: transaction identity/input, receipt/events, canonical block observations,
@@ -122,17 +125,32 @@ requires the complete published deployment directory, including its inventory,
 prepared configuration, compiler files and native creation evidence. It recompiles
 and hashes the canonical configuration, regenerates the manifest and checks its
 preparation/evidence digests before evaluating the transition. A standalone
-manifest and fabricated transition are insufficient. Offline results retain the
-selected-capture trust boundary above; they do not establish independent finality.
+manifest and fabricated transition are insufficient. The current evidence v1
+schema authenticates creation only; it does not bind subsequent custody
+transactions, receipts or finality. Therefore this command rejects even
+arithmetically valid transitions with `CUSTODY_TRANSITION_PROVENANCE_UNPROVEN`.
+The pure transition checker reports `arithmetic-only`; it cannot establish
+testnet success. Debt releases after cancellation use the frozen entitlement,
+while `lastTransition` advances to the release timestamp.
 
 Readiness evidence requires JSON booleans for deployment, authority, protocol,
 coverage and estimate flags. String booleans are rejected. Report verification
 requires all canonical report fields, including explicit `authorityComplete` and
 `estimatesComplete` booleans, valid manifest digest and UTC seconds, and consistent
 status, reasons and reconciliation. Regenerate earlier reports missing the
-required authority field. Both verification commands read local files and cannot
+required authority field. Adjusted supply and the implied fixed supply must be
+nonnegative. Chain timestamps must be inside `[observedAt, validUntil]`; estimate
+expiry must be after `observedAt` and at or before `validUntil`.
+Both verification commands read local files and cannot
 broadcast. Readiness verification checks report integrity under the supplied
 manifest digest; current chain observations remain separate evidence.
+
+`pnpm token:passport generate` produces a deterministic archive from the manifest
+and observations. `pnpm token:passport check` additionally requires `--now` as
+canonical UTC seconds inside the observation interval. Authority observations
+must identify a configured chain and controlled address; known capabilities must
+also match their exact manifest target. Unconfigured capabilities remain
+explicitly unresolved, and duplicate capability observations are rejected.
 
 ## Recovery and external execution
 

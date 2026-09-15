@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { renameSync, symlinkSync, type Stats } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import test from "node:test";
 import { publishDeploymentFiles, readDeploymentFile, verifyDeploymentFiles } from "../src/features/genesis-manifest/adapters/deployment-store.js";
@@ -50,4 +51,31 @@ test("bounded reads and crash locks fail closed", async context => {
   await writeFile(join(output, ".publication-lock"), "old lock");
   await assert.rejects(publishDeploymentFiles(output, { "result.json": new Uint8Array() }, true));
   assert.equal(await readFile(join(output, ".publication-lock"), "utf8"), "old lock");
+});
+
+test("a parent replaced after its directory check cannot redirect reads outside the trusted directory", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const trusted = join(root, "trusted"), outside = join(root, "outside"), moved = join(root, "held");
+  await mkdir(trusted); await mkdir(outside);
+  await writeFile(join(trusted, "result.json"), "approved");
+  await writeFile(join(outside, "result.json"), "foreign");
+  const parent = await stat(trusted), isDirectory = parent.isDirectory;
+  let attacked = false;
+  // Replace the checked parent synchronously while the reader still holds its
+  // pre-substitution stat. No production hook or scheduler timing is involved.
+  const replacement = context.mock.method(Object.getPrototypeOf(parent), "isDirectory", function (this: Stats) {
+    const directory = isDirectory.call(this);
+    if (!attacked && this.dev === parent.dev && this.ino === parent.ino) {
+      attacked = true;
+      renameSync(trusted, moved);
+      symlinkSync(outside, trusted);
+    }
+    return directory;
+  });
+  try {
+    await assert.rejects(readDeploymentFile(join(trusted, "result.json")), /DIRECTORY_IDENTITY|ENOTDIR|ELOOP/);
+    assert.equal(attacked, true);
+  } finally { replacement.mock.restore(); }
+  assert.equal(await readFile(join(outside, "result.json"), "utf8"), "foreign");
+  assert.equal(await readFile(join(moved, "result.json"), "utf8"), "approved");
 });

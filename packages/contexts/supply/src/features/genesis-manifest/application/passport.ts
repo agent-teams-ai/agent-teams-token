@@ -24,10 +24,25 @@ function validateInputs(manifest: DeploymentManifest, observations: PassportObse
   if (/private|secret|password|keystore|seed|mnemonic|privatekey/i.test(JSON.stringify(observations))) {fail("PRIVATE_FIELD");}
 }
 function mechanism(capability: string, expected: string | null): AuthorityRegistryEntry["mechanism"] { const c = capability.toLowerCase(); return c.includes("safe") ? "safe" : c.includes("pda") || c.includes("mint authority") ? "pda" : c.includes("protocol") || c.includes("registry") ? "protocol" : expected ? "immutable" : "unknown"; }
+function controlsManifestAddress(manifest: DeploymentManifest, observation: PassportAuthorityObservation): boolean {
+  const c = manifest.configuration, evm = c.bridge?.ethereum, solana = c.bridge?.solana;
+  const evmAddresses = [manifest.token?.address, ...manifest.grants.map(g => g.address), ...c.allocations.map(a => a.recipient), ...c.custodySafes.map(s => s.address),
+    ...(evm ? [evm.token, evm.pool, evm.router, evm.rmn, evm.registry, evm.registryModule] : [])];
+  const solanaAddresses = solana ? [solana.mint, solana.pool, solana.poolSigner, solana.poolTokenAccount, solana.lookupTable,
+    solana.tokenProgram, solana.router, solana.offRamp, solana.rmn, solana.feeQuoter, solana.burnMintProgram] : [];
+  return typeof observation.controlled === "string" && (
+    (observation.chain === c.environment.evmChainId && evmAddresses.includes(observation.controlled))
+    || (observation.chain === c.environment.solanaGenesisHash && solanaAddresses.includes(observation.controlled)));
+}
 function registryEntries(manifest: DeploymentManifest, observations: PassportObservation): AuthorityRegistryEntry[] {
   const c = manifest.configuration, observed = new Map((observations.authorities ?? []).map(a => [a.capability, a]));
   const expected: Array<[string, string, string, string, string, string]> = [["token.ccip-admin", c.environment.evmChainId, manifest.token?.address ?? "unresolved", c.token.initialCCIPAdmin, "administrative token control", "Initial administrator is recorded separately from current registry administration"]];
   for (const safe of c.custodySafes) {expected.push([`custody.safe.${safe.id}`, c.environment.evmChainId, safe.address, safe.address, "Safe CALL control", `threshold ${safe.threshold}; ${safe.beneficialControl}`]);}
+  if (observed.size !== (observations.authorities ?? []).length) { fail("AUTHORITY_DUPLICATE"); }
+  for (const a of observed.values()) {
+    const binding = expected.find(([capability]) => capability === a.capability);
+    if (!controlsManifestAddress(manifest, a) || (binding && (a.chain !== binding[1] || a.controlled !== binding[2]))) { fail("AUTHORITY_BINDING"); }
+  }
   const result: AuthorityRegistryEntry[] = expected.map(([capability, chain, controlled, expectedValue, power, limitation]) => { const a = observed.get(capability); return { capability, chain, controlled, expected: expectedValue, observed: a?.observed ?? null, pending: a?.pending ?? null, mechanism: mechanism(capability, expectedValue), power, limitation, evidence: a?.evidence ?? null }; });
   for (const a of observations.authorities ?? []) { if (!result.some(e => e.capability === a.capability)) { result.push({ capability: a.capability, chain: a.chain, controlled: a.controlled, expected: null, observed: a.observed ?? null, pending: a.pending ?? null, mechanism: mechanism(a.capability, null), power: "unresolved", limitation: "No expected value is configured", evidence: a.evidence ?? null }); } }
   return result.toSorted((a, b) => a.capability.localeCompare(b.capability));

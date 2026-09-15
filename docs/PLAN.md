@@ -34,6 +34,12 @@ locally; missing Safe/native-provider/Linux prerequisites must remain visible.
 No mainnet transaction or production secret is authorized. Final owned-testnet
 execution and independent exact-candidate review belong to later orchestration.
 
+Exact-review correction: deployment evidence v1 binds creation only, not later
+custody transitions. Offline `custody:verify` must therefore fail closed with
+`CUSTODY_TRANSITION_PROVENANCE_UNPROVEN`; arithmetic checks alone cannot claim a
+finalized transaction. Current passport checks require explicit canonical UTC
+seconds through `--now`; archival generation makes no freshness claim.
+
 The pinned cast 1.8.0 keystore path has an additional native prerequisite found
 while qualifying two ephemeral test signatures: it requires the existing user
 home location even with an explicit absolute `--keystore`. The narrow subprocess

@@ -35,7 +35,7 @@ function assertReconciliation(reconciliation: Record<string, unknown>, reasons: 
   if (surplus === null) {
     if (adjusted !== null || reconciliation.status !== "unknown") { invalid(); }
   } else {
-    if (!integer(adjusted) || !integer(surplus)) { return invalid(); }
+    if (!uint(adjusted) || !integer(surplus) || BigInt(adjusted) + BigInt(surplus) < 0n) { return invalid(); }
     const status = BigInt(surplus) < 0n ? "under-backed" : BigInt(surplus) > 0n ? "surplus" : "exact";
     if (reconciliation.status !== status) { invalid(); }
   }

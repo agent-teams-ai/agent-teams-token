@@ -34,7 +34,7 @@ export interface CustodyTransitionResult {
   readonly operation: CustodyTransition["operation"]; readonly timestamp: string;
   readonly released: string; readonly refunded: string; readonly vestedDebt: string;
   readonly remainingPrincipal: string; readonly donations: string; readonly feeWei: string;
-  readonly proof: "finalized-transaction"; readonly founderRejection: boolean;
+  readonly proof: "arithmetic-only"; readonly founderRejection: boolean;
 }
 const fail = (reason: string): never => { throw new Error(`CUSTODY_${reason}`); };
 const same = (a: unknown, b: unknown): boolean => new TextDecoder().decode(deploymentBytes(a)) === new TextDecoder().decode(deploymentBytes(b));
@@ -85,7 +85,9 @@ function verifyGrantState(manifest: DeploymentManifest, snapshot: CustodySnapsho
   uint(state.allowance);
   const entitlement = state.cancelled ? frozen : custodyVested(g, snapshot.block.timestamp);
   const refund = state.cancelled ? allocation - frozen : 0n;
-  if (frozen > allocation || released > entitlement || (!state.cancelled && frozen !== 0n) || (state.cancelled && frozen !== custodyVested(g, state.lastTransition))
+  // lastTransition advances on debt releases; frozenEntitlement remains the cancellation entitlement.
+  // The cancellation transition itself verifies the exact curve value at cancellation.
+  if (frozen > allocation || released > entitlement || (!state.cancelled && frozen !== 0n) || (state.cancelled && frozen > custodyVested(g, state.lastTransition))
     || (!state.funded && (released !== 0n || state.cancelled || state.lastTransition !== "0"))
     || uint(state.available) !== (state.funded ? entitlement - released : 0n)) { fail("GRANT_ACCOUNTING"); }
   const remaining = state.funded ? allocation - released - refund : 0n;
@@ -119,7 +121,8 @@ function bindTransition(manifest: DeploymentManifest, t: CustodyTransition): { b
   const before = t.before.grants.find(g => g.grantId === t.grantId), after = t.after.grants.find(g => g.grantId === t.grantId);
   if (!before || !after || !isDigest(t.transactionHash) || !same(t.block, t.after.block)
     || BigInt(t.block.number) !== BigInt(t.before.block.number) + 1n || BigInt(t.block.timestamp) < BigInt(t.before.block.timestamp)
-    || t.intent.operationId !== t.operationId || t.intent.operation !== t.operation || t.intent.configurationSha256 !== manifest.configurationSha256) { return fail("TRANSITION_BINDING"); }
+    || t.intent.operationId !== t.operationId || t.intent.operation !== t.operation || t.intent.configurationSha256 !== manifest.configurationSha256
+    || t.intent.chainId !== manifest.configuration.environment.evmChainId || t.intent.environment !== manifest.configuration.environment.mode) { return fail("TRANSITION_BINDING"); }
   if (t.before.grants.some(g => g.grantId !== t.grantId && !same({ ...g, available: "0" }, { ...t.after.grants.find(a => a.grantId === g.grantId), available: "0" }))) { fail("UNRELATED_GRANT_CHANGE"); }
   if (before.donations !== after.donations) { fail("UNATTRIBUTED_DONATION"); }
   return { before, after, grant: immutableGrant(manifest, after) };
@@ -189,5 +192,5 @@ export function verifyCustodyTransition(manifest: DeploymentManifest, t: Custody
   return { operationId: t.operationId, transactionHash: t.transactionHash, grantId: t.grantId, operation: t.operation,
     timestamp: t.block.timestamp, released: after.released, refunded: refunded.toString(), vestedDebt: after.available,
     remainingPrincipal: (after.funded ? uint(after.allocation) - uint(after.released) - refunded : 0n).toString(),
-    donations: after.donations, feeWei: (uint(t.gasUsed) * uint(t.effectiveGasPrice)).toString(), proof: "finalized-transaction", founderRejection: expected.founderRejection };
+    donations: after.donations, feeWei: (uint(t.gasUsed) * uint(t.effectiveGasPrice)).toString(), proof: "arithmetic-only", founderRejection: expected.founderRejection };
 }

@@ -35,3 +35,30 @@ test("passport output contains no operational settings or credentials", () => {
   assert.doesNotMatch(passport.markdown, /password|private.?key|mnemonic|keystore/i);
   assert.doesNotMatch(JSON.stringify(passport.authorityRegistry), /password|private.?key|mnemonic|keystore/i);
 });
+
+test("authority evidence binds capability, chain and controlled contract to the manifest", () => {
+  const tokenAddress = "0x0000000000000000000000000000000000000080";
+  const deployed: DeploymentManifest = { ...manifest, status: "partial", token: { address: tokenAddress,
+    transactionHash: manifest.evidenceSha256, block: { number: "1", hash: manifest.evidenceSha256, timestamp: "1700000000" },
+    constructorArgs: "0x", artifactSha256: manifest.preparedSha256, compilerInputSha256: manifest.preparedSha256, genesisAllocationHash: manifest.configurationSha256 } };
+  const safe = config.custodySafes[0];
+  const authorities = [
+    { capability: "token.ccip-admin", chain: "31337", controlled: tokenAddress, observed: config.token.initialCCIPAdmin },
+    { capability: `custody.safe.${safe.id}`, chain: "31337", controlled: safe.address, observed: safe.address },
+  ];
+  const observed = { ...observations, authorities }, passport = generatePassport(deployed, observed);
+  checkPassport(deployed, observed, passport, "1700000100");
+  assert.equal(passport.authorityRegistry.entries.find(e => e.capability === "token.ccip-admin")!.observed, config.token.initialCCIPAdmin);
+  for (const index of [0, 1]) {
+    for (const patch of [{ chain: "11155111" }, { controlled: "0x0000000000000000000000000000000000000099" }, { controlled: index === 0 ? safe.address : tokenAddress }]) {
+      const changed = { ...observed, authorities: authorities.map((a, i) => i === index ? { ...a, ...patch } : a) };
+      assert.throws(() => generatePassport(deployed, changed), /PASSPORT_AUTHORITY_BINDING/);
+      assert.throws(() => checkPassport(deployed, changed, passport), /PASSPORT_AUTHORITY_BINDING/);
+    }
+  }
+  assert.throws(() => generatePassport(manifest, observed), /PASSPORT_AUTHORITY_BINDING/);
+  assert.throws(() => generatePassport(deployed, { ...observed, authorities: [...authorities, authorities[0]!] }), /PASSPORT_AUTHORITY_DUPLICATE/);
+  const unresolved = { ...authorities[0]!, capability: "token.unconfigured-authority" };
+  assert.equal(generatePassport(deployed, { ...observations, authorities: [unresolved] }).authorityRegistry.entries.find(e => e.capability === unresolved.capability)!.expected, null);
+  assert.throws(() => generatePassport(deployed, { ...observations, authorities: [{ ...unresolved, chain: "11155111" }] }), /PASSPORT_AUTHORITY_BINDING/);
+});

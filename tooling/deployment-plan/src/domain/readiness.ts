@@ -21,8 +21,14 @@ export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport 
     .some(value => typeof value !== "boolean")) { fail("EVIDENCE_INVALID"); }
   const observedAt = quantity(evidence.observedAt, "observedAt"), validUntil = quantity(evidence.validUntil, "validUntil");
   if (validUntil < observedAt || !/^0x[0-9a-f]{64}$/u.test(evidence.manifestSha256) || !/^0x[0-9a-f]{64}$/u.test(evidence.ethereum.block.hash) || !/^[1-9A-HJ-NP-Za-km-z]{32,64}$/u.test(evidence.solana.genesisHash)) { fail("EVIDENCE_INVALID"); }
-  quantity(evidence.ethereum.block.number, "ethereum.block.number"); quantity(evidence.ethereum.block.timestamp, "ethereum.block.timestamp");
-  quantity(evidence.solana.slot, "solana.slot"); quantity(evidence.solana.blockTime, "solana.blockTime");
+  quantity(evidence.ethereum.block.number, "ethereum.block.number"); quantity(evidence.solana.slot, "solana.slot");
+  for (const timestamp of [quantity(evidence.ethereum.block.timestamp, "ethereum.block.timestamp"), quantity(evidence.solana.blockTime, "solana.blockTime")]) {
+    if (timestamp < observedAt || timestamp > validUntil) { fail("OBSERVATION_OUTSIDE_INTERVAL"); }
+  }
+  for (const op of evidence.estimates?.operations ?? []) {
+    const expiresAt = quantity(op.expiresAt, `estimate.${op.id}.expiresAt`);
+    if (expiresAt <= observedAt || expiresAt > validUntil) { fail("ESTIMATE_EXPIRY_OUTSIDE_INTERVAL"); }
+  }
   const reasons: string[] = [];
   if (evidence.ethereum.chainId !== "1") {reasons.push("ethereum-chain-mismatch");}
   if (!evidence.ethereum.deployed || !evidence.solana.deployed) {reasons.push("deployment-not-present");}
@@ -35,6 +41,7 @@ export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport 
   if (pendingES === null || pendingSE === null) { reasons.push("reconciliation-unknown"); }
   if (backing > fixed) {reasons.push("backing-exceeds-fixed-supply");}
   const adjusted = pendingES === null || pendingSE === null ? null : fixed - backing + supply + pendingES + pendingSE;
+  if (adjusted !== null && adjusted < 0n) { fail("ADJUSTED_SUPPLY_NEGATIVE"); }
   const surplus = pendingES === null || pendingSE === null ? null : backing - supply - pendingES - pendingSE;
   const reconciliationStatus = surplus === null ? "unknown" : surplus < 0n ? "under-backed" : surplus > 0n ? "surplus" : "exact";
   if (reconciliationStatus !== "exact" && reconciliationStatus !== "unknown") {reasons.push(reconciliationStatus);}

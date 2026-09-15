@@ -46,6 +46,31 @@ test("refund based on allocation minus released, wrong reserve and successful ou
     assert.throws(() => verifyCustodyTransition(manifest, { ...transition, ...patch } as CustodyTransition), /CUSTODY_/);
   }
 });
+test("later debt release retains the frozen cancellation entitlement and conserves principal", () => {
+  const { manifest, team, transition: cancellation } = cancellationFixture();
+  verifyCustodyTransition(manifest, cancellation);
+  const before = cancellation.after, grant = before.grants[1]!;
+  const later = (BigInt(team.schedule.cliff) + (BigInt(team.schedule.end) - BigInt(team.schedule.cliff)) * 3n / 4n).toString();
+  const after = snapshotFixture(manifest, later, "9", [
+    { ...before.grants[0]!, available: "75000" },
+    { ...grant, released: "100000", available: "0", lastTransition: later },
+  ], ["500000", "300000", "0", "100000", "100000", "0"]);
+  const intent: CustodyIntent = { ...cancellation.intent, operationId: "team-one-claim-debt", operation: "claim-debt",
+    from: grant.beneficiary, to: grant.address, callerRole: "beneficiary", data: "0x86d1a69f", safe: null };
+  const claim: CustodyTransition = { ...cancellation, operationId: intent.operationId, operation: "claim-debt", intent,
+    before, after, block: after.block, safeResult: null, movements: [{ from: grant.address, to: grant.beneficiary, amount: "50000" }] };
+  const result = verifyCustodyTransition(manifest, claim);
+  assert.equal(result.released, "100000"); assert.equal(result.refunded, "100000");
+  assert.equal(result.vestedDebt, "0"); assert.equal(result.remainingPrincipal, "0");
+  assert.equal(BigInt(result.released) + BigInt(result.refunded) + BigInt(result.remainingPrincipal), 200000n);
+  for (const amount of ["49999", "50001", "100000"]) {
+    assert.throws(() => verifyCustodyTransition(manifest, { ...claim, movements: [{ ...claim.movements[0]!, amount }] }), /CUSTODY_TRANSITION_EFFECT_MISMATCH/);
+  }
+  const wrongFrozen = { ...after, grants: after.grants.map(g => g.grantId === team.id ? { ...g, frozenEntitlement: "150000", released: "150000" } : g) };
+  assert.throws(() => verifyCustodyTransition(manifest, { ...claim, after: wrongFrozen }), /CUSTODY_/);
+  const wrongBalance = { ...after, balances: after.balances.map(b => b.address === grant.address ? { ...b, amount: "1" } : b) };
+  assert.throws(() => verifyCustodyTransition(manifest, { ...claim, after: wrongBalance }), /CUSTODY_INVENTORY_CONSERVATION/);
+});
 test("changed immutable bindings, supply and omitted or aliased inventories are rejected", () => {
   const { manifest, transition } = cancellationFixture(), snapshot = transition.after;
   for (const patch of [{ totalSupply: "1000001" }, { chainId: "11155111" }, { balances: snapshot.balances.slice(1) },

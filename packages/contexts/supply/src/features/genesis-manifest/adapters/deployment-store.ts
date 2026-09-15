@@ -1,5 +1,5 @@
-import { constants, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { constants, lstat, mkdir, open, readdir, unlink, type FileHandle } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { deploymentBytes } from "../application/compile-deployment.js";
 import type { Hex } from "../domain/deployment.js";
 import { sha256 } from "./digest.js";
@@ -24,7 +24,30 @@ async function realParents(path: string): Promise<void> {
 
 /** Bound allocation before reading and reject substituted/symlink/hardlinked public inputs. */
 export async function readDeploymentFile(path: string, limit = FILE_LIMIT): Promise<Uint8Array> {
-  await realParents(dirname(resolve(path)));
+  // Node has no openat. Linux descriptor paths let O_NOFOLLOW protect every
+  // component, even if an already opened ancestor is replaced concurrently.
+  if (process.platform !== "linux") { io("DESCRIPTOR_TRAVERSAL_UNAVAILABLE"); }
+  const directories: { file: FileHandle; path: string }[] = [];
+  let parent = "/";
+  try {
+    for (const component of [...dirname(resolve(path)).split("/").filter(Boolean), basename(path)]) {
+      const info = await lstat(parent);
+      if (!info.isDirectory() || info.isSymbolicLink()) { io("DIRECTORY_IDENTITY"); }
+      const file = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      directories.push({ file, path: parent });
+      const opened = await file.stat();
+      if (opened.dev !== info.dev || opened.ino !== info.ino) { io("DIRECTORY_IDENTITY"); }
+      parent = `/proc/self/fd/${file.fd}/${component}`;
+    }
+    const bytes = await readBoundedFile(parent, limit);
+    for (const directory of directories) {
+      const opened = await directory.file.stat(), named = await lstat(directory.path);
+      if (!named.isDirectory() || named.dev !== opened.dev || named.ino !== opened.ino) { io("DIRECTORY_IDENTITY"); }
+    }
+    return bytes;
+  } finally { await Promise.all(directories.map(directory => directory.file.close())); }
+}
+async function readBoundedFile(path: string, limit: number): Promise<Uint8Array> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await file.stat();

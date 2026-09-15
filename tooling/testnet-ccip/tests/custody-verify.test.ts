@@ -68,7 +68,14 @@ test("offline custody verifier requires authenticated deployment files and recom
   const root = await mkdtemp(join(tmpdir(), "custody-proof-")); context.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "valid"), { files, manifest } = await deploymentBundle(directory), transition = approval(manifest);
   const path = join(directory, "deployment-manifest.json");
-  assert.equal((await verifyCustodyProof(path, transition)).operation, "approve");
+  assert.equal(verifyCustodyTransition(manifest, transition).proof, "arithmetic-only");
+  await assert.rejects(verifyCustodyProof(path, transition), /CUSTODY_TRANSITION_PROVENANCE_UNPROVEN/);
+  const fabricatedHash = { ...transition, transactionHash: `0x${"de".repeat(32)}` as Hex };
+  assert.equal(verifyCustodyTransition(manifest, fabricatedHash).proof, "arithmetic-only");
+  await assert.rejects(verifyCustodyProof(path, fabricatedHash), /CUSTODY_TRANSITION_PROVENANCE_UNPROVEN/);
+  const wrongChain = { ...transition, intent: { ...transition.intent, environment: "owned-testnet" as const, chainId: "11155111" as const } };
+  assert.throws(() => verifyCustodyTransition(manifest, wrongChain), /CUSTODY_TRANSITION_BINDING/);
+  await assert.rejects(verifyCustodyProof(path, wrongChain), /CUSTODY_TRANSITION_BINDING/);
   assert.deepEqual((await readdir(directory)).toSorted(), [...Object.keys(files), "inventory.json"].toSorted());
   const fabricated = manifestFixture(), fabricatedTransition = approval(fabricated);
   assert.equal(verifyCustodyTransition(fabricated, fabricatedTransition).operation, "approve");
@@ -94,7 +101,8 @@ test("offline custody verifier requires authenticated deployment files and recom
   await assert.rejects(verifyCustodyProof(join(wrongEvidence, "deployment-manifest.json"), transition), /DEPLOYMENT_EVIDENCE_/);
   const transitionPath = join(root, "transition.json"); await writeFile(transitionPath, JSON.stringify(transition));
   const run = (manifestPath: string) => spawnSync(process.execPath, [resolve("tooling/testnet-ccip/src/composition/custody-verify.ts"), "--manifest", manifestPath, "--evidence", transitionPath], { encoding: "utf8" });
-  const accepted = run(path); assert.equal(accepted.status, 0, accepted.stderr); assert.equal(JSON.parse(accepted.stdout).broadcastAllowed, false);
+  const unproven = run(path); assert.equal(unproven.status, 2, unproven.stderr); assert.equal(unproven.stdout, "");
+  assert.deepEqual(JSON.parse(unproven.stderr), { status: "invalid", reason: "CUSTODY_TRANSITION_PROVENANCE_UNPROVEN", broadcastAllowed: false });
   await writeFile(transitionPath, JSON.stringify(fabricatedTransition));
   const refused = run(join(root, "deployment-manifest.json")); assert.equal(refused.status, 2); assert.equal(JSON.parse(refused.stderr).status, "invalid");
   assert.deepEqual(new Uint8Array(await readFile(path)), files["deployment-manifest.json"]);
