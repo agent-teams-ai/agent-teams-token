@@ -1,4 +1,4 @@
-import { dirname, resolve, join } from "node:path";
+import { basename, dirname, resolve, join } from "node:path";
 import { deploymentBytes, type DeploymentArtifact, type PreparedDeployment } from "../application/compile-deployment.js";
 import { isDigest } from "../domain/deployment.js";
 import { readDeploymentFile } from "./deployment-store.js";
@@ -36,8 +36,10 @@ async function readPinnedArtifact(input: unknown, path: string): Promise<{ artif
     exact(pin, ["contract", "artifactPath", "artifactSha256", "buildInfoPath", "buildInfoSha256"]);
     if ((pin.contract !== "AGTMAICCIPToken" && pin.contract !== "GrantVault") || typeof pin.artifactPath !== "string" || typeof pin.buildInfoPath !== "string"
       || !isDigest(pin.artifactSha256) || !isDigest(pin.buildInfoSha256)) { return refuse(); }
-    const artifactBytes = await readDeploymentFile(resolve(dirname(path), pin.artifactPath));
-    const buildBytes = await readDeploymentFile(resolve(dirname(path), pin.buildInfoPath));
+    const artifactPath = pinnedPath(path, pin.artifactPath, [ `${pin.contract}.json`, `${pin.contract.toLowerCase()}.artifact.json` ]);
+    const buildInfoPath = pinnedPath(path, pin.buildInfoPath, [ `${pin.contract.toLowerCase()}.build-info.json` ], true);
+    const artifactBytes = await readDeploymentFile(artifactPath);
+    const buildBytes = await readDeploymentFile(buildInfoPath);
     if (sha256(artifactBytes) !== pin.artifactSha256 || sha256(buildBytes) !== pin.buildInfoSha256) { return refuse(); }
     const artifact = json(artifactBytes), build = json(buildBytes);
     if (build.solcVersion !== "0.8.36" || record(artifact.metadata).compiler === undefined || record(record(artifact.metadata).compiler).version !== "0.8.36+commit.8a079791") { return refuse(); }
@@ -48,6 +50,15 @@ async function readPinnedArtifact(input: unknown, path: string): Promise<{ artif
       [`${pin.contract.toLowerCase()}.artifact.json`]: artifactBytes,
       [`${pin.contract.toLowerCase()}.build-info.json`]: buildBytes,
     } };
+}
+
+function pinnedPath(pinsPath: string, relativePath: string, leaves: readonly string[], buildInfo = false): string {
+  // Validate before resolve can erase traversal. readDeploymentFile rejects linked/non-regular leaves and parents.
+  if (!relativePath.split("/").every(part => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(part) && !part.includes(".."))
+    || !(leaves.includes(basename(relativePath)) || (buildInfo && /^[0-9a-f]{16}\.json$/.test(basename(relativePath))))) {
+    throw new Error("DEPLOYMENT_ARTIFACT_PATH");
+  }
+  return resolve(dirname(pinsPath), relativePath);
 }
 
 function decodeCompilerOutput(artifact: Record<string, unknown>, build: Record<string, unknown>, contract: string) {

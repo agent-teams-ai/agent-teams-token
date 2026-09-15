@@ -91,7 +91,11 @@ RPC option on these commands.
 The `agtmai-artifact-pins-v1` input records the contract-source `sourceRevision`
 and exactly two artifact entries (`AGTMAICCIPToken`, `GrantVault`), each with
 `artifactPath`, `artifactSha256`, `buildInfoPath` and `buildInfoSha256`. Hashes
-cover the actual bytes; paths resolve relative to the pins file. The pinned
+cover the actual bytes. Paths must stay below the trusted pins directory, with
+no absolute paths, traversal or linked files/directories. Artifact leaves are
+`<Contract>.json` or `<contract-lowercase>.artifact.json`; build-info leaves are
+Foundry's 16-hex-digit `.json` names or `<contract-lowercase>.build-info.json`.
+Other leaves are rejected before reading or publication. The pinned
 Foundry build must use repository compiler/optimizer/EVM settings. Compilation
 publishes the raw artifact/build-info files so later verification can authenticate
 runtime immutable slots against their hashes instead of trusting a claimed hash.
@@ -110,6 +114,25 @@ state their status/reason and `broadcastAllowed: false`. Output directories are
 exclusive. Preserve an incomplete directory and use a new output directory or
 an authenticated publication-only retry; never repeat a transaction to repair
 publication.
+
+## Offline custody and readiness verification
+
+`pnpm custody:verify --manifest "$DEPLOYMENT/deployment-manifest.json" --evidence "$TRANSITION"`
+requires the complete published deployment directory, including its inventory,
+prepared configuration, compiler files and native creation evidence. It recompiles
+and hashes the canonical configuration, regenerates the manifest and checks its
+preparation/evidence digests before evaluating the transition. A standalone
+manifest and fabricated transition are insufficient. Offline results retain the
+selected-capture trust boundary above; they do not establish independent finality.
+
+Readiness evidence requires JSON booleans for deployment, authority, protocol,
+coverage and estimate flags. String booleans are rejected. Report verification
+requires all canonical report fields, including explicit `authorityComplete` and
+`estimatesComplete` booleans, valid manifest digest and UTC seconds, and consistent
+status, reasons and reconciliation. Regenerate earlier reports missing the
+required authority field. Both verification commands read local files and cannot
+broadcast. Readiness verification checks report integrity under the supplied
+manifest digest; current chain observations remain separate evidence.
 
 ## Recovery and external execution
 

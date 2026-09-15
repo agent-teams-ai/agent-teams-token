@@ -25,7 +25,7 @@ async function realParents(path: string): Promise<void> {
 /** Bound allocation before reading and reject substituted/symlink/hardlinked public inputs. */
 export async function readDeploymentFile(path: string, limit = FILE_LIMIT): Promise<Uint8Array> {
   await realParents(dirname(resolve(path)));
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await file.stat();
     if (!before.isFile() || before.nlink !== 1 || before.size > limit) { io("FILE_BOUND_OR_IDENTITY"); }

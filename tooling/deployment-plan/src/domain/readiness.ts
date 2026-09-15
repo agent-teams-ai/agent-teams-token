@@ -9,13 +9,16 @@ export interface ReadinessEvidence {
   readonly protocolQualified: boolean; readonly coverageComplete: boolean;
   readonly estimates?: { readonly complete: boolean; readonly operations?: readonly { readonly id: string; readonly estimatedNative: string; readonly worstCaseNative: string; readonly expiresAt: string }[] };
 }
-export interface ReadinessReport { readonly schema: "agtmai-readiness-report-v1"; readonly broadcastAllowed: false; readonly status: "qualified" | "incomplete" | "inconsistent" | "not-deployed"; readonly reasons: readonly string[]; readonly manifestSha256: string; readonly reconciliation: { readonly adjustedGlobalSupply: string | null; readonly backingSurplus: string | null; readonly status: "exact" | "under-backed" | "surplus" | "unknown" }; readonly estimatesComplete: boolean; readonly observedAt: string; readonly validUntil: string; }
+export interface ReadinessReport { readonly schema: "agtmai-readiness-report-v1"; readonly broadcastAllowed: false; readonly status: "qualified" | "incomplete" | "inconsistent" | "not-deployed"; readonly reasons: readonly string[]; readonly manifestSha256: string; readonly reconciliation: { readonly adjustedGlobalSupply: string | null; readonly backingSurplus: string | null; readonly status: "exact" | "under-backed" | "surplus" | "unknown" }; readonly authorityComplete: boolean; readonly estimatesComplete: boolean; readonly observedAt: string; readonly validUntil: string; }
 const fail = (reason: string): never => { throw new Error(`READINESS_${reason}`); };
 const quantity = (value: unknown, field: string): bigint => parseUint(value, field);
 // oxlint-disable-next-line complexity -- keep accounting and qualification in one atomic decision.
 export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport {
   if (!evidence || evidence.schema !== "agtmai-readiness-evidence-v1" || evidence.broadcastAllowed !== false) {fail("EVIDENCE_INVALID");}
   if (!evidence.ethereum || !evidence.solana || !evidence.ethereum.block || typeof evidence.ethereum.block !== "object" || typeof evidence.solana.genesisHash !== "string") { fail("EVIDENCE_INVALID"); }
+  if ([evidence.protocolQualified, evidence.coverageComplete, evidence.ethereum.deployed, evidence.ethereum.authorityComplete,
+    evidence.solana.deployed, evidence.solana.authorityComplete, ...(evidence.estimates === undefined ? [] : [evidence.estimates?.complete])]
+    .some(value => typeof value !== "boolean")) { fail("EVIDENCE_INVALID"); }
   const observedAt = quantity(evidence.observedAt, "observedAt"), validUntil = quantity(evidence.validUntil, "validUntil");
   if (validUntil < observedAt || !/^0x[0-9a-f]{64}$/u.test(evidence.manifestSha256) || !/^0x[0-9a-f]{64}$/u.test(evidence.ethereum.block.hash) || !/^[1-9A-HJ-NP-Za-km-z]{32,64}$/u.test(evidence.solana.genesisHash)) { fail("EVIDENCE_INVALID"); }
   quantity(evidence.ethereum.block.number, "ethereum.block.number"); quantity(evidence.ethereum.block.timestamp, "ethereum.block.timestamp");
@@ -38,5 +41,5 @@ export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport 
   const estimatesComplete = evidence.estimates?.complete === true && (evidence.estimates.operations ?? []).every(op => quantity(op.estimatedNative, `estimate.${op.id}`) >= 0n && quantity(op.worstCaseNative, `estimate.${op.id}`) >= quantity(op.estimatedNative, `estimate.${op.id}`));
   if (!estimatesComplete) {reasons.push("estimates-incomplete");}
   const status = reasons.includes("backing-exceeds-fixed-supply") || reconciliationStatus === "under-backed" ? "inconsistent" : !evidence.ethereum.deployed || !evidence.solana.deployed ? "not-deployed" : reasons.length ? "incomplete" : "qualified";
-  return { schema: "agtmai-readiness-report-v1", broadcastAllowed: false, status, reasons: reasons.toSorted(), manifestSha256: evidence.manifestSha256, reconciliation: { adjustedGlobalSupply: adjusted?.toString() ?? null, backingSurplus: surplus?.toString() ?? null, status: reconciliationStatus }, estimatesComplete, observedAt: observedAt.toString(), validUntil: validUntil.toString() };
+  return { schema: "agtmai-readiness-report-v1", broadcastAllowed: false, status, reasons: reasons.toSorted(), manifestSha256: evidence.manifestSha256, reconciliation: { adjustedGlobalSupply: adjusted?.toString() ?? null, backingSurplus: surplus?.toString() ?? null, status: reconciliationStatus }, authorityComplete: evidence.ethereum.authorityComplete && evidence.solana.authorityComplete, estimatesComplete, observedAt: observedAt.toString(), validUntil: validUntil.toString() };
 }

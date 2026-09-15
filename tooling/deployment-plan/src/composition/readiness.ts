@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
-import { assessReadiness, assertReadinessBundle, type ReadinessReport } from "../application/readiness.ts";
+import { assessReadiness, assertReadinessBundle } from "../application/readiness.ts";
 import { digestReadinessManifest, parseReadinessEvidence } from "../adapters/readiness-evidence.ts";
 import { parseJsonWithoutDuplicates } from "../adapters/strict-json.ts";
 
@@ -27,7 +27,7 @@ export async function readinessCli(args: readonly string[]): Promise<number> {
     }
     if (command === "verify") {
       const bundle = parseJsonWithoutDuplicates(await readFile(option(args, "--bundle"))) as Record<string, unknown>;
-      assertReadinessBundle(bundle as unknown as ReadinessReport, option(args, "--manifest-sha256"));
+      assertReadinessBundle(bundle, option(args, "--manifest-sha256"));
       if (args.includes("--now")) {
         const now = option(args, "--now");
         if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(String(bundle.observedAt)) || BigInt(now) > BigInt(String(bundle.validUntil))) { throw new Error("READINESS_BUNDLE_STALE"); }

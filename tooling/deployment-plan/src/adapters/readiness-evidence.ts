@@ -15,6 +15,7 @@ export function parseReadinessEvidence(bytes: Uint8Array): ReadinessEvidence {
   exact(block, ["hash", "number", "timestamp"]);
   exact(solana, ["authorityComplete", "blockTime", "deployed", "genesisHash", "slot", "supply"]);
   if (root.estimates !== undefined) { const estimates = object(root.estimates); exact(estimates, estimates.operations === undefined ? ["complete"] : ["complete", "operations"]); if (estimates.operations !== undefined && !Array.isArray(estimates.operations)) { throw new Error("READINESS_EVIDENCE_SCHEMA"); } for (const operation of (estimates.operations as unknown[] ?? [])) { exact(object(operation), ["estimatedNative", "expiresAt", "id", "worstCaseNative"]); } }
+  evaluateReadiness(evidence);
   return evidence;
 }
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : (() => { throw new Error("READINESS_EVIDENCE_SCHEMA"); })();
