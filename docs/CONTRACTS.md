@@ -1,17 +1,33 @@
 # Transparent token release contracts
 
-## Agreed accounting slice, 2026-09-14
+## Implemented contributor-grant custody slice, 2026-09-15
 
 Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
-and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
-Founder/team use individual 12-to-48-month curves; founder is non-revocable,
-team unvested revocation preserves vested debt and the original reserve.
-Public authority, transfer rights, cap rules and deployment remain open.
+and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-2026-09-15).
+`GrantVault` now provides local production-code custody evidence around unchanged
+`GrantAccounting`; no vault has been configured or deployed on a public network.
 
+Each vault constructor binds `IERC20 token`, beneficiary, originating reserve,
+controller and `GrantAccounting.Terms`. Public behavior is deliberately narrow:
 
+```text
+fund()       reserve-only exact full-allocation pull, once, no later than start
+release()    beneficiary-only payment of all currently available entitlement
+cancel()     controller-only team cancellation and immediate unvested refund
+grant()      complete accounting snapshot
+available()  zero before funding, otherwise current claimable amount
+```
 
-Status: design proposal for discussion. No contract in this document is deployed
-or approved for mainnet.
+Bindings have no update API. Founder cancellation always fails. Team cancellation
+freezes entitlement at transaction time, sends only unvested tokens to the bound
+reserve and leaves vested-but-unreleased debt claimable. Transfers require exact
+balance deltas and share a reentrancy guard. Refunds perform no reserve callback
+and cannot reset an external budget. The controller address is intended for the
+selected Safe 2-of-3; the contract does not verify its owners or threshold.
+
+Status: the bounded `GrantVault` custody slice is implemented locally, but no
+contract in this document is deployed or approved for mainnet. Broader
+policy-vault, genesis and governance sections below remain proposals.
 
 ## What the contracts must prove
 
@@ -186,8 +202,8 @@ distribution.
 
 ## Founder, team and future contributors - 15%
 
-Founder and initial-team amounts go directly to separate full-code
-`NoCatchUpVesting` contracts, not OpenZeppelin `VestingWallet`. Claimable value
+Founder and initial-team amounts use separate full-code `GrantVault` contracts,
+not OpenZeppelin `VestingWallet`. Claimable value
 is zero before each cliff, then grows linearly from zero to the full amount at
 the declared end. There is no
 large first-day catch-up release and no beneficiary-change function.
@@ -201,6 +217,10 @@ reserve; vested-but-unclaimed remains owed. Founder vesting is non-revocable.
 For allocation `A`, cliff `C` and end `E`, vested is zero at `t <= C`, `A` at
 `t >= E`, otherwise `floor(A * (t - C) / (E - C))`. Releasable is vested minus
 already released. Donations never increase `A`.
+
+The older proposed direct-genesis mint into vesting contracts does not activate
+the implemented reserve-funded vault: `fund()` must observe an exact debit from
+the immutable originating reserve. Production genesis wiring remains deferred.
 
 The future contributor reserve can only create a full-code vesting grant through
 the Project Timelock. A grant start cannot be earlier than the approving proposal's

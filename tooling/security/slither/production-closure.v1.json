@@ -12,6 +12,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
       "contract": "GrantAccounting"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
+      "contract": "GrantVault"
     }
   ],
   "expectedContracts": [
@@ -20,6 +24,7 @@
     "Context",
     "ERC20",
     "GrantAccounting",
+    "GrantVault",
     "IERC1155Errors",
     "IERC20",
     "IERC20Errors",
@@ -58,6 +63,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantAccounting.sol",
       "sha256": "52b9f943411da5187a7660d8125f2801f6ade1dc0271c660f4b6ee49b5efe13d"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
+      "sha256": "673cad0516c8e0068aa495e8fa5e93ae43cc84547b57c9bd824daec292e56a80"
     }
   ],
   "config": [

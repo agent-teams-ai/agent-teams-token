@@ -1,14 +1,15 @@
 # Community-first tokenomics proposal
 
-## Agreed accounting slice, 2026-09-14
+## Implemented contributor-grant custody slice, 2026-09-15
 
 Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
-and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
-Founder/team use individual 12-to-48-month curves; founder is non-revocable,
-team unvested revocation preserves vested debt and the original reserve.
-Public authority, transfer rights, cap rules and deployment remain open.
-
-
+and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-2026-09-15).
+Local production code now binds a non-replaceable beneficiary, originating
+reserve and controller per grant, with exact full funding, real token releases,
+permanent founder non-cancellation and unvested-only team refunds. This does not
+approve or configure any percentage, supply, allocation, party, Safe, reserve
+cap, date, genesis or deployment input; every economic table below remains a
+proposal.
 
 Status: proposal, not a sale, airdrop, listing or launch announcement. No person
 has an entitlement until the relevant allocation, schedule and distribution are

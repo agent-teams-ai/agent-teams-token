@@ -1,14 +1,13 @@
 # Open product decisions
 
-## Agreed accounting slice, 2026-09-14
+## Approved custody slice, 2026-09-15
 
 Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
-and [current accounting-only scope](PLAN.md#agreed-accounting-slice-2026-09-14).
-Founder/team use individual 12-to-48-month curves; founder is non-revocable,
-team unvested revocation preserves vested debt and the original reserve.
-Public authority, transfer rights, cap rules and deployment remain open.
-
-
+and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-2026-09-15).
+The fixed beneficiary, immutable originating reserve, exact full funding,
+transaction-time team cancellation and immutable controller-address model are
+resolved for this slice. Actual parties, Safe configuration, amounts, dates,
+reserve caps, production genesis and deployment remain open.
 
 Product decisions that materially change the implementation are listed first.
 Non-blocking engineering follow-up sits at the end.
@@ -43,9 +42,9 @@ release gate, not an open naming choice.
    unreleased ceiling. Per-vault commitment caps do not prevent synchronized
    future unlocks.
 9. Team-service unvested revocation and founder non-revocability are accepted.
-   Exact cancellation authority, effective time and any delay remain open. Earlier proposal:
-   service grants may return only unvested value after a timelocked cancellation;
-   vested value remains owed. Founder vesting stays non-revocable.
+   The custody slice binds one controller address intended for Safe 2-of-3 and
+   makes cancellation effective at transaction time without an embedded delay.
+   Actual Safe owners, address and any external timelock composition remain open.
 10. Approve or reject splitting the 1% liquidity allocation into a physically
     beta-bounded `0.1%` experimental vault and a `0.9%` future reserve with no beta
     release path.

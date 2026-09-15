@@ -1,6 +1,6 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
-## Agreed accounting slice, 2026-09-14
+## Approved contributor-grant custody slice, 2026-09-15
 
 Current owner-approved rules: individual founder/team schedules are zero through
 month 12, then linear from zero to full at month 48. Founder grants cannot be
@@ -10,19 +10,24 @@ their original purpose reserve; vested-but-unclaimed value remains owed. Safe
 See [owner decisions](DECISIONS.md#owner-decisions-2026-09-14) and
 [revocation](DECISIONS.md#grant-revocation-decision-2026-09-14).
 
-This checkpoint implements an internal Solidity grant-accounting library
-with independent unit/fuzz/sequence tests. Amounts and exact UTC instants
-are explicit inputs; no provisional percentages or production dates are baked
-in. It does not implement token custody, payout/refund effects, reserve caps,
-Safe authorization, transfer rights or a public deployment ABI. Those remain
-separate decisions/integration work. Recorded releases/refunds are accounting
-transitions, not observed token transfers. Production genesis stays disabled
-for proposals. No new framework, vendor integration, airdrop or sale platform.
+The active delivery adds one immutable `GrantVault` per grant around the existing
+`GrantAccounting` library. Each vault binds the ERC-20, beneficiary, originating
+reserve, controller, allocation, kind and exact UTC schedule at construction;
+only the reserve can atomically fund the full allocation. The beneficiary can
+release vested tokens only to the bound address. The controller is an immutable
+address intended for the selected Safe 2-of-3 and may cancel only a funded team
+grant at the transaction timestamp. Cancellation returns only unvested tokens to
+the bound originating reserve and leaves vested-but-unreleased tokens claimable.
+Founder cancellation remains permanently forbidden.
 
-Older percentages, timelocks, beneficiary-transfer rules and governance proposals
-below are not adopted by this accounting slice. The future wrapper must bind
-the actual beneficiary/reserve, trusted time and authority and enforce atomic
-token effects and reserve constraints. This slice does not weaken those gates.
+This custody slice does not implement or certify Safe signatures, a timelock,
+reserve budget/cap accounting, beneficiary or controller replacement, a factory,
+governance, production genesis wiring or deployment. Amounts, purposes, parties
+and exact UTC instants remain constructor/deployment inputs; percentages and
+production supply remain proposals. The prior direct-genesis-mint vesting flow
+cannot activate this reserve-funded vault and requires later production wiring.
+No framework, dependency, airdrop, sale, Solana, CCIP or broadcast change is part
+of this delivery.
 
 
 ## Активная продуктовая граница, 8 сентября 2026
