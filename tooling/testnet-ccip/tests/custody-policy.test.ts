@@ -38,6 +38,9 @@ test("positive cancellation returns unvested principal and preserves unpaid vest
   assert.equal(result.released, "50000"); assert.equal(result.refunded, "100000"); assert.equal(result.vestedDebt, "50000");
   assert.equal(result.remainingPrincipal, "50000"); assert.equal(result.feeWei, "65000000000000");
   assert.equal(result.founderRejection, false);
+  // Correct refund routing proves arithmetic only. The production purpose/cap reserve
+  // and its no-reset tests remain prerequisites; no EOA or Safe fixture substitutes.
+  assert.equal(result.proof, "arithmetic-only");
 });
 test("refund based on allocation minus released, wrong reserve and successful outer/failed inner all fail", () => {
   const { manifest, transition } = cancellationFixture();
@@ -66,6 +69,11 @@ test("later debt release retains the frozen cancellation entitlement and conserv
   for (const amount of ["49999", "50001", "100000"]) {
     assert.throws(() => verifyCustodyTransition(manifest, { ...claim, movements: [{ ...claim.movements[0]!, amount }] }), /CUSTODY_TRANSITION_EFFECT_MISMATCH/);
   }
+  for (const destination of [grant.reserve, before.grants[0]!.address]) {
+    assert.throws(() => verifyCustodyTransition(manifest, { ...claim, movements: [{ ...claim.movements[0]!, to: destination }] }), /CUSTODY_TRANSITION_EFFECT_MISMATCH/);
+  }
+  const movedDebt = { ...after, grants: after.grants.map(g => g.grantId === team.id ? { ...g, address: before.grants[0]!.address } : g) };
+  assert.throws(() => verifyCustodyTransition(manifest, { ...claim, after: movedDebt }), /CUSTODY_/);
   const wrongFrozen = { ...after, grants: after.grants.map(g => g.grantId === team.id ? { ...g, frozenEntitlement: "150000", released: "150000" } : g) };
   assert.throws(() => verifyCustodyTransition(manifest, { ...claim, after: wrongFrozen }), /CUSTODY_/);
   const wrongBalance = { ...after, balances: after.balances.map(b => b.address === grant.address ? { ...b, amount: "1" } : b) };
@@ -76,7 +84,8 @@ test("changed immutable bindings, supply and omitted or aliased inventories are 
   for (const patch of [{ totalSupply: "1000001" }, { chainId: "11155111" }, { balances: snapshot.balances.slice(1) },
     { balances: [...snapshot.balances.slice(0, -1), snapshot.balances[0]!] },
     { grants: snapshot.grants.map(g => ({ ...g, controller: manifest.configuration.token.initialCCIPAdmin })) },
-    { grants: snapshot.grants.map(g => ({ ...g, originalPurpose: blockHash })) }]) {
+    { grants: snapshot.grants.map(g => ({ ...g, originalPurpose: blockHash })) },
+    { grants: snapshot.grants.map(g => ({ ...g, beneficiary: manifest.configuration.token.initialCCIPAdmin })) }]) {
     assert.throws(() => verifyCustodySnapshot(manifest, { ...snapshot, ...patch } as typeof snapshot), /CUSTODY_/);
   }
 });

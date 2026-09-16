@@ -1,9 +1,10 @@
+import { requireQualifiedSafeProfile, type QualifiedSafeProfile } from "./safe-artifacts.ts";
 import { deploymentBytes, isDigest, isEvmAddress, verifyDeploymentRuntime, type Hex, type DeploymentBlock,
   type PreparedDeployment, type DeploymentManifest, type ContractDeploymentEvidence } from "@agent-teams/supply/deployment";
 import { deploymentCompilerPorts } from "@agent-teams/supply/deployment-files";
 import { verifyCustodySnapshot, verifyCustodyTransition, type CustodyGrantState, type CustodySnapshot, type CustodyTransition, type CustodyMovement } from "../domain/custody.ts";
 import { canonicalCustodyIntent, type CustodyIntent } from "../domain/custody-intent.ts";
-import { custodySelector, custodyTopic, custodySafeHash, custodySafeResult, safeInspectionCalls, verifyCustodySafe, type SafeProfile, type SafeInspection } from "./safe-custody.ts";
+import { custodySelector, custodyTopic, custodySafeHash, custodySafeResult, safeInspectionCalls, verifyCustodySafe, custodySafeSetupOwners, verifyCustodySafeSetupEvent, type SafeInspection } from "./safe-custody.ts";
 
 const fail = (code: string): never => { throw new Error(`CUSTODY_RPC_${code}`); };
 const object = (v: unknown): Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : fail("SHAPE");
@@ -60,7 +61,8 @@ function decodeWords(value: Hex, count: number): string[] {
 const boolWord = (v: string): boolean => v === word(0n) ? false : v === word(1n) ? true : fail("BOOLEAN");
 
 /** Separate read-only custody client; chain verification runs before every RPC request and after each capture. */
-export function createCustodyReader(endpoint: string, environment: "local-test" | "owned-testnet", mode: "offline" | "observe" = "observe", fetcher: typeof fetch = globalThis.fetch, safeProfile?: SafeProfile) {
+export function createCustodyReader(endpoint: string, environment: "local-test" | "owned-testnet", mode: "offline" | "observe" = "observe", fetcher: typeof fetch = globalThis.fetch, safeQualification?: { readonly profile: QualifiedSafeProfile; readonly initializationHash?: Hex }) {
+  const safeProfile = safeQualification?.profile, safeInitializationHash = safeQualification?.initializationHash;
   if (!["local-test", "owned-testnet"].includes(environment)) { return fail("MAINNET_FORBIDDEN"); }
   const url = new URL(endpoint);
   if (environment === "local-test" && (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname))) { return fail("LOCAL_ENDPOINT"); }
@@ -125,13 +127,30 @@ export function createCustodyReader(endpoint: string, environment: "local-test" 
     return { address: r.contractAddress, transaction: { ...tx.transaction, to: null, value: "0" }, receipt: { ...r, status: 1, contractAddress: r.contractAddress },
       blockBefore: at, blockAfter: block(await read("eth_getBlockByNumber", [rpcNumber(at.number), false])), finalizedBlock: block(await read("eth_getBlockByNumber", ["finalized", false])), runtime, calls };
   }
-  async function safe(expected: PreparedDeployment["configuration"]["custodySafes"][number], profile: SafeProfile, at: DeploymentBlock): Promise<SafeInspection> {
+  async function inspectSafe(expected: PreparedDeployment["configuration"]["custodySafes"][number], profile: QualifiedSafeProfile, at: DeploymentBlock): Promise<SafeInspection> {
+    requireQualifiedSafeProfile(profile);
+    const ownerCode = [];
+    for (const owner of expected.owners) { ownerCode.push({ address: owner, code: await code(owner, at), blockHash: at.hash }); }
     const storage = async (slot: Hex) => hex(await read("eth_getStorageAt", [expected.address, slot, { blockHash: at.hash, requireCanonical: true }]));
-    const observed: SafeInspection = { address: expected.address, blockHash: at.hash, proxyCode: await code(expected.address, at), singletonCode: await code(profile.singleton, at),
+    const observed: SafeInspection = { ownerCode, address: expected.address, blockHash: at.hash, proxyCode: await code(expected.address, at), singletonCode: await code(profile.singleton, at),
       singletonStorage: await storage(`0x${word(0n)}`), versionResult: await call(expected.address, safeInspectionCalls.version, at), ownersResult: await call(expected.address, safeInspectionCalls.owners, at),
       thresholdResult: await call(expected.address, safeInspectionCalls.threshold, at), nonceResult: await call(expected.address, safeInspectionCalls.nonce, at), modulesResult: await call(expected.address, safeInspectionCalls.modules, at),
       guardStorage: await storage(safeInspectionCalls.guardSlot), fallbackStorage: await storage(safeInspectionCalls.fallbackSlot) };
     await canonical(at); verifyCustodySafe(expected, profile, observed); return observed;
+  }
+  async function safe(expected: PreparedDeployment["configuration"]["custodySafes"][number], profile: QualifiedSafeProfile, at: DeploymentBlock): Promise<SafeInspection> {
+    requireQualifiedSafeProfile(profile);
+    if (!safeInitializationHash) { return fail("SAFE_INITIALIZATION_REQUIRED"); }
+    const initialization = await finalizedTransaction(safeInitializationHash), tx = initialization.transaction;
+    if (tx.to !== expected.address || tx.value !== "0" || initialization.receipt.status !== 1
+      || BigInt(initialization.at.number) > BigInt(at.number)) { return fail("SAFE_INITIALIZATION"); }
+    const owners = custodySafeSetupOwners(expected.address, tx.input);
+    verifyCustodySafeSetupEvent(expected.address, tx.from, owners, initialization.receipt.logs);
+    const initial = await inspectSafe({ ...expected, owners }, profile, initialization.at);
+    if (BigInt(initial.nonceResult) !== 0n) { return fail("SAFE_INITIALIZATION"); }
+    const observed = await inspectSafe(expected, profile, at);
+    if (!same(initialization, await finalizedTransaction(safeInitializationHash))) { return fail("SAFE_INITIALIZATION_CHANGED"); }
+    return observed;
   }
   async function transition(manifest: DeploymentManifest, prepared: PreparedDeployment, intent: CustodyIntent, grantId: string, hash: Hex): Promise<CustodyTransition> {
     canonicalCustodyIntent(intent);

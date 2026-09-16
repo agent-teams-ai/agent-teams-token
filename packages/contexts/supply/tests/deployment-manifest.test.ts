@@ -10,7 +10,7 @@ import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 
 const ports = { sha256, encodeToken: encodeDeploymentToken, encodeGrant: encodeDeploymentGrant, expectedTokenCalls, expectedGrantCalls, createAddress: deploymentCreateAddress };
 const revision = "17136dc08fc928f3cebc6af89215e31f6f2bb537";
-function synthetic() {
+function synthetic(withGrants = false) {
   const config = JSON.parse(readFileSync("tests/fixtures/deployment/local-test.json", "utf8"));
   const artifacts: DeploymentArtifact[] = ["AGTMAICCIPToken", "GrantVault"].map(contract => ({ contract: contract as DeploymentArtifact["contract"], compilerVersion: "0.8.36",
     artifactSha256: `0x${"ab".repeat(32)}`, buildInfoSha256: `0x${"ef".repeat(32)}`, compilerInputSha256: `0x${"cd".repeat(32)}`, creationBytecode: "0x6000", runtimeBytecode: `0x60${"00".repeat(32)}`, immutableReferences: [{ start: 1, length: 32 }] }));
@@ -26,6 +26,19 @@ function synthetic() {
     calls: Object.entries(state.calls).map(([data, result]) => ({ to: address, data: data as `0x${string}`, result, blockHash: block.hash, blockNumber: block.number })) };
   const evidence: DeploymentEvidence = { schema: "agtmai-deployment-evidence-v1", configurationSha256: prepared.configurationSha256,
     collector: { kind: "local-anvil", sourceRevision: revision }, token, grants: [] };
+  if (withGrants) {
+    const grants: DeploymentEvidence["grants"] = prepared.configuration.grants.map((grant, index) => {
+      const nonce = String(index + 1), grantAddress = deploymentCreateAddress(from, nonce);
+      const transactionHash = `0x${String(index + 3).repeat(64)}` as const;
+      const expected = expectedGrantCalls(prepared.configuration, grant, token.address);
+      return { grantId: grant.id, deployment: { ...token, address: grantAddress,
+        transaction: { ...token.transaction, hash: transactionHash, nonce, input: `0x6000${encodeDeploymentGrant(prepared.configuration, grant, token.address).slice(2)}` },
+        receipt: { ...token.receipt, transactionHash, contractAddress: grantAddress, logs: expected.logs.map((l, i) => ({ ...l, address: grantAddress, removed: false as const, logIndex: String(i) })) },
+        calls: Object.entries(expected.calls).map(([data, result]) => ({ to: grantAddress, data: data as `0x${string}`, result, blockHash: block.hash, blockNumber: block.number })),
+      } };
+    });
+    return { prepared, evidence: { ...evidence, grants } };
+  }
   return { prepared, evidence };
 }
 
@@ -71,4 +84,43 @@ test("public evidence parser rejects unknown private fields and duplicate keys",
   assert.deepEqual(parseDeploymentEvidence(JSON.stringify(evidence)), evidence);
   assert.throws(() => parseDeploymentEvidence(JSON.stringify({ ...evidence, rpcPassword: "do-not-publish" })), /SHAPE/);
   assert.throws(() => parseDeploymentEvidence(JSON.stringify(evidence).replace('"schema":', '"schema":"duplicate","schema":')), /SHAPE/);
+});
+
+
+const replaceWord = (hex: string, index: number, replacement: string): `0x${string}` =>
+    `${hex.slice(0, 2 + index * 64)}${replacement}${hex.slice(2 + (index + 1) * 64)}` as `0x${string}`;
+
+test("grant-specific creation observations bind recipient and founder/team kind at each boundary", () => {
+  const { prepared, evidence } = synthetic(true);
+  const valid = materializeDeploymentManifest(prepared, evidence, ports);
+  assert.equal(valid.status, "deployed");
+  assert.equal(valid.grants.length, 2);
+  const recipient = "000000000000000000000000000000000000000000000000000000000000dead";
+  for (const grantIndex of [0, 1]) {
+    const grant = prepared.configuration.grants[grantIndex]!;
+    const kind = (grant.kind === "founder" ? "1" : "0").padStart(64, "0");
+    for (const surface of ["recipient-constructor", "recipient-getter", "recipient-event", "kind-constructor", "kind-getter", "kind-event"] as const) {
+      const changed = JSON.parse(JSON.stringify(evidence)), deployment = changed.grants[grantIndex]!.deployment;
+      const input = deployment.transaction.input;
+      if (surface.endsWith("constructor")) {
+        const args = `0x${input.slice(6)}`;
+        deployment.transaction.input = `0x6000${replaceWord(args, surface.startsWith("recipient") ? 1 : 8, surface.startsWith("recipient") ? recipient : kind).slice(2)}`;
+      } else if (surface === "recipient-getter") {
+        const expected = `0x${grant.beneficiary.slice(2).padStart(64, "0")}`;
+        const getter = deployment.calls.find((c: { result: string }) => c.result === expected)!;
+        getter.result = `0x${recipient}`;
+      } else if (surface === "kind-getter") {
+        const getter = deployment.calls.find((c: { result: string }) => c.result.length === 2 + 11 * 64)!;
+        getter.result = replaceWord(getter.result, 4, kind);
+      } else if (surface === "recipient-event") {
+        deployment.receipt.logs[0]!.topics[2] = `0x${recipient}`;
+      } else {
+        deployment.receipt.logs[0]!.data = replaceWord(deployment.receipt.logs[0]!.data, 5, kind);
+      }
+      assert.throws(() => materializeDeploymentManifest(prepared, changed, ports), /DEPLOYMENT_EVIDENCE_/, surface);
+    }
+    const changed = JSON.parse(JSON.stringify(prepared));
+    changed.configuration.grants[grantIndex]!.beneficiary = "0x000000000000000000000000000000000000dead";
+    assert.throws(() => materializeDeploymentManifest(changed, evidence, ports), /PREPARATION_MISMATCH/);
+  }
 });

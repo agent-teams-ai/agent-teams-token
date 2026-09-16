@@ -25,7 +25,7 @@ function inspectionFixture() {
   const code = "0x6000" as Hex, runtime = custodyKeccak(Buffer.from("6000", "hex"));
   const profile: SafeProfile = { schema: "agtmai-official-safe-profile-v1", version: "1.4.1", source: "safe-global/safe-smart-account", sourceRevision: "1".repeat(40),
     proxyArtifactSha256: hash, singletonArtifactSha256: hash, proxyRuntimeKeccak256: runtime, singletonRuntimeKeccak256: runtime, singleton: address(99) };
-  const inspection: SafeInspection = { address: safe.address, blockHash: hash, proxyCode: code, singletonCode: code, singletonStorage: `0x${word(99n)}`,
+  const inspection: SafeInspection = { ownerCode: safe.owners.map(owner => ({ address: owner, code: "0x", blockHash: hash })), address: safe.address, blockHash: hash, proxyCode: code, singletonCode: code, singletonStorage: `0x${word(99n)}`,
     versionResult: `0x${word(32n)}${word(5n)}${Buffer.from("1.4.1").toString("hex").padEnd(64, "0")}`,
     ownersResult: `0x${word(32n)}${word(3n)}${[11n, 12n, 13n].map(word).join("")}`, thresholdResult: `0x${word(2n)}`, nonceResult: `0x${word(7n)}`,
     modulesResult: `0x${word(64n)}${word(1n)}${word(0n)}`, guardStorage: `0x${word(0n)}`, fallbackStorage: `0x${word(0n)}` };
@@ -35,6 +35,8 @@ test("Safe inspection checks proxy/singleton, initialization, exact threshold, c
   const { profile, inspection } = inspectionFixture();
   assert.equal(verifyCustodySafe(safe, profile, inspection).nonce, "7");
   for (const patch of [{ proxyCode: "0x6001" }, { singletonCode: "0x6001" }, { singletonStorage: `0x${word(98n)}` },
+    { ownerCode: [] }, { ownerCode: safe.owners.map(owner => ({ address: owner, code: "0x6000", blockHash: hash })) },
+    { ownerCode: safe.owners.map(owner => ({ address: owner, code: "0x", blockHash: `0x${"b".repeat(64)}` })) },
     { thresholdResult: `0x${word(1n)}` }, { thresholdResult: `0x${word(0n)}` }, { ownersResult: `0x${word(32n)}${word(3n)}${[11n, 11n, 13n].map(word).join("")}` },
     { modulesResult: `0x${word(64n)}${word(2n)}${word(0n)}` }, { guardStorage: `0x${word(2n)}` }, { fallbackStorage: `0x${word(2n)}` }]) {
     assert.throws(() => verifyCustodySafe(safe, profile, { ...inspection, ...patch } as SafeInspection), /CUSTODY_SAFE/);
@@ -78,4 +80,16 @@ test("two ephemeral keystore signatures independently agree with cast EIP-712 an
     await assert.rejects(custodySafeCalldata("31337", { ...changed, transactionHash }, selected, signatures, verify), /SIGNATURE_INVALID/);
   }
   assert.notEqual(custodySafeHash("11155111", call), signedCall.transactionHash);
+});
+
+
+test("sentinel and Safe-self owner are rejected even when listed in the selected configuration", () => {
+  for (const owner of [address(1), safe.address]) {
+    const { profile, inspection } = inspectionFixture();
+    const owners = [owner, address(12), address(13)];
+    assert.throws(() => verifyCustodySafe({ ...safe, owners }, profile, { ...inspection,
+      ownersResult: `0x${word(32n)}${word(3n)}${owners.map(o => word(BigInt(o))).join("")}`,
+      ownerCode: owners.map(member => ({ address: member, code: "0x", blockHash: hash })),
+    }), /THRESHOLD_OR_OWNERS/);
+  }
 });

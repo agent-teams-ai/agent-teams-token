@@ -52,7 +52,8 @@ registries never become a second editable fact source.
   unpaid vested debt remains owed to the immutable beneficiary.
 - Minting directly to, or donating into, an unfunded vault does not activate it.
   The original reserve must approve exactly the grant allocation and fund it
-  once before its start. Production reserve wiring remains a prerequisite.
+  once no later than its start. The configured funding lead time is a stricter
+  operational gate. Production reserve wiring remains a prerequisite.
 - Config status `accepted` does not establish approval. Production preparation
   additionally requires independently selected approval evidence bound to the
   canonical configuration digest. Changing any approved value invalidates it.
@@ -62,6 +63,151 @@ registries never become a second editable fact source.
 - Published files contain allowlisted public fields only. Credentials, signer
   references and RPC settings remain private. A file-hash inventory is written
   last, excludes its own digest, and rejects changed/missing files.
+
+## Grant custody boundaries
+
+The [current qualification slice](../PLAN.md#grant-custody-qualification-2026-09-16)
+retains the immutable vault and accounting library. The constructor encoding
+boundary rejects every kind except `founder` and `team`; valid values still map
+to ABI enums 0 and 1. Grant names do not establish revocability. Configuration,
+constructor words, runtime/getters and `GrantConfigured` must agree exactly.
+
+Funding has two distinct operations: the original reserve approves the vault,
+then calls `fund()`. The full allocation pull and activation occur in that one
+call. A failing funding transaction rolls back token movement, allowance
+consumption and the funded flag; an earlier successful approval remains. Use
+exact finite allowance equal to the allocation for the reviewed operational
+path. The contract itself accepts sufficient allowance. Reconcile existing
+allowance and uncertain transaction identities before another action; neither a
+prior donation nor direct genesis minting activates a grant. A successful funding
+receipt needs the canonical token's reserve-to-vault `Transfer` and
+`GrantFunded`, with unchanged total supply and no mint event.
+
+For allocation A, releases L, refunds Q, separately attributed donations D and
+vault balance B, funded principal conserves `L + Q + (B - D) = A`. Donations
+never increase entitlement or spending authority and have no recovery path.
+The production reader assumes a complete fresh inventory, zero attributed
+donations and isolated block-level before/after effects. Ambiguous activity
+must not be attributed to a grant simply because aggregate arithmetic balances.
+
+The beneficiary address and terms cannot change at any lifecycle stage. Claims
+must originate from that address and always pay that address. Before funding,
+an address error requires abandoning the empty vault and reviewing a new vault
+identity and schedule. After funding there is no migration or recovery selector.
+Team cancellation cannot move frozen vested debt into a replacement vault.
+Review the full ABI/runtime and the beneficiary's ability to call `release()`;
+negative tests of guessed selectors alone do not establish absence of a path.
+A fixed address does not prevent key sale, smart-wallet owner or implementation
+changes, offchain assignment, or sale of released tokens. The local controlled
+wallet test demonstrates this limitation; it is not a Safe implementation.
+
+Founder non-revocation applies to funded custody. Before activation, the reserve
+can withhold funding. Once funded, even an authorized Safe cancellation cannot
+refund founder principal. The public selector remains present and rejects with
+`FounderCannotCancel` after authorization and funding checks. No rescue, pause,
+approval, upgrade or alternate withdrawal route exists in GrantVault.
+
+For a team's successful cancellation at time τ, freeze `F = V(τ)`, return `A-F`
+to `ORIGINAL_RESERVE`, and retain `F-L` as beneficiary debt in the same vault.
+Previously released value is never clawed back. A failed refund restores the
+uncancelled ledger and balances; a later successful retry uses its later block
+time. Fully vested cancellation can emit a zero refund without a token call.
+Claims after the original end remain payable from frozen debt. Subsequent claims
+advance `lastTransition`, so retain the cancellation receipt/event to identify τ.
+Departure is a human decision; no HR oracle, personal record or backdated cutoff
+is part of this contract. External timelock scheduling does not freeze vesting.
+The scenario's positive release/refund/debt requirements are acceptance-fixture
+constraints, not universal contract preconditions.
+
+## Production reserve prerequisite
+
+**Purpose-specific cap enforcement is not implemented or qualified.** Neither
+an address labelled reserve, an EOA nor a Safe provides it. Offchain allocation
+commitment validation is not an onchain spending limit. Returning tokens to the
+original reserve proves routing only and cannot establish preservation of caps.
+
+The separately approved contributor-reserve implementation must bind the
+canonical token and purpose, authenticate admitted grants and their terms,
+enforce approved commitments/spending limits, and originate approval and
+funding itself. Funding failure must roll back applicable budget consumption;
+previously charged commitments must not be double charged. It must expose no
+unrestricted transfer, approval or execution bypass. Refund inventory must not
+restore consumed authority or erase gross historical commitments. Outstanding
+obligation forecasts may decrease, but cannot reset caps. Existing beneficiary
+debt claims must remain independent of new approvals.
+
+Acceptance against that actual implementation must exhaust a synthetic approved
+cap, cancel and refund, reject an immediate over-cap replacement, charge each
+subsequently authorized grant, and demonstrate rollback on failed funding.
+Reject fake grants, wrong purposes, alternate destinations, bypass calls and
+cross-purpose laundering between two reserves. Test window boundaries only
+after the policy is selected. No 365-day window, checkpoint algorithm, cap
+amount, allocation percentage or generic reserve platform is selected here.
+
+## Safe qualification and control
+
+Safe 1.4.1 is a qualification candidate. The artifact adapter consumes a
+separately reviewed `agtmai-safe-artifact-pins-v1` record and an independently
+selected SHA-256 of its canonical bytes. It checks source revision, raw artifact
+and build-info hashes, ABI hashes, compiler provenance, runtime hashes and their
+agreement. Supply's token/vault artifact schema remains unchanged. A captured
+profile cannot nominate its own trust root. Review must establish official
+origin and the exact source revision; calculating a hash is not that review.
+
+The reader accepts qualified profiles and reads owner code at the same canonical
+block as proxy/singleton state. Only three distinct supported EOA owners with
+threshold two qualify. Sentinel and Safe-self owners, contract/delegated owner
+code, modules, guard and fallback handler are rejected. Complete empty module
+enumeration, exact proxy/singleton, version, block identity and nonce are required.
+The reader additionally requires a separately selected finalized direct setup
+transaction: exactly three EOA owners, threshold two, no setup delegatecall,
+fallback handler or payment, the authentic `SafeSetup` event and pristine nonce
+zero with qualified runtime/state at that block. It rechecks this receipt after
+current inspection. Factory/batched initialization remains unsupported. Current
+state alone cannot prove absence of historical setup effects; owner rotation
+changes the current approved set without rewriting the original setup evidence.
+
+The selected custody disclosure remains one beneficial controller. Separate
+keys/devices/seeds/backups and recovery practices are human attestations; Safe
+cannot verify their independence. Standard Safe administration can change
+owners, threshold and extensions. An observation proves the current configuration,
+not permanent 2-of-3 enforcement. Owner rotation requires qualification against
+a reviewed updated owner set; an old inspection or signature set is insufficient.
+Loss of beneficiary access can strand entitlement even if controller keys recover.
+
+| Operation | Caller route |
+| --- | --- |
+| Production funding | Safe → approved reserve entrypoint → token approval and vault funding |
+| Team cancellation | Controller Safe → `vault.cancel()` |
+| Claim | Beneficiary → `vault.release()` |
+| Refund | Vault → original reserve automatically |
+
+A Safe cannot directly fund a grant bound to another reserve contract. The local
+Safe-as-reserve demonstration uses two ordinary signed transactions, approval
+then funding, and makes no reserve-cap claim. Production tooling continues to
+support cancellation only; fixture ABI calls are test-only.
+
+Require two distinct owner signatures in canonical order, the exact chain, Safe,
+nonce, target, calldata, CALL operation, zero native value and no reimbursement.
+An outer successful receipt does not prove inner success. Safe inner failure can
+consume its nonce while leaving target state unchanged; an outer revert preserves
+Safe state. An `ExecutionFailure` alone does not identify the founder guard; the
+Solidity exact-error test establishes that guard under valid prerequisites.
+Safe signatures do not enforce an application expiry or automatically bind an
+offchain manifest. Pending signatures therefore require reconciliation before
+replacement. Source rollback cannot reverse funded immutable custody.
+
+Run `.tools/bin/node --test tooling/testnet-ccip/tests/safe-custody.local.test.ts`
+with `AGTMAI_SAFE_ARTIFACT_DIRECTORY` containing `pins.json`, `SafeProxy.json`,
+`Safe.json` and the corresponding Hardhat `build-info.json`, and with the
+independently selected `AGTMAI_SAFE_PINS_SHA256`. These are qualification inputs,
+not production addresses. Missing inputs fail rather than skip. The test uses
+the existing disposable local Anvil supervisor and pinned cast with fresh test
+identities, never Safe impersonation. Its temporary public evidence directory
+contains receipts, transaction fields, state/code observations, recovered signer
+identities, nonce changes and grant effects. Synthetic artifact/parser tests
+remain explicitly distinct from this actual execution gate. No current Safe
+qualification is claimed until this gate passes with official reviewed bytes.
 
 ## Inputs and qualification
 

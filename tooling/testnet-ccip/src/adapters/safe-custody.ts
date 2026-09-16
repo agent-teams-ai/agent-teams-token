@@ -23,6 +23,7 @@ export interface SafeInspection {
   readonly singletonStorage: Hex; readonly versionResult: Hex; readonly ownersResult: Hex;
   readonly thresholdResult: Hex; readonly nonceResult: Hex; readonly modulesResult: Hex;
   readonly guardStorage: Hex; readonly fallbackStorage: Hex;
+  readonly ownerCode: readonly { readonly address: Hex; readonly code: Hex; readonly blockHash: Hex }[];
 }
 export const safeInspectionCalls = {
   version: custodySelector("VERSION()"), owners: custodySelector("getOwners()"), threshold: custodySelector("getThreshold()"), nonce: custodySelector("nonce()"),
@@ -39,13 +40,19 @@ export function verifyCustodySafe(expected: DeploymentSafe, profile: SafeProfile
   const ownerWords = observation.ownersResult.slice(2).match(/.{64}/g);
   if (!/^0x[0-9a-f]{320}$/.test(observation.ownersResult) || ownerWords?.[0] !== word(32n) || ownerWords[1] !== word(3n)) { fail("OWNERS"); }
   const owners = ownerWords!.slice(2).map(w => `0x${w.slice(24)}` as Hex);
-  if (owners.some((o, i) => !isEvmAddress(o) || ownerWords![i + 2] !== addr(o)) || new Set(owners).size !== 3
+  if (owners.some((o, i) => !isEvmAddress(o) || o === sentinel || o === expected.address || ownerWords![i + 2] !== addr(o)) || new Set(owners).size !== 3
     || owners.toSorted().join() !== [...expected.owners].toSorted().join() || expected.threshold !== 2 || observation.thresholdResult !== `0x${word(2n)}`) { fail("THRESHOLD_OR_OWNERS"); }
+  verifyOwnerCode(owners, observation);
   // A single bounded page proves the complete empty module list only when next == SENTINEL_MODULES.
   if (observation.modulesResult !== `0x${word(64n)}${addr(sentinel)}${word(0n)}` || observation.guardStorage !== `0x${word(0n)}`
     || observation.fallbackStorage !== `0x${word(0n)}`) { fail("UNEXPECTED_EXTENSION"); }
   if (!/^0x[0-9a-f]{64}$/.test(observation.nonceResult)) { fail("NONCE"); }
   return { nonce: BigInt(observation.nonceResult).toString(), owners };
+}
+function verifyOwnerCode(owners: readonly Hex[], observation: SafeInspection): void {
+  if (!Array.isArray(observation.ownerCode) || observation.ownerCode.length !== 3
+    || new Set(observation.ownerCode.map(o => o.address)).size !== 3
+    || observation.ownerCode.some(o => !owners.includes(o.address) || o.code !== "0x" || o.blockHash !== observation.blockHash)) { fail("UNSUPPORTED_OWNER"); }
 }
 function verifySafeProfile(profile: SafeProfile): void {
   if (profile.schema !== "agtmai-official-safe-profile-v1" || profile.version !== "1.4.1" || profile.source !== "safe-global/safe-smart-account"
@@ -92,4 +99,24 @@ export function custodySafeResult(chainId: "31337" | "11155111", call: CustodySa
   const matching = logs.filter(l => l.address === call.address && [success, failure].includes(l.topics[0]!));
   if (matching.length !== 1 || matching[0]!.topics.length !== 1 || matching[0]!.removed || matching[0]!.data !== `${call.transactionHash}${word(0n)}`) { return fail("INNER_RESULT_UNPROVEN"); }
   return matching[0]!.topics[0] === success ? "success" : "failure";
+}
+
+
+/** Bounded direct setup only: no delegatecall, handler or payment; factory/batch forms remain unqualified. */
+export function custodySafeSetupOwners(safe: Hex, data: Hex): readonly Hex[] {
+  const selector = custodySelector("setup(address[],uint256,address,bytes,address,address,uint256,address)");
+  if (!data.startsWith(selector) || !/^0x[0-9a-f]{840}$/.test(data)) { return fail("INITIALIZATION"); }
+  const words = data.slice(10).match(/.{64}/g)!;
+  const expected = [word(256n), word(2n), word(0n), word(384n), word(0n), word(0n), word(0n), word(0n), word(3n)];
+  if (expected.some((value, index) => words[index] !== value) || words[12] !== word(0n)) { return fail("INITIALIZATION"); }
+  const owners = words.slice(9, 12).map(value => `0x${value.slice(24)}` as Hex);
+  if (new Set(owners).size !== 3 || owners.some((owner, i) => !isEvmAddress(owner) || owner === sentinel || owner === safe || words[i + 9] !== addr(owner))) { return fail("INITIALIZATION"); }
+  return owners;
+}
+
+export function verifyCustodySafeSetupEvent(safe: Hex, initiator: Hex, owners: readonly Hex[], logs: readonly SafeReceiptLog[]): void {
+  const matching = logs.filter(log => log.address === safe && log.topics[0] === custodyTopic("SafeSetup(address,address[],uint256,address,address)"));
+  const expectedData = `0x${word(128n)}${word(2n)}${word(0n)}${word(0n)}${word(3n)}${owners.map(addr).join("")}`;
+  if (matching.length !== 1 || matching[0]!.removed || matching[0]!.topics.length !== 2
+    || matching[0]!.topics[1] !== `0x${addr(initiator)}` || matching[0]!.data !== expectedData) { fail("INITIALIZATION"); }
 }

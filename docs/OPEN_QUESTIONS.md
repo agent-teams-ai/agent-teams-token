@@ -19,7 +19,11 @@ and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-202
 The fixed beneficiary, immutable originating reserve, exact full funding,
 transaction-time team cancellation and immutable controller-address model are
 resolved for this slice. Actual parties, Safe configuration, amounts, dates,
-reserve caps, production genesis and deployment remain open.
+reserve caps, production genesis and deployment remain open. Purpose-specific
+reserve enforcement is absent and requires its own approved primitive/policy and
+[adversarial acceptance](architecture/post-custody-operations.md#production-reserve-prerequisite).
+Cancellation must not reset spending authority merely because refunded inventory
+increases. No cap value or window is selected by local custody tests.
 
 Product decisions that materially change the implementation are listed first.
 Non-blocking engineering follow-up sits at the end.

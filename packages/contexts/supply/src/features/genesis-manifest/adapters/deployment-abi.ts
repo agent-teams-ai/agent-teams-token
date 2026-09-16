@@ -20,6 +20,8 @@ export function encodeDeploymentToken(config: DeploymentConfig, allocations: rea
 
 /** The actual GrantVault constructor: four addresses followed by the six static Terms words. */
 export function encodeDeploymentGrant(config: DeploymentConfig, grant: DeploymentGrant, token: Hex): Hex {
+  // Recheck the enum at this runtime boundary, including callers outside the validator.
+  if (grant.kind !== "founder" && grant.kind !== "team") { throw new Error("DEPLOYMENT_ABI_GRANT_KIND"); }
   const reserve = config.allocations.find(a => a.id === grant.fundingAllocation);
   const safe = config.custodySafes.find(s => s.id === grant.controllerSafe);
   if (!reserve || !safe || !encodeAllocationId(grant.id)) { throw new Error("DEPLOYMENT_ABI_BINDINGS"); }

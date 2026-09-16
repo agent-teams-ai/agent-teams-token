@@ -1,5 +1,43 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Grant custody qualification, 2026-09-16
+
+The bounded qualification starts from `3ff3d11a70bab96d27e9979ccbb16250a27bc788`.
+It retains GrantVault, GrantAccounting, deployment configuration and the existing
+custody/Safe utilities. Only constructor-kind validation and proven Safe
+qualification gaps may change production behavior; the remaining work is
+adversarial evidence and operational documentation. This task is local-only;
+the historical public-network authorization below does not apply to it.
+
+Confirmed corrections: funding is permitted **through** the start timestamp
+(`timestamp <= start`), while configured operational lead time is stricter.
+Approval may precede funding; the full reserve pull and activation are atomic
+inside `fund()`. Beneficiary address immutability does not freeze wallet control.
+Team cancellation uses its successful transaction timestamp, not a departure,
+scheduling or signing timestamp. The selected custody baseline is solo-founder
+Safe 2-of-3; older independent 3-of-5 governance descriptions remain proposals.
+ADR-0006 remains proposed.
+
+**Production purpose-specific reserve enforcement is absent.** A refund to the
+original address proves routing only. It must not restore consumed spending
+authority merely by increasing reserve inventory. Qualifying that behavior
+requires the separately approved real reserve implementation; an EOA, Safe or
+mock cannot establish it. No cap window, amount or reserve platform is selected
+or implemented in this task. The prerequisite and its acceptance cases belong
+to [Post-custody operations](architecture/post-custody-operations.md).
+
+Official Safe artifacts and actual local two-signature execution are required
+for Safe qualification. Synthetic inspection and creation evidence do not prove
+later custody execution. Current Safe state also cannot establish clean setup:
+qualification requires a separately selected finalized initialization transaction
+and authenticated state at that block. This bounded reader supports direct Safe
+setup; factory/batched initialization remains unqualified. Keep `CUSTODY_TRANSITION_PROVENANCE_UNPROVEN` and the
+existing narrower readiness meaning. Missing artifacts/native prerequisites
+must fail qualification visibly. Final delivery is a reviewable uncommitted
+patch; clean committed-candidate Slither/rollback evidence follows orchestration.
+Amounts, addresses, reserve caps, signer identities, recovery arrangements and
+exact UTC deployment values remain configuration and release gates.
+
 ## Active post-custody implementation, 2026-09-15
 
 The reviewed four-feature plan is being implemented from exact base

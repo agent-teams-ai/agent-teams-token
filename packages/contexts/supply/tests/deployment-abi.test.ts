@@ -73,3 +73,17 @@ test("canonical deployment bytes reject implicit numeric or object coercion", ()
     assert.throws(() => deploymentBytes(value), /canonical JSON/);
   }
 });
+
+
+test("grant constructor kind rejects unknown runtime values and binds the exact ABI enum", () => {
+  const { value: config } = validateDeployment(JSON.parse(readFileSync("tests/fixtures/deployment/local-test.json", "utf8")));
+  assert.ok(config);
+  const grant = config.grants[0]!, token = "0x000000000000000000000000000000000000f00d";
+  for (const [kind, expected] of [["founder", 0n], ["team", 1n]] as const) {
+    const encoded = encodeDeploymentGrant(config, { ...grant, kind }, token);
+    assert.equal(BigInt(`0x${encoded.slice(2 + 8 * 64, 2 + 9 * 64)}`), expected);
+  }
+  for (const kind of ["founder-like", "Team", "", null, undefined, 0, 1]) {
+    assert.throws(() => encodeDeploymentGrant(config, { ...grant, kind } as unknown as typeof grant, token), /DEPLOYMENT_ABI_GRANT_KIND/);
+  }
+});

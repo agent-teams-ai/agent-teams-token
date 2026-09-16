@@ -31,6 +31,25 @@ contract ContractCaller {
     }
 }
 
+/// @dev Control-transfer counterexample only; this wallet is not a Safe or production primitive.
+contract ControlledBeneficiary {
+    address public owner;
+
+    constructor(address initialOwner) {
+        owner = initialOwner;
+    }
+
+    function rotate(address next) external {
+        require(msg.sender == owner, "owner");
+        owner = next;
+    }
+
+    function release(GrantVault vault) external returns (uint256) {
+        require(msg.sender == owner, "owner");
+        return vault.release();
+    }
+}
+
 /// @dev Test-only ERC-20 failure and callback fixture. It deliberately permits inconsistent token
 /// accounting so the vault's exact-delta checks can reject unsupported behavior.
 contract HostileToken is IERC20 {

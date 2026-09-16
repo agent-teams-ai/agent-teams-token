@@ -1,9 +1,11 @@
+import { syntheticSafeArtifacts } from "./fixtures/safe-artifacts.ts";
+import type { QualifiedSafeProfile } from "../src/adapters/safe-artifacts.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DeploymentBlock, Hex, PreparedDeployment } from "@agent-teams/supply/deployment";
 import { deploymentCompilerPorts as ports } from "@agent-teams/supply/deployment-files";
 import { createCustodyReader } from "../src/adapters/custody-rpc.ts";
-import { custodyKeccak, custodySafeHash, custodySelector, custodyTopic, safeInspectionCalls, type SafeProfile } from "../src/adapters/safe-custody.ts";
+import { custodySafeHash, custodySelector, custodyTopic, safeInspectionCalls } from "../src/adapters/safe-custody.ts";
 import { canonicalCustodyIntent, type CustodyIntent, type CustodySafeCall } from "../src/domain/custody-intent.ts";
 import { blockHash, hash, manifestFixture, safeCalldataFixture, stateFixture } from "./fixtures/custody.ts";
 
@@ -15,7 +17,7 @@ const fetchWith = (respond: (method: string, params: unknown[]) => unknown): typ
   const result = request.method === "eth_chainId" ? "0x7a69" : respond(request.method, request.params);
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
 }) as typeof fetch;
-const readerWith = (respond: (method: string, params: unknown[]) => unknown, profile?: SafeProfile) => createCustodyReader("http://127.0.0.1:8545", "local-test", "observe", fetchWith(respond), profile);
+const readerWith = (respond: (method: string, params: unknown[]) => unknown, profile?: QualifiedSafeProfile, initializationHash?: Hex) => createCustodyReader("http://127.0.0.1:8545", "local-test", "observe", fetchWith(respond), profile ? { profile, initializationHash } : undefined);
 
 test("finality rejects conflicting hashes at the receipt height and reorgs across finality reads", async () => {
   const at: DeploymentBlock = { number: "7", hash, timestamp: "100" };
@@ -40,8 +42,7 @@ function fixture() {
   const states = manifest.grants.map(g => stateFixture(manifest, g.grantId, { funded: g.grantId === "founder-one" }));
   const founder = states[0]!, runtime = "0x6000" as Hex;
   const before = { number: "7", hash, timestamp: founder.start }, at = { number: "8", hash: blockHash, timestamp: (BigInt(founder.start) + 1n).toString() };
-  const profile: SafeProfile = { schema: "agtmai-official-safe-profile-v1", version: "1.4.1", source: "safe-global/safe-smart-account", sourceRevision: "1".repeat(40),
-    proxyArtifactSha256: hash, singletonArtifactSha256: hash, proxyRuntimeKeccak256: custodyKeccak(new Uint8Array([0x60, 0])), singletonRuntimeKeccak256: custodyKeccak(new Uint8Array([0x60, 0])), singleton: "0x0000000000000000000000000000000000000099" };
+  const { profile } = syntheticSafeArtifacts();
   const prepared: PreparedDeployment = { schema: "agtmai-prepared-deployment-v1", broadcastAllowed: false, sourceRevision: manifest.sourceRevision, configuration: manifest.configuration,
     configurationSha256: manifest.configurationSha256, approval: null, artifacts: ["AGTMAICCIPToken", "GrantVault"].map(contract => ({ contract: contract as "AGTMAICCIPToken" | "GrantVault",
       compilerVersion: "0.8.36", artifactSha256: hash, buildInfoSha256: hash, compilerInputSha256: hash, creationBytecode: runtime, runtimeBytecode: runtime, immutableReferences: [] })),
@@ -55,6 +56,13 @@ function fixture() {
     { address: safe.address, topics: [custodyTopic("ExecutionFailure(bytes32,uint256)")], data: `${intent.safe!.transactionHash}${word(0n)}`, logIndex: "0x0", removed: false, transactionHash: hash, blockHash, blockNumber: "0x8" },
   ] };
   const transaction = { hash, chainId: "0x7a69", from: intent.from, to: intent.to, nonce: "0x9", value: "0x0", input: intent.data, blockHash, blockNumber: "0x8" };
+  const initializationHash = `0x${"c".repeat(64)}` as Hex;
+  const setup = `${custodySelector("setup(address[],uint256,address,bytes,address,address,uint256,address)")}${["256", "2", "0", "384", "0", "0", "0", "0", "3", ...safe.owners, "0"].map(word).join("")}` as Hex;
+  const initializationTransaction = { ...transaction, hash: initializationHash, nonce: "0x8", input: setup, blockHash: before.hash, blockNumber: "0x7" };
+  const initializationReceipt = { ...receipt, transactionHash: initializationHash, blockHash: before.hash, blockNumber: "0x7", logs: [{ address: safe.address,
+    topics: [custodyTopic("SafeSetup(address,address[],uint256,address,address)"), `0x${word(intent.from)}`],
+    data: `0x${["128", "2", "0", "0", "3", ...safe.owners].map(word).join("")}`, logIndex: "0x0", removed: false,
+    transactionHash: initializationHash, blockHash: before.hash, blockNumber: "0x7" }] };
   const tokenCalls = ports.expectedTokenCalls(manifest.configuration, hash).calls;
   const balances = new Map([[founder.reserve, "300000"], [states[1]!.reserve, "600000"], [founder.address, "100000"]]);
   const respondCall = (params: unknown[]): unknown => {
@@ -83,15 +91,15 @@ function fixture() {
   const respond = (method: string, params: unknown[]): unknown => {
     if (method === "eth_getBlockByNumber") { return nativeBlock(params[0] === "0x7" ? before : at); }
     if (method === "eth_getBlockByHash") { return nativeBlock(before); }
-    if (method === "eth_getTransactionByHash") { return transaction; }
-    if (method === "eth_getTransactionReceipt") { return receipt; }
-    if (method === "eth_getCode") { return runtime; }
+    if (method === "eth_getTransactionByHash") { return params[0] === initializationHash ? initializationTransaction : transaction; }
+    if (method === "eth_getTransactionReceipt") { return params[0] === initializationHash ? initializationReceipt : receipt; }
+    if (method === "eth_getCode") { return safe.owners.includes(params[0] as `0x${string}`) ? "0x" : runtime; }
     if (method === "eth_getStorageAt") { return `0x${word(params[1] === `0x${word(0n)}` ? profile.singleton : "0")}`; }
     if (method !== "eth_call") { throw new Error(`Unexpected method ${method}`); }
     return respondCall(params);
   };
-  const prove = (selected = intent, handler = respond, selectedProfile: SafeProfile | undefined = profile) => readerWith(handler, selectedProfile).transition(manifest, prepared, selected, founder.grantId, hash);
-  return { intent, receipt, transaction, respond, prove, profile, manifest, prepared, founder, before, at };
+  const prove = (selected = intent, handler = respond, selectedProfile: QualifiedSafeProfile | undefined = profile) => readerWith(handler, selectedProfile, initializationHash).transition(manifest, prepared, selected, founder.grantId, hash);
+  return { intent, receipt, transaction, respond, prove, profile, manifest, prepared, founder, before, at, initializationHash, initializationTransaction, initializationReceipt };
 }
 
 test("Safe outer calldata must decode to the exact intended vault CALL before accepting an intent", () => {
@@ -116,8 +124,8 @@ test("reader authenticates Safe runtime, nonce, recomputed hash and actual calld
   await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_getCode" && p[0] === f.profile.singleton
     && (p[1] as { blockHash: string }).blockHash === blockHash ? "0x6001" : f.respond(m, p)), /CODE_IDENTITY/);
   await assert.rejects(f.prove(f.intent, f.respond, { ...f.profile, sourceRevision: "unqualified" }), /PROFILE_UNQUALIFIED/);
-  await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_call" && (p[0] as { data: string }).data === safeInspectionCalls.nonce ? `0x${word(9n)}` : f.respond(m, p)), /SAFE_NONCE/);
-  await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_getTransactionReceipt" ? { ...f.receipt, logs: [{ ...f.receipt.logs[0], data: `${hash}${word(0n)}` }] } : f.respond(m, p)), /INNER_RESULT_UNPROVEN/);
+  await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_call" && (p[0] as { data: string }).data === safeInspectionCalls.nonce && (p[1] as { blockHash: Hex }).blockHash === blockHash ? `0x${word(9n)}` : f.respond(m, p)), /SAFE_NONCE/);
+  await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_getTransactionReceipt" && p[0] === hash ? { ...f.receipt, logs: [{ ...f.receipt.logs[0], data: `${hash}${word(0n)}` }] } : f.respond(m, p)), /INNER_RESULT_UNPROVEN/);
   const unrelated = { ...f.intent.safe!, to: f.manifest.grants[1]!.address };
   const unrelatedIntent = { ...f.intent, data: safeCalldataFixture(unrelated), safe: { ...unrelated, transactionHash: custodySafeHash("31337", unrelated) } };
   await assert.rejects(f.prove(unrelatedIntent, (m, p) => m === "eth_getTransactionByHash" ? { ...f.transaction, input: unrelatedIntent.data } : f.respond(m, p)), /SAFE_BINDING/);
@@ -128,13 +136,46 @@ test("effects are rejected when receipt ancestry or finality changes during capt
   await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_getBlockByHash" ? nativeBlock({ ...f.before, hash: blockHash }) : f.respond(m, p)), /PARENT_BINDING/);
   let receipts = 0;
   await assert.rejects(f.prove(f.intent, (m, p) => {
-    if (m === "eth_getTransactionReceipt") { receipts++; }
+    if (m === "eth_getTransactionReceipt" && p[0] === hash) { receipts++; }
     if (receipts > 1 && m === "eth_getBlockByNumber" && p[0] === "finalized") { return nativeBlock({ ...f.at, hash }); }
     return f.respond(m, p);
   }), /FINALITY_CONFLICT/);
   let transactions = 0;
   await assert.rejects(f.prove(f.intent, (m, p) => {
-    if (m === "eth_getTransactionByHash" && ++transactions > 1) { return { ...f.transaction, input: "0x12345678" }; }
+    if (m === "eth_getTransactionByHash" && p[0] === hash && ++transactions > 1) { return { ...f.transaction, input: "0x12345678" }; }
     return f.respond(m, p);
   }), /TRANSACTION_CHANGED/);
+});
+
+
+test("reader checks each configured owner code at both canonical blocks and rejects captured profile authority", async () => {
+  const f = fixture(), owners = f.manifest.configuration.custodySafes[0]!.owners;
+  const observed: string[] = [];
+  await f.prove(f.intent, (method, params) => {
+    if (method === "eth_getCode" && owners.includes(params[0] as Hex)) {
+      const at = params[1] as { blockHash: Hex; requireCanonical: boolean };
+      assert.equal(at.requireCanonical, true);
+      assert.ok([f.before.hash, f.at.hash].includes(at.blockHash));
+      observed.push(`${params[0]}:${at.blockHash}`);
+    }
+    return f.respond(method, params);
+  });
+  assert.equal(new Set(observed).size, 6);
+  await assert.rejects(f.prove(f.intent, (method, params) => method === "eth_getCode" && params[0] === owners[0]
+    ? "0xef01000000000000000000000000000000000000000002" : f.respond(method, params)), /CUSTODY_SAFE_UNSUPPORTED_OWNER/);
+  await assert.rejects(f.prove(f.intent, f.respond, JSON.parse(JSON.stringify(f.profile))), /CUSTODY_SAFE_PROFILE_UNQUALIFIED/);
+});
+
+
+test("Safe initialization requires finalized direct setup with no delegatecall or reimbursement", async () => {
+  const f = fixture();
+  await assert.rejects(readerWith(f.respond, f.profile).transition(f.manifest, f.prepared, f.intent, f.founder.grantId, hash), /SAFE_INITIALIZATION_REQUIRED/);
+  for (const index of [1, 2, 4, 5, 6, 7, 12]) {
+    const data = f.initializationTransaction.input;
+    const input = `${data.slice(0, 10 + index * 64)}${word(1n)}${data.slice(10 + (index + 1) * 64)}`;
+    await assert.rejects(f.prove(f.intent, (method, params) => method === "eth_getTransactionByHash" && params[0] === f.initializationHash
+      ? { ...f.initializationTransaction, input } : f.respond(method, params)), /CUSTODY_SAFE_INITIALIZATION/);
+  }
+  await assert.rejects(f.prove(f.intent, (method, params) => method === "eth_getTransactionReceipt" && params[0] === f.initializationHash
+    ? { ...f.initializationReceipt, logs: [] } : f.respond(method, params)), /CUSTODY_SAFE_INITIALIZATION/);
 });
