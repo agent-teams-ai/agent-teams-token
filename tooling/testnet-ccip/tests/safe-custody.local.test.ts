@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile, unlink, rmdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, unlink, rmdir } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -44,7 +44,9 @@ async function localSafeFixture(t: TestContext) {
     (error, stdout) => error ? reject(new Error(`Local cast ${args[0]} operation failed`)) : resolve(stdout.trim()));
   });
   const privateDirectory = await mkdtemp(join(tmpdir(), "agtmai-safe-local-keys-"));
-  const evidenceDirectory = await mkdtemp(join(tmpdir(), "agtmai-safe-local-evidence-"));
+  // Public evidence outlives the test; keep it outside the wrapper's private temporary environment.
+  await mkdir(join(root, ".local"), { recursive: true });
+  const evidenceDirectory = await mkdtemp(join(root, ".local", "agtmai-safe-local-evidence-"));
   t.diagnostic(`Public local evidence: ${evidenceDirectory}`);
   const keyPaths: string[] = [];
   t.after(async () => { for (const path of keyPaths) { await unlink(path); } await rmdir(privateDirectory); });
@@ -267,5 +269,10 @@ test("official Safe 1.4.1 local signature execution, grant custody and owner rot
   assert.equal(BigInt(await call(token, "totalSupply()")), 1000000n);
   });
   await writeFile(join(evidenceDirectory, "evidence.json"), deploymentBytes({ schema: "agtmai-safe-local-test-evidence-v1", qualification: "local observations; acceptance requires a successful test exit",
-    reserveCapEnforcement: "unimplemented-unproven", pins, selectedPinsSha256: selected, safe, rotated, grants, records }), { flag: "wx" });
+    reserveCapEnforcement: "unimplemented-unproven", pins, selectedPinsSha256: selected, safe, rotated,
+    grants: grants.map(g => ({ ...g, start: g.start.toString(), cliff: g.cliff.toString(), end: g.end.toString() })), records }), { flag: "wx" });
+  const evidenceBytes = await readFile(join(evidenceDirectory, "evidence.json")), evidence = JSON.parse(evidenceBytes.toString());
+  assert.deepEqual(evidenceBytes, Buffer.from(deploymentBytes(evidence)));
+  assert.deepEqual(evidence.grants.map((g: { start: string; cliff: string; end: string }) => [g.start, g.cliff, g.end]),
+    grants.map(g => [g.start.toString(), g.cliff.toString(), g.end.toString()]));
 });

@@ -53,7 +53,7 @@ function fixture() {
     kind: "call", from: manifest.configuration.token.initialCCIPAdmin, to: safe.address, nonce: "9", value: "0", data: safeCalldataFixture(call), callerRole: "safe-executor", prerequisiteSha256: hash,
     gasLimit: "200000", maxFeePerGasWei: "2", maxPriorityFeePerGasWei: "0", deployment: null, safe: { ...call, transactionHash: custodySafeHash("31337", call) } };
   const receipt = { transactionHash: hash, blockHash, blockNumber: "0x8", status: "0x1", contractAddress: null, gasUsed: "0x10000", effectiveGasPrice: "0x1", logs: [
-    { address: safe.address, topics: [custodyTopic("ExecutionFailure(bytes32,uint256)")], data: `${intent.safe!.transactionHash}${word(0n)}`, logIndex: "0x0", removed: false, transactionHash: hash, blockHash, blockNumber: "0x8" },
+    { address: safe.address, topics: [custodyTopic("ExecutionFailure(bytes32,uint256)"), intent.safe!.transactionHash], data: `0x${word(0n)}`, logIndex: "0x0", removed: false, transactionHash: hash, blockHash, blockNumber: "0x8" },
   ] };
   const transaction = { hash, chainId: "0x7a69", from: intent.from, to: intent.to, nonce: "0x9", value: "0x0", input: intent.data, blockHash, blockNumber: "0x8" };
   const initializationHash = `0x${"c".repeat(64)}` as Hex;
@@ -125,7 +125,7 @@ test("reader authenticates Safe runtime, nonce, recomputed hash and actual calld
     && (p[1] as { blockHash: string }).blockHash === blockHash ? "0x6001" : f.respond(m, p)), /CODE_IDENTITY/);
   await assert.rejects(f.prove(f.intent, f.respond, { ...f.profile, sourceRevision: "unqualified" }), /PROFILE_UNQUALIFIED/);
   await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_call" && (p[0] as { data: string }).data === safeInspectionCalls.nonce && (p[1] as { blockHash: Hex }).blockHash === blockHash ? `0x${word(9n)}` : f.respond(m, p)), /SAFE_NONCE/);
-  await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_getTransactionReceipt" && p[0] === hash ? { ...f.receipt, logs: [{ ...f.receipt.logs[0], data: `${hash}${word(0n)}` }] } : f.respond(m, p)), /INNER_RESULT_UNPROVEN/);
+  await assert.rejects(f.prove(f.intent, (m, p) => m === "eth_getTransactionReceipt" && p[0] === hash ? { ...f.receipt, logs: [{ ...f.receipt.logs[0], topics: [custodyTopic("ExecutionFailure(bytes32,uint256)"), hash] }] } : f.respond(m, p)), /INNER_RESULT_UNPROVEN/);
   const unrelated = { ...f.intent.safe!, to: f.manifest.grants[1]!.address };
   const unrelatedIntent = { ...f.intent, data: safeCalldataFixture(unrelated), safe: { ...unrelated, transactionHash: custodySafeHash("31337", unrelated) } };
   await assert.rejects(f.prove(unrelatedIntent, (m, p) => m === "eth_getTransactionByHash" ? { ...f.transaction, input: unrelatedIntent.data } : f.respond(m, p)), /SAFE_BINDING/);
