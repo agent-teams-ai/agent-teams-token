@@ -23,8 +23,15 @@ const assertNonNegative = (label: string, value: bigint): void => {
 export const reconcileSupply = (
   snapshot: SupplySnapshot,
 ): SupplyReconciliation => {
-  for (const [label, value] of Object.entries(snapshot)) {
-    assertNonNegative(label, value);
+  const fields = [
+    "fixedSupply",
+    "lockedOnEthereum",
+    "supplyOnSolana",
+    "pendingEthereumToSolana",
+    "pendingSolanaToEthereum",
+  ] as const satisfies readonly (keyof SupplySnapshot)[];
+  for (const field of fields) {
+    assertNonNegative(field, snapshot[field]);
   }
 
   const pending =
@@ -48,4 +55,3 @@ export const reconcileSupply = (
           : "exact",
   };
 };
-

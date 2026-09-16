@@ -97,7 +97,7 @@ export function projectMessage(
     return result("inconsistent", "invalid-transfer-identity");
   }
   const collected = collectEvents(identity, events);
-  if (collected.error) {
+  if (collected.error !== null) {
     return result("inconsistent", collected.error);
   }
   const observed = collected.events;
