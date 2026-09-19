@@ -61,18 +61,18 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "041cf58a38451ad26527baeb9afa79808e69ad1b3b3d203d4d56e0c3799e6d02",
+      "beforeSha256": "a288d05ff09bade14393fea1dc7112b90f9c18f02637bc93ac17ef1ddaf275cc",
       "afterSha256": "d1583760ebcec9fba6ae449044d7e0a959925b5f684849dd2a36b26c8753747c"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "56cc0adae0d6e21b2d9a8d8e4aa7432aa12eb40a631b921bcdfdaf254d1d104f",
-      "afterSha256": "55241ed9fb6b5da48480d0643c59e3308b48bf98bfc93209a469a2ae05f896d4"
+      "beforeSha256": "ecb14044d9bbf9b922ca90bad0f6e1e301abb32394201a6beb3509b636eb3cde",
+      "afterSha256": "4f2f919fc445124ad32c2966f5b0752665baf7cf3306524b06bed4b341e4905a"
     },
     {
       "path": "package.json",
-      "beforeSha256": "bb000beb1da6445d35b6e22ef7bcc1043142084de1ba263b221581d3bf3eef1c",
-      "afterSha256": "0ac0e54b94ce8e02847d562e8e73589157b51cd84b2b9c424e0a8afdeb9061c9"
+      "beforeSha256": "fa7eeb722236bdd419842354e8dd160c78b86f946d868900525eb21d84dadd26",
+      "afterSha256": "7a285b813c29bf740d5ed1fdfc22d7f405a553a30bf3b009e2cda19728cc9a22"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
@@ -81,8 +81,8 @@
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "2ffd64e0175b0acb6a1b9e6c1eeaf5fc4fb08b1441faa29ae8687cc1140368c0",
-      "afterSha256": "cb3def226f5c53446fb4ac5f673a4e89234af3f5ddb5c90c2be3ae045dc05ccd"
+      "beforeSha256": "10484deee16d9c480ca5bb598842cb0728986375d4a93b1161ee8ac703a3cdee",
+      "afterSha256": "845c42d4659117c32a3c9ad7173c0dfb801452f7b44e2581aedbf02c9a08ec52"
     },
     {
       "path": "tooling/toolchain.lock.json",

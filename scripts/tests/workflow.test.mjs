@@ -134,6 +134,15 @@ test("foundation job proves complete exact history and preflights every rollback
   assert.match(offline.run, /command -v pnpm.*\.tools\/bin\/pnpm/u);
   const workspace = byId("install-frozen-source-workspace-and-populate-store");
   assert.equal(workspace.run, "source scripts/env.sh && pnpm install --frozen-lockfile");
+  const buildArtifacts = byId("build-canonical-evm-artifacts");
+  assert.equal(
+    buildArtifacts.run,
+    'source scripts/env.sh\n'
+      + '(\n'
+      + '  cd contracts/evm\n'
+      + '  "$AGTMAI_FORGE_BINARY" build --offline --no-auto-detect --sizes --use "$AGTMAI_SOLC_BINARY"\n'
+      + ')\n',
+  );
   const preload = byId("preload-pinned-slither-image");
   assert.equal(preload.run, "source scripts/env.sh && pnpm security:solidity:prepare-image");
   const preflight = byId("non-pulling-rollback-environment-cache-preflight");
@@ -250,7 +259,7 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   assert.equal(finalGuard.if, "${{ always() }}");
   assert.match(finalGuard.run, /\$\{\{ needs\.solidity\.result \}\}/);
   assert.match(finalGuard.run, /SOLIDITY_PREREQUISITE_FAILED/);
-  assert.doesNotMatch(workflowText, /GITHUB_ENV/);
+  assert.doesNotMatch(JSON.stringify(job), /GITHUB_ENV/);
   assert.equal(job.env.SLITHER_CANDIDATE_SHA, "${{ github.sha }}");
   assert.equal(job.env.SLITHER_DOCKER_PATH, "/usr/bin/docker");
   assert.match(job.env.SLITHER_FORGE_PATH, /foundry-v1\.8\.0-linux-x64\/forge/u);

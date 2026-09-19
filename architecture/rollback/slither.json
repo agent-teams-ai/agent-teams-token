@@ -117,22 +117,22 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "041cf58a38451ad26527baeb9afa79808e69ad1b3b3d203d4d56e0c3799e6d02",
+      "beforeSha256": "a288d05ff09bade14393fea1dc7112b90f9c18f02637bc93ac17ef1ddaf275cc",
       "afterSha256": "0e4c60a305e56e16e7f59de3db84b2d969621b46345489fc6311169550efdf70"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "56cc0adae0d6e21b2d9a8d8e4aa7432aa12eb40a631b921bcdfdaf254d1d104f",
-      "afterSha256": "614cc6988cf327183fb3d67315011a49aa77747b0eacd5a3a7d3d03af01c3f0e"
+      "beforeSha256": "ecb14044d9bbf9b922ca90bad0f6e1e301abb32394201a6beb3509b636eb3cde",
+      "afterSha256": "1beafac85c196eafb8b33c5cd3a89668e7180f1831fe9bb43fbd521033fade75"
     },
     {
       "path": "package.json",
-      "beforeSha256": "bb000beb1da6445d35b6e22ef7bcc1043142084de1ba263b221581d3bf3eef1c",
-      "afterSha256": "82982d278cc129438473eefa471c5843720e9542bf1aa0dab7846a911b5001b3"
+      "beforeSha256": "fa7eeb722236bdd419842354e8dd160c78b86f946d868900525eb21d84dadd26",
+      "afterSha256": "e6d7a3160939fa6196f85a79a314a79bbb885a421f6e85486ae5fadeb73a93b9"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "2ffd64e0175b0acb6a1b9e6c1eeaf5fc4fb08b1441faa29ae8687cc1140368c0",
+      "beforeSha256": "10484deee16d9c480ca5bb598842cb0728986375d4a93b1161ee8ac703a3cdee",
       "afterSha256": "267e37afcbc23ddc1e4874cf9d950d637d8abd2e950a05a27c6180a4957b500f"
     },
     {

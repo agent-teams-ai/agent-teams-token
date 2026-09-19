@@ -82,6 +82,21 @@ jobs:
         id: install-frozen-source-workspace-and-populate-store
         shell: bash
         run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Build canonical EVM artifacts for local E2E
+        env: *rollback-runner-environment
+        id: build-canonical-evm-artifacts
+        shell: bash
+        run: |
+          source scripts/env.sh
+          (
+            cd contracts/evm
+            "$AGTMAI_FORGE_BINARY" build --offline --no-auto-detect --sizes --use "$AGTMAI_SOLC_BINARY"
+          )
+      - name: Prepare official integrity-pinned Safe 1.4.1 artifacts
+        env: *rollback-runner-environment
+        id: prepare-official-safe-artifacts
+        shell: bash
+        run: bash scripts/prepare-safe-artifacts.sh --fetch >> "$GITHUB_ENV"
       - name: Preload pinned Slither image
         env: *rollback-runner-environment
         id: preload-pinned-slither-image

@@ -35,6 +35,21 @@ import { makeFixture } from "./toolchain-fixture.mjs";
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 
+test("canonical child environment preserves only the explicit Safe qualification inputs", () => {
+  const safeInputs = {
+    AGTMAI_SAFE_ARTIFACT_DIRECTORY: "/tmp/Safe artifacts 'quoted' $directory",
+    AGTMAI_SAFE_PINS_SHA256: `0x${"ab".repeat(32)}`,
+  };
+  const child = allowlistedChildEnvironment({
+    ...safeInputs,
+    AGTMAI_SAFE_UNRELATED: "must-not-reach-child",
+    UNRELATED_VARIABLE: "must-not-reach-child",
+    NODE_OPTIONS: "--invalid-hostile-option",
+    HTTPS_PROXY: "http://sentinel.invalid/",
+  });
+  assert.deepEqual(child, { ...allowlistedChildEnvironment({}), ...safeInputs });
+});
+
 test("canonical child and Git environments reject preload, config, proxy and npm authority", () => {
   const hostile = {
     ...process.env,

@@ -16,16 +16,23 @@
     "tooling/deployment-plan/src/adapters/native-executable-custody.ts",
     "tooling/deployment-plan/src/adapters/native-no-replace.ts",
     "tooling/deployment-plan/src/adapters/native-policy.ts",
+    "tooling/deployment-plan/src/adapters/readiness-evidence.ts",
+    "tooling/deployment-plan/src/adapters/readiness-evm.ts",
+    "tooling/deployment-plan/src/adapters/readiness-rpc.ts",
+    "tooling/deployment-plan/src/adapters/readiness-solana.ts",
     "tooling/deployment-plan/src/adapters/rpc.ts",
     "tooling/deployment-plan/src/adapters/safe-output.ts",
     "tooling/deployment-plan/src/adapters/strict-json.ts",
     "tooling/deployment-plan/src/application/builder.ts",
     "tooling/deployment-plan/src/application/ports.ts",
     "tooling/deployment-plan/src/application/raw-artifact-verifier.ts",
+    "tooling/deployment-plan/src/application/readiness.ts",
     "tooling/deployment-plan/src/application/verifier.ts",
     "tooling/deployment-plan/src/composition/index.ts",
+    "tooling/deployment-plan/src/composition/readiness.ts",
     "tooling/deployment-plan/src/domain/identity.ts",
     "tooling/deployment-plan/src/domain/model.ts",
+    "tooling/deployment-plan/src/domain/readiness.ts",
     "tooling/deployment-plan/tests/adversarial.test.ts",
     "tooling/deployment-plan/tests/anvil.integration.test.ts",
     "tooling/deployment-plan/tests/artifact.test.ts",
@@ -40,6 +47,8 @@
     "tooling/deployment-plan/tests/policy-json-corpus.json",
     "tooling/deployment-plan/tests/production-native-policy.test.ts",
     "tooling/deployment-plan/tests/raw-artifact-fixture.ts",
+    "tooling/deployment-plan/tests/readiness-transport.test.ts",
+    "tooling/deployment-plan/tests/readiness.test.ts",
     "tooling/deployment-plan/tests/rpc.test.ts",
     "tooling/deployment-plan/tests/safe-output.test.ts",
     "tooling/deployment-plan/tests/schema.test.ts",
@@ -55,18 +64,18 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "041cf58a38451ad26527baeb9afa79808e69ad1b3b3d203d4d56e0c3799e6d02",
+      "beforeSha256": "a288d05ff09bade14393fea1dc7112b90f9c18f02637bc93ac17ef1ddaf275cc",
       "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "56cc0adae0d6e21b2d9a8d8e4aa7432aa12eb40a631b921bcdfdaf254d1d104f",
-      "afterSha256": "632b206820b873a42a551a9ac2e4360ddb88fcbab45fc53d4f37c5324fdc8dc2"
+      "beforeSha256": "ecb14044d9bbf9b922ca90bad0f6e1e301abb32394201a6beb3509b636eb3cde",
+      "afterSha256": "0da6ddabec9173bb70eda60e7e28f90a50021c1211f72dc0bc7248b76a49bd8c"
     },
     {
       "path": "package.json",
-      "beforeSha256": "bb000beb1da6445d35b6e22ef7bcc1043142084de1ba263b221581d3bf3eef1c",
-      "afterSha256": "66b37304de3620ffbb7f8676d95944fdf7a610d9662d27512bf74ef7b7468966"
+      "beforeSha256": "fa7eeb722236bdd419842354e8dd160c78b86f946d868900525eb21d84dadd26",
+      "afterSha256": "43389cb20a0db5695077a3486ccee8dd8d50f28b3e056cd8e4440513539c928e"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",
@@ -75,8 +84,8 @@
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "2ffd64e0175b0acb6a1b9e6c1eeaf5fc4fb08b1441faa29ae8687cc1140368c0",
-      "afterSha256": "b3909a9478059291a257f605d7de469722b3e9a12501c00e259f8a2def0a80a1"
+      "beforeSha256": "10484deee16d9c480ca5bb598842cb0728986375d4a93b1161ee8ac703a3cdee",
+      "afterSha256": "a26fcb518ade4255c5d47a22b28497e171b8271878bb09dea312f7382040983d"
     },
     {
       "path": "tooling/deployment-plan/src/README.md",

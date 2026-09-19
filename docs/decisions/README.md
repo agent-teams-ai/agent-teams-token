@@ -13,6 +13,7 @@ instead of editing the accepted decision.
 
 ## Proposed
 
+- [ADR-0007: Mainnet protocol line for AGTMAI readiness](0007-mainnet-protocol-line-for-agtmai-readiness.md)
 - [ADR-0006: Immutable grant custody](0006-immutable-grant-custody.md)
 - [ADR-0004: Feature-module topology and bounded contexts](0004-feature-module-topology.md)
 

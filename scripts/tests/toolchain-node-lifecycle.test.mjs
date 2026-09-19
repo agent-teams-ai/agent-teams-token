@@ -22,6 +22,35 @@ function fixture(context) {
   return { ...value, wrapper: join(value.toolsRoot, "bin/node") };
 }
 
+test("generated Node wrapper preserves only the explicit Safe qualification inputs", (context) => {
+  const value = fixture(context);
+  const safeInputs = {
+    AGTMAI_SAFE_ARTIFACT_DIRECTORY: join(value.root, "Safe artifacts 'quoted' $directory"),
+    AGTMAI_SAFE_PINS_SHA256: `0x${"ab".repeat(32)}`,
+  };
+  const unrelated = {
+    AGTMAI_SAFE_UNRELATED: "must-not-reach-child",
+    UNRELATED_VARIABLE: "must-not-reach-child",
+    NODE_OPTIONS: "--invalid-hostile-option",
+    HTTPS_PROXY: "http://sentinel.invalid/",
+  };
+  const keys = [...Object.keys(safeInputs), ...Object.keys(unrelated)];
+  const source = `process.stdout.write(JSON.stringify(Object.fromEntries(
+    ${JSON.stringify(keys)}.map(key => [key, process.env[key]])
+  )))`;
+  for (const inputs of [safeInputs, {}]) {
+    const result = spawnSync(value.wrapper, ["--eval", source], {
+      cwd: value.root,
+      env: { ...inputs, ...unrelated },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), inputs);
+  }
+});
+
 // Fixture records contain seven temporary paths; 16 KiB deliberately fails closed
 // on oversized environments. FD 1 is borrowed, never reopened or closed here.
 function createEventWriter(write) {

@@ -85,6 +85,17 @@
         }
       },
       {
+        "id": "build-canonical-evm-artifacts",
+        "position": "after-frozen-workspace-install-before-safe-artifacts",
+        "shell": "bash",
+        "run": "source scripts/env.sh\\n(\\n  cd contracts/evm\\n  \"$AGTMAI_FORGE_BINARY\" build --offline --no-auto-detect --sizes --use \"$AGTMAI_SOLC_BINARY\"\\n)",
+        "env": {
+          "AGTMAI_ROLLBACK_TMPDIR": "${{ runner.temp }}",
+          "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}",
+          "SLITHER_EVIDENCE_DIRECTORY": "${{ runner.temp }}/rollback-proof-${{ github.sha }}"
+        }
+      },
+      {
         "id": "preload-pinned-slither-image",
         "position": "after-frozen-workspace-install",
         "shell": "bash",

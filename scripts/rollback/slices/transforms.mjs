@@ -80,7 +80,7 @@ export function editPackage(root, sliceId, options = {}) {
       check: " && pnpm test:local-solana",
     },
     "deployment-plan": {
-      remove: ["deployment:estimate:local", "test:deployment-plan"],
+      remove: ["deployment:estimate:local", "deployment:readiness", "test:deployment-plan"],
       typecheck: " && tsc -p tooling/deployment-plan/tsconfig.json --pretty false",
       check: " && pnpm test:deployment-plan",
     },

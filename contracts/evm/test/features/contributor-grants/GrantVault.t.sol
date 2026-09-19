@@ -6,8 +6,13 @@ import { GrantAccounting as G } from "../../../src/features/contributor-grants/G
 import { GrantVault } from "../../../src/features/contributor-grants/GrantVault.sol";
 import { AGTMAIToken } from "../../../src/features/token-genesis/AGTMAIToken.sol";
 import { AGTMAICCIPToken } from "../../../src/features/token-genesis/AGTMAICCIPToken.sol";
-import { TestBase } from "../../TestBase.sol";
-import { ContractCaller, HostileToken, VaultDeployer } from "./GrantVaultFixtures.sol";
+import { TestBase, Vm } from "../../TestBase.sol";
+import {
+    ContractCaller,
+    ControlledBeneficiary,
+    HostileToken,
+    VaultDeployer
+} from "./GrantVaultFixtures.sol";
 
 contract GrantVaultTest is TestBase {
     event GrantConfigured(
@@ -255,9 +260,8 @@ contract GrantVaultTest is TestBase {
 
     function testRealTokenTeamRegressionDonationsAndEvents() public {
         AGTMAIToken real = new AGTMAIToken(ALLOCATION + 12, _one(RESERVE, ALLOCATION + 12));
-        GrantVault target = _deploy(
-            real, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
-        );
+        GrantVault target =
+            _deploy(real, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService));
         vm.prank(RESERVE);
         assertTrue(real.transfer(address(target), 7));
         assertFalse(target.funded());
@@ -417,9 +421,8 @@ contract GrantVaultTest is TestBase {
 
         HostileToken paid = new HostileToken();
         paid.mint(RESERVE, ALLOCATION);
-        GrantVault exhausted = _deploy(
-            paid, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
-        );
+        GrantVault exhausted =
+            _deploy(paid, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService));
         _approveAndFund(paid, exhausted, RESERVE);
         vm.warp(END);
         vm.prank(BENEFICIARY);
@@ -701,6 +704,244 @@ contract GrantVaultTest is TestBase {
         assertEq(second.available(), 160);
         assertEq(token.balanceOf(RESERVE), ALLOCATION * 9);
         assertEq(token.balanceOf(secondReserve), 560);
+    }
+
+    function _canonical(bool ccip, uint256 supply) internal returns (AGTMAIToken) {
+        return ccip
+            ? new AGTMAICCIPToken(supply, _one(RESERVE, supply), address(0xCC1F))
+            : new AGTMAIToken(supply, _one(RESERVE, supply));
+    }
+
+    function _fundingSnapshot(IERC20 asset, GrantVault target) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                target.grant(),
+                target.funded(),
+                asset.totalSupply(),
+                asset.balanceOf(RESERVE),
+                asset.balanceOf(address(target)),
+                asset.balanceOf(BENEFICIARY),
+                asset.allowance(RESERVE, address(target))
+            )
+        );
+    }
+
+    function testBothCanonicalTokensFundingFailuresRestoreAllowanceAndCustody() public {
+        for (uint256 variant; variant < 2; ++variant) {
+            for (uint256 failure; failure < 2; ++failure) {
+                AGTMAIToken real =
+                    _canonical(variant == 1, failure == 0 ? ALLOCATION - 1 : ALLOCATION);
+                GrantVault target = _deploy(
+                    real, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
+                );
+                uint256 allowance = failure == 0 ? ALLOCATION : ALLOCATION - 1;
+                vm.prank(RESERVE);
+                assertTrue(real.approve(address(target), allowance));
+                bytes32 beforeState = _fundingSnapshot(real, target);
+                bytes memory reason =
+                    _reverted(RESERVE, target, abi.encodeCall(GrantVault.fund, ()));
+                _assertError(
+                    reason,
+                    failure == 0
+                        ? abi.encodeWithSignature(
+                            "ERC20InsufficientBalance(address,uint256,uint256)",
+                            RESERVE,
+                            ALLOCATION - 1,
+                            ALLOCATION
+                        )
+                        : abi.encodeWithSignature(
+                            "ERC20InsufficientAllowance(address,uint256,uint256)",
+                            address(target),
+                            ALLOCATION - 1,
+                            ALLOCATION
+                        )
+                );
+                assertEq(_fundingSnapshot(real, target), beforeState);
+                assertFalse(target.funded());
+                // A completed approval survives a failed funding transaction.
+                assertEq(real.allowance(RESERVE, address(target)), allowance);
+            }
+        }
+    }
+
+    function testBothCanonicalTokensExactFundingDonationDeadlineAndDuplicate() public {
+        for (uint256 variant; variant < 2; ++variant) {
+            vm.warp(START - 1);
+            AGTMAIToken real = _canonical(variant == 1, ALLOCATION * 2 + 7);
+            GrantVault target = _deploy(
+                real, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
+            );
+            GrantVault late = _deploy(
+                real, BENEFICIARY, RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
+            );
+            vm.prank(RESERVE);
+            assertTrue(real.transfer(address(target), 7));
+            assertFalse(target.funded());
+            assertEq(target.available(), 0);
+            vm.prank(RESERVE);
+            assertTrue(real.approve(address(target), ALLOCATION));
+            vm.prank(RESERVE);
+            assertTrue(real.approve(address(late), ALLOCATION));
+            vm.warp(START);
+            vm.recordLogs();
+            vm.prank(RESERVE);
+            target.fund();
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+            assertEq(logs.length, 2);
+            assertEq(logs[0].emitter, address(real));
+            assertEq(logs[0].topics[0], keccak256("Transfer(address,address,uint256)"));
+            assertEq(logs[0].topics[1], bytes32(uint256(uint160(RESERVE))));
+            assertEq(logs[0].topics[2], bytes32(uint256(uint160(address(target)))));
+            assertEq(abi.decode(logs[0].data, (uint256)), ALLOCATION);
+            assertEq(logs[1].emitter, address(target));
+            assertEq(logs[1].topics[0], keccak256("GrantFunded(uint256,uint64)"));
+            assertEq(keccak256(logs[1].data), keccak256(abi.encode(ALLOCATION, START)));
+            assertTrue(target.funded());
+            assertEq(real.balanceOf(RESERVE), ALLOCATION);
+            assertEq(real.balanceOf(address(target)), ALLOCATION + 7);
+            assertEq(real.allowance(RESERVE, address(target)), 0);
+            assertEq(real.totalSupply(), ALLOCATION * 2 + 7);
+            bytes32 beforeState = _fundingSnapshot(real, target);
+            _assertError(
+                _reverted(RESERVE, target, abi.encodeCall(GrantVault.fund, ())),
+                abi.encodeWithSelector(GrantVault.AlreadyFunded.selector)
+            );
+            assertEq(_fundingSnapshot(real, target), beforeState);
+            vm.warp(START + 1);
+            beforeState = _fundingSnapshot(real, late);
+            _assertError(
+                _reverted(RESERVE, late, abi.encodeCall(GrantVault.fund, ())),
+                abi.encodeWithSelector(GrantVault.StartInPast.selector, START, START + 1)
+            );
+            assertEq(_fundingSnapshot(real, late), beforeState);
+            assertFalse(late.funded());
+        }
+    }
+
+    function testWalletControlCanChangeWithoutChangingBeneficiaryOrEntitlement() public {
+        ControlledBeneficiary wallet = new ControlledBeneficiary(BENEFICIARY);
+        AGTMAIToken real = _canonical(false, ALLOCATION);
+        GrantVault target = _deploy(
+            real, address(wallet), RESERVE, CONTROLLER, _terms(ALLOCATION, G.Kind.TeamService)
+        );
+        _fundReal(real, target, RESERVE);
+        vm.warp(130);
+        bytes32 beforeState = _digest(target);
+        uint256 entitlement = target.available();
+        vm.prank(BENEFICIARY);
+        wallet.rotate(STRANGER);
+        assertEq(_digest(target), beforeState);
+        assertEq(target.available(), entitlement);
+        assertEq(target.BENEFICIARY(), address(wallet));
+        _assertError(
+            _reverted(STRANGER, target, abi.encodeCall(GrantVault.release, ())),
+            abi.encodeWithSelector(GrantVault.Unauthorized.selector, STRANGER, address(wallet))
+        );
+        vm.prank(BENEFICIARY);
+        (bool oldOwner,) =
+            address(wallet).call(abi.encodeCall(ControlledBeneficiary.release, (target)));
+        assertFalse(oldOwner);
+        vm.prank(STRANGER);
+        assertEq(wallet.release(target), entitlement);
+        assertEq(real.balanceOf(address(wallet)), entitlement);
+        assertEq(real.balanceOf(STRANGER), 0);
+        assertEq(real.balanceOf(BENEFICIARY), 0);
+    }
+
+    function testReassignmentAttemptsAcrossLifecycleCannotRedirectTrailingCalldata() public {
+        address[5] memory callers = [RESERVE, CONTROLLER, BENEFICIARY, STRANGER, address(this)];
+        bytes4[4] memory selectors = [
+            bytes4(keccak256("setBeneficiary(address)")),
+            bytes4(keccak256("transferOwnership(address)")),
+            bytes4(keccak256("migrate(address)")),
+            bytes4(keccak256("release(address,uint256)"))
+        ];
+        bytes32 terms = keccak256(abi.encode(vault.grant().terms));
+        for (uint256 phase; phase < 5; ++phase) {
+            if (phase == 1) _approveAndFund(token, vault, RESERVE);
+            if (phase == 2) vm.warp(130);
+            if (phase == 3) {
+                vm.prank(CONTROLLER);
+                vault.cancel();
+            }
+            if (phase == 4) {
+                vm.warp(END + 1);
+                vm.prank(BENEFICIARY);
+                (bool ok,) = address(vault)
+                    .call(
+                        abi.encodePacked(
+                            GrantVault.release.selector, abi.encode(STRANGER, ALLOCATION)
+                        )
+                    );
+                assertTrue(ok);
+                assertEq(token.balanceOf(BENEFICIARY), 180);
+                assertEq(token.balanceOf(STRANGER), 0);
+            }
+            bytes32 beforeState = _digest(vault);
+            for (uint256 i; i < callers.length; ++i) {
+                for (uint256 j; j < selectors.length; ++j) {
+                    _reverted(
+                        callers[i],
+                        vault,
+                        abi.encodeWithSelector(selectors[j], STRANGER, ALLOCATION)
+                    );
+                }
+            }
+            assertEq(_digest(vault), beforeState);
+            assertEq(keccak256(abi.encode(vault.grant().terms)), terms);
+            assertEq(vault.BENEFICIARY(), BENEFICIARY);
+        }
+    }
+
+    function testRefundFailureRetryUsesLaterSuccessfulTimeAndDebtSurvivesEnd() public {
+        _approveAndFund(token, vault, RESERVE);
+        vm.warp(118);
+        vm.prank(BENEFICIARY);
+        assertEq(vault.release(), 60);
+        vm.warp(130);
+        token.configure(HostileToken.Mode.FalseAfterMutation, address(0), "");
+        bytes32 beforeState = _fundingSnapshot(token, vault);
+        _assertError(
+            _reverted(CONTROLLER, vault, abi.encodeCall(GrantVault.cancel, ())),
+            abi.encodeWithSelector(GrantVault.ERC20TransferFailed.selector)
+        );
+        assertEq(_fundingSnapshot(token, vault), beforeState);
+        vm.warp(131);
+        token.configure(HostileToken.Mode.Normal, address(0), "");
+        vm.expectEmit(true, false, false, true);
+        emit TeamGrantCancelled(bytes32("contributors"), 190, 170, 131);
+        vm.prank(CONTROLLER);
+        assertEq(vault.cancel(), 170);
+        vm.warp(END + 100);
+        assertEq(vault.available(), 130);
+        vm.prank(BENEFICIARY);
+        assertEq(vault.release(), 130);
+        assertEq(vault.grant().frozenEntitlement, 190);
+        assertEq(vault.grant().lastTransition, END + 100);
+        assertEq(token.balanceOf(BENEFICIARY), 190);
+        assertEq(token.balanceOf(RESERVE), ALLOCATION * 9 + 170);
+        _assertError(
+            _reverted(RESERVE, vault, abi.encodeCall(GrantVault.fund, ())),
+            abi.encodeWithSelector(GrantVault.AlreadyFunded.selector)
+        );
+    }
+
+    function testFullyVestedCancellationEmitsZeroRefundWithoutTokenCall() public {
+        _approveAndFund(token, vault, RESERVE);
+        vm.warp(END);
+        token.configure(HostileToken.Mode.RevertCall, address(0), "");
+        vm.recordLogs();
+        vm.prank(CONTROLLER);
+        assertEq(vault.cancel(), 0);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].emitter, address(vault));
+        assertEq(logs[0].topics[0], keccak256("TeamGrantCancelled(bytes32,uint256,uint256,uint64)"));
+        assertEq(logs[0].topics[1], bytes32("contributors"));
+        assertEq(keccak256(logs[0].data), keccak256(abi.encode(ALLOCATION, uint256(0), END)));
+        assertTrue(vault.grant().cancelled);
+        assertEq(vault.grant().frozenEntitlement, ALLOCATION);
+        assertEq(vault.available(), ALLOCATION);
     }
 
     function testFuzzExactEndReleaseHasNoRoundingDust(uint128 amountSeed) public {

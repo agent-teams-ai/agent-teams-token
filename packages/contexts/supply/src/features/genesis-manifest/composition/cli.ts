@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { deploymentCli } from "./deployment.js";
 import { resolve } from "node:path";
 import { inspectArtifacts, readSafeSource, writeArtifact } from "../adapters/artifact-store.js";
 import { encodeAllocationCommitment } from "../adapters/abi.js";
@@ -9,6 +10,7 @@ import { compileLocalText } from "./compile-local.js";
 
 export const EXIT = Object.freeze({ success: 0, validation: 2, io: 3, internal: 4 });
 async function main(arguments_: readonly string[]): Promise<number> {
+  if (arguments_[0] === "deployment") { return deploymentCli(arguments_.slice(1)); }
   const [command, first, second] = arguments_;
   try {
     if (command === "validate-proposal" && first) {

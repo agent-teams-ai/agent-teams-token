@@ -9,7 +9,14 @@ reserve and controller per grant, with exact full funding, real token releases,
 permanent founder non-cancellation and unvested-only team refunds. This does not
 approve or configure any percentage, supply, allocation, party, Safe, reserve
 cap, date, genesis or deployment input; every economic table below remains a
-proposal.
+proposal. Production purpose-specific reserve enforcement remains absent;
+returning inventory must not restore consumed spending authority. See the
+[reserve prerequisite](architecture/post-custody-operations.md#production-reserve-prerequisite).
+The selected current custody control is solo-founder Safe 2-of-3. The independent
+3-of-5, governance and timelock descriptions below remain proposals, including
+any external delay around team cancellation. The vault's cutoff is the successful
+transaction timestamp. Fixed beneficiary addresses do not freeze wallet ownership
+or implementation, prevent key sale or prohibit sale of released tokens.
 
 Status: proposal, not a sale, airdrop, listing or launch announcement. No person
 has an entitlement until the relevant allocation, schedule and distribution are

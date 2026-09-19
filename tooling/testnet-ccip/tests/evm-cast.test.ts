@@ -49,7 +49,7 @@ test("sign argv binds chain/nonce/value/fees and isolates environment without br
   assert.deepEqual(calls[0]?.args, ["mktx", "--chain", "11155111", "--nonce", "0", "--value", "0",
     "--gas-limit", "100000", "--gas-price", "1000000000", "--priority-gas-price", "1000000",
     "--keystore", config.keystore, "--password-file", config.passwordFile, to, "0x12345678"]);
-  assert.deepEqual(calls[0]?.options.env, { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" });
+  assert.deepEqual(calls[0]?.options.env, { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", ...(process.env.HOME ? { HOME: process.env.HOME } : {}) });
   assert.deepEqual(calls[1]?.args, ["decode-transaction", bytes, "--json"]);
   assert.equal(calls.length, 2);
 });

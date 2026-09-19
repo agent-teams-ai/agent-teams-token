@@ -1,5 +1,16 @@
 # Contributor-grant custody implementation, 2026-09-15
 
+## Post-custody implementation in progress, 2026-09-15
+
+The four-feature extension starts from
+`17136dc08fc928f3cebc6af89215e31f6f2bb537`. Canonical configuration, calendar
+validation, unsigned constructors and deployment-fact verification are being
+implemented. Current scope and evidence distinctions are in
+[PLAN](PLAN.md#active-post-custody-implementation-2026-09-15) and
+[Post-custody operations](architecture/post-custody-operations.md).
+No new public-chain E2E or production-readiness acceptance is claimed.
+
+
 Implemented one immutable, fully funded `GrantVault` per contributor grant on
 top of the unchanged `GrantAccounting` library. The vault performs exact ERC-20
 funding, beneficiary releases and team refunds atomically; fixes beneficiary,

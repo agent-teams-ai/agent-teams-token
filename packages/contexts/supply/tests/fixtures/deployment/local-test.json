@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "deploymentId": "synthetic-local-test",
+  "status": "test-only",
+  "environment": {
+    "mode": "local-test",
+    "evmChainId": "31337",
+    "solanaGenesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    "evmSelector": "16015286601757825753",
+    "solanaSelector": "16423721717087811551"
+  },
+  "token": {
+    "name": "Agent Teams AI",
+    "symbol": "AGTMAI",
+    "decimals": 9,
+    "initialSupplyBaseUnits": "1000000",
+    "initialCCIPAdmin": "0x0000000000000000000000000000000000000065"
+  },
+  "allocations": [
+    {
+      "id": "team-reserve",
+      "recipient": "0x0000000000000000000000000000000000000066",
+      "amountBaseUnits": "600000",
+      "bps": 6000
+    },
+    {
+      "id": "founder-reserve",
+      "recipient": "0x0000000000000000000000000000000000000067",
+      "amountBaseUnits": "400000",
+      "bps": 4000
+    }
+  ],
+  "grants": [
+    {
+      "id": "founder-one",
+      "kind": "founder",
+      "beneficiary": "0x0000000000000000000000000000000000000068",
+      "fundingAllocation": "founder-reserve",
+      "controllerSafe": "custody",
+      "amountBaseUnits": "100000",
+      "originalPurpose": "0x0101010101010101010101010101010101010101010101010101010101010101",
+      "schedule": {
+        "profile": "calendar-12-48",
+        "start": "1831552200",
+        "cliff": "1863174600",
+        "end": "1957782600"
+      }
+    },
+    {
+      "id": "team-one",
+      "kind": "team",
+      "beneficiary": "0x0000000000000000000000000000000000000069",
+      "fundingAllocation": "team-reserve",
+      "controllerSafe": "custody",
+      "amountBaseUnits": "200000",
+      "originalPurpose": "0x0202020202020202020202020202020202020202020202020202020202020202",
+      "schedule": {
+        "profile": "calendar-12-48",
+        "start": "1831552200",
+        "cliff": "1863174600",
+        "end": "1957782600"
+      }
+    }
+  ],
+  "custodySafes": [
+    {
+      "id": "custody",
+      "address": "0x000000000000000000000000000000000000006a",
+      "owners": [
+        "0x000000000000000000000000000000000000006b",
+        "0x000000000000000000000000000000000000006c",
+        "0x000000000000000000000000000000000000006d"
+      ],
+      "threshold": 2,
+      "beneficialControl": "solo-founder",
+      "disclosure": "Synthetic test-only fixture; three keys controlled by one test operator."
+    }
+  ],
+  "roleAliases": [],
+  "bridge": null,
+  "testScenario": {
+    "label": "test-only",
+    "transfers": []
+  },
+  "policy": {
+    "tokenExpenditureCeilingBaseUnits": "500000",
+    "evmMaxFeePerGasWei": "10000000000",
+    "evmMaxPriorityFeePerGasWei": "1000000000",
+    "evmMaxGasPerTransaction": "6000000",
+    "evmMaxTotalFeeWei": "300000000000000000",
+    "solanaMaxFeeLamports": "100000",
+    "solanaMaxTotalFeeLamports": "1000000",
+    "observationMaxAgeSeconds": "300",
+    "executionDeadline": "1957783200",
+    "fundingDeadline": "1831551600",
+    "fundingLeadSeconds": "60",
+    "estimateValiditySeconds": "120",
+    "gasBufferBps": 1500
+  }
+}

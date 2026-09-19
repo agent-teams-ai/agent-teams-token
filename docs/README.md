@@ -30,6 +30,8 @@ The consumer-owned Foundation profile v3 authoring authority and Docs Protocol
 stable8 qualification v2 integration are active. The consumer controller owns
 the generated Skill, caller workflow, package pins, and managed state.
 
+- [Post-custody operations](architecture/post-custody-operations.md)
+
 ## Complete document catalog
 
 - [Architecture](ARCHITECTURE.md)
