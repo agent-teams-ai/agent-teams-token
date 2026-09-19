@@ -2,6 +2,14 @@
 pragma solidity 0.8.36;
 
 interface Vm {
+    struct Log {
+        bytes32[] topics;
+        bytes data;
+        address emitter;
+    }
+
+    function recordLogs() external;
+    function getRecordedLogs() external returns (Log[] memory);
     function assume(bool condition) external;
     function chainId(uint256 newChainId) external;
     function expectEmit(bool, bool, bool, bool) external;

@@ -40,6 +40,8 @@ contract GrantVaultHandler is TestBase {
     uint256 public successfulFundings;
     uint256 public positiveReleases;
     uint256 public positiveRefunds;
+    uint256 public founderCancellationAttempts;
+    uint256 public reassignmentAttempts;
     uint256 public totalAllocated;
     uint256 public totalReleased;
     uint256 public totalRefunded;
@@ -62,15 +64,19 @@ contract GrantVaultHandler is TestBase {
         external
     {
         if (steps == 0) {
+            _attackFounder();
+            _attackReassignment(1, actionSeed);
             _releaseAt(0, 130);
         } else if (steps == 1) {
             _cancel(0);
         } else {
             uint256 slot = slotSeed % 2;
             _replaceIfSettled(slot, amountSeed);
-            uint256 action = actionSeed % 3;
+            uint256 action = actionSeed % 5;
             if (action == 0) _release(slot, timeSeed);
             else if (action == 1 && slot == 0 && !ghosts[slot].cancelled) _cancel(slot);
+            else if (action == 3) _attackFounder();
+            else if (action == 4) _attackReassignment(slot, amountSeed);
             else _donate(slot, amountSeed);
         }
         ++steps;
@@ -87,6 +93,7 @@ contract GrantVaultHandler is TestBase {
             uint256 amount = ghosts[slot].vault.available();
             if (amount > 0) _pay(slot, amount);
         }
+        _attackFounder();
         assertLedger();
     }
 
@@ -223,6 +230,46 @@ contract GrantVaultHandler is TestBase {
         if (refund > 0) ++positiveRefunds;
     }
 
+    function _attackFounder() private {
+        Ghost storage g = ghosts[1];
+        bytes32 beforeState = _attackSnapshot(g);
+        (bool ok, bytes memory reason) =
+            address(g.reserve).call(abi.encodeCall(ContractCaller.cancel, (g.vault)));
+        assertFalse(ok);
+        assertEq(
+            keccak256(reason), keccak256(abi.encodeWithSelector(G.FounderCannotCancel.selector))
+        );
+        assertEq(_attackSnapshot(g), beforeState);
+        ++founderCancellationAttempts;
+    }
+
+    function _attackReassignment(uint256 slot, uint256 seed) private {
+        Ghost storage g = ghosts[slot];
+        bytes32 beforeState = _attackSnapshot(g);
+        address caller = seed % 2 == 0 ? address(g.reserve) : g.beneficiary;
+        vm.prank(caller);
+        (bool ok,) =
+            address(g.vault).call(abi.encodeWithSignature("setBeneficiary(address)", address(this)));
+        assertFalse(ok);
+        assertEq(_attackSnapshot(g), beforeState);
+        ++reassignmentAttempts;
+    }
+
+    function _attackSnapshot(Ghost storage g) private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                g.vault.grant(),
+                g.vault.funded(),
+                g.vault.BENEFICIARY(),
+                g.vault.available(),
+                TOKEN.balanceOf(address(g.vault)),
+                TOKEN.balanceOf(address(g.reserve)),
+                TOKEN.balanceOf(g.beneficiary),
+                TOKEN.totalSupply()
+            )
+        );
+    }
+
     function _donate(uint256 slot, uint256 amountSeed) private {
         uint256 amount = bound(amountSeed, 1, 1_000_000);
         assertTrue(TOKEN.transfer(address(ghosts[slot].vault), amount));
@@ -270,6 +317,8 @@ contract GrantVaultInvariantTest is TestBase {
         assertTrue(handler.successfulFundings() >= 2);
         assertTrue(handler.positiveReleases() > 0);
         assertTrue(handler.positiveRefunds() > 0);
+        assertTrue(handler.founderCancellationAttempts() > 0);
+        assertTrue(handler.reassignmentAttempts() > 0);
         handler.settleAll();
         for (uint256 slot; slot < 2; ++slot) {
             GrantVaultHandler.Ghost memory g = handler.ghost(slot);

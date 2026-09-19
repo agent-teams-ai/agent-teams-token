@@ -2,6 +2,17 @@
 
 Status: working baseline, 2026-08-27.
 
+## Post-custody deployment tooling
+
+The active four-feature extension is described in
+[Post-custody operations](architecture/post-custody-operations.md).
+The Supply genesis-manifest feature owns one deployment fact model and a pure
+`@agent-teams/supply/deployment` entrypoint. Custody execution and read-only
+readiness remain separate outer tooling owners. The local Genesis Core format
+and historical signed journals retain their existing meanings. Implementation
+is in progress; production reserve wiring and mainnet protocol qualification
+remain prerequisites.
+
 ## Contributor-grant custody
 
 The contributor-grants feature uses one immutable, fully funded `GrantVault`

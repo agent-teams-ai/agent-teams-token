@@ -17,11 +17,11 @@ function quantity(value: unknown): string {
   if (result >= 1n << 256n) { return invalid(); }
   return result.toString();
 }
-function transaction(raw: unknown, expectedHash: string): ObservedTransaction {
+function transaction(raw: unknown, expectedHash: string, expectedChain: string): ObservedTransaction {
   const tx = object(raw);
   const hash = hex(tx.hash, 32);
   const chainId = quantity(tx.chainId);
-  if (hash !== expectedHash || chainId !== "11155111") { return invalid(); }
+  if (hash !== expectedHash || chainId !== expectedChain) { return invalid(); }
   const data = hex(tx.input ?? tx.data);
   if (tx.input !== undefined && tx.data !== undefined && hex(tx.data) !== data) { return invalid(); }
   return { hash, chainId, from: hex(tx.from, 20), to: tx.to === null ? null : hex(tx.to, 20),
@@ -48,6 +48,21 @@ function sameReceipt(left: ReceiptEvidence, right: ReceiptEvidence): boolean {
 export function createSepoliaRpc(endpoint: string, fetcher: typeof fetch = globalThis.fetch): {
   observe(hash: string): Promise<Observation>; broadcast(bytes: string): Promise<string>;
 } {
+  return createEvmRpc(endpoint, "11155111", fetcher);
+}
+
+/** Isolated local profile. Anvil observations are always labelled chain 31337. */
+export function createLocalCustodyRpc(endpoint: string, fetcher: typeof fetch = globalThis.fetch): {
+  observe(hash: string): Promise<Observation>; broadcast(bytes: string): Promise<string>;
+} {
+  const url = new URL(endpoint);
+  if (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname)) { throw new Error("Local custody RPC requires loopback"); }
+  return createEvmRpc(endpoint, "31337", fetcher);
+}
+
+function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: typeof fetch): {
+  observe(hash: string): Promise<Observation>; broadcast(bytes: string): Promise<string>;
+} {
   const url = new URL(endpoint);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.hash) {
     throw new Error("Invalid Sepolia RPC endpoint");
@@ -68,7 +83,7 @@ export function createSepoliaRpc(endpoint: string, fetcher: typeof fetch = globa
     return payload.result;
   }
   async function checkChain(): Promise<void> {
-    if (quantity(await rpc("eth_chainId", [])) !== "11155111") { return invalid(); }
+    if (quantity(await rpc("eth_chainId", [])) !== chainId) { return invalid(); }
   }
   async function canonical(number: string): Promise<{ hash: string; number: string }> {
     const result = block(await rpc("eth_getBlockByNumber", ["0x" + BigInt(number).toString(16), false]));
@@ -90,7 +105,7 @@ export function createSepoliaRpc(endpoint: string, fetcher: typeof fetch = globa
       if (rawTx === null) {
         return rawReceipt === null ? await absent(hash) : { kind: "unknown" };
       }
-      const tx = transaction(rawTx, hash);
+      const tx = transaction(rawTx, hash, chainId);
       if (rawReceipt === null) { await checkChain(); return { kind: "observed", transaction: tx }; }
       const evidence = receipt(rawReceipt, hash);
       const minedTx = object(rawTx);

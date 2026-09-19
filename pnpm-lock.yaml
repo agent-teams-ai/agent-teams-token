@@ -26,6 +26,12 @@ importers:
 
   .:
     devDependencies:
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.4.0
+      '@agent-teams/supply':
+        specifier: workspace:*
+        version: link:packages/contexts/supply
       '@agent-teams/docs-protocol':
         specifier: 0.6.0
         version: 0.6.0

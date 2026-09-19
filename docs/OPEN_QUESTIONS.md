@@ -1,5 +1,17 @@
 # Open product decisions
 
+## Post-custody release prerequisites
+
+The [active implementation](PLAN.md#active-post-custody-implementation-2026-09-15)
+keeps production values unresolved until supplied and validated. Explicit
+prerequisites include approved supply/allocations/recipients, exact grant
+purposes and UTC schedules, leap-day policy, production reserve wiring, Safe
+configuration/control disclosure, bridge timelock policy, protocol qualification,
+rate limits, fee caps and independently selected configuration approval.
+ADR-0006 remains proposed; owner-approved custody semantics do not automatically
+change its lifecycle status. New local proofs and owned-testnet execution must
+qualify the changed candidate; historical evidence remains historical.
+
 ## Approved custody slice, 2026-09-15
 
 Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
@@ -7,7 +19,11 @@ and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-202
 The fixed beneficiary, immutable originating reserve, exact full funding,
 transaction-time team cancellation and immutable controller-address model are
 resolved for this slice. Actual parties, Safe configuration, amounts, dates,
-reserve caps, production genesis and deployment remain open.
+reserve caps, production genesis and deployment remain open. Purpose-specific
+reserve enforcement is absent and requires its own approved primitive/policy and
+[adversarial acceptance](architecture/post-custody-operations.md#production-reserve-prerequisite).
+Cancellation must not reset spending authority merely because refunded inventory
+increases. No cap value or window is selected by local custody tests.
 
 Product decisions that materially change the implementation are listed first.
 Non-blocking engineering follow-up sits at the end.
