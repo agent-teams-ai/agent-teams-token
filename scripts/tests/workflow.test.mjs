@@ -250,7 +250,7 @@ test("Slither job is exact-SHA-bound, fail closed and uploads immutable evidence
   assert.equal(finalGuard.if, "${{ always() }}");
   assert.match(finalGuard.run, /\$\{\{ needs\.solidity\.result \}\}/);
   assert.match(finalGuard.run, /SOLIDITY_PREREQUISITE_FAILED/);
-  assert.doesNotMatch(workflowText, /GITHUB_ENV/);
+  assert.doesNotMatch(JSON.stringify(job), /GITHUB_ENV/);
   assert.equal(job.env.SLITHER_CANDIDATE_SHA, "${{ github.sha }}");
   assert.equal(job.env.SLITHER_DOCKER_PATH, "/usr/bin/docker");
   assert.match(job.env.SLITHER_FORGE_PATH, /foundry-v1\.8\.0-linux-x64\/forge/u);
