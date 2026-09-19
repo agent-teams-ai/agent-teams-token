@@ -64,7 +64,7 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "b88517c72e38999299e51397fabb630d0eb8a2144b9209f6c96a6e36803eeca8",
+      "beforeSha256": "a288d05ff09bade14393fea1dc7112b90f9c18f02637bc93ac17ef1ddaf275cc",
       "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
     },
     {
@@ -84,7 +84,7 @@
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "92a688a2d1d37ed7cbe1968f9d37d8c032afcc17a46270e3531af91059808cbb",
+      "beforeSha256": "10484deee16d9c480ca5bb598842cb0728986375d4a93b1161ee8ac703a3cdee",
       "afterSha256": "a26fcb518ade4255c5d47a22b28497e171b8271878bb09dea312f7382040983d"
     },
     {
