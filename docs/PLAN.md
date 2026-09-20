@@ -10,13 +10,13 @@ caps, per-grant caps and deterministic offline genesis/public facts verification
 No deployment, network execution or changes to utility, liquidity, airdrop,
 public sale, governance or CCIP are authorized by this slice.
 
-The uncommitted `ReserveController` candidate now funds existing `GrantVault`
+The committed `ReserveController` implementation funds existing `GrantVault`
 instances atomically, binds one purpose and controller, and counts full grant
 amounts in `(now - 365 days, now]`. Refunds preserve consumed cap authority.
 Caps are immutable explicit constructor inputs, not invented production defaults.
 This corrects the historical statement below that no reserve implementation
 exists; it does not establish completed production wiring or qualification.
-The candidate also includes a one-shot 3% founder funding reserve and strict
+The implementation also includes a one-shot 3% founder funding reserve and strict
 offline configuration verification/public facts. The 20% envelope is represented
 as separate 3% founder and 17% contributor recipients. The other six bucket IDs
 are explicit approved input, not inferred product policy. Facts bind normalized
@@ -27,8 +27,8 @@ cliff/end instants must consistently select February 28 or March 1. A local
 constructor-order fixture proves direct genesis routing, the 3%/17% split,
 founder irrevocability, refund routing and conserved supply. This is not deployed
 production evidence. ADR-0008 records the reserve policy; full qualification
-and deployment evidence remain pending. Deployment artifact generation is
-outside this bounded slice.
+and deployment evidence remain pending. Deployment artifact generation and actual
+deployment are outside this bounded slice.
 The requested allocation's bucket identities and numerical cap policy must be
 bound to their approved source before production inputs can be accepted.
 The local docs commands currently cannot run because pnpm is unavailable.

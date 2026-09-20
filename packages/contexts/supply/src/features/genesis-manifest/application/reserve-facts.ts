@@ -14,6 +14,7 @@ export function verifyReserveFacts(input: unknown, approvedConfigurationSha256: 
   const facts = {
     schema: "agtmai-reserve-public-facts-v1", evidence: "verified-configuration-only",
     broadcastAllowed: false, deploymentVerified: false, configurationSha256,
+    name: "Agent Teams AI", symbol: "AGTMAI", decimals: 9,
     initialSupplyBaseUnits: config.initialSupplyBaseUnits, allocations: config.allocations,
     founder: { ...config.founder, bps: 300, revocable: false },
     contributors: { ...config.contributors, bps: 1700, revocable: true, cliffMonths: 12,
