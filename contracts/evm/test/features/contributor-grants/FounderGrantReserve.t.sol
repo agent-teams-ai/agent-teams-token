@@ -53,6 +53,47 @@ contract FounderGrantReserveTest is TestBase {
         assertEq(token.totalSupply(), 10_000);
     }
 
+    function _tokenWithSupply(uint256 supply) private returns (AGTMAIToken) {
+        AGTMAIToken.Allocation[] memory allocations = new AGTMAIToken.Allocation[](1);
+        allocations[0] = AGTMAIToken.Allocation(bytes32("fixture"), address(this), supply);
+        return new AGTMAIToken(supply, allocations);
+    }
+
+    function testFuzzFounderExactPercentageAndNonDivisibleSupply(uint256 seed) public {
+        uint256 hundreds = bound(seed, 1, type(uint256).max / 100);
+        uint256 supply = hundreds * 100;
+        AGTMAIToken exactToken = _tokenWithSupply(supply);
+        G.Terms memory terms = _terms();
+        terms.allocation = hundreds * 3;
+        FounderGrantReserve reserve =
+            new FounderGrantReserve(exactToken, BENEFICIARY, address(this), terms);
+        assertEq(reserve.VAULT().grant().terms.allocation, hundreds * 3);
+        assertTrue(exactToken.transfer(address(reserve), terms.allocation));
+        reserve.fund();
+        assertEq(exactToken.balanceOf(address(reserve.VAULT())), hundreds * 3);
+        terms.allocation += 1;
+        vm.expectRevert(FounderGrantReserve.InvalidFounderAllocation.selector);
+        new FounderGrantReserve(exactToken, BENEFICIARY, address(this), terms);
+        terms.allocation -= 1;
+        AGTMAIToken inexactToken = _tokenWithSupply(supply + 1);
+        vm.expectRevert(FounderGrantReserve.InvalidFounderAllocation.selector);
+        new FounderGrantReserve(inexactToken, BENEFICIARY, address(this), terms);
+    }
+
+    function testFounderMaximumDivisibleSupplyAvoidsMultiplyOverflow() public {
+        uint256 supply = type(uint256).max - type(uint256).max % 100;
+        AGTMAIToken maximumToken = _tokenWithSupply(supply);
+        G.Terms memory terms = _terms();
+        // Independent complement identity; multiplying the supply by three would overflow.
+        terms.allocation = supply - (supply / 100) * 97;
+        FounderGrantReserve reserve =
+            new FounderGrantReserve(maximumToken, BENEFICIARY, address(this), terms);
+        assertEq(reserve.VAULT().grant().terms.allocation, terms.allocation);
+        assertTrue(maximumToken.transfer(address(reserve), terms.allocation));
+        reserve.fund();
+        assertEq(maximumToken.balanceOf(address(reserve.VAULT())), terms.allocation);
+    }
+
     function testFounderCannotBeRevocableOrDifferentPercentage() public {
         G.Terms memory terms = _terms();
         terms.kind = G.Kind.TeamService;

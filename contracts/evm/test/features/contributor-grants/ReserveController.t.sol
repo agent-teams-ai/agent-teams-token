@@ -36,6 +36,44 @@ contract ReserveControllerTest is TestBase {
         );
     }
 
+    function testEmptySameTimestampAndFullyExpiredHistory() public {
+        assertEq(reserve.grossCommitted(), 0);
+        assertEq(reserve.rollingCommitted(), 0);
+        vm.warp(400 days);
+        assertEq(reserve.rollingCommitted(), 0);
+        reserve.commit(BENEFICIARY, _terms(100));
+        assertEq(reserve.grossCommitted(), 100);
+        assertEq(reserve.rollingCommitted(), 100);
+        reserve.commit(BENEFICIARY, _terms(200));
+        assertEq(reserve.grossCommitted(), 300);
+        assertEq(reserve.rollingCommitted(), 300);
+        vm.warp(400 days + 1);
+        reserve.commit(BENEFICIARY, _terms(400));
+        assertEq(reserve.grossCommitted(), 700);
+        assertEq(reserve.rollingCommitted(), 700);
+        vm.warp(765 days - 1);
+        assertEq(reserve.rollingCommitted(), 700);
+        vm.warp(765 days);
+        assertEq(reserve.rollingCommitted(), 400);
+        vm.warp(765 days + 1);
+        assertEq(reserve.rollingCommitted(), 0);
+        assertEq(reserve.grossCommitted(), 700);
+        reserve.commit(BENEFICIARY, _terms(600));
+        assertEq(reserve.rollingCommitted(), 600);
+        assertEq(reserve.grossCommitted(), 1300);
+    }
+
+    function testMergedCapExpiresTogetherAtExactWindowBoundary() public {
+        uint256 committedAt = block.timestamp;
+        reserve.commit(BENEFICIARY, _terms(600));
+        reserve.commit(BENEFICIARY, _terms(400));
+        vm.warp(committedAt + 365 days - 1);
+        assertEq(reserve.rollingCommitted(), 1000);
+        vm.warp(committedAt + 365 days);
+        assertEq(reserve.rollingCommitted(), 0);
+        assertEq(reserve.grossCommitted(), 1000);
+    }
+
     function testPerGrantAndGrossCaps() public {
         vm.expectRevert(ReserveController.CapExceeded.selector);
         reserve.commit(BENEFICIARY, _terms(601));
