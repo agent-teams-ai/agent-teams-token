@@ -87,7 +87,7 @@
     {
       "path": "tooling/toolchain.lock.json",
       "beforeSha256": "b9ddc21e667242342ba9cea9383f0f6b980dbfd8c4af1881f42bcb405f6db286",
-      "afterSha256": "7ccc9e0e914dc3eecaedc4ca89b630eb079606ac160e0efb7b728163d410537f"
+      "afterSha256": "30ea2207004fc35e7b92622198d5310cf8c01497d1f13bb81e46600dabc6bf33"
     },
     {
       "path": "tooling/local-solana/src/README.md",

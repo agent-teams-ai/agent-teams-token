@@ -138,7 +138,7 @@
     {
       "path": "tooling/toolchain.lock.json",
       "beforeSha256": "b9ddc21e667242342ba9cea9383f0f6b980dbfd8c4af1881f42bcb405f6db286",
-      "afterSha256": "cbc21d4b05abc9db3b1c3040f620a7b915ab5dbb8a8f1869574a8a5a746d6ee3"
+      "afterSha256": "24c672ad06db3f57a990839a00a98c83e3912d4fc2ee4c80c075e659481b61a6"
     },
     {
       "path": "tooling/security/slither/src/README.md",
