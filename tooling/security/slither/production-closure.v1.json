@@ -119,7 +119,7 @@
     },
     {
       "path": "tooling/security/slither/suppressions.v1.json",
-      "sha256": "03215f43c6baff5e3d01b8b309f6a7a66b0ee720399d2d2ff61d7638bc9a1bc7"
+      "sha256": "fbdc3de1a844d6044f77b37e0b984537bee05ddf31f0679484f94d426d76e424"
     },
     {
       "path": "tooling/security/slither/suppression-ledger.schema.v1.json",
@@ -127,7 +127,7 @@
     },
     {
       "path": "tooling/security/slither/triage.v1.json",
-      "sha256": "6188d4ab5620ccbf0f762ddb5c5ea939e46beb00380b6bb81a308ee121a6e41d"
+      "sha256": "42388222d3d3d29f7bbd4d51f2237d0448e0a800ead128a1c20d19929446d84e"
     },
     {
       "path": "tooling/security/slither/triage-ledger.schema.v1.json",
