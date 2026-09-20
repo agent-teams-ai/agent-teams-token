@@ -119,30 +119,32 @@ is part of this contract. External timelock scheduling does not freeze vesting.
 The scenario's positive release/refund/debt requirements are acceptance-fixture
 constraints, not universal contract preconditions.
 
-## Production reserve prerequisite
+## Production reserve enforcement
 
-**Purpose-specific cap enforcement is not implemented or qualified.** Neither
-an address labelled reserve, an EOA nor a Safe provides it. Offchain allocation
-commitment validation is not an onchain spending limit. Returning tokens to the
-original reserve proves routing only and cannot establish preservation of caps.
+The bounded reserve implementation now provides the purpose-specific onchain
+limit that this document previously marked as missing. `ReserveController`
+binds the canonical token, one immutable purpose and the controller address;
+it creates and fully funds only `TeamService` grants whose terms match that
+purpose. It charges the full grant amount to an immutable per-grant cap and a
+rolling `(now - 365 days, now]` gross-commitment window. Refunds return only
+unvested inventory to the originating reserve and never erase consumed gross
+commitments. Approval, funding and commitment accounting are atomic, and there
+is no generic transfer, approval or execution bypass. `FounderGrantReserve`
+has a one-shot 3% founder allocation with the same 12-to-48-month calendar
+validation and no cancellation path.
 
-The separately approved contributor-reserve implementation must bind the
-canonical token and purpose, authenticate admitted grants and their terms,
-enforce approved commitments/spending limits, and originate approval and
-funding itself. Funding failure must roll back applicable budget consumption;
-previously charged commitments must not be double charged. It must expose no
-unrestricted transfer, approval or execution bypass. Refund inventory must not
-restore consumed authority or erase gross historical commitments. Outstanding
-obligation forecasts may decrease, but cannot reset caps. Existing beneficiary
-debt claims must remain independent of new approvals.
+`ReserveGenesis` and the supply reserve-facts feature verify the 30/30/20/9/5/5/1
+allocation envelope, the 3% founder plus 17% contributor split, and normalized
+configuration facts offline. They do not choose live beneficiaries, Safe
+addresses, cap amounts or deployment dates, and they do not establish that any
+contract is deployed. Safe qualification remains a separate custody gate.
 
-Acceptance against that actual implementation must exhaust a synthetic approved
-cap, cancel and refund, reject an immediate over-cap replacement, charge each
-subsequently authorized grant, and demonstrate rollback on failed funding.
-Reject fake grants, wrong purposes, alternate destinations, bypass calls and
-cross-purpose laundering between two reserves. Test window boundaries only
-after the policy is selected. No 365-day window, checkpoint algorithm, cap
-amount, allocation percentage or generic reserve platform is selected here.
+Acceptance coverage exhausts a synthetic cap, rejects an immediate over-cap
+replacement, verifies refund routing without cap restoration, rejects wrong
+purposes and alternate destinations, and proves constructor routing and supply
+conservation. Production qualification still requires clean-head toolchain and
+deployment evidence; test fixtures and offline facts must not be presented as
+mainnet evidence.
 
 ## Safe qualification and control
 

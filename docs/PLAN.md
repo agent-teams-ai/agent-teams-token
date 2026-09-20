@@ -26,8 +26,9 @@ Both funding contracts now enforce Gregorian UTC anniversaries onchain; leap-day
 cliff/end instants must consistently select February 28 or March 1. A local
 constructor-order fixture proves direct genesis routing, the 3%/17% split,
 founder irrevocability, refund routing and conserved supply. This is not deployed
-production evidence. Architecture decision recording and full qualification
-remain pending. Deployment artifact generation is outside this bounded slice.
+production evidence. ADR-0008 records the reserve policy; full qualification
+and deployment evidence remain pending. Deployment artifact generation is
+outside this bounded slice.
 The requested allocation's bucket identities and numerical cap policy must be
 bound to their approved source before production inputs can be accepted.
 The local docs commands currently cannot run because pnpm is unavailable.

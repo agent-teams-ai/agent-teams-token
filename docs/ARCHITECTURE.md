@@ -9,9 +9,9 @@ The active four-feature extension is described in
 The Supply genesis-manifest feature owns one deployment fact model and a pure
 `@agent-teams/supply/deployment` entrypoint. Custody execution and read-only
 readiness remain separate outer tooling owners. The local Genesis Core format
-and historical signed journals retain their existing meanings. Implementation
-is in progress; production reserve wiring and mainnet protocol qualification
-remain prerequisites.
+and historical signed journals retain their existing meanings. The reserve
+wiring is implemented as a bounded contract slice; mainnet protocol
+qualification and deployment evidence remain prerequisites.
 
 ## Contributor-grant custody
 
@@ -23,10 +23,15 @@ the one-time exact funding pull, the immutable beneficiary claims to itself, and
 an immutable controller address intended for a Safe 2-of-3 may cancel only team
 grants. See [ADR-0006](decisions/0006-immutable-grant-custody.md).
 
-This boundary has no factory, manager, proxy, governance, reserve-cap ledger or
-deployment path. Actual parties, allocation and UTC schedule remain deployment
-inputs. The older proposed direct-genesis-mint flow cannot activate a vault whose
-funding invariant is an exact reserve debit and requires later production wiring.
+The production reserve slice adds purpose-specific, non-upgradeable funding
+entrypoints beside the vault: `ReserveController` admits only contributor grants
+for its immutable purpose, counts gross commitments in a rolling 365-day window
+and enforces an immutable per-grant cap; `FounderGrantReserve` funds exactly one
+3% irrevocable founder vault. `ReserveGenesis` proves the constructor wiring and
+the 3%/17% split without selecting live addresses or cap amounts. Actual parties,
+allocation inputs, cap values and UTC schedules remain deployment inputs. These
+contracts are the bounded enforcement layer, not a generic treasury platform or
+deployment proof. See [ADR-0008](decisions/0008-production-reserve-commitment-policy.md).
 
 ## Product boundary
 
@@ -152,8 +157,10 @@ real consumers prove identical invariants and failure semantics.
 - `supply/genesis-manifest`: strict proposal validator plus canonical,
   test-only local-fixture compiler. There is no production manifest schema or
   production compile command in Genesis Core.
-- `token-control/release-policy`: designed future capability for pure allocation,
-  commitment-cap and recipient policy; it is not implemented in Genesis Core.
+- `token-control/release-policy`: the contributor-grant reserve slice implements
+  the narrow commitment-cap and recipient policy in
+  `contracts/evm/src/features/contributor-grants/`; a general release-policy
+  package is still deferred.
 - `cross-chain-accounting/supply-reconciliation`: current pure bigint bootstrap;
   its final event-ledger boundary remains a later slice.
 - feature-owned outbound adapters: pinned CCIP SDK, Ethereum RPC and typed Solana
