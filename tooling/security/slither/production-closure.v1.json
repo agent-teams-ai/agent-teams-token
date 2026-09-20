@@ -85,7 +85,7 @@
     },
     {
       "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
-      "sha256": "1b621b3a47450026fd89c0cfdeac2c8654b7ca377a4fada5504f794ee242889c"
+      "sha256": "471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986"
     },
     {
       "path": "contracts/evm/src/features/contributor-grants/ReserveController.sol",
