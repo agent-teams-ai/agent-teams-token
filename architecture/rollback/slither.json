@@ -122,8 +122,8 @@
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "ecb14044d9bbf9b922ca90bad0f6e1e301abb32394201a6beb3509b636eb3cde",
-      "afterSha256": "1beafac85c196eafb8b33c5cd3a89668e7180f1831fe9bb43fbd521033fade75"
+      "beforeSha256": "49d386d699890ddca16b76fa147093c6ae85cd99ebc40a2234983ae53207064d",
+      "afterSha256": "c572422c73f67367eee70dd4e80fae3bc0035910bccb298898b610e73a3b2ea2"
     },
     {
       "path": "package.json",
