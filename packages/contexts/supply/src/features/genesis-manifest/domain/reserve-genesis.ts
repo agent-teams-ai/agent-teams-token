@@ -38,15 +38,9 @@ function positive(value: unknown): bigint {
   return result;
 }
 
-/** Strict offline policy validation. Names of the other six buckets remain explicit approved input.
- * The 20% contributor envelope is represented by separate 3% founder and 17% reserve recipients.
- * This verifies authored facts, never deployed code, transactions or custody observations. */
-export function validateReserveGenesis(input: unknown): ReserveGenesis {
-  const root = object(input, ["schema", "status", "initialSupplyBaseUnits", "allocations", "founder", "contributors"]);
-  if (root.schema !== "agtmai-reserve-genesis-v1" || root.status !== "accepted") { reject(); }
-  const supply = positive(root.initialSupplyBaseUnits);
-  if (!Array.isArray(root.allocations) || root.allocations.length !== 8) { reject(); }
-  for (const value of root.allocations) {
+function validateAllocations(allocations: unknown, supply: bigint): void {
+  if (!Array.isArray(allocations) || allocations.length !== 8) { reject(); }
+  for (const value of allocations) {
     const allocation = object(value, ["id", "recipient", "amountBaseUnits", "bps"]);
     if (!encodeAllocationId(allocation.id) || !Number.isInteger(allocation.bps)
       || (allocation.bps as number) <= 0 || (allocation.bps as number) > 10_000) { reject(); }
@@ -54,6 +48,16 @@ export function validateReserveGenesis(input: unknown): ReserveGenesis {
     const numerator = supply * BigInt(allocation.bps as number);
     if (numerator % 10_000n !== 0n || positive(allocation.amountBaseUnits) !== numerator / 10_000n) { reject(); }
   }
+}
+
+/** Strict offline policy validation. Names of the other six buckets remain explicit approved input.
+ * The 20% contributor envelope is represented by separate 3% founder and 17% reserve recipients.
+ * This verifies authored facts, never deployed code, transactions or custody observations. */
+export function validateReserveGenesis(input: unknown): ReserveGenesis {
+  const root = object(input, ["schema", "status", "initialSupplyBaseUnits", "allocations", "founder", "contributors"]);
+  if (root.schema !== "agtmai-reserve-genesis-v1" || root.status !== "accepted") { reject(); }
+  const supply = positive(root.initialSupplyBaseUnits);
+  validateAllocations(root.allocations, supply);
   const typed = input as ReserveGenesis;
   const normalized = normalizeAllocationSet(typed.initialSupplyBaseUnits, typed.allocations, "deployment");
   if (normalized.diagnostics.length || !normalized.allocations) { reject(); }
@@ -61,7 +65,7 @@ export function validateReserveGenesis(input: unknown): ReserveGenesis {
   const contributorAllocation = typed.allocations.find(a => a.id === "contributors");
   if (founderAllocation?.bps !== 300 || contributorAllocation?.bps !== 1700) { reject(); }
   const otherBps = typed.allocations.filter(a => a.id !== "founder" && a.id !== "contributors")
-    .map(a => a.bps).sort((a, b) => a - b);
+    .map(a => a.bps).toSorted((a, b) => a - b);
   if (JSON.stringify(otherBps) !== "[100,500,500,900,3000,3000]") { reject(); }
   const founder = object(root.founder, ["beneficiary", "controller", "purpose", "schedule"]);
   address(founder.beneficiary); address(founder.controller); purpose(founder.purpose);

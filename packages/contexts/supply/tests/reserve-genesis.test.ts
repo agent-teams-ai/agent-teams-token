@@ -25,7 +25,7 @@ function approval(input: ReserveGenesis): `0x${string}` {
 test("offline facts bind exact allocation, founder rights and gross cap inputs deterministically", () => {
   const source = fixture(), hash = approval(source);
   const first = verifyReserveFacts(source, hash, { sha256 });
-  const reversed = { ...source, allocations: [...source.allocations].reverse() };
+  const reversed = { ...source, allocations: source.allocations.toReversed() };
   assert.deepEqual(verifyReserveFacts(reversed, hash, { sha256 }).canonicalBytes, first.canonicalBytes);
   assert.equal(first.facts.allocations.reduce((sum, a) => sum + BigInt(a.amountBaseUnits), 0n), 1000000n);
   assert.equal(first.facts.founder.revocable, false);
