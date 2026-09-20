@@ -21,6 +21,11 @@
       "id": "ADR-0005",
       "path": "docs/decisions/0005-ccip-testnet-protocol-line.md",
       "immutableDigest": "sha256:e8407e63c2ca22f4645529679124ed4a226b67c56a883abead2892798a2d93a6"
+    },
+    {
+      "id": "ADR-0008",
+      "path": "docs/decisions/0008-production-reserve-commitment-policy.md",
+      "immutableDigest": "sha256:b49b55118ced6e47d41cd6efebac5d378c6563888f8ed5d8404ea27e7a89c946"
     }
   ]
 }

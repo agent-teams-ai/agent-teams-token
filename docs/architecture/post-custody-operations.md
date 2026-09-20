@@ -119,7 +119,11 @@ is part of this contract. External timelock scheduling does not freeze vesting.
 The scenario's positive release/refund/debt requirements are acceptance-fixture
 constraints, not universal contract preconditions.
 
-## Production reserve enforcement
+## Production reserve prerequisite
+
+The prerequisite is now implemented as the bounded reserve enforcement layer
+described below; production qualification and deployment evidence remain
+separate gates.
 
 The bounded reserve implementation now provides the purpose-specific onchain
 limit that this document previously marked as missing. `ReserveController`
