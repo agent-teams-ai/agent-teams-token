@@ -5,7 +5,7 @@ import { validateFindingTriage } from "../src/application/triage.ts";
 import { findingFingerprint, normalizedIdentityHash, sha256, sourceLocation } from "../src/adapters/fingerprint.ts";
 import { assertSerializedAgainstSchema } from "../src/adapters/json-schema.ts";
 import { parseSlitherJson } from "../src/adapters/slither-json.ts";
-import type { Finding, FindingTriage } from "../src/domain/model.ts";
+import type { Finding, FindingTriage, Suppression } from "../src/domain/model.ts";
 
 const source = "contract A {}";
 const base = { detectorId: "naming-convention", impact: "Informational" as const, confidence: "High", identity: "name", findingIdentityHash: normalizedIdentityHash("name"), location: sourceLocation("contracts/evm/src/A.sol", 0, 8, source) };
@@ -29,7 +29,7 @@ test("production triage pins the exact current captured findings without suppres
   const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
     suppressions: { fingerprint: string; detectorId: string; sourceHash: string }[];
   };
-  // Exact lower-impact tuples from the Linux/Docker 3c18ed90 capture.
+  // Exact lower-impact tuples from the Linux/Docker 545ec35c4f8e6526338a5911a68cfca7d0bd34ed capture.
   const expected = [
     "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
     "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
@@ -55,14 +55,14 @@ test("production triage pins the exact current captured findings without suppres
     "sha256:0f1d1c70209c5a29a2a0a0969a4e11db4873f900ece437fbe18c6046930becad",
     "sha256:28f7103fa97fa3384f7e4a34e1cb5e888d24a6cd887580063a28d87601fc80d4",
     "sha256:475ac45ba5b092391c7ff99a3f85070b1d139f60fad980a153f566b1b064aafa",
-    "sha256:5330f0155e60cebca58fbc19ac3f5dbe0afebed130aa09ac14e1027f1752402f",
+    "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861",
     "sha256:7401973b9268b84a98fb8aaeee22a9d2bc8768c98fc79d239e36958736c98e32",
     "sha256:7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2",
     "sha256:b350056771ccd86c45901ba4efdcd3c8a3464ce6f03d85423144a9b59a7a04cd",
     "sha256:bf758266512a4c93aab2a313ae2604ecbd732624e1546f8ed413946b79e51fd2",
     "sha256:c9d6c5db026446d352bc82a40e2aff339aeb764aeeca2e828300c25ad9b352f0",
     "sha256:d59a459510dbbd608781cecfe1224b5fd2dd2100c5b454cd3ec954851f709c5c",
-    "sha256:eaa97f18f2a3d4b817b937cd3dad2b6be2791e6f7fd6d77bf3556a5808360b72"
+    "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575"
   ];
   const reviewedDates = [
     "2026-08-29T00:00:00.000Z",
@@ -131,9 +131,9 @@ test("production triage pins the exact current captured findings without suppres
       sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
     },
     {
-      fingerprint: "sha256:8918b704620cfd37967ea5e96ca19c8c09a73f9f31fbcd675a493ba7ca8f8890",
+      fingerprint: "sha256:183d2d275f060287166d43e5a3fe689cabc763a4505a248ffbcd6ac2e3b958db",
       detectorId: "divide-before-multiply",
-      sourceHash: "sha256:1b621b3a47450026fd89c0cfdeac2c8654b7ca377a4fada5504f794ee242889c"
+      sourceHash: "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986"
     },
     {
       fingerprint: "sha256:a0ea426b4266d3b089c430ac69847e2b78db0e8ee14816a09824dd37064a9f30",
@@ -165,4 +165,78 @@ test("historical captured findings require retained triage and reject current tr
   assert.equal(errors.length, 22);
   assert.ok(errors.some((error) => error.includes("467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742 requires exactly one")));
   assert.ok(errors.some((error) => error.includes("7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2 is stale")));
+});
+
+// Observed tuples from the real pinned host capture at 545ec35; no Docker replay here.
+test("founder reserve capture binds every refreshed tuple to exact current source bytes", async () => {
+  const captured: Finding[] = [
+    {
+      "detectorId": "naming-convention",
+      "impact": "Informational",
+      "confidence": "High",
+      "identity": "Variable FounderGrantReserve.TOKEN (src/features/contributor-grants/FounderGrantReserve.sol#17) is not in mixedCase",
+      "findingIdentityHash": "sha256:7740b5a101f72167bfb26f440d5669aced16d888f516cbb308888a78e27a58c4",
+      "location": {
+        "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+        "start": 717,
+        "length": 34,
+        "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+        "snippetHash": "sha256:9f0f3b238caccc0e3e705a88569e4a73e6e88bc175b4a94311ae197e5960b922"
+      },
+      "fingerprint": "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861"
+    },
+    {
+      "detectorId": "divide-before-multiply",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "identity": "FounderGrantReserve.constructor(AGTMAIToken,address,address,GrantAccounting.Terms) (src/features/contributor-grants/FounderGrantReserve.sol#20-35) performs a multiplication on the result of a division: - supply == 0 || supply % 100 != 0 || terms.allocation != supply / 100 * 3 || terms.kind != GrantAccounting.Kind.Founder (src/features/contributor-grants/FounderGrantReserve.sol#29-30)",
+      "findingIdentityHash": "sha256:7136a5da976f1a788ddfda5f66d7879dfd2ed4098263d04808ea2d0b21831619",
+      "location": {
+        "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+        "start": 797,
+        "length": 658,
+        "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+        "snippetHash": "sha256:2cbb7207769bea32178008ce64f526c70b96372d3ee26055c4e2cd19bf288784"
+      },
+      "fingerprint": "sha256:183d2d275f060287166d43e5a3fe689cabc763a4505a248ffbcd6ac2e3b958db"
+    },
+    {
+      "detectorId": "naming-convention",
+      "impact": "Informational",
+      "confidence": "High",
+      "identity": "Variable FounderGrantReserve.VAULT (src/features/contributor-grants/FounderGrantReserve.sol#18) is not in mixedCase",
+      "findingIdentityHash": "sha256:aea3a54dc8e2252456f1eea724769e47cf42ff2eb3670d8b4701a6c0e2e2b8a6",
+      "location": {
+        "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+        "start": 757,
+        "length": 33,
+        "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+        "snippetHash": "sha256:edfc3776533ca134e98bb501afc16778c6256659862a5e57c5a463800312c158"
+      },
+      "fingerprint": "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575"
+    }
+  ];
+  const { suppressions } = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
+    suppressions: Suppression[];
+  };
+  const { findings: triage } = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as {
+    findings: FindingTriage[];
+  };
+  for (const observed of captured) {
+    const { path, start, length } = observed.location;
+    assert.deepEqual(sourceLocation(path, start, length, await readFile(path, "utf8")), observed.location);
+    assert.equal(normalizedIdentityHash(observed.identity), observed.findingIdentityHash);
+    assert.equal(findingFingerprint(observed), observed.fingerprint);
+    if (observed.impact === "Medium") {
+      const matches = suppressions.filter(({ path: sourcePath }) => sourcePath === path);
+      assert.equal(matches.length, 1);
+      const { fingerprint, detectorId, findingIdentityHash, path: sourcePath, start, length, sourceHash, snippetHash } = matches[0]!;
+      assert.deepEqual({ fingerprint, detectorId, findingIdentityHash, location: { path: sourcePath, start, length, sourceHash, snippetHash } }, {
+        fingerprint: observed.fingerprint, detectorId: observed.detectorId,
+        findingIdentityHash: observed.findingIdentityHash, location: observed.location,
+      });
+    } else {
+      assert.deepEqual(validateFindingTriage([observed], triage.filter(({ fingerprint }) => fingerprint === observed.fingerprint)), []);
+    }
+  }
 });

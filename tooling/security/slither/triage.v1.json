@@ -195,7 +195,7 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:5330f0155e60cebca58fbc19ac3f5dbe0afebed130aa09ac14e1027f1752402f",
+      "fingerprint": "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861",
       "owner": "project-security",
       "disposition": "accepted-design",
       "rationale": "Variable FounderGrantReserve.TOKEN intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
@@ -251,7 +251,7 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:eaa97f18f2a3d4b817b937cd3dad2b6be2791e6f7fd6d77bf3556a5808360b72",
+      "fingerprint": "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575",
       "owner": "project-security",
       "disposition": "accepted-design",
       "rationale": "Variable FounderGrantReserve.VAULT intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",

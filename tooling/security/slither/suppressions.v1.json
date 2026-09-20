@@ -83,19 +83,19 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:8918b704620cfd37967ea5e96ca19c8c09a73f9f31fbcd675a493ba7ca8f8890",
+      "fingerprint": "sha256:183d2d275f060287166d43e5a3fe689cabc763a4505a248ffbcd6ac2e3b958db",
       "detectorId": "divide-before-multiply",
       "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
-      "start": 760,
-      "length": 585,
-      "sourceHash": "sha256:1b621b3a47450026fd89c0cfdeac2c8654b7ca377a4fada5504f794ee242889c",
-      "snippetHash": "sha256:2872d9489a3d4b4df1085d1805fbb5322fdf3d3ed00c1f472ad8d96f71b7a81e",
-      "findingIdentityHash": "sha256:0ff599e375f1d8fcb1ccbcd766f48e08a163766b29477fc881103a36e7189727",
+      "start": 797,
+      "length": 658,
+      "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+      "snippetHash": "sha256:2cbb7207769bea32178008ce64f526c70b96372d3ee26055c4e2cd19bf288784",
+      "findingIdentityHash": "sha256:7136a5da976f1a788ddfda5f66d7879dfd2ed4098263d04808ea2d0b21831619",
       "reason": "Supply must be nonzero and divisible by 100 before division. Writing supply = 100*q makes (supply/100)*3 exact; 3*q <= supply prevents overflow even at the largest divisible uint256 supply.",
       "owner": "project-security",
       "reviewAt": "2026-12-20T00:00:00Z",
       "expiresAt": "2027-03-20T00:00:00Z",
-      "regressionEvidence": "contracts/evm/test/features/contributor-grants/FounderGrantReserve.t.sol: testFuzzFounderExactPercentageAndNonDivisibleSupply, testFounderMaximumDivisibleSupplyAvoidsMultiplyOverflow, testFounderCannotBeRevocableOrDifferentPercentage. Exact finding from Linux/Docker PR merge 3c18ed90c0a2bdd4252de0e2dadb7df5687ca26d capture."
+      "regressionEvidence": "contracts/evm/test/features/contributor-grants/FounderGrantReserve.t.sol: testFuzzFounderExactPercentageAndNonDivisibleSupply, testFounderMaximumDivisibleSupplyAvoidsMultiplyOverflow, testFounderCannotBeRevocableOrDifferentPercentage. Exact finding from Linux/Docker base 545ec35c4f8e6526338a5911a68cfca7d0bd34ed capture."
     },
     {
       "schemaVersion": 1,
