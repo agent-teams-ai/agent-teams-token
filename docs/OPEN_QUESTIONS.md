@@ -19,11 +19,19 @@ and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-202
 The fixed beneficiary, immutable originating reserve, exact full funding,
 transaction-time team cancellation and immutable controller-address model are
 resolved for this slice. Actual parties, Safe configuration, amounts, dates,
-reserve caps, production genesis and deployment remain open. Purpose-specific
-reserve enforcement is absent and requires its own approved primitive/policy and
-[adversarial acceptance](architecture/post-custody-operations.md#production-reserve-prerequisite).
-Cancellation must not reset spending authority merely because refunded inventory
-increases. No cap value or window is selected by local custody tests.
+reserve cap values, production genesis wiring and deployment remain open.
+Purpose-specific onchain reserve/grant enforcement is implemented and committed:
+`ReserveController` enforces per-grant and rolling 365-day gross commitment caps;
+refunds do not restore consumed spending authority. `FounderGrantReserve` funds
+one irrevocable 3% founder grant alongside the 17% contributor reserve. Both
+funding contracts enforce individual 12-month cliff / month-48 full-vesting
+calendar schedules under the
+[accepted reserve policy](decisions/0008-production-reserve-commitment-policy.md).
+Production configuration, deployment and
+[adversarial qualification](architecture/post-custody-operations.md#production-reserve-prerequisite),
+including Safe qualification and final mainnet evidence, remain pending. The
+committed implementation and local proofs do not establish deployment or mainnet
+readiness.
 
 Product decisions that materially change the implementation are listed first.
 Non-blocking engineering follow-up sits at the end.

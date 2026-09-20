@@ -16,6 +16,18 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
       "contract": "GrantVault"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+      "contract": "FounderGrantReserve"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/ReserveController.sol",
+      "contract": "ReserveController"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantCalendar.sol",
+      "contract": "GrantCalendar"
     }
   ],
   "expectedContracts": [
@@ -23,13 +35,16 @@
     "AGTMAIToken",
     "Context",
     "ERC20",
+    "FounderGrantReserve",
     "GrantAccounting",
+    "GrantCalendar",
     "GrantVault",
     "IERC1155Errors",
     "IERC20",
     "IERC20Errors",
     "IERC20Metadata",
-    "IERC721Errors"
+    "IERC721Errors",
+    "ReserveController"
   ],
   "sources": [
     {
@@ -67,6 +82,18 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantVault.sol",
       "sha256": "673cad0516c8e0068aa495e8fa5e93ae43cc84547b57c9bd824daec292e56a80"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+      "sha256": "471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/ReserveController.sol",
+      "sha256": "000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      "path": "contracts/evm/src/features/contributor-grants/GrantCalendar.sol",
+      "sha256": "ab6b7bab6a9aeee5dfb66ed2c48fd53a7b3faf2d4b6b11d5fc101462ea426f4f"
     }
   ],
   "config": [
@@ -92,7 +119,7 @@
     },
     {
       "path": "tooling/security/slither/suppressions.v1.json",
-      "sha256": "03215f43c6baff5e3d01b8b309f6a7a66b0ee720399d2d2ff61d7638bc9a1bc7"
+      "sha256": "2409b54b9ac061ef8c1967bc8d0cf093ee7237fe40b46a0c6ef14f512544716d"
     },
     {
       "path": "tooling/security/slither/suppression-ledger.schema.v1.json",
@@ -100,7 +127,7 @@
     },
     {
       "path": "tooling/security/slither/triage.v1.json",
-      "sha256": "6188d4ab5620ccbf0f762ddb5c5ea939e46beb00380b6bb81a308ee121a6e41d"
+      "sha256": "3a77f84b733322ca382b26a6387f51f151ec9f192154b6c345ef279de97b8fb8"
     },
     {
       "path": "tooling/security/slither/triage-ledger.schema.v1.json",

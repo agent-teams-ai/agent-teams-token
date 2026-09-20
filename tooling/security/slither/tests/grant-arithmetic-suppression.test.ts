@@ -49,7 +49,7 @@ const decide = (findings: readonly Finding[], ledger = arithmeticSuppressions, n
 
 test("only the observed source-bound arithmetic Medium is authorized and remains surfaced", async () => {
   await assertSerializedAgainstSchema(policyRaw, `${directory}/suppression-ledger.schema.v1.json`);
-  assert.equal(suppressions.length, 2);
+  assert.equal(suppressions.length, 9);
   assert.equal(arithmeticSuppressions.length, 1);
   assert.equal(arithmeticSuppressions[0]?.owner, "project-security");
   assert.equal(arithmeticSuppressions[0]?.reviewAt, "2026-12-14T00:00:00Z");

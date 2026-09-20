@@ -19,6 +19,7 @@ instead of editing the accepted decision.
 
 ## Accepted
 
+- [ADR-0008: Production reserve commitment policy](0008-production-reserve-commitment-policy.md)
 - [ADR-0005: CCIP testnet protocol line](0005-ccip-testnet-protocol-line.md)
 - [ADR-0001: Hybrid native macOS and Linux CI toolchain](0001-hybrid-toolchain.md)
 - [ADR-0002: Script-first CCIP integration](0002-script-first-ccip.md)

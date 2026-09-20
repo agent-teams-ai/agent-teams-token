@@ -14,8 +14,8 @@
       "fingerprint": "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
       "owner": "project-security",
       "disposition": "accepted-design",
-      "rationale": "The approved AGTMAI acronym is intentionally retained in the public token contract identifier.",
-      "reviewedAt": "2026-08-29T00:00:00.000Z"
+      "rationale": "AGTMAIToken.INITIAL_SUPPLY intentionally uses uppercase for an immutable constructor-assigned value with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
     },
     {
       "schemaVersion": 1,
@@ -32,14 +32,6 @@
       "disposition": "accepted-design",
       "rationale": "The pinned OpenZeppelin ERC20 implementation intentionally retains its compatible upstream pragma.",
       "reviewedAt": "2026-08-29T00:00:00.000Z"
-    },
-    {
-      "schemaVersion": 1,
-      "fingerprint": "sha256:f395435ae8382a9eb4bc8f3ee2c1dd920aa1736be8d305e12a37207ef71472a9",
-      "owner": "project-security",
-      "disposition": "accepted-design",
-      "rationale": "Pinned OpenZeppelin compatibility pragmas and both tokens', GrantAccounting's and GrantVault's exact 0.8.36 pragmas compile together under verified solc 0.8.36+commit.8a079791, Paris, optimizer 200, viaIR=false, IPFS metadata and CBOR enabled. The finding describes differing source constraints, not differing executed compilers.",
-      "reviewedAt": "2026-09-15T07:56:21.125Z"
     },
     {
       "schemaVersion": 1,
@@ -62,8 +54,8 @@
       "fingerprint": "sha256:83f6581c3996d4e9b5968b277ce1ff495a578911f308179538cc8f86ed788d8c",
       "owner": "project-security",
       "disposition": "accepted-design",
-      "rationale": "The immutable token type intentionally uses the approved all-capitals AGTMAI product acronym.",
-      "reviewedAt": "2026-08-29T00:00:00.000Z"
+      "rationale": "AGTMAIToken.GENESIS_ALLOCATION_HASH intentionally uses uppercase for an immutable constructor-assigned value with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
     },
     {
       "schemaVersion": 1,
@@ -168,6 +160,102 @@
       "disposition": "false-positive",
       "rationale": "The movement helper receives only token balance snapshots and an amount; its comparisons enforce exact debit and credit and do not read or compare a timestamp.",
       "reviewedAt": "2026-09-15T07:56:21.125Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:03811eb0729f1b47fa5d6cc36b162e3201d5605cf0cc697eb924c69c4c5bbefa",
+      "owner": "project-security",
+      "disposition": "false-positive",
+      "rationale": "ReserveController holds its lock through approval, funding, reset and GrantCommitted emission. ReserveControllerReentrancyTest proves authorized callbacks at all three call sites fail ReentrantCall and exactly one correctly bound event is emitted per successful commitment; reset failure reverts the transaction before event emission.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:0f1d1c70209c5a29a2a0a0969a4e11db4873f900ece437fbe18c6046930becad",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable ReserveController.PURPOSE intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:28f7103fa97fa3384f7e4a34e1cb5e888d24a6cd887580063a28d87601fc80d4",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Chain time intentionally defines (now - 365 days, now]; upper-bound search expires the exact cutoff. Boundary, staggered-expiry and independent-history fuzz tests cover this policy.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:475ac45ba5b092391c7ff99a3f85070b1d139f60fad980a153f566b1b064aafa",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable ReserveController.TOKEN intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable FounderGrantReserve.TOKEN intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:7401973b9268b84a98fb8aaeee22a9d2bc8768c98fc79d239e36958736c98e32",
+      "owner": "project-security",
+      "disposition": "false-positive",
+      "rationale": "grossCommitted compares array length, not time, and returns lifetime cumulative commitments even after all checkpoints expire; testEmptySameTimestampAndFullyExpiredHistory proves this.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Pinned OpenZeppelin compatibility constraints and all seven production sources are compatible with the pinned solc 0.8.36 compiler; differing source constraints do not select different compilers. Production compiler/closure authentication remains mandatory in the unchanged gate.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:b350056771ccd86c45901ba4efdcd3c8a3464ce6f03d85423144a9b59a7a04cd",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable ReserveController.ROLLING_CAP intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:bf758266512a4c93aab2a313ae2604ecbd732624e1546f8ed413946b79e51fd2",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable ReserveController.CONTROLLER intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:c9d6c5db026446d352bc82a40e2aff339aeb764aeeca2e828300c25ad9b352f0",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable ReserveController.PER_GRANT_CAP intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:d59a459510dbbd608781cecfe1224b5fd2dd2100c5b454cd3ec954851f709c5c",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Commitment timestamps intentionally merge equal-time checkpoints and enforce gross rolling authority. testMergedCapExpiresTogetherAtExactWindowBoundary proves joint expiry; pre-cliff refund coverage proves inventory refunds do not restore authority.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Variable FounderGrantReserve.VAULT intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
+      "reviewedAt": "2026-09-20T00:00:00Z"
     }
   ]
 }

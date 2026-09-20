@@ -49,10 +49,20 @@ and the exception requires review before 2026-12-14 (expires 2027-03-14).
 This is an explicitly reviewed warning, not a claim of zero analyzer findings.
 
 This paragraph retains the historical accounting-only claim. The later custody
-slice above supersedes its wrapper-status description; reserve budget enforcement,
-calendar compilation, percentages, amounts and deployment remain unfinished.
-The current boundary is in
-[PLAN](PLAN.md#approved-contributor-grant-custody-slice-2026-09-15).
+and committed reserve implementation supersede its wrapper-status description.
+`ReserveController` implements onchain purpose-bound, per-grant and rolling
+365-day gross commitment caps without restoring capacity on refunds.
+`FounderGrantReserve` funds one irrevocable 3% founder grant alongside the 17%
+contributor reserve. Both funding contracts enforce individual 12-month cliff /
+month-48 full-vesting Gregorian UTC anniversaries. Offline calendar validation
+and deterministic reserve-genesis/public-facts compilation are also implemented;
+configuration facts do not prove deployment. The
+[accepted reserve policy](decisions/0008-production-reserve-commitment-policy.md)
+and [current reserve scope](PLAN.md#production-reserve-implementation-2026-09-19)
+distinguish this committed enforcement from pending production configuration
+(including cap values, addresses and dates), genesis wiring, deployment artifacts,
+deployment, Safe and exact-candidate qualification, and final mainnet evidence.
+No production deployment or mainnet readiness is claimed.
 
 # Активный продуктовый статус, 8 сентября 2026
 

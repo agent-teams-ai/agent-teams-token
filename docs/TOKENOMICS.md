@@ -9,8 +9,18 @@ reserve and controller per grant, with exact full funding, real token releases,
 permanent founder non-cancellation and unvested-only team refunds. This does not
 approve or configure any percentage, supply, allocation, party, Safe, reserve
 cap, date, genesis or deployment input; every economic table below remains a
-proposal. Production purpose-specific reserve enforcement remains absent;
-returning inventory must not restore consumed spending authority. See the
+proposal. Historically, the September 15 custody-only slice lacked production
+purpose-specific reserve enforcement. The committed `ReserveController` now
+enforces per-grant caps and rolling 365-day gross commitments; refunds return
+inventory without restoring consumed spending authority. `FounderGrantReserve`
+binds a one-shot, irrevocable 3% grant and rejects an identical beneficiary and
+controller. Both funding contracts enforce individual Gregorian UTC month-12
+cliffs and full vesting at month 48. The later bounded reserve slice implements
+the requested 30/30/20/9/5/5/1 allocation with separate 3% founder and 17%
+contributor recipients; the older tables below remain historical proposals, not
+production inputs. Actual deployment, deployment artifacts, production addresses,
+caps and dates, and Safe qualification remain pending. See the
+[current reserve implementation](PLAN.md#production-reserve-implementation-2026-09-19) and
 [reserve prerequisite](architecture/post-custody-operations.md#production-reserve-prerequisite).
 The selected current custody control is solo-founder Safe 2-of-3. The independent
 3-of-5, governance and timelock descriptions below remain proposals, including

@@ -47,6 +47,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/domain/model.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/deployment.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/grant-schedule.ts
+      - packages/contexts/supply/src/features/genesis-manifest/domain/reserve-genesis.ts
     allow:
       boundaries: []
       packages: []
@@ -61,6 +62,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/passport.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/canonical.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts
     allow:
       boundaries:
         - supply.genesis-manifest.domain

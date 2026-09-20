@@ -5,7 +5,7 @@ import { validateFindingTriage } from "../src/application/triage.ts";
 import { findingFingerprint, normalizedIdentityHash, sha256, sourceLocation } from "../src/adapters/fingerprint.ts";
 import { assertSerializedAgainstSchema } from "../src/adapters/json-schema.ts";
 import { parseSlitherJson } from "../src/adapters/slither-json.ts";
-import type { Finding, FindingTriage } from "../src/domain/model.ts";
+import type { Finding, FindingTriage, Suppression } from "../src/domain/model.ts";
 
 const source = "contract A {}";
 const base = { detectorId: "naming-convention", impact: "Informational" as const, confidence: "High", identity: "name", findingIdentityHash: normalizedIdentityHash("name"), location: sourceLocation("contracts/evm/src/A.sol", 0, 8, source) };
@@ -29,12 +29,12 @@ test("production triage pins the exact current captured findings without suppres
   const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
     suppressions: { fingerprint: string; detectorId: string; sourceHash: string }[];
   };
+  // Exact lower-impact tuples from the Linux/Docker 545ec35c4f8e6526338a5911a68cfca7d0bd34ed capture.
   const expected = [
     "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
     "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
     "sha256:3e9bbd4f4becbedeaf399132a78aae873c16832f014081535116f8d9a71b58bf",
     "sha256:41a24f69881fa7e61a657184f095cca8f63b0294157d67d51f53c35fa205be6a",
-    "sha256:f395435ae8382a9eb4bc8f3ee2c1dd920aa1736be8d305e12a37207ef71472a9",
     "sha256:6968e5dfe430c2af75b3853c25e887ca502f113bf9bda91f9534c82162306811",
     "sha256:8263a454f64d24c9db2b6ba6d64e2f87cd69bd6a25d40eeb480da1133e77acfa",
     "sha256:83f6581c3996d4e9b5968b277ce1ff495a578911f308179538cc8f86ed788d8c",
@@ -51,19 +51,30 @@ test("production triage pins the exact current captured findings without suppres
     "sha256:ce70f4037558f57df4f3b299af5765113c5fa6ada98b6b6a94d33fd6d36d1d26",
     "sha256:d5b879fba117edb58befc8d6fc53ae3adf138e611a7327c5332e65a692664ccc",
     "sha256:efd8f5efafa87c1fad1e76342676ba8f2eb7122649f114a86e52179845e748c5",
+    "sha256:03811eb0729f1b47fa5d6cc36b162e3201d5605cf0cc697eb924c69c4c5bbefa",
+    "sha256:0f1d1c70209c5a29a2a0a0969a4e11db4873f900ece437fbe18c6046930becad",
+    "sha256:28f7103fa97fa3384f7e4a34e1cb5e888d24a6cd887580063a28d87601fc80d4",
+    "sha256:475ac45ba5b092391c7ff99a3f85070b1d139f60fad980a153f566b1b064aafa",
+    "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861",
+    "sha256:7401973b9268b84a98fb8aaeee22a9d2bc8768c98fc79d239e36958736c98e32",
+    "sha256:7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2",
+    "sha256:b350056771ccd86c45901ba4efdcd3c8a3464ce6f03d85423144a9b59a7a04cd",
+    "sha256:bf758266512a4c93aab2a313ae2604ecbd732624e1546f8ed413946b79e51fd2",
+    "sha256:c9d6c5db026446d352bc82a40e2aff339aeb764aeeca2e828300c25ad9b352f0",
+    "sha256:d59a459510dbbd608781cecfe1224b5fd2dd2100c5b454cd3ec954851f709c5c",
+    "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575"
   ];
   const reviewedDates = [
     "2026-08-29T00:00:00.000Z",
-    "2026-08-29T00:00:00.000Z",
-    "2026-08-29T00:00:00.000Z",
-    "2026-08-29T00:00:00.000Z",
-    "2026-09-15T07:56:21.125Z",
-    "2026-08-29T00:00:00.000Z",
-    "2026-09-08T05:52:55.734Z",
+    "2026-09-20T00:00:00Z",
     "2026-08-29T00:00:00.000Z",
     "2026-08-29T00:00:00.000Z",
     "2026-08-29T00:00:00.000Z",
     "2026-09-08T05:52:55.734Z",
+    "2026-09-20T00:00:00Z",
+    "2026-08-29T00:00:00.000Z",
+    "2026-08-29T00:00:00.000Z",
+    "2026-09-08T05:52:55.734Z",
     "2026-08-29T00:00:00.000Z",
     "2026-09-15T07:56:21.125Z",
     "2026-09-15T07:56:21.125Z",
@@ -74,6 +85,18 @@ test("production triage pins the exact current captured findings without suppres
     "2026-09-15T07:56:21.125Z",
     "2026-09-15T07:56:21.125Z",
     "2026-09-15T07:56:21.125Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z",
+    "2026-09-20T00:00:00Z"
   ];
 
   assert.equal(document.schemaVersion, 1);
@@ -92,6 +115,41 @@ test("production triage pins the exact current captured findings without suppres
       detectorId: "arbitrary-send-erc20",
       sourceHash: "sha256:673cad0516c8e0068aa495e8fa5e93ae43cc84547b57c9bd824daec292e56a80",
     },
+    {
+      fingerprint: "sha256:215db270cb5c8b1b79276042836966fc232c64b95ebd3085077f64010c970d75",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      fingerprint: "sha256:2349fcc51da883d63261f98dc18fd31a99186bb09f260f76fd38d97ea5232cfe",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      fingerprint: "sha256:6b496e82a330be04da27ab83300479b7359bc41222809ffa97153abed467ae28",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      fingerprint: "sha256:183d2d275f060287166d43e5a3fe689cabc763a4505a248ffbcd6ac2e3b958db",
+      detectorId: "divide-before-multiply",
+      sourceHash: "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986"
+    },
+    {
+      fingerprint: "sha256:a0ea426b4266d3b089c430ac69847e2b78db0e8ee14816a09824dd37064a9f30",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      fingerprint: "sha256:d9136af21e57d4b9adffe88e9577b07ad6df4ebf350a5ed388e24719c4e73ac6",
+      detectorId: "uninitialized-local",
+      sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      fingerprint: "sha256:e8e7464fb50f08c474434449f181f8daacda04e35fcc631afee1b47a12ed03f0",
+      detectorId: "reentrancy-no-eth",
+      sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
   ]);
 });
 
@@ -104,7 +162,81 @@ test("historical captured findings require retained triage and reject current tr
   const parsed = await parseSlitherJson(await readFile("tooling/security/slither/tests/fixtures/slither-0.11.6-production.json", "utf8"), process.cwd());
   assert.deepEqual(validateFindingTriage(parsed.findings, historical.findings), []);
   const errors = validateFindingTriage(parsed.findings, current.findings);
-  assert.equal(errors.length, 11);
+  assert.equal(errors.length, 22);
   assert.ok(errors.some((error) => error.includes("467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742 requires exactly one")));
-  assert.ok(errors.some((error) => error.includes("f395435ae8382a9eb4bc8f3ee2c1dd920aa1736be8d305e12a37207ef71472a9 is stale")));
+  assert.ok(errors.some((error) => error.includes("7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2 is stale")));
+});
+
+// Observed tuples from the real pinned host capture at 545ec35; no Docker replay here.
+test("founder reserve capture binds every refreshed tuple to exact current source bytes", async () => {
+  const captured: Finding[] = [
+    {
+      "detectorId": "naming-convention",
+      "impact": "Informational",
+      "confidence": "High",
+      "identity": "Variable FounderGrantReserve.TOKEN (src/features/contributor-grants/FounderGrantReserve.sol#17) is not in mixedCase",
+      "findingIdentityHash": "sha256:7740b5a101f72167bfb26f440d5669aced16d888f516cbb308888a78e27a58c4",
+      "location": {
+        "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+        "start": 717,
+        "length": 34,
+        "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+        "snippetHash": "sha256:9f0f3b238caccc0e3e705a88569e4a73e6e88bc175b4a94311ae197e5960b922"
+      },
+      "fingerprint": "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861"
+    },
+    {
+      "detectorId": "divide-before-multiply",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "identity": "FounderGrantReserve.constructor(AGTMAIToken,address,address,GrantAccounting.Terms) (src/features/contributor-grants/FounderGrantReserve.sol#20-35) performs a multiplication on the result of a division: - supply == 0 || supply % 100 != 0 || terms.allocation != supply / 100 * 3 || terms.kind != GrantAccounting.Kind.Founder (src/features/contributor-grants/FounderGrantReserve.sol#29-30)",
+      "findingIdentityHash": "sha256:7136a5da976f1a788ddfda5f66d7879dfd2ed4098263d04808ea2d0b21831619",
+      "location": {
+        "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+        "start": 797,
+        "length": 658,
+        "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+        "snippetHash": "sha256:2cbb7207769bea32178008ce64f526c70b96372d3ee26055c4e2cd19bf288784"
+      },
+      "fingerprint": "sha256:183d2d275f060287166d43e5a3fe689cabc763a4505a248ffbcd6ac2e3b958db"
+    },
+    {
+      "detectorId": "naming-convention",
+      "impact": "Informational",
+      "confidence": "High",
+      "identity": "Variable FounderGrantReserve.VAULT (src/features/contributor-grants/FounderGrantReserve.sol#18) is not in mixedCase",
+      "findingIdentityHash": "sha256:aea3a54dc8e2252456f1eea724769e47cf42ff2eb3670d8b4701a6c0e2e2b8a6",
+      "location": {
+        "path": "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol",
+        "start": 757,
+        "length": 33,
+        "sourceHash": "sha256:471174e40cbc33a761285f6d6e327cf25c337c76b612d785f644026dfbc30986",
+        "snippetHash": "sha256:edfc3776533ca134e98bb501afc16778c6256659862a5e57c5a463800312c158"
+      },
+      "fingerprint": "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575"
+    }
+  ];
+  const { suppressions } = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
+    suppressions: Suppression[];
+  };
+  const { findings: currentTriage } = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as {
+    findings: FindingTriage[];
+  };
+  for (const observed of captured) {
+    const { path, start, length } = observed.location;
+    assert.deepEqual(sourceLocation(path, start, length, await readFile(path, "utf8")), observed.location);
+    assert.equal(normalizedIdentityHash(observed.identity), observed.findingIdentityHash);
+    assert.equal(findingFingerprint(observed), observed.fingerprint);
+    if (observed.impact === "Medium") {
+      const matches = suppressions.filter(({ path: sourcePath }) => sourcePath === path);
+      assert.equal(matches.length, 1);
+      const { fingerprint, detectorId, findingIdentityHash, path: sourcePath, start: suppressionStart, length: suppressionLength, sourceHash, snippetHash } = matches[0]!;
+      assert.deepEqual({ fingerprint, detectorId, findingIdentityHash, location: { path: sourcePath, start: suppressionStart, length: suppressionLength, sourceHash, snippetHash } }, {
+        fingerprint: observed.fingerprint, detectorId: observed.detectorId,
+        findingIdentityHash: observed.findingIdentityHash, location: observed.location,
+      });
+    } else {
+      assert.deepEqual(validateFindingTriage([observed], currentTriage.filter(({ fingerprint }) => fingerprint === observed.fingerprint)), []);
+    }
+  }
 });
