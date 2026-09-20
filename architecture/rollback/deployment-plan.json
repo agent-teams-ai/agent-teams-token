@@ -75,7 +75,7 @@
     {
       "path": "package.json",
       "beforeSha256": "fa7eeb722236bdd419842354e8dd160c78b86f946d868900525eb21d84dadd26",
-      "afterSha256": "43389cb20a0db5695077a3486ccee8dd8d50f28b3e056cd8e4440513539c928e"
+      "afterSha256": "050b276959b0046483cb53b643779fc9d366feedfe1372dad51a3808f86500a9"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",
