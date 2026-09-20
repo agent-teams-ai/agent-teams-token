@@ -18,6 +18,13 @@ export interface ReserveGenesis {
   };
 }
 
+// ADR-0008: 100,000,000 AGTMAI at 9 decimals; the contributor 20% is split 3%/17%.
+const APPROVED_SUPPLY_BASE_UNITS = 100_000_000_000_000_000n;
+const APPROVED_ALLOCATION_BPS: Readonly<Record<string, number>> = {
+  "long-term": 3000, users: 3000, founder: 300, contributors: 1700,
+  operations: 900, ecosystem: 500, financing: 500, liquidity: 100,
+};
+
 function reject(): never { throw new Error("RESERVE_GENESIS_INVALID"); }
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)
@@ -43,30 +50,28 @@ function validateAllocations(allocations: unknown, supply: bigint): void {
   for (const value of allocations) {
     const allocation = object(value, ["id", "recipient", "amountBaseUnits", "bps"]);
     if (!encodeAllocationId(allocation.id) || !Number.isInteger(allocation.bps)
-      || (allocation.bps as number) <= 0 || (allocation.bps as number) > 10_000) { reject(); }
+      || !Object.hasOwn(APPROVED_ALLOCATION_BPS, allocation.id as string)
+      || allocation.bps !== APPROVED_ALLOCATION_BPS[allocation.id as string]) { reject(); }
     address(allocation.recipient);
     const numerator = supply * BigInt(allocation.bps as number);
     if (numerator % 10_000n !== 0n || positive(allocation.amountBaseUnits) !== numerator / 10_000n) { reject(); }
   }
 }
 
-/** Strict offline policy validation. Names of the other six buckets remain explicit approved input.
+/** Strict offline validation of the accepted production allocation policy.
  * The 20% contributor envelope is represented by separate 3% founder and 17% reserve recipients.
  * This verifies authored facts, never deployed code, transactions or custody observations. */
 export function validateReserveGenesis(input: unknown): ReserveGenesis {
   const root = object(input, ["schema", "status", "initialSupplyBaseUnits", "allocations", "founder", "contributors"]);
   if (root.schema !== "agtmai-reserve-genesis-v1" || root.status !== "accepted") { reject(); }
   const supply = positive(root.initialSupplyBaseUnits);
+  if (supply !== APPROVED_SUPPLY_BASE_UNITS) { reject(); }
   validateAllocations(root.allocations, supply);
   const typed = input as ReserveGenesis;
   const normalized = normalizeAllocationSet(typed.initialSupplyBaseUnits, typed.allocations, "deployment");
   if (normalized.diagnostics.length || !normalized.allocations) { reject(); }
-  const founderAllocation = typed.allocations.find(a => a.id === "founder");
   const contributorAllocation = typed.allocations.find(a => a.id === "contributors");
-  if (founderAllocation?.bps !== 300 || contributorAllocation?.bps !== 1700) { reject(); }
-  const otherBps = typed.allocations.filter(a => a.id !== "founder" && a.id !== "contributors")
-    .map(a => a.bps).toSorted((a, b) => a - b);
-  if (JSON.stringify(otherBps) !== "[100,500,500,900,3000,3000]") { reject(); }
+  if (!contributorAllocation) { reject(); }
   const founder = object(root.founder, ["beneficiary", "controller", "purpose", "schedule"]);
   address(founder.beneficiary); address(founder.controller); purpose(founder.purpose);
   const scheduleKeys = ["profile", "start", "cliff", "end"];
@@ -78,6 +83,7 @@ export function validateReserveGenesis(input: unknown): ReserveGenesis {
   if (validateGrantSchedule(rawSchedule as GrantSchedule, true, "/founder/schedule").length) { reject(); }
   const contributors = object(root.contributors, ["controller", "purpose", "rollingCapBaseUnits", "perGrantCapBaseUnits"]);
   address(contributors.controller); purpose(contributors.purpose);
+  if (founder.beneficiary === founder.controller || founder.beneficiary === contributors.controller) { reject(); }
   const rolling = positive(contributors.rollingCapBaseUnits), perGrant = positive(contributors.perGrantCapBaseUnits);
   if (perGrant > rolling || rolling > positive(contributorAllocation.amountBaseUnits)) { reject(); }
   if (typed.allocations.some(a => a.recipient === founder.beneficiary || a.recipient === founder.controller

@@ -8,10 +8,11 @@ import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 
 function fixture(): ReserveGenesis {
   const shares = [3000, 3000, 300, 1700, 900, 500, 500, 100];
+  const ids = ["long-term", "users", "founder", "contributors", "operations", "ecosystem", "financing", "liquidity"];
   return {
-    schema: "agtmai-reserve-genesis-v1", status: "accepted", initialSupplyBaseUnits: "1000000",
-    allocations: shares.map((bps, i) => ({ id: i === 2 ? "founder" : i === 3 ? "contributors" : `fixture-${i}`,
-      recipient: `0x${String(i + 1).padStart(40, "0")}`, bps, amountBaseUnits: String(bps * 100) })),
+    schema: "agtmai-reserve-genesis-v1", status: "accepted", initialSupplyBaseUnits: "100000000000000000",
+    allocations: shares.map((bps, i) => ({ id: ids[i]!,
+      recipient: `0x${String(i + 1).padStart(40, "0")}`, bps, amountBaseUnits: String(BigInt(bps) * 10_000_000_000_000n) })),
     founder: { beneficiary: `0x${"a".repeat(40)}`, controller: `0x${"b".repeat(40)}`,
       purpose: `0x${"1".repeat(64)}`, schedule: calendarSchedule("1800000000") },
     contributors: { controller: `0x${"b".repeat(40)}`, purpose: `0x${"2".repeat(64)}`,
@@ -27,7 +28,7 @@ test("offline facts bind exact allocation, founder rights and gross cap inputs d
   const first = verifyReserveFacts(source, hash, { sha256 });
   const reversed = { ...source, allocations: source.allocations.toReversed() };
   assert.deepEqual(verifyReserveFacts(reversed, hash, { sha256 }).canonicalBytes, first.canonicalBytes);
-  assert.equal(first.facts.allocations.reduce((sum, a) => sum + BigInt(a.amountBaseUnits), 0n), 1000000n);
+  assert.equal(first.facts.allocations.reduce((sum, a) => sum + BigInt(a.amountBaseUnits), 0n), 100000000000000000n);
   assert.equal(first.facts.founder.revocable, false);
   assert.equal(first.facts.contributors.bps, 1700);
   assert.equal(first.facts.commitmentPolicy.refundsRestoreCapacity, false);
@@ -70,11 +71,39 @@ test("leap-day schedules require explicit anniversary policy and preserve exact 
   assert.equal(result.founder.schedule.end, String(Date.parse("2032-02-29T12:34:56Z") / 1000));
 });
 
-test("exact integral allocation does not require supply divisible by 10000", () => {
+test("bind every approved purpose to its percentage, including equal-share purpose identities", () => {
   const source = fixture();
-  const minimal = { ...source, initialSupplyBaseUnits: "100",
-    allocations: source.allocations.map(a => ({ ...a, amountBaseUnits: String(a.bps / 100) })),
-    contributors: { ...source.contributors, rollingCapBaseUnits: "2", perGrantCapBaseUnits: "1" } };
-  assert.equal(validateReserveGenesis(minimal).allocations.reduce((sum, a) => sum + BigInt(a.amountBaseUnits), 0n), 100n);
-  assert.throws(() => validateReserveGenesis({ ...minimal, initialSupplyBaseUnits: "101" }), /RESERVE_GENESIS_INVALID/);
+  for (const allocation of source.allocations) {
+    assert.throws(() => validateReserveGenesis({ ...source,
+      allocations: source.allocations.map(a => a.id === allocation.id ? { ...a, id: "unknown-purpose" } : a),
+    }), /RESERVE_GENESIS_INVALID/);
+    for (const other of source.allocations.filter(a => a.bps !== allocation.bps)) {
+      const swapped = { ...source, allocations: source.allocations.map(a => ({ ...a,
+        id: a.id === allocation.id ? other.id : a.id === other.id ? allocation.id : a.id,
+      })) };
+      assert.throws(() => validateReserveGenesis(swapped), /RESERVE_GENESIS_INVALID/);
+    }
+  }
+});
+
+test("reject self-consistent rescaling of accepted production supply", () => {
+  const source = fixture();
+  for (const supply of [100n, 1_000_000n, 100_000_000n, 200_000_000_000_000_000n,
+    100_000_000_000_000_000_000_000_000n]) {
+    const scaled = { ...source, initialSupplyBaseUnits: String(supply),
+      allocations: source.allocations.map(a => ({ ...a, amountBaseUnits: String(supply * BigInt(a.bps) / 10_000n) })),
+      contributors: { ...source.contributors, rollingCapBaseUnits: "2", perGrantCapBaseUnits: "1" } };
+    assert.throws(() => validateReserveGenesis(scaled), /RESERVE_GENESIS_INVALID/);
+  }
+});
+
+test("founder beneficiary must differ from either project controller", () => {
+  const source = fixture();
+  assert.doesNotThrow(() => validateReserveGenesis(source));
+  for (const input of [
+    { ...source, founder: { ...source.founder, beneficiary: source.founder.controller } },
+    { ...source, contributors: { ...source.contributors, controller: source.founder.beneficiary } },
+  ]) {
+    assert.throws(() => validateReserveGenesis(input), /RESERVE_GENESIS_INVALID/);
+  }
 });
