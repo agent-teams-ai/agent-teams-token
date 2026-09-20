@@ -4,3 +4,5 @@ export { canonicalJson } from "./application/canonical.js";
 export { encodeAllocationCommitment } from "./adapters/abi.js";
 export { sha256 } from "./adapters/digest.js";
 export { parseLocalSource, parseProposal } from "./adapters/strict-source.js";
+export { validateReserveGenesis, type ReserveGenesis } from "./domain/reserve-genesis.js";
+export { verifyReserveFacts, type ReserveFactsPorts } from "./application/reserve-facts.js";

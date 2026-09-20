@@ -1,5 +1,37 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Production reserve implementation in progress, 2026-09-19
+
+The owner requested the bounded production-reserve slice from
+`7f55b55fa0ce322721ea94f66869826f52c81fd4`: 30/30/20/9/5/5/1 allocation,
+3% irrevocable founder grant, 17% revocable contributor reserve, individual
+12-month cliff and full vesting at month 48, rolling 365-day gross commitment
+caps, per-grant caps and deterministic offline genesis/public facts verification.
+No deployment, network execution or changes to utility, liquidity, airdrop,
+public sale, governance or CCIP are authorized by this slice.
+
+The uncommitted `ReserveController` candidate now funds existing `GrantVault`
+instances atomically, binds one purpose and controller, and counts full grant
+amounts in `(now - 365 days, now]`. Refunds preserve consumed cap authority.
+Caps are immutable explicit constructor inputs, not invented production defaults.
+This corrects the historical statement below that no reserve implementation
+exists; it does not establish completed production wiring or qualification.
+The candidate also includes a one-shot 3% founder funding reserve and strict
+offline configuration verification/public facts. The 20% envelope is represented
+as separate 3% founder and 17% contributor recipients. The other six bucket IDs
+are explicit approved input, not inferred product policy. Facts bind normalized
+configuration to a separately selected hash and explicitly do not prove deployment.
+Offline founder calendar anniversaries reuse the existing 12/48-month validator.
+Both funding contracts now enforce Gregorian UTC anniversaries onchain; leap-day
+cliff/end instants must consistently select February 28 or March 1. A local
+constructor-order fixture proves direct genesis routing, the 3%/17% split,
+founder irrevocability, refund routing and conserved supply. This is not deployed
+production evidence. Architecture decision recording and full qualification
+remain pending. Deployment artifact generation is outside this bounded slice.
+The requested allocation's bucket identities and numerical cap policy must be
+bound to their approved source before production inputs can be accepted.
+The local docs commands currently cannot run because pnpm is unavailable.
+
 ## Grant custody qualification, 2026-09-16
 
 The bounded qualification starts from `3ff3d11a70bab96d27e9979ccbb16250a27bc788`.
