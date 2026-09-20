@@ -1,6 +1,6 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
-## Production reserve implementation in progress, 2026-09-19
+## Production reserve implementation, 2026-09-19
 
 The owner requested the bounded production-reserve slice from
 `7f55b55fa0ce322721ea94f66869826f52c81fd4`: 30/30/20/9/5/5/1 allocation,
@@ -31,7 +31,12 @@ and deployment evidence remain pending. Deployment artifact generation and actua
 deployment are outside this bounded slice.
 The requested allocation's bucket identities and numerical cap policy must be
 bound to their approved source before production inputs can be accepted.
-The local docs commands currently cannot run because pnpm is unavailable.
+Founder reserve construction rejects an identical beneficiary and controller;
+this separates bound addresses, not beneficial wallet ownership. Actual deployment,
+deployment artifacts, production addresses, caps and dates, and Safe qualification
+remain pending. The earlier uncommitted-patch delivery instructions below are
+historical; the reserve implementation is committed. Fresh exact-SHA security
+and rollback evidence is a separate follow-up after this remediation commit.
 
 ## Grant custody qualification, 2026-09-16
 
@@ -51,13 +56,16 @@ scheduling or signing timestamp. The selected custody baseline is solo-founder
 Safe 2-of-3; older independent 3-of-5 governance descriptions remain proposals.
 ADR-0006 remains proposed.
 
-**Production purpose-specific reserve enforcement is absent.** A refund to the
-original address proves routing only. It must not restore consumed spending
+Historically, this September 16 custody-only slice did not include production
+purpose-specific reserve enforcement. The committed `ReserveController` now
+enforces per-grant and rolling 365-day gross commitment caps without restoring
+authority on refunds; production wiring and qualification remain pending.
+A refund to the original address proves routing only. It must not restore consumed spending
 authority merely by increasing reserve inventory. Qualifying that behavior
-requires the separately approved real reserve implementation; an EOA, Safe or
-mock cannot establish it. No cap window, amount or reserve platform is selected
-or implemented in this task. The prerequisite and its acceptance cases belong
-to [Post-custody operations](architecture/post-custody-operations.md).
+requires evidence from the real reserve implementation; an EOA, Safe or
+mock cannot establish it. No cap window, amount or reserve platform was selected
+or implemented in that historical custody-only task. The prerequisite and its
+acceptance cases belong to [Post-custody operations](architecture/post-custody-operations.md).
 
 Official Safe artifacts and actual local two-signature execution are required
 for Safe qualification. Synthetic inspection and creation evidence do not prove
@@ -66,8 +74,9 @@ qualification requires a separately selected finalized initialization transactio
 and authenticated state at that block. This bounded reader supports direct Safe
 setup; factory/batched initialization remains unqualified. Keep `CUSTODY_TRANSITION_PROVENANCE_UNPROVEN` and the
 existing narrower readiness meaning. Missing artifacts/native prerequisites
-must fail qualification visibly. Final delivery is a reviewable uncommitted
-patch; clean committed-candidate Slither/rollback evidence follows orchestration.
+must fail qualification visibly. The historical custody task requested a reviewable
+uncommitted patch; that is not the current delivery state. Fresh committed-candidate
+Slither/rollback evidence follows separately from this remediation.
 Amounts, addresses, reserve caps, signer identities, recovery arrangements and
 exact UTC deployment values remain configuration and release gates.
 
@@ -92,9 +101,10 @@ Corrections to the reviewed plan: its passport command remains redacted; the
 concrete alias will be `pnpm token:passport`. Compilation needs explicit
 `--artifacts` pins; `deployment:config materialize` turns verified creation
 evidence into the manifest. These fill missing command arguments/steps without
-changing acceptance. Clean committed-candidate/rollback qualification follows
-orchestrator review and commit; this implementation task explicitly leaves an
-uncommitted patch. ADR-0006 is still proposed; merged
+changing acceptance. That historical implementation task requested an uncommitted
+patch followed by orchestrator review, commit and committed-candidate/rollback
+qualification. The implementation is now committed; qualification still requires
+evidence bound to the exact candidate. ADR-0006 is still proposed; merged
 custody code does not accept it. The owner-approved custody semantics in
 DECISIONS remain applicable while its ADR lifecycle is resolved through the
 repository documentation process. Historical scope and proof below are retained

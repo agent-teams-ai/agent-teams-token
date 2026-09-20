@@ -10,6 +10,7 @@ import { GrantCalendar } from "./GrantCalendar.sol";
 /// @dev No replacement, cancellation, sweep or discretionary grant-creation API. The token must
 /// be the verified fixed-supply genesis token; calendar instants are enforced at construction.
 contract FounderGrantReserve {
+    error BeneficiaryIsController();
     error InvalidFounderAllocation();
     error ApprovalFailed();
 
@@ -22,6 +23,7 @@ contract FounderGrantReserve {
         address controller,
         GrantAccounting.Terms memory terms
     ) {
+        if (beneficiary == controller) revert BeneficiaryIsController();
         uint256 supply = token.INITIAL_SUPPLY();
         if (
             supply == 0 || supply % 100 != 0 || terms.allocation != supply / 100 * 3

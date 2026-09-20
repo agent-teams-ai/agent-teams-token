@@ -25,6 +25,11 @@ contract FounderGrantReserveTest is TestBase {
         return G.Terms(300, 100, 31_536_100, 126_230_500, G.Kind.Founder, bytes32("founder"));
     }
 
+    function testFounderRejectsBeneficiaryAsController() public {
+        vm.expectRevert(FounderGrantReserve.BeneficiaryIsController.selector);
+        new FounderGrantReserve(token, BENEFICIARY, BENEFICIARY, _terms());
+    }
+
     function testFounderThreePercentIrrevocableAndFundedOnlyOnce() public {
         FounderGrantReserve reserve =
             new FounderGrantReserve(token, BENEFICIARY, address(this), _terms());
