@@ -219,7 +219,7 @@ test("founder reserve capture binds every refreshed tuple to exact current sourc
   const { suppressions } = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
     suppressions: Suppression[];
   };
-  const { findings: triage } = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as {
+  const { findings: currentTriage } = JSON.parse(await readFile("tooling/security/slither/triage.v1.json", "utf8")) as {
     findings: FindingTriage[];
   };
   for (const observed of captured) {
@@ -230,13 +230,13 @@ test("founder reserve capture binds every refreshed tuple to exact current sourc
     if (observed.impact === "Medium") {
       const matches = suppressions.filter(({ path: sourcePath }) => sourcePath === path);
       assert.equal(matches.length, 1);
-      const { fingerprint, detectorId, findingIdentityHash, path: sourcePath, start, length, sourceHash, snippetHash } = matches[0]!;
-      assert.deepEqual({ fingerprint, detectorId, findingIdentityHash, location: { path: sourcePath, start, length, sourceHash, snippetHash } }, {
+      const { fingerprint, detectorId, findingIdentityHash, path: sourcePath, start: suppressionStart, length: suppressionLength, sourceHash, snippetHash } = matches[0]!;
+      assert.deepEqual({ fingerprint, detectorId, findingIdentityHash, location: { path: sourcePath, start: suppressionStart, length: suppressionLength, sourceHash, snippetHash } }, {
         fingerprint: observed.fingerprint, detectorId: observed.detectorId,
         findingIdentityHash: observed.findingIdentityHash, location: observed.location,
       });
     } else {
-      assert.deepEqual(validateFindingTriage([observed], triage.filter(({ fingerprint }) => fingerprint === observed.fingerprint)), []);
+      assert.deepEqual(validateFindingTriage([observed], currentTriage.filter(({ fingerprint }) => fingerprint === observed.fingerprint)), []);
     }
   }
 });
