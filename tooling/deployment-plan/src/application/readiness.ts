@@ -1,6 +1,6 @@
-import { evaluateReadiness, type ReadinessEvidence, type ReadinessReport } from "../domain/readiness.ts";
-export type { ReadinessEvidence, ReadinessReport } from "../domain/readiness.ts";
-export function assessReadiness(evidence: ReadinessEvidence): ReadinessReport { return evaluateReadiness(evidence); }
+import { evaluateReadiness, type ReadinessEvidence, type ReadinessProtocolContext, type ReadinessReport } from "../domain/readiness.ts";
+export type { ReadinessEvidence, ReadinessProtocolContext, ReadinessReport } from "../domain/readiness.ts";
+export function assessReadiness(evidence: ReadinessEvidence, protocol?: ReadinessProtocolContext): ReadinessReport { return evaluateReadiness(evidence, protocol); }
 const invalid = (): never => { throw new Error("READINESS_BUNDLE_INVALID"); };
 const fields = (value: unknown, keys: string): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).toSorted().join() !== keys.split(",").toSorted().join()) { return invalid(); }
@@ -9,7 +9,8 @@ const fields = (value: unknown, keys: string): Record<string, unknown> => {
 const integer = (value: unknown): value is string => typeof value === "string" && /^(0|-?[1-9][0-9]*)$/u.test(value);
 const uint = (value: unknown): value is string => integer(value) && !value.startsWith("-");
 const reasonNames = ["activity-coverage-incomplete", "authority-observation-incomplete", "backing-exceeds-fixed-supply", "deployment-not-present",
-  "estimates-incomplete", "ethereum-chain-mismatch", "protocol-unqualified", "reconciliation-unknown", "surplus", "under-backed"];
+  "estimates-incomplete", "ethereum-chain-mismatch", "protocol-manifest-unbound", "protocol-profile-unverified", "protocol-unqualified", "reconciliation-unknown",
+  "solana-mainnet-genesis-mismatch", "solana-manifest-genesis-mismatch", "surplus", "under-backed"];
 export function assertReadinessBundle(value: unknown, expectedManifestSha256: string): asserts value is ReadinessReport {
   const report = fields(value, "schema,broadcastAllowed,status,reasons,manifestSha256,reconciliation,authorityComplete,estimatesComplete,observedAt,validUntil");
   if (report.schema !== "agtmai-readiness-report-v1" || report.broadcastAllowed !== false
@@ -24,7 +25,9 @@ export function assertReadinessBundle(value: unknown, expectedManifestSha256: st
     || reasons.includes("authority-observation-incomplete") !== !report.authorityComplete) { invalid(); }
   const status = reasons.includes("backing-exceeds-fixed-supply") || reconciliation.status === "under-backed" ? "inconsistent"
     : reasons.includes("deployment-not-present") ? "not-deployed" : reasons.length ? "incomplete" : "qualified";
-  if (report.status !== status) { invalid(); }
+  // There is no authenticated protocol-profile validator in this release.
+  // Consequently a standalone JSON bundle must never certify qualification.
+  if (report.status !== status || report.status === "qualified" || !reasons.includes("protocol-profile-unverified")) { invalid(); }
 }
 function assertReasons(reasons: unknown): asserts reasons is readonly string[] {
   if (!Array.isArray(reasons) || reasons.some(r => typeof r !== "string" || !reasonNames.includes(r))

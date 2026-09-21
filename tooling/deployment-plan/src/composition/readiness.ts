@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
 import { assessReadiness, assertReadinessBundle } from "../application/readiness.ts";
-import { digestReadinessManifest, parseReadinessEvidence } from "../adapters/readiness-evidence.ts";
+import { digestReadinessManifest, parseReadinessEvidence, parseReadinessManifestProtocol } from "../adapters/readiness-evidence.ts";
 import { parseJsonWithoutDuplicates } from "../adapters/strict-json.ts";
 
 const option = (args: readonly string[], name: string): string => {
@@ -15,12 +15,12 @@ export async function readinessCli(args: readonly string[]): Promise<number> {
     if (command === "evaluate") {
       const manifest = parseJsonWithoutDuplicates(await readFile(option(args, "--manifest"))) as Record<string, unknown>;
       if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) { throw new Error("READINESS_MANIFEST_INVALID"); }
-      if (manifest.schema !== "agtmai-deployment-manifest-v1" || manifest.broadcastAllowed !== false) { throw new Error("READINESS_MANIFEST_INVALID"); }
+      const protocol = parseReadinessManifestProtocol(manifest);
       const evidence = parseReadinessEvidence(new TextEncoder().encode(await readFile(option(args, "--evidence"), "utf8")));
       const expectedDigest = digestReadinessManifest(manifest);
       if (args.includes("--manifest-sha256") && option(args, "--manifest-sha256") !== expectedDigest) { throw new Error("READINESS_MANIFEST_MISMATCH"); }
       if (evidence.manifestSha256 !== expectedDigest) { throw new Error("READINESS_MANIFEST_MISMATCH"); }
-      const report = assessReadiness(evidence);
+      const report = assessReadiness(evidence, protocol);
       await writeFile(option(args, "--output"), `${JSON.stringify(report)}\n`, { flag: "wx" });
       process.stdout.write(`${JSON.stringify(report)}\n`);
       return report.status === "qualified" ? 0 : 2;

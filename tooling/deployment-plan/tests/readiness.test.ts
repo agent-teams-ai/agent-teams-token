@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { evaluateReadiness } from "../src/domain/readiness.ts";
-import { parseReadinessEvidence } from "../src/adapters/readiness-evidence.ts";
+import { digestReadinessManifest, parseReadinessEvidence, parseReadinessManifestProtocol } from "../src/adapters/readiness-evidence.ts";
 
 const base = () => ({
   schema: "agtmai-readiness-evidence-v1" as const, broadcastAllowed: false as const,
@@ -16,9 +16,19 @@ const base = () => ({
   protocolQualified: true, coverageComplete: true, estimates: { complete: true, operations: [] },
 });
 
-test("readiness reconciles fixed supply and rejects a surplus or under-backing claim", () => {
+const readinessManifest = () => ({
+  schema: "agtmai-deployment-manifest-v1", broadcastAllowed: false,
+  configuration: {
+    status: "accepted",
+    environment: { mode: "mainnet-dry-run", evmChainId: "1", solanaGenesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
+    bridge: { protocol: { reference: "synthetic-test-only", snapshotSha256: `0x${"aa".repeat(32)}`, networkDataSha256: `0x${"bb".repeat(32)}` } },
+  },
+});
+
+test("readiness preserves reconciliation facts while protocol qualification is fail-closed", () => {
   const exact = evaluateReadiness(base());
-  assert.equal(exact.status, "qualified");
+  assert.equal(exact.status, "incomplete");
+  assert.ok(exact.reasons.includes("protocol-profile-unverified"));
   assert.equal(exact.reconciliation.status, "exact");
   assert.equal(exact.reconciliation.adjustedGlobalSupply, "1000");
   const surplus = evaluateReadiness({ ...base(), ethereum: { ...base().ethereum, backing: "600" } });
@@ -40,6 +50,57 @@ test("readiness evidence rejects duplicate JSON members before evaluation", () =
   const value = JSON.stringify(base());
   assert.equal(JSON.stringify(parseReadinessEvidence(new TextEncoder().encode(value))), value);
   assert.throws(() => parseReadinessEvidence(new TextEncoder().encode(value.replace('"schema":"agtmai-readiness-evidence-v1"', '"schema":"agtmai-readiness-evidence-v1","schema":"other"'))), /READINESS_EVIDENCE_SCHEMA|duplicate/i);
+});
+
+test("forged completion booleans cannot qualify a mainnet readiness report", () => {
+  const forged = parseReadinessEvidence(new TextEncoder().encode(JSON.stringify(base())));
+  const report = evaluateReadiness(forged);
+  assert.equal(report.status, "incomplete");
+  assert.ok(report.reasons.includes("protocol-profile-unverified"));
+  assert.ok(report.reasons.includes("protocol-manifest-unbound"));
+  assert.equal(report.reconciliation.status, "exact");
+});
+
+test("a Devnet genesis substitution remains incomplete even when all caller assertions are true", () => {
+  const report = evaluateReadiness({ ...base(), solana: { ...base().solana, genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" } });
+  assert.equal(report.status, "incomplete");
+  assert.ok(report.reasons.includes("solana-mainnet-genesis-mismatch"));
+  assert.ok(report.reasons.includes("protocol-profile-unverified"));
+});
+
+test("manifest protocol pins are required and do not turn an unverified profile into qualification", () => {
+  const protocol = parseReadinessManifestProtocol(readinessManifest());
+  assert.deepEqual(protocol, { reference: "synthetic-test-only", snapshotSha256: `0x${"aa".repeat(32)}`,
+    networkDataSha256: `0x${"bb".repeat(32)}`, solanaGenesisHash: base().solana.genesisHash });
+  const report = evaluateReadiness(base(), protocol);
+  assert.equal(report.status, "incomplete");
+  assert.ok(report.reasons.includes("protocol-profile-unverified"));
+  assert.ok(!report.reasons.includes("protocol-manifest-unbound"));
+  const missingProtocol = readinessManifest() as { configuration: { bridge: unknown } };
+  missingProtocol.configuration.bridge = null;
+  assert.throws(() => parseReadinessManifestProtocol(missingProtocol), /READINESS_MANIFEST_INVALID/);
+  const inventedPins = readinessManifest();
+  inventedPins.configuration.bridge.protocol.snapshotSha256 = "not-a-digest";
+  assert.throws(() => parseReadinessManifestProtocol(inventedPins), /READINESS_MANIFEST_INVALID/);
+  const devnetManifest = readinessManifest();
+  devnetManifest.configuration.environment.solanaGenesisHash = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+  assert.throws(() => parseReadinessManifestProtocol(devnetManifest), /READINESS_MANIFEST_INVALID/);
+});
+
+test("evaluate CLI binds the manifest protocol pins but emits an incomplete report without an authenticated profile", async context => {
+  const root = await mkdtemp(join(tmpdir(), "readiness-evaluate-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const manifest = readinessManifest(), manifestPath = join(root, "manifest.json"), evidencePath = join(root, "evidence.json"), output = join(root, "report.json");
+  const evidence = { ...base(), manifestSha256: digestReadinessManifest(manifest) };
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await writeFile(evidencePath, JSON.stringify(evidence));
+  const result = spawnSync(process.execPath, [resolve("tooling/deployment-plan/src/composition/readiness.ts"), "evaluate", "--manifest", manifestPath,
+    "--evidence", evidencePath, "--output", output], { encoding: "utf8" });
+  assert.equal(result.status, 2, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, "incomplete");
+  assert.ok(report.reasons.includes("protocol-profile-unverified"));
+  assert.equal((JSON.parse(await readFile(output, "utf8")) as { status: string }).status, "incomplete");
 });
 
 
@@ -76,6 +137,9 @@ test("report verification requires complete typed canonical facts and consistent
     assert.throws(() => assertReadinessBundle({ ...report, ...patch }, digest), /READINESS_BUNDLE_INVALID/);
   }
   assert.throws(() => assertReadinessBundle({ ...report, manifestSha256: "bad" }, "bad"), /READINESS_BUNDLE_INVALID/);
+  const fabricatedQualified = { ...report, status: "qualified" as const,
+    reasons: report.reasons.filter(reason => reason !== "protocol-profile-unverified" && reason !== "protocol-manifest-unbound") };
+  assert.throws(() => assertReadinessBundle(fabricatedQualified, digest), /READINESS_BUNDLE_INVALID/);
   for (const evidence of [
     { ...base(), ethereum: { ...base().ethereum, pendingEthereumToSolana: null } },
     { ...base(), ethereum: { ...base().ethereum, backing: "600" } },
@@ -101,6 +165,11 @@ test("read-only verify CLI rejects a forged partial report even without --now", 
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.deepEqual(JSON.parse(accepted.stdout), { status: "verified", broadcastAllowed: false });
+  const fabricated = { ...report, status: "qualified", reasons: report.reasons.filter(reason => reason !== "protocol-profile-unverified" && reason !== "protocol-manifest-unbound") };
+  await writeFile(bundle, JSON.stringify(fabricated));
+  const rejectedFabrication = run();
+  assert.equal(rejectedFabrication.status, 2, rejectedFabrication.stdout + rejectedFabrication.stderr);
+  assert.equal(JSON.parse(rejectedFabrication.stderr).reason, "READINESS_BUNDLE_INVALID");
 });
 
 test("canonical reports reject impossible supplies and contradictory status/reason combinations", () => {
@@ -138,7 +207,7 @@ test("both chain observations must fall within the declared interval, including 
     for (const timestamp of ["0", "99", "100", "150", "200", "201"]) {
       const evidence = base();
       if (chain === "ethereum") { evidence.ethereum.block.timestamp = timestamp; } else { evidence.solana.blockTime = timestamp; }
-      if (["100", "150", "200"].includes(timestamp)) { assert.equal(evaluateReadiness(evidence).status, "qualified"); }
+      if (["100", "150", "200"].includes(timestamp)) { assert.equal(evaluateReadiness(evidence).status, "incomplete"); }
       else {
         assert.throws(() => evaluateReadiness(evidence), /READINESS_OBSERVATION_OUTSIDE_INTERVAL/);
         assert.throws(() => parseReadinessEvidence(new TextEncoder().encode(JSON.stringify(evidence))), /READINESS_OBSERVATION_OUTSIDE_INTERVAL/);
@@ -156,7 +225,7 @@ test("estimate expiry must be canonical, later than observation and no later tha
   }
   for (const expiresAt of ["101", "150", "200"]) {
     const evidence = { ...base(), estimates: { complete: true, operations: [{ id: "deploy", estimatedNative: "1", worstCaseNative: "2", expiresAt }] } };
-    assert.equal(evaluateReadiness(evidence).status, "qualified");
+    assert.equal(evaluateReadiness(evidence).status, "incomplete");
   }
 });
 
@@ -167,7 +236,7 @@ test("report and CLI freshness end at the earliest operation estimate expiry", a
     { id: "earliest", estimatedNative: "1", worstCaseNative: "2", expiresAt: "101" },
   ] } };
   const report = evaluateReadiness(evidence);
-  assert.equal(report.status, "qualified");
+  assert.equal(report.status, "incomplete");
   assert.equal(report.validUntil, "101");
   assert.equal(evidence.validUntil, "200");
   assertReadinessBundle(report, report.manifestSha256);

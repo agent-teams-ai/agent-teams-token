@@ -577,7 +577,15 @@ immutable ERC-20 и verifier с тестами - выполняется по
 9. Если внешний сервис, faucet или RPC недоступен, продолжай всё, что не зависит от блокера, и записывай ровно один конкретный следующий шаг в `NEEDS_INPUT.md`.
 10. Никогда не скрывай, что именно было реально исполнено, что симулировано, а что замокано.
 
-Текущий подтверждённый baseline на дату документа: production Solana CCIP release `1.6.3`; отдельный local-test artifact фиксируется своим release tag и SHA256 в `tooling/toolchain.lock.json`. Перед каждой public-network операцией baseline перечитывается из live directory и official releases.
+Проверенная evidence snapshot не задаёт единый production Solana CCIP baseline
+`1.6.3`: Router, BurnMint и LockRelease точно совпадают с
+`solana-v1.6.2`, OffRamp и RMN — с `solana-v1.6.3`, а Fee Quoter не имеет
+точного совпадения среди supplied `solana-v1.6.0`–`solana-v1.6.4` artifacts и
+блокирует qualification. Directory lane labels `1.6.0` не доказывают artifact,
+compatibility, enabled configuration или authority. См. proposed
+[ADR-0007](decisions/0007-mainnet-protocol-line-for-agtmai-readiness.md);
+перед public-network operation требуются fresh official directory и
+independently reviewed exact artifacts.
 
 ---
 

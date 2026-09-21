@@ -9,11 +9,23 @@ export interface ReadinessEvidence {
   readonly protocolQualified: boolean; readonly coverageComplete: boolean;
   readonly estimates?: { readonly complete: boolean; readonly operations?: readonly { readonly id: string; readonly estimatedNative: string; readonly worstCaseNative: string; readonly expiresAt: string }[] };
 }
+/**
+ * The deployment manifest binds these pins to a particular mainnet plan.  It
+ * deliberately carries no qualification assertion: accepting a protocol
+ * profile requires a later, separately authenticated adapter.
+ */
+export interface ReadinessProtocolContext {
+  readonly reference: string;
+  readonly snapshotSha256: string;
+  readonly networkDataSha256: string;
+  readonly solanaGenesisHash: string;
+}
 export interface ReadinessReport { readonly schema: "agtmai-readiness-report-v1"; readonly broadcastAllowed: false; readonly status: "qualified" | "incomplete" | "inconsistent" | "not-deployed"; readonly reasons: readonly string[]; readonly manifestSha256: string; readonly reconciliation: { readonly adjustedGlobalSupply: string | null; readonly backingSurplus: string | null; readonly status: "exact" | "under-backed" | "surplus" | "unknown" }; readonly authorityComplete: boolean; readonly estimatesComplete: boolean; readonly observedAt: string; readonly validUntil: string; }
 const fail = (reason: string): never => { throw new Error(`READINESS_${reason}`); };
 const quantity = (value: unknown, field: string): bigint => parseUint(value, field);
+export const SOLANA_MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 // oxlint-disable-next-line complexity -- keep accounting and qualification in one atomic decision.
-export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport {
+export function evaluateReadiness(evidence: ReadinessEvidence, protocol?: ReadinessProtocolContext): ReadinessReport {
   if (!evidence || evidence.schema !== "agtmai-readiness-evidence-v1" || evidence.broadcastAllowed !== false) {fail("EVIDENCE_INVALID");}
   if (!evidence.ethereum || !evidence.solana || !evidence.ethereum.block || typeof evidence.ethereum.block !== "object" || typeof evidence.solana.genesisHash !== "string") { fail("EVIDENCE_INVALID"); }
   if ([evidence.protocolQualified, evidence.coverageComplete, evidence.ethereum.deployed, evidence.ethereum.authorityComplete,
@@ -35,6 +47,13 @@ export function evaluateReadiness(evidence: ReadinessEvidence): ReadinessReport 
   if (evidence.ethereum.chainId !== "1") {reasons.push("ethereum-chain-mismatch");}
   if (!evidence.ethereum.deployed || !evidence.solana.deployed) {reasons.push("deployment-not-present");}
   if (!evidence.protocolQualified) {reasons.push("protocol-unqualified");}
+  // Caller-controlled booleans cannot establish the reviewed protocol line,
+  // release artifacts, or authority graph.  A future authenticated profile is
+  // intentionally a separate composition input, not evidence JSON.
+  reasons.push("protocol-profile-unverified");
+  if (protocol === undefined) { reasons.push("protocol-manifest-unbound"); }
+  else if (protocol.solanaGenesisHash !== evidence.solana.genesisHash) { reasons.push("solana-manifest-genesis-mismatch"); }
+  if (evidence.solana.genesisHash !== SOLANA_MAINNET_GENESIS) { reasons.push("solana-mainnet-genesis-mismatch"); }
   if (!evidence.coverageComplete) {reasons.push("activity-coverage-incomplete");}
   if (!evidence.ethereum.authorityComplete || !evidence.solana.authorityComplete) {reasons.push("authority-observation-incomplete");}
   const fixed = quantity(evidence.ethereum.fixedSupply, "fixedSupply"), backing = quantity(evidence.ethereum.backing, "backing"), supply = quantity(evidence.solana.supply, "supply");

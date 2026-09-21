@@ -193,10 +193,14 @@ later approves a real custom onchain artifact.
 The detailed release-contract proposal and the limits of what code can prove are
 recorded in [CONTRACTS.md](CONTRACTS.md).
 
-CCIP adapter and monitor implementation wait for an ADR that executes the EVM
-`1.6.4` versus `2.0.0` compatibility spike against the live SVM `1.6.3` lane.
-The selected protocol line defines the canonical backing holder, registration
-encoding and verifier interface; no adapter infers these from package `latest`.
+CCIP adapter and monitor implementation wait for proposed ADR-0007 and exact
+protocol qualification. The reviewed SVM snapshot is mixed, not a live `1.6.3`
+baseline: Router/BurnMint/LockRelease match `1.6.2`, OffRamp/RMN match `1.6.3`,
+and the Fee Quoter has no exact supplied `1.6.0`–`1.6.4` artifact match.
+Directory `1.6.0` lane labels do not prove deployed artifacts, compatibility,
+enabled configuration, or authority. The selected protocol line will define the
+canonical backing holder, registration encoding and verifier interface; no
+adapter infers these from package `latest`.
 
 ## Local truth versus network truth
 
