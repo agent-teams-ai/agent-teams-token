@@ -54,6 +54,17 @@ test("deterministic four-operation observation parses canonically and passes onl
   assert.equal(result.broadcastAllowed, false);
 });
 
+test("funding success rejects a founder vault that reports unfunded", () => {
+  const fixture = executionFixture();
+  const observation = structuredClone(fixture.observations) as Mutable<ProductionObservation>;
+  observation.state!.founderVault.funded = false;
+  const parsed = parseProductionObservation(JSON.parse(JSON.stringify(observation)));
+  const result = assessProductionPreflight({...fixture, observations: parsed});
+  assert.equal(result.status, "blocked");
+  assert.equal(result.broadcastAllowed, false);
+  assert.deepEqual(result.reasons, ["founder-funding-mismatch"]);
+});
+
 test("execution observation parser rejects schema drift, numbers and reordered inventory", () => {
   const fixture = executionFixture();
   for (const mutate of [
