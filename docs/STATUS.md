@@ -660,7 +660,7 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   The local Genesis Core plan uses accepted ADR-0003 for the new manifest
   feature but leaves the generic bootstrap unchanged until ADR-0004 is accepted
   or rejected, avoiding a temporary double migration.
-- Purpose-specific release/vesting vault proposal and rolling commitments;
+- Purpose-specific release/vesting vault proposal;
   governance-reserve activation remains an explicit open decision and ABI blocker.
 - Production genesis wiring, vesting and treasury contracts.
 - Chainlink CCIP Ethereum and Solana pool configuration.

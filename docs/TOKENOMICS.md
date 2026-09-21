@@ -22,8 +22,10 @@ production inputs. Actual deployment, deployment artifacts, production addresses
 caps and dates, and Safe qualification remain pending. See the
 [current reserve implementation](PLAN.md#production-reserve-implementation-2026-09-19) and
 [reserve prerequisite](architecture/post-custody-operations.md#production-reserve-prerequisite).
-The selected current custody control is solo-founder Safe 2-of-3. The independent
-3-of-5, governance and timelock descriptions below remain proposals, including
+The selected current custody control uses separate Project Controller and Founder
+Beneficiary Safe configurations, each solo-founder 2-of-3 with separate
+keys/devices. The independent 3-of-5, governance and timelock descriptions below
+remain proposals, including
 any external delay around team cancellation. The vault's cutoff is the successful
 transaction timestamp. Fixed beneficiary addresses do not freeze wallet ownership
 or implementation, prevent key sale or prohibit sale of released tokens.
