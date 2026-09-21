@@ -28,7 +28,7 @@ const APPROVED_ALLOCATION_BPS: Readonly<Record<string, number>> = {
 function reject(): never { throw new Error("RESERVE_GENESIS_INVALID"); }
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)
-    || Object.getPrototypeOf(value) !== Object.prototype) { return reject(); }
+    || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) { return reject(); }
   const record = value as Record<string, unknown>;
   if (Object.keys(record).length !== keys.length || keys.some(key => !Object.hasOwn(record, key))) { return reject(); }
   return record;

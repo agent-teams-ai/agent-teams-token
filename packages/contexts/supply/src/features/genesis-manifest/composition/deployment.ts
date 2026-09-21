@@ -1,4 +1,4 @@
-import { loadDeploymentManifest } from "./deployment-files.js";
+import { loadDeploymentManifest, parseProductionApproval, parseProductionExpectations } from "./deployment-files.js";
 import { dirname, resolve } from "node:path";
 import { compileDeployment, deploymentBytes, type DeploymentApproval } from "../application/compile-deployment.js";
 import { materializeDeploymentManifest } from "../application/deployment-manifest.js";
@@ -12,9 +12,10 @@ import { sha256 } from "../adapters/digest.js";
 import { parseStrict } from "../adapters/strict-source.js";
 import { prepareProductionDeployment, type ProductionApproval, type ProductionExpectation } from "../application/prepare-production-deployment.js";
 import { validateProductionDeployment } from "../domain/production-deployment.js";
+import type { Hex } from "../domain/deployment.js";
 
 const ports = { sha256, encodeToken: encodeDeploymentToken, encodeGrant: encodeDeploymentGrant,
-  encodeFounderReserve: encodeProductionFounderReserve, encodeReserveController: encodeProductionReserveController,
+  encodeFounderReserve: encodeProductionFounderReserve, encodeReserveController: (input: { token: Hex; controller: Hex; purpose: Hex; rollingCap: string; perGrantCap: string }) => encodeProductionReserveController(input.token, input.controller, input.purpose, input.rollingCap, input.perGrantCap),
   expectedTokenCalls, expectedGrantCalls, createAddress: deploymentCreateAddress, keccak256: keccakBytes };
 const text = async (path: string, limit?: number): Promise<string> => new TextDecoder().decode(await readDeploymentFile(path, limit));
 const report = (value: unknown, status = 0): number => { process.stdout.write(`${JSON.stringify(value)}\n`); return status; };
@@ -38,9 +39,16 @@ export async function deploymentCli(args: readonly string[]): Promise<number> {
       const approval = parseProductionApproval(await text(required("--approval")));
       const expectations = parseProductionExpectations(await text(required("--expectations")));
       const result = prepareProductionDeployment(value, { artifactSourceRevision: artifacts.sourceRevision, artifacts: artifacts.artifacts, approval: approval as ProductionApproval, expectations: expectations as ProductionExpectation }, ports, sha256);
-      if (!result.prepared) return report({ status: "invalid", diagnostics: result.diagnostics, broadcastAllowed: false }, 2);
+      if (!result.prepared) {return report({ status: "invalid", diagnostics: result.diagnostics, broadcastAllowed: false }, 2);}
       const output = required("--output");
-      await publishDeploymentFiles(output, { ...artifacts.files, "prepared-production-deployment.json": deploymentBytes(result.prepared) });
+      const packagePins = { schema: "agtmai-production-artifact-pins-v1", sourceRevision: artifacts.sourceRevision, artifacts: result.prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactPath: `${artifact.contract.toLowerCase()}.artifact.json`, artifactSha256: artifact.artifactSha256, buildInfoPath: `${artifact.contract.toLowerCase()}.build-info.json`, buildInfoSha256: artifact.buildInfoSha256 })) };
+      await publishDeploymentFiles(output, { ...artifacts.files,
+        "canonical-production-configuration.json": deploymentBytes(value),
+        "production-approval.json": deploymentBytes(approval),
+        "production-artifact-pins.json": deploymentBytes(packagePins),
+        "production-expectations.json": deploymentBytes(expectations),
+        "prepared-production-deployment.json": deploymentBytes(result.prepared),
+      });
       return report({ status: "prepared", coverage: result.prepared.coverage, broadcastAllowed: false });
     }
     if (command === "validate" || command === "compile") {
@@ -107,28 +115,4 @@ function parseProductionSource(source: string): unknown {
   return parsed.value;
 }
 
-function exactObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).toSorted().join() !== [...keys].toSorted().join()) throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");
-  return record;
-}
-
-function allowedObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some(key => !keys.includes(key))) throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");
-  return record;
-}
-
-function parseProductionApproval(source: string): ProductionApproval {
-  return exactObject(parseProductionSource(source), ["configurationSha256", "reference", "reserveConfigurationSha256", "schema"]) as unknown as ProductionApproval;
-}
-
-function parseProductionExpectations(source: string): ProductionExpectation {
-  const root = exactObject(parseProductionSource(source), ["artifactPinsSha256", "attemptIdentity", "authority", "chainId", "configurationSha256", "deployer", "maxObservationAgeSeconds", "maxTotalCostWei", "operations", "reserveConfigurationSha256", "schema", "sender", "sourceRevision", "startingNonce"]);
-  if (!Array.isArray(root.authority) || !Array.isArray(root.operations)) throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");
-  for (const safe of root.authority) exactObject(safe, ["address", "fallbackHandler", "guard", "modules", "nonce", "owners", "proxyCodeHash", "singletonCodeHash", "setupProvenance", "singletonAddress", "singletonSlot", "threshold"]);
-  for (const operation of root.operations) allowedObject(operation, ["baseFeePerGas", "blockGasLimit", "expectedAddress", "nestedAddress", "gasEstimate", "gasLimit", "initcode", "initcodeHash", "intentHash", "kind", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "runtime", "runtimeHash", "value", "id"]);
-  return root as unknown as ProductionExpectation;
-}
+export { readDeploymentFile };

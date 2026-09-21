@@ -37,8 +37,19 @@ export function encodeDeploymentGrant(config: DeploymentConfig, grant: Deploymen
     word(grant.kind === "founder" ? 0n : 1n), grant.originalPurpose.slice(2)].join("")}`;
 }
 
-export function encodeProductionFounderReserve(token: Hex, beneficiary: Hex, controller: Hex, allocation: string, start: string, cliff: string, end: string, purpose: Hex): Hex {
-  return `0x${[addressWord(token), addressWord(beneficiary), addressWord(controller), productionWord(BigInt(allocation)), productionWord(BigInt(start)), productionWord(BigInt(cliff)), productionWord(BigInt(end)), productionWord(0n), purpose.slice(2)].join("")}`;
+export interface ProductionFounderReserveInput {
+  readonly token: Hex;
+  readonly beneficiary: Hex;
+  readonly controller: Hex;
+  readonly allocation: string;
+  readonly start: string;
+  readonly cliff: string;
+  readonly end: string;
+  readonly purpose: Hex;
+}
+
+export function encodeProductionFounderReserve(input: ProductionFounderReserveInput): Hex {
+  return `0x${[addressWord(input.token), addressWord(input.beneficiary), addressWord(input.controller), productionWord(BigInt(input.allocation)), productionWord(BigInt(input.start)), productionWord(BigInt(input.cliff)), productionWord(BigInt(input.end)), productionWord(0n), input.purpose.slice(2)].join("")}`;
 }
 
 export function encodeProductionReserveController(token: Hex, controller: Hex, purpose: Hex, rollingCap: string, perGrantCap: string): Hex {

@@ -44,47 +44,72 @@ function sameAllocationSet(deployment: DeploymentConfig, reserve: ReserveGenesis
 }
 
 function checkSafe(safe: DeploymentSafe | undefined, pointer: string, diagnostics: Diagnostic[]): void {
-  if (!safe) return;
+  if (!safe) { return; }
   if (safe.owners.length !== 3 || new Set(safe.owners).size !== 3 || safe.threshold !== 2 || safe.beneficialControl !== "solo-founder") {
     diagnostics.push(error("SAFE_QUALIFICATION", pointer));
   }
+}
+
+function readDeployment(root: Record<string, unknown>, diagnostics: Diagnostic[]): ValidatedDeployment | undefined {
+  if (root.deployment === undefined) {
+    diagnostics.push(error("REQUIRED", "/deployment"));
+    return undefined;
+  }
+  const result = validateDeployment(root.deployment);
+  if (result.value) { return result.value; }
+  diagnostics.push(...result.diagnostics.map(d => ({ ...d, code: `PRODUCTION_DEPLOYMENT_${d.code}` })));
+  return undefined;
+}
+
+function readReserve(root: Record<string, unknown>, diagnostics: Diagnostic[]): ReserveGenesis | undefined {
+  if (root.reserveGenesis === undefined) {
+    diagnostics.push(error("REQUIRED", "/reserveGenesis"));
+    return undefined;
+  }
+  try {
+    return validateReserveGenesis(root.reserveGenesis);
+  } catch {
+    diagnostics.push(error("RESERVE_GENESIS", "/reserveGenesis"));
+    return undefined;
+  }
+}
+
+function readSafeIds(root: Record<string, unknown>, diagnostics: Diagnostic[]): { projectId: string; founderId: string } | undefined {
+  const projectId = root.projectControllerSafeId;
+  const founderId = root.founderBeneficiarySafeId;
+  if (typeof projectId !== "string" || projectId.length === 0) { diagnostics.push(error("SAFE_ID", "/projectControllerSafeId")); }
+  if (typeof founderId !== "string" || founderId.length === 0) { diagnostics.push(error("SAFE_ID", "/founderBeneficiarySafeId")); }
+  if (typeof projectId !== "string" || typeof founderId !== "string") { return undefined; }
+  return { projectId, founderId };
+}
+
+function checkProductionBindings(deployment: ValidatedDeployment, reserve: ReserveGenesis, ids: { projectId: string; founderId: string }, diagnostics: Diagnostic[]): void {
+  if (deployment.status !== "accepted" || deployment.environment.mode !== "mainnet-dry-run" || deployment.environment.evmChainId !== "1") { diagnostics.push(error("MAINNET_MODE", "/deployment/environment")); }
+  if (deployment.token.initialSupplyBaseUnits !== reserve.initialSupplyBaseUnits) { diagnostics.push(error("SUPPLY_BINDING", "/deployment/token/initialSupplyBaseUnits")); }
+  sameAllocationSet(deployment, reserve, diagnostics);
+  const project = safeById(deployment, ids.projectId, "/projectControllerSafeId", diagnostics);
+  const founder = safeById(deployment, ids.founderId, "/founderBeneficiarySafeId", diagnostics);
+  if (project?.address === founder?.address) { diagnostics.push(error("SAFE_ALIAS", "/founderBeneficiarySafeId")); }
+  checkSafe(project, "/deployment/custodySafes/project", diagnostics);
+  checkSafe(founder, "/deployment/custodySafes/founder", diagnostics);
+  if (project && reserve.contributors.controller !== project.address) { diagnostics.push(error("CONTRIBUTOR_CONTROLLER", "/reserveGenesis/contributors/controller")); }
+  if (founder && reserve.founder.beneficiary !== founder.address) { diagnostics.push(error("FOUNDER_BENEFICIARY", "/reserveGenesis/founder/beneficiary")); }
+  if (project && reserve.founder.controller !== project.address) { diagnostics.push(error("FOUNDER_CONTROLLER", "/reserveGenesis/founder/controller")); }
+  if (project && deployment.token.initialCCIPAdmin !== project.address) { diagnostics.push(error("TOKEN_ADMINISTRATOR", "/deployment/token/initialCCIPAdmin")); }
+  if (reserve.allocations.find(a => a.id === "founder")?.bps !== 300 || reserve.allocations.find(a => a.id === "contributors")?.bps !== 1700) { diagnostics.push(error("RESERVE_SPLIT", "/reserveGenesis/allocations")); }
 }
 
 /** Joins the two existing authorities without producing deployable defaults. */
 export function validateProductionDeployment(input: unknown): ProductionValidation {
   const diagnostics: Diagnostic[] = [];
   const root = object(input, ["deployment", "founderBeneficiarySafeId", "projectControllerSafeId", "reserveGenesis", "schema"], "", diagnostics);
-  if (!root || root.schema !== "agtmai-production-deployment-v1") diagnostics.push(error("SCHEMA", "/schema"));
-  if (!root) return { diagnostics: diagnostics.toSorted(compareDiagnostics) };
-  let deployment: ValidatedDeployment | undefined;
-  if (root?.deployment !== undefined) {
-    const result = validateDeployment(root.deployment);
-    if (result.value) deployment = result.value;
-    else diagnostics.push(...result.diagnostics.map(d => ({ ...d, code: `PRODUCTION_DEPLOYMENT_${d.code}` })));
-  } else diagnostics.push(error("REQUIRED", "/deployment"));
-  let reserve: ReserveGenesis | undefined;
-  if (root?.reserveGenesis !== undefined) {
-    try { reserve = validateReserveGenesis(root.reserveGenesis); }
-    catch { diagnostics.push(error("RESERVE_GENESIS", "/reserveGenesis")); }
-  } else diagnostics.push(error("REQUIRED", "/reserveGenesis"));
-  const projectId = root?.projectControllerSafeId;
-  const founderId = root?.founderBeneficiarySafeId;
-  if (typeof projectId !== "string" || projectId.length === 0) diagnostics.push(error("SAFE_ID", "/projectControllerSafeId"));
-  if (typeof founderId !== "string" || founderId.length === 0) diagnostics.push(error("SAFE_ID", "/founderBeneficiarySafeId"));
-  if (!deployment || !reserve || typeof projectId !== "string" || typeof founderId !== "string") return { diagnostics: diagnostics.toSorted(compareDiagnostics) };
-  if (deployment.status !== "accepted" || deployment.environment.mode !== "mainnet-dry-run" || deployment.environment.evmChainId !== "1") diagnostics.push(error("MAINNET_MODE", "/deployment/environment"));
-  if (deployment.token.initialSupplyBaseUnits !== reserve.initialSupplyBaseUnits) diagnostics.push(error("SUPPLY_BINDING", "/deployment/token/initialSupplyBaseUnits"));
-  sameAllocationSet(deployment, reserve, diagnostics);
-  const project = safeById(deployment, projectId, "/projectControllerSafeId", diagnostics);
-  const founder = safeById(deployment, founderId, "/founderBeneficiarySafeId", diagnostics);
-  if (project?.address === founder?.address) diagnostics.push(error("SAFE_ALIAS", "/founderBeneficiarySafeId"));
-  checkSafe(project, "/deployment/custodySafes/project", diagnostics);
-  checkSafe(founder, "/deployment/custodySafes/founder", diagnostics);
-  if (project && reserve.contributors.controller !== project.address) diagnostics.push(error("CONTRIBUTOR_CONTROLLER", "/reserveGenesis/contributors/controller"));
-  if (founder && reserve.founder.beneficiary !== founder.address) diagnostics.push(error("FOUNDER_BENEFICIARY", "/reserveGenesis/founder/beneficiary"));
-  if (project && reserve.founder.controller !== project.address) diagnostics.push(error("FOUNDER_CONTROLLER", "/reserveGenesis/founder/controller"));
-  if (project && deployment.token.initialCCIPAdmin !== project.address) diagnostics.push(error("TOKEN_ADMINISTRATOR", "/deployment/token/initialCCIPAdmin"));
-  if (reserve.allocations.find(a => a.id === "founder")?.bps !== 300 || reserve.allocations.find(a => a.id === "contributors")?.bps !== 1700) diagnostics.push(error("RESERVE_SPLIT", "/reserveGenesis/allocations"));
-  if (diagnostics.length) return { diagnostics: diagnostics.toSorted(compareDiagnostics) };
-  return { diagnostics: [], value: structuredClone({ schema: root.schema, deployment, reserveGenesis: reserve, projectControllerSafeId: projectId, founderBeneficiarySafeId: founderId }) as ValidatedProductionDeployment };
+  if (!root || root.schema !== "agtmai-production-deployment-v1") { diagnostics.push(error("SCHEMA", "/schema")); }
+  if (!root) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
+  const deployment = readDeployment(root, diagnostics);
+  const reserve = readReserve(root, diagnostics);
+  const ids = readSafeIds(root, diagnostics);
+  if (!deployment || !reserve || !ids) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
+  checkProductionBindings(deployment, reserve, ids, diagnostics);
+  if (diagnostics.length) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
+  return { diagnostics: [], value: structuredClone({ schema: root.schema, deployment, reserveGenesis: reserve, projectControllerSafeId: ids.projectId, founderBeneficiarySafeId: ids.founderId }) as ValidatedProductionDeployment };
 }

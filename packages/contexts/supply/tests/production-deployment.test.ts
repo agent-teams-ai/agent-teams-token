@@ -1,32 +1,13 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import test from "node:test";
 import { prepareProductionDeployment, type ProductionArtifactPin, type ProductionExpectation } from "../src/features/genesis-manifest/application/prepare-production-deployment.js";
 import { canonicalJson, type JsonValue } from "../src/features/genesis-manifest/application/canonical.js";
 import type { Hex } from "../src/features/genesis-manifest/domain/deployment.js";
 import { validateProductionDeployment } from "../src/features/genesis-manifest/domain/production-deployment.js";
-import { calendarSchedule } from "../src/features/genesis-manifest/domain/grant-schedule.js";
+import { sha256 as digestBytes } from "../src/features/genesis-manifest/adapters/digest.js";
+import { syntheticProductionEnvelope } from "./production-fixture.js";
 
-function syntheticEnvelope(): Record<string, unknown> {
-  const shares = [3000, 3000, 300, 1700, 900, 500, 500, 100];
-  const ids = ["long-term", "users", "founder", "contributors", "operations", "ecosystem", "financing", "liquidity"];
-  const allocations = shares.map((bps, index) => ({ id: ids[index], recipient: `0x${String(index + 1).padStart(40, "0")}`, amountBaseUnits: String(BigInt(bps) * 10_000_000_000_000n), bps }));
-  const disabled = { enabled: false, capacity: "0", rate: "0" };
-  const evm = "0x1111111111111111111111111111111111111111";
-  const solana = "11111111111111111111111111111111";
-  const safe = (id: string, address: string, owners: string[]) => ({ id, address, owners, threshold: 2, beneficialControl: "solo-founder", disclosure: "Synthetic test-only Safe identity." });
-  const deployment = {
-    schemaVersion: 1, deploymentId: "synthetic-production-envelope", status: "accepted",
-    environment: { mode: "mainnet-dry-run", evmChainId: "1", solanaGenesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", evmSelector: "5009297550715157269", solanaSelector: "124615329519749607" },
-    token: { name: "Agent Teams AI", symbol: "AGTMAI", decimals: 9, initialSupplyBaseUnits: "100000000000000000", initialCCIPAdmin: `0x${"b".repeat(40)}` },
-    allocations, grants: [],
-    custodySafes: [safe("project-controller", `0x${"b".repeat(40)}`, [`0x${"c".repeat(40)}`, `0x${"d".repeat(40)}`, `0x${"e".repeat(40)}`]), safe("founder-beneficiary", `0x${"a".repeat(40)}`, [`0x${"f".repeat(40)}`, `0x${"1".repeat(39)}2`, `0x${"1".repeat(39)}3`])],
-    roleAliases: [{ address: `0x${"b".repeat(40)}`, roles: ["safe.project-controller.address", "token.initialCCIPAdmin"] }],
-    bridge: { protocol: { reference: "synthetic-test-only", snapshotSha256: `0x${"1".repeat(64)}`, networkDataSha256: `0x${"2".repeat(64)}` }, ethereum: { token: null, pool: null, router: evm, rmn: evm, registry: evm, registryModule: evm, registryAdministrator: evm, poolOwner: evm, rateLimitAdministrator: evm, rebalancer: null, inbound: disabled, outbound: disabled }, solana: { mint: null, pool: null, poolSigner: null, poolTokenAccount: null, lookupTable: null, tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", router: solana, offRamp: solana, rmn: solana, feeQuoter: solana, burnMintProgram: solana, poolAdministrator: solana, registryAdministrator: solana, upgradeAuthority: null, inbound: disabled, outbound: disabled } },
-    testScenario: null, policy: { tokenExpenditureCeilingBaseUnits: "100000000000000000", evmMaxFeePerGasWei: "10000000000", evmMaxPriorityFeePerGasWei: "1000000000", evmMaxGasPerTransaction: "6000000", evmMaxTotalFeeWei: "300000000000000000", solanaMaxFeeLamports: "100000", solanaMaxTotalFeeLamports: "1000000", observationMaxAgeSeconds: "300", executionDeadline: "2000000000", fundingDeadline: "1799999940", fundingLeadSeconds: "60", estimateValiditySeconds: "120", gasBufferBps: 1500 },
-  };
-  return { schema: "agtmai-production-deployment-v1", deployment, reserveGenesis: { schema: "agtmai-reserve-genesis-v1", status: "accepted", initialSupplyBaseUnits: "100000000000000000", allocations, founder: { beneficiary: `0x${"a".repeat(40)}`, controller: `0x${"b".repeat(40)}`, purpose: `0x${"3".repeat(64)}`, schedule: calendarSchedule("1800000000") }, contributors: { controller: `0x${"b".repeat(40)}`, purpose: `0x${"4".repeat(64)}`, rollingCapBaseUnits: "16000000000000000", perGrantCapBaseUnits: "5000000000000000" } }, projectControllerSafeId: "project-controller", founderBeneficiarySafeId: "founder-beneficiary" };
-}
+const syntheticEnvelope = syntheticProductionEnvelope;
 
 test("synthetic accepted production envelope binds supply, allocations, Safe roles and reserve controllers", () => {
   const result = validateProductionDeployment(syntheticEnvelope());
@@ -75,7 +56,7 @@ test("separate solo-founder Safes may use the same three approved owner keys", (
   assert.ok(result.value);
 });
 
-const sha256 = (bytes: Uint8Array): Hex => `0x${createHash("sha256").update(bytes).digest("hex")}`;
+const sha256 = (bytes: Uint8Array): Hex => digestBytes(bytes);
 const hash = (value: string): Hex => sha256(new TextEncoder().encode(value));
 
 function syntheticPreparation(): {
@@ -94,9 +75,9 @@ function syntheticPreparation(): {
     allocations.find(allocation => allocation.id === "contributors")!.recipient = contributorReserve;
   }
   const artifacts: ProductionArtifactPin[] = [
-    { contract: "ReserveController", creationBytecode: "0x03", runtimeBytecode: "0x33", artifactSha256: hash("controller-artifact"), buildInfoSha256: hash("controller-build"), compilerInputSha256: hash("controller-input"), immutableReferences: [] },
-    { contract: "AGTMAICCIPToken", creationBytecode: "0x01", runtimeBytecode: "0x11", artifactSha256: hash("token-artifact"), buildInfoSha256: hash("token-build"), compilerInputSha256: hash("token-input"), immutableReferences: [] },
-    { contract: "FounderGrantReserve", creationBytecode: "0x02", runtimeBytecode: "0x22", artifactSha256: hash("founder-artifact"), buildInfoSha256: hash("founder-build"), compilerInputSha256: hash("founder-input"), immutableReferences: [] },
+    { contract: "ReserveController", compilerVersion: "0.8.36", creationBytecode: "0x03", runtimeBytecode: "0x33", artifactSha256: hash("controller-artifact"), buildInfoSha256: hash("controller-build"), compilerInputSha256: hash("controller-input"), immutableReferences: [] },
+    { contract: "AGTMAICCIPToken", compilerVersion: "0.8.36", creationBytecode: "0x01", runtimeBytecode: "0x11", artifactSha256: hash("token-artifact"), buildInfoSha256: hash("token-build"), compilerInputSha256: hash("token-input"), immutableReferences: [] },
+    { contract: "FounderGrantReserve", compilerVersion: "0.8.36", creationBytecode: "0x02", runtimeBytecode: "0x22", artifactSha256: hash("founder-artifact"), buildInfoSha256: hash("founder-build"), compilerInputSha256: hash("founder-input"), immutableReferences: [] },
   ];
   const sourceRevision = "b".repeat(40);
   const validated = validateProductionDeployment(value).value!;
@@ -109,17 +90,24 @@ function syntheticPreparation(): {
   const tokenInitcode = "0x01aa" as Hex;
   const founderInitcode = "0x02bb" as Hex;
   const controllerInitcode = "0x03cc" as Hex;
+  const gas = { gasEstimate: "100", gasLimit: "115", baseFeePerGas: "1", maxPriorityFeePerGas: "1", maxFeePerGas: "2", blockGasLimit: "10000000", value: "0" } as const;
+  const fundCalldata = `0x${hash("fund()").slice(2, 10)}` as Hex;
   const operations: ProductionExpectation["operations"] = [
-    { id: "token-create", kind: "create", intentHash: hash("token-intent"), nonce: "10", expectedAddress: `0x${"6".repeat(40)}`, initcode: tokenInitcode, initcodeHash: sha256(Uint8Array.from([0x01, 0xaa])), runtime: "0x11", runtimeHash: sha256(Uint8Array.from([0x11])) },
-    { id: "founder-reserve-create", kind: "create", intentHash: hash("founder-intent"), nonce: "11", expectedAddress: founderReserve, nestedAddress: nestedFounderVault, initcode: founderInitcode, initcodeHash: sha256(Uint8Array.from([0x02, 0xbb])), runtime: "0x22", runtimeHash: sha256(Uint8Array.from([0x22])) },
-    { id: "controller-create", kind: "create", intentHash: hash("controller-intent"), nonce: "12", expectedAddress: contributorReserve, initcode: controllerInitcode, initcodeHash: sha256(Uint8Array.from([0x03, 0xcc])), runtime: "0x33", runtimeHash: sha256(Uint8Array.from([0x33])) },
-    { id: "founder-fund", kind: "call", intentHash: hash("fund-intent"), nonce: "13", expectedAddress: founderReserve },
+    { id: "token-create", kind: "create", intentHash: hash("placeholder"), nonce: "10", expectedAddress: `0x${"6".repeat(40)}`, initcode: tokenInitcode, initcodeHash: sha256(Uint8Array.from([0x01, 0xaa])), runtime: "0x11", runtimeHash: sha256(Uint8Array.from([0x11])), ...gas },
+    { id: "founder-reserve-create", kind: "create", intentHash: hash("placeholder"), nonce: "11", expectedAddress: founderReserve, nestedAddress: nestedFounderVault, initcode: founderInitcode, initcodeHash: sha256(Uint8Array.from([0x02, 0xbb])), runtime: "0x22", runtimeHash: sha256(Uint8Array.from([0x22])), ...gas },
+    { id: "controller-create", kind: "create", intentHash: hash("placeholder"), nonce: "12", expectedAddress: contributorReserve, initcode: controllerInitcode, initcodeHash: sha256(Uint8Array.from([0x03, 0xcc])), runtime: "0x33", runtimeHash: sha256(Uint8Array.from([0x33])), ...gas },
+    { id: "founder-fund", kind: "call", intentHash: hash("placeholder"), nonce: "13", expectedAddress: founderReserve, calldata: fundCalldata, ...gas },
   ];
-  const expectations: ProductionExpectation = { schema: "agtmai-production-expectations-v1", chainId: "1", sourceRevision, configurationSha256, reserveConfigurationSha256, artifactPinsSha256, attemptIdentity: hash("attempt"), sender: `0x${"5".repeat(40)}`, deployer: `0x${"5".repeat(40)}`, startingNonce: "10", maxObservationAgeSeconds: "300", maxTotalCostWei: "100000000000000000", authority: deployment.custodySafes.map(safeState), operations };
+  const sender = `0x${"5".repeat(40)}` as Hex;
+  const intent = (operation: ProductionExpectation["operations"][number], createBytes: Hex, calldata: Hex) => hash(canonicalJson({ domain: "AGTMAI_PRODUCTION_OPERATION_INTENT_V1", chainId: "1", sender, nonce: operation.nonce, kind: operation.kind, target: operation.expectedAddress, createBytes, value: operation.value, calldata } as unknown as JsonValue));
+  const intents = [intent(operations[0]!, tokenInitcode, "0x"), intent(operations[1]!, founderInitcode, "0x"), intent(operations[2]!, controllerInitcode, "0x"), intent(operations[3]!, "0x", fundCalldata)];
+  for (const [index, intentHash] of intents.entries()) {(operations[index] as { intentHash: Hex }).intentHash = intentHash;}
+  const attemptIdentity = hash(canonicalJson({ domain: "AGTMAI_PRODUCTION_ATTEMPT_V1", chainId: "1", sender, startingNonce: "10", intents } as unknown as JsonValue));
+  const expectations: ProductionExpectation = { schema: "agtmai-production-expectations-v1", chainId: "1", sourceRevision, configurationSha256, reserveConfigurationSha256, artifactPinsSha256, attemptIdentity, sender, deployer: sender, startingNonce: "10", maxObservationAgeSeconds: "300", maxTotalCostWei: "100000000000000000", authority: deployment.custodySafes.map(safeState), operations };
   return {
     value,
     pins: { artifactSourceRevision: sourceRevision, artifacts, approval: { schema: "agtmai-production-approval-v1", configurationSha256, reserveConfigurationSha256, reference: "synthetic-review" }, expectations },
-    ports: { encodeToken: () => ({ constructorArgs: "0xaa" }), encodeFounderReserve: () => "0xbb", encodeReserveController: () => "0xcc", keccak256: sha256, createAddress: () => nestedFounderVault },
+    ports: { encodeToken: () => ({ constructorArgs: "0xaa" }), encodeFounderReserve: () => "0xbb", encodeReserveController: () => "0xcc", keccak256: sha256, createAddress: (_sender, nonce) => (({ "10": `0x${"6".repeat(40)}`, "11": founderReserve, "12": contributorReserve } as Record<string, Hex>)[nonce] ?? nestedFounderVault) as Hex },
   };
 }
 
@@ -134,7 +122,7 @@ test("production preparation binds reserve recipients and canonicalizes artifact
 test("production preparation rejects a genesis allocation routed outside its predicted reserve", () => {
   const fixture = syntheticPreparation();
   const value = fixture.value as unknown as { deployment: { allocations: { id: string; recipient: string }[] }; reserveGenesis: { allocations: { id: string; recipient: string }[] } };
-  for (const allocations of [value.deployment.allocations, value.reserveGenesis.allocations]) allocations.find(allocation => allocation.id === "founder")!.recipient = `0x${"4".repeat(40)}`;
+  for (const allocations of [value.deployment.allocations, value.reserveGenesis.allocations]) {allocations.find(allocation => allocation.id === "founder")!.recipient = `0x${"4".repeat(40)}`;}
   const validated = validateProductionDeployment(fixture.value).value!;
   const configurationSha256 = sha256(new TextEncoder().encode(canonicalJson(validated.deployment as unknown as JsonValue)));
   const reserveConfigurationSha256 = sha256(new TextEncoder().encode(canonicalJson(validated.reserveGenesis as unknown as JsonValue)));
@@ -145,4 +133,34 @@ test("production preparation rejects a genesis allocation routed outside its pre
   const result = prepareProductionDeployment(fixture.value, fixture.pins, fixture.ports, sha256);
   assert.equal(result.prepared, undefined);
   assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === "PRODUCTION_RESERVE_RECIPIENT_BINDING"));
+});
+
+test("production preparation rejects caller-asserted nonce, calldata, intent, Safe and policy mutations", () => {
+  const cases: readonly [(fixture: ReturnType<typeof syntheticPreparation>) => void, string][] = [
+    [fixture => { (fixture.pins.expectations.operations[1] as { nonce: string }).nonce = "12"; }, "PRODUCTION_NONCE_SEQUENCE"],
+    [fixture => { (fixture.pins.expectations.operations[3] as { calldata: Hex }).calldata = "0x12345678"; }, "PRODUCTION_FUND_CALLDATA"],
+    [fixture => { (fixture.pins.expectations.operations[0] as { intentHash: Hex }).intentHash = hash("invented"); }, "PRODUCTION_INTENT_HASH"],
+    [fixture => { (fixture.pins.expectations.authority[0] as { owners: readonly Hex[] }).owners = [`0x${"1".repeat(40)}`, `0x${"2".repeat(40)}`, `0x${"3".repeat(40)}`]; }, "PRODUCTION_EXPECTATIONS"],
+    [fixture => { (fixture.pins.expectations.operations[0] as { maxFeePerGas: string }).maxFeePerGas = "10000000001"; }, "PRODUCTION_GAS_FEE_POLICY"],
+  ];
+  for (const [mutate, code] of cases) {
+    const fixture = syntheticPreparation(); mutate(fixture);
+    const result = prepareProductionDeployment(fixture.value, fixture.pins, fixture.ports, sha256);
+    assert.equal(result.prepared, undefined, code);
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === code), code);
+  }
+});
+
+test("runtime immutable claims remain explicitly unresolved while preparation stays truthful", () => {
+  const fixture = syntheticPreparation();
+  const artifact = fixture.pins.artifacts[0] as unknown as { runtimeBytecode: Hex; immutableReferences: { start: number; length: 32 }[] };
+  artifact.runtimeBytecode = `0x${"00".repeat(33)}`;
+  artifact.immutableReferences = [{ start: 1, length: 32 }];
+  const operation = fixture.pins.expectations.operations.find(item => item.id === "controller-create") as { runtime: Hex; runtimeHash: Hex };
+  operation.runtime = artifact.runtimeBytecode; operation.runtimeHash = sha256(Uint8Array.from({ length: 33 }, () => 0));
+  (fixture.pins.expectations as { artifactPinsSha256: Hex }).artifactPinsSha256 = sha256(new TextEncoder().encode(canonicalJson({ schema: "agtmai-production-artifact-pins-v1", sourceRevision: fixture.pins.artifactSourceRevision, artifacts: fixture.pins.artifacts.toSorted((left, right) => left.contract.localeCompare(right.contract)) } as unknown as JsonValue)));
+  const result = prepareProductionDeployment(fixture.value, fixture.pins, fixture.ports, sha256);
+  assert.equal(result.diagnostics.length, 0);
+  assert.equal(result.prepared?.runtimeVerification.status, "unresolved-immutables");
+  assert.equal(result.prepared?.runtimeVerification.reason, "PRODUCTION_RUNTIME_IMMUTABLES_REQUIRE_DETERMINISTIC_LOCAL_EXECUTION");
 });

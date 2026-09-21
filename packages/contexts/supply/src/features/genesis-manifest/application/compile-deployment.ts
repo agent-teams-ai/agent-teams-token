@@ -38,7 +38,7 @@ export function compileDeployment(input: unknown, pins: { readonly sourceRevisio
   // Mainnet-shaped v1 input is intentionally no longer a compilation authority.
   // Production preparation must first bind the accepted reserve envelope.
   if (config.environment.mode === "mainnet-dry-run") {
-    diagnostics.push(failure("PRODUCTION_ENVELOPE_REQUIRED", "/"));
+    diagnostics.push(failure("DEPLOYMENT_PRODUCTION_ENVELOPE_REQUIRED", "/"));
     return { diagnostics };
   }
   const configurationSha256 = ports.sha256(deploymentBytes(config));

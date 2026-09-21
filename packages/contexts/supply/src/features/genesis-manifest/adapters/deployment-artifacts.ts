@@ -61,7 +61,7 @@ async function readProductionPinnedArtifact(input: unknown, path: string): Promi
   const artifact = json(artifactBytes), build = json(buildBytes);
   if (build.solcVersion !== "0.8.36" || record(artifact.metadata).compiler === undefined || record(record(artifact.metadata).compiler).version !== "0.8.36+commit.8a079791") { return refuse(); }
   const { compilerInput, bytecode, runtime } = decodeCompilerOutput(artifact, build, pin.contract);
-  return { artifact: { contract: pin.contract as ProductionArtifactPin["contract"], creationBytecode: bytecode.object as `0x${string}`, runtimeBytecode: runtime.object as `0x${string}`, artifactSha256: pin.artifactSha256, buildInfoSha256: pin.buildInfoSha256, compilerInputSha256: sha256(deploymentBytes(compilerInput)), immutableReferences: immutableReferences(runtime) }, files: {
+  return { artifact: { contract: pin.contract as ProductionArtifactPin["contract"], compilerVersion: "0.8.36", creationBytecode: bytecode.object as `0x${string}`, runtimeBytecode: runtime.object as `0x${string}`, artifactSha256: pin.artifactSha256, buildInfoSha256: pin.buildInfoSha256, compilerInputSha256: sha256(deploymentBytes(compilerInput)), immutableReferences: immutableReferences(runtime) }, files: {
     [`${pin.contract.toLowerCase()}.artifact.json`]: artifactBytes,
     [`${pin.contract.toLowerCase()}.build-info.json`]: buildBytes,
   } };

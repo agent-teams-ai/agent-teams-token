@@ -117,6 +117,7 @@ boundaries:
     entrypoints:
       - packages/contexts/supply/src/features/genesis-manifest/index.ts
       - packages/contexts/supply/src/features/genesis-manifest/composition/compile-local.ts
+      - packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts
       - packages/contexts/supply/src/features/genesis-manifest/composition/passport.ts
       - packages/contexts/supply/src/features/genesis-manifest/composition/passport-cli.ts
     allow:
@@ -245,8 +246,7 @@ boundaries:
       boundaries:
         - tooling.deployment-plan.application
         - tooling.deployment-plan.domain
-      packages:
-        - "@agent-teams/supply"
+      packages: []
       builtins:
         - node:child_process
         - node:crypto
@@ -257,6 +257,7 @@ boundaries:
         - node:url
       runtimeReferences: []
   - id: tooling.deployment-plan.composition
+    dependencyMode: development
     roots:
       - tooling/deployment-plan/src/composition
     entrypoints:
@@ -268,7 +269,8 @@ boundaries:
         - tooling.deployment-plan.adapters
         - tooling.deployment-plan.application
         - tooling.deployment-plan.domain
-      packages: []
+      packages:
+        - "@agent-teams/supply"
       builtins:
         - node:fs
         - node:fs/promises
