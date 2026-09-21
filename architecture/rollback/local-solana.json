@@ -71,8 +71,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "fa7eeb722236bdd419842354e8dd160c78b86f946d868900525eb21d84dadd26",
-      "afterSha256": "7a285b813c29bf740d5ed1fdfc22d7f405a553a30bf3b009e2cda19728cc9a22"
+      "beforeSha256": "24d682d2de87dfa6261476c5127ae5c38192f05b091b611fec693bc14aea874b",
+      "afterSha256": "65f9d68b2d240162b4690c1b50cab90d9f61a2721bf990bd32dc087ad5a09570"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
@@ -87,7 +87,7 @@
     {
       "path": "tooling/toolchain.lock.json",
       "beforeSha256": "b9ddc21e667242342ba9cea9383f0f6b980dbfd8c4af1881f42bcb405f6db286",
-      "afterSha256": "7ccc9e0e914dc3eecaedc4ca89b630eb079606ac160e0efb7b728163d410537f"
+      "afterSha256": "30ea2207004fc35e7b92622198d5310cf8c01497d1f13bb81e46600dabc6bf33"
     },
     {
       "path": "tooling/local-solana/src/README.md",

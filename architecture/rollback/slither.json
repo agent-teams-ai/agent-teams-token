@@ -127,8 +127,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "fa7eeb722236bdd419842354e8dd160c78b86f946d868900525eb21d84dadd26",
-      "afterSha256": "e6d7a3160939fa6196f85a79a314a79bbb885a421f6e85486ae5fadeb73a93b9"
+      "beforeSha256": "24d682d2de87dfa6261476c5127ae5c38192f05b091b611fec693bc14aea874b",
+      "afterSha256": "0d6963b5d2b3fe6636898f48b82eb406d236813778dccc4bdb1121ea6f8dd200"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
@@ -138,7 +138,7 @@
     {
       "path": "tooling/toolchain.lock.json",
       "beforeSha256": "b9ddc21e667242342ba9cea9383f0f6b980dbfd8c4af1881f42bcb405f6db286",
-      "afterSha256": "cbc21d4b05abc9db3b1c3040f620a7b915ab5dbb8a8f1869574a8a5a746d6ee3"
+      "afterSha256": "24c672ad06db3f57a990839a00a98c83e3912d4fc2ee4c80c075e659481b61a6"
     },
     {
       "path": "tooling/security/slither/src/README.md",
