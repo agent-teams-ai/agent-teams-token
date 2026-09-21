@@ -49,19 +49,28 @@ const bytes = (value: unknown): Uint8Array => deploymentBytes(value);
 const hash = (value: Uint8Array): Hex => sha256(value);
 const encode = new TextEncoder();
 
-function sourceArtifact(contract: "AGTMAICCIPToken" | "FounderGrantReserve" | "ReserveController"): { readonly artifact: Record<string, unknown>; readonly build: Record<string, unknown> } {
+const immutableNamesByContract = {
+  AGTMAICCIPToken: ["GENESIS_ALLOCATION_HASH", "INITIAL_CCIP_ADMIN", "INITIAL_SUPPLY"],
+  FounderGrantReserve: ["TOKEN", "VAULT"],
+  ReserveController: ["CONTROLLER", "PER_GRANT_CAP", "PURPOSE", "ROLLING_CAP", "TOKEN"],
+} as const;
+
+function sourceArtifact(contract: "AGTMAICCIPToken" | "FounderGrantReserve" | "ReserveController", omitLastImmutable = false): { readonly artifact: Record<string, unknown>; readonly build: Record<string, unknown>; readonly references: readonly { readonly name: string; readonly start: number; readonly length: 32 }[] } {
   const source = `contracts/${contract}.sol`;
-  const runtime = "00".repeat(33);
   const rawMetadata = `synthetic-${contract}-metadata`;
-  const immutableReferences = { synthetic: [{ start: 1, length: 32 }] };
-  const output = { contracts: { [source]: { [contract]: { metadata: rawMetadata, evm: { bytecode: { object: "6001" }, deployedBytecode: { object: runtime, immutableReferences } } } } } };
+  const names = omitLastImmutable ? immutableNamesByContract[contract].slice(0, -1) : immutableNamesByContract[contract];
+  const runtime = "00".repeat(names.length * 32);
+  const references = names.map((name, index) => ({ name, start: index * 32, length: 32 as const }));
+  const immutableReferences = Object.fromEntries(references.map((reference, index) => [String(index + 1), [{ start: reference.start, length: reference.length }]]));
+  const output = { contracts: { [source]: { [contract]: { metadata: rawMetadata, evm: { bytecode: { object: "6001" }, deployedBytecode: { object: runtime, immutableReferences } } } } }, sources: { [source]: { ast: { nodeType: "SourceUnit", nodes: references.map((reference, index) => ({ nodeType: "VariableDeclaration", id: index + 1, name: reference.name, mutability: "immutable" })) } } } };
   return {
     artifact: { metadata: { compiler: { version: "0.8.36+commit.8a079791" }, settings: { compilationTarget: { [source]: contract } } }, rawMetadata, bytecode: { object: "0x6001", linkReferences: {} }, deployedBytecode: { object: `0x${runtime}`, linkReferences: {}, immutableReferences } },
     build: { solcVersion: "0.8.36", input: { language: "Solidity", settings: { evmVersion: "paris", optimizer: { enabled: true, runs: 200 } } }, output },
+    references,
   };
 }
 
-async function writeProductionInputs(directory: string): Promise<{ readonly config: string; readonly artifacts: string; readonly approval: string; readonly expectations: string }> {
+async function writeProductionInputs(directory: string, incompleteImmutableContract?: keyof typeof immutableNamesByContract): Promise<{ readonly config: string; readonly artifacts: string; readonly approval: string; readonly expectations: string }> {
   const sourceRevision = "b".repeat(40);
   const envelope = syntheticProductionEnvelope();
   const inputDeployment = envelope.deployment as { allocations: { id: string; recipient: Hex; amountBaseUnits: string }[] };
@@ -76,7 +85,7 @@ async function writeProductionInputs(directory: string): Promise<{ readonly conf
   assert.ok(validated.value, validated.diagnostics.map(diagnostic => diagnostic.code).join(","));
   const deployment = validated.value.deployment;
   const reserve = validated.value.reserveGenesis;
-  const artifacts = (["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"] as const).map(contract => ({ contract, ...sourceArtifact(contract) }));
+  const artifacts = (["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"] as const).map(contract => ({ contract, ...sourceArtifact(contract, contract === incompleteImmutableContract) }));
   const pins = artifacts.map(({ contract, artifact, build }) => ({ contract, artifactPath: `${contract.toLowerCase()}.artifact.json`, artifactSha256: hash(bytes(artifact)), buildInfoPath: `${contract.toLowerCase()}.build-info.json`, buildInfoSha256: hash(bytes(build)) }));
   const normalizedAllocations = deployment.allocations.map(allocation => ({
     id: allocation.id,
@@ -90,13 +99,14 @@ async function writeProductionInputs(directory: string): Promise<{ readonly conf
   const controllerInitcode = `0x6001${encodeProductionReserveController(addresses[0]!, reserve.contributors.controller as Hex, reserve.contributors.purpose as Hex, reserve.contributors.rollingCapBaseUnits, reserve.contributors.perGrantCapBaseUnits).slice(2)}` as Hex;
   const configurationSha256 = hash(encode.encode(canonicalJson(deployment as unknown as JsonValue)));
   const reserveConfigurationSha256 = hash(encode.encode(canonicalJson(reserve as unknown as JsonValue)));
-  const artifactPinsSha256 = hash(encode.encode(canonicalJson({ schema: "agtmai-production-artifact-pins-v1", sourceRevision, artifacts: artifacts.map(({ contract, artifact, build }) => ({ contract, compilerVersion: "0.8.36", creationBytecode: "0x6001", runtimeBytecode: (artifact.deployedBytecode as { object: Hex }).object, artifactSha256: hash(bytes(artifact)), buildInfoSha256: hash(bytes(build)), compilerInputSha256: hash(bytes(build.input)), immutableReferences: [{ start: 1, length: 32 }] })).toSorted((left, right) => left.contract.localeCompare(right.contract)) } as unknown as JsonValue)));
+  const artifactPinsSha256 = hash(encode.encode(canonicalJson({ schema: "agtmai-production-artifact-pins-v1", sourceRevision, artifacts: artifacts.map(({ contract, artifact, build, references }) => ({ contract, compilerVersion: "0.8.36", creationBytecode: "0x6001", runtimeBytecode: (artifact.deployedBytecode as { object: Hex }).object, artifactSha256: hash(bytes(artifact)), buildInfoSha256: hash(bytes(build)), compilerInputSha256: hash(bytes(build.input)), immutableReferences: references })).toSorted((left, right) => left.contract.localeCompare(right.contract)) } as unknown as JsonValue)));
   const gas = { gasEstimate: "100", gasLimit: "115", baseFeePerGas: "1", maxPriorityFeePerGas: "1", maxFeePerGas: "2", blockGasLimit: "10000000", value: "0" } as const;
   const calldata = `0x${keccakBytes(encode.encode("fund()")).slice(2, 10)}` as Hex;
+  const runtime = (contract: keyof typeof immutableNamesByContract): Hex => (artifacts.find(artifact => artifact.contract === contract)!.artifact.deployedBytecode as { object: Hex }).object;
   const operations = [
-    { id: "token-create", kind: "create" as const, nonce: "10", expectedAddress: addresses[0]!, initcode: tokenInitcode, initcodeHash: keccakBytes(hex(tokenInitcode)), runtime: `0x${"00".repeat(33)}`, runtimeHash: keccakBytes(hex(`0x${"00".repeat(33)}`)), ...gas },
-    { id: "founder-reserve-create", kind: "create" as const, nonce: "11", expectedAddress: addresses[1]!, nestedAddress: deploymentCreateAddress(addresses[1]!, "1"), initcode: founderInitcode, initcodeHash: keccakBytes(hex(founderInitcode)), runtime: `0x${"00".repeat(33)}`, runtimeHash: keccakBytes(hex(`0x${"00".repeat(33)}`)), ...gas },
-    { id: "controller-create", kind: "create" as const, nonce: "12", expectedAddress: addresses[2]!, initcode: controllerInitcode, initcodeHash: keccakBytes(hex(controllerInitcode)), runtime: `0x${"00".repeat(33)}`, runtimeHash: keccakBytes(hex(`0x${"00".repeat(33)}`)), ...gas },
+    { id: "token-create", kind: "create" as const, nonce: "10", expectedAddress: addresses[0]!, initcode: tokenInitcode, initcodeHash: keccakBytes(hex(tokenInitcode)), runtime: runtime("AGTMAICCIPToken"), runtimeHash: keccakBytes(hex(runtime("AGTMAICCIPToken"))), ...gas },
+    { id: "founder-reserve-create", kind: "create" as const, nonce: "11", expectedAddress: addresses[1]!, nestedAddress: deploymentCreateAddress(addresses[1]!, "1"), initcode: founderInitcode, initcodeHash: keccakBytes(hex(founderInitcode)), runtime: runtime("FounderGrantReserve"), runtimeHash: keccakBytes(hex(runtime("FounderGrantReserve"))), ...gas },
+    { id: "controller-create", kind: "create" as const, nonce: "12", expectedAddress: addresses[2]!, initcode: controllerInitcode, initcodeHash: keccakBytes(hex(controllerInitcode)), runtime: runtime("ReserveController"), runtimeHash: keccakBytes(hex(runtime("ReserveController"))), ...gas },
     { id: "founder-fund", kind: "call" as const, nonce: "13", expectedAddress: addresses[1]!, calldata, ...gas },
   ];
   const intents = operations.map(operation => keccakBytes(encode.encode(canonicalJson({ domain: "AGTMAI_PRODUCTION_OPERATION_INTENT_V1", chainId: "1", sender, nonce: operation.nonce, kind: operation.kind, target: operation.expectedAddress, createBytes: operation.kind === "create" ? operation.initcode : "0x", value: operation.value, calldata: operation.kind === "call" ? operation.calldata : "0x" } as unknown as JsonValue))));
@@ -139,4 +149,16 @@ test("production package reconstruction rejects authenticated tampering and inve
   await assert.rejects(loadPreparedProductionPackage(extra), /DEPLOYMENT_PRODUCTION_PACKAGE_INVENTORY/);
   const missing = await compile("missing"); await unlink(join(missing, "production-approval.json")); await replaceInventory(missing);
   await assert.rejects(loadPreparedProductionPackage(missing), /DEPLOYMENT_PRODUCTION_PACKAGE_INVENTORY/);
+});
+
+test("production artifact authentication requires every expected immutable name", async context => {
+  const parent = resolve("../../../.local/production-package-tests"); await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(join(parent, "immutable-names-")); context.after(() => rm(root, { recursive: true, force: true }));
+  for (const contract of Object.keys(immutableNamesByContract) as (keyof typeof immutableNamesByContract)[]) {
+    const inputRoot = join(root, contract); await mkdir(inputRoot);
+    const inputs = await writeProductionInputs(inputRoot, contract);
+    const result = run(["compile-production", "--config", inputs.config, "--artifacts", inputs.artifacts, "--approval", inputs.approval, "--expectations", inputs.expectations, "--output", join(root, `${contract}-output`)]);
+    assert.notEqual(result.status, 0, contract);
+    assert.match(result.stdout + result.stderr, /DEPLOYMENT_ARTIFACT_PINS_INVALID/, contract);
+  }
 });

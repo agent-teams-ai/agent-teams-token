@@ -44,11 +44,14 @@
     "tooling/deployment-plan/tests/domain.test.ts",
     "tooling/deployment-plan/tests/fixtures/forge-build-info-1.8.0-representative.json",
     "tooling/deployment-plan/tests/helpers/no-replace-directory-rename.ts",
+    "tooling/deployment-plan/tests/helpers/real-production-package.ts",
     "tooling/deployment-plan/tests/helpers/temporary-directory.ts",
     "tooling/deployment-plan/tests/native-no-replace.test.ts",
     "tooling/deployment-plan/tests/native-provenance-fixture.ts",
     "tooling/deployment-plan/tests/planner.test.ts",
     "tooling/deployment-plan/tests/policy-json-corpus.json",
+    "tooling/deployment-plan/tests/production-execution.integration.test.ts",
+    "tooling/deployment-plan/tests/production-execution.test.ts",
     "tooling/deployment-plan/tests/production-guards.test.ts",
     "tooling/deployment-plan/tests/production-native-policy.test.ts",
     "tooling/deployment-plan/tests/raw-artifact-fixture.ts",
@@ -83,8 +86,38 @@
       "afterSha256": "1fb14c130412afb8dcad87dac8d43f6cf7c2f826d31fd9a9242e507cb6d647ab"
     },
     {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+      "beforeSha256": "cdb43c639eb82e0f862904639db2cc403f110d2fb7c05b82ae35365c8eb99f5a",
+      "afterSha256": "9ad40ca763848d8aa572240adcb1482b82d9a46f993ed1e550197d0b2f26ae47"
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+      "beforeSha256": "30b7ab175fd2134173cae1aeae144a5dabca9c6dc02429c1b254548ebfed36ab",
+      "afterSha256": "ed2aced7a31e8e30ebcf5fe46722effae0af6fbdbe75ef3ecdc727133e636c22"
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+      "beforeSha256": "8ab52a2ad05ffbdc93d7d9259c0473c3cc7872b4a77feca3439c5bc2ca68c409",
+      "afterSha256": "b21325d8ef6d9adf0f04ae314f7e6ce9ea824dddd9b67c46782ae38b85aa4046"
+    },
+    {
+      "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
+      "beforeSha256": "bb6de39043dcc923ef1336c24b5240f34835652c8b0b305a8099a258db117c24",
+      "afterSha256": "f731b5370a5b3f98895d0e74c5f8e55bdf5a2296b71d5db3d1791d02b274326d"
+    },
+    {
+      "path": "packages/contexts/supply/tests/production-deployment.test.ts",
+      "beforeSha256": "27135a8271b03b0baca9a9c2d6bd010d9797a61026010ec450875151682db651",
+      "afterSha256": "b8938b47ebd49c7eb944cbd8d6f98e3b1fedbcb60d881f825f3b2ac15ef3a1a4"
+    },
+    {
       "path": "scripts/deployment/estimate-local.ts",
       "beforeSha256": "e0311b72412dc6af1adba470cb4145ea1f08bdd94d3983ae97717a8c85abdbdd",
+      "afterSha256": "absent"
+    },
+    {
+      "path": "scripts/deployment/local-execution-proof.ts",
+      "beforeSha256": "613ed65bd4d5b81cd30181915d44a0d499ab99b2d317cab6c6ce8cbf55251b45",
       "afterSha256": "absent"
     },
     {
@@ -96,15 +129,45 @@
       "path": "tooling/deployment-plan/src/README.md",
       "beforeSha256": "absent",
       "afterSha256": "e497a44eec3f9c82b7a859f799e8d39266e9b7b207da6b262b165badf0200f62"
+    },
+    {
+      "path": "tooling/local-evm/process.ts",
+      "beforeSha256": "f081446219ab0816a3905cfc86bd5aa99f9a64e3f1c097a313a6c52fa78e0c33",
+      "afterSha256": "74c901f9b039f185bd306efa31d1fff566ab46ec98b7a75dd133ce1b83063bff"
+    },
+    {
+      "path": "tooling/local-evm/rpc.ts",
+      "beforeSha256": "659e2862a146e4ade666f2a269f1e02a33e557f7d31c7d7c88a2a23af9d464db",
+      "afterSha256": "4e8c3fe1ec97161ef7e0ad05b604915cc1aa15e19734984af7c2339e6b30e4bb"
+    },
+    {
+      "path": "tooling/local-evm/tests/rpc.test.ts",
+      "beforeSha256": "ceb80de2b96fb86629be2e8a56be2a5d5ebc72a62d62aa9de2ed4b81096dc391",
+      "afterSha256": "731bf0f8f357ba62505e49ac52d2724be1bc674c9f8f2a07980aa5f200459f39"
+    },
+    {
+      "path": "tooling/local-evm/toolchain.ts",
+      "beforeSha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e",
+      "afterSha256": "024fd537c43eb5fb067c485075dfe151ca764871f625e9250df29d1bfef27177"
     }
   ],
   "sharedPaths": [
     ".github/workflows/ci.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
+    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+    "packages/contexts/supply/tests/deployment-cli.test.ts",
+    "packages/contexts/supply/tests/production-deployment.test.ts",
     "scripts/deployment/estimate-local.ts",
+    "scripts/deployment/local-execution-proof.ts",
     "scripts/tests/workflow.test.mjs",
-    "tooling/deployment-plan/src/README.md"
+    "tooling/deployment-plan/src/README.md",
+    "tooling/local-evm/process.ts",
+    "tooling/local-evm/rpc.ts",
+    "tooling/local-evm/tests/rpc.test.ts",
+    "tooling/local-evm/toolchain.ts"
   ],
   "retainedSharedPaths": [
     {

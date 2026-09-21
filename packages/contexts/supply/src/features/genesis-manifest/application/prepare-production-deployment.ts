@@ -11,7 +11,7 @@ export interface ProductionArtifactPin {
   readonly artifactSha256: Hex;
   readonly buildInfoSha256: Hex;
   readonly compilerInputSha256: Hex;
-  readonly immutableReferences: readonly { readonly start: number; readonly length: 32 }[];
+  readonly immutableReferences: readonly { readonly name: string; readonly start: number; readonly length: 32 }[];
 }
 export interface ProductionExpectation {
   readonly schema: "agtmai-production-expectations-v1";
@@ -51,7 +51,7 @@ export interface PreparedProductionDeployment {
       readonly contract: ProductionArtifactPin["contract"];
       readonly compilerVersion: "0.8.36";
       readonly compilerInputSha256: Hex;
-      readonly immutableReferences: readonly { readonly start: number; readonly length: 32 }[];
+      readonly immutableReferences: readonly { readonly name: string; readonly start: number; readonly length: 32 }[];
     }[];
   };
   readonly coverage: "token-and-reserves-only";
@@ -139,7 +139,7 @@ function validateArtifacts(pins: { readonly artifactSourceRevision: string; read
   if (pins.expectations.artifactPinsSha256 !== selected) {diagnostics.push(invalid("ARTIFACT_PIN_BINDING", "/expectations/artifactPinsSha256"));}
   if (pins.artifactSourceRevision !== pins.expectations.sourceRevision) {diagnostics.push(invalid("SOURCE_REVISION_BINDING", "/expectations/sourceRevision"));}
   const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"];
-  const valid = pins.artifacts.length === 3 && new Set(pins.artifacts.map(a => a.contract)).size === 3 && pins.artifacts.every(artifact => contracts.includes(artifact.contract) && artifact.compilerVersion === "0.8.36" && digest(artifact.artifactSha256) && digest(artifact.buildInfoSha256) && digest(artifact.compilerInputSha256) && bytes(artifact.creationBytecode) && bytes(artifact.runtimeBytecode) && Array.isArray(artifact.immutableReferences) && artifact.immutableReferences.every(reference => Number.isSafeInteger(reference.start) && reference.start >= 0 && reference.length === 32 && (reference.start + 32) * 2 <= artifact.runtimeBytecode.length - 2));
+  const valid = pins.artifacts.length === 3 && new Set(pins.artifacts.map(a => a.contract)).size === 3 && pins.artifacts.every(artifact => contracts.includes(artifact.contract) && artifact.compilerVersion === "0.8.36" && digest(artifact.artifactSha256) && digest(artifact.buildInfoSha256) && digest(artifact.compilerInputSha256) && bytes(artifact.creationBytecode) && bytes(artifact.runtimeBytecode) && Array.isArray(artifact.immutableReferences) && artifact.immutableReferences.every(reference => /^[A-Z][A-Z0-9_]{0,63}$/.test(reference.name) && Number.isSafeInteger(reference.start) && reference.start >= 0 && reference.length === 32 && (reference.start + 32) * 2 <= artifact.runtimeBytecode.length - 2));
   if (!valid) {diagnostics.push(invalid("ARTIFACTS", "/artifacts"));}
 }
 

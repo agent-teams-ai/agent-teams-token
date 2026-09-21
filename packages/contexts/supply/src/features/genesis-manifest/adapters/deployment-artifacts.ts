@@ -61,7 +61,7 @@ async function readProductionPinnedArtifact(input: unknown, path: string): Promi
   const artifact = json(artifactBytes), build = json(buildBytes);
   if (build.solcVersion !== "0.8.36" || record(artifact.metadata).compiler === undefined || record(record(artifact.metadata).compiler).version !== "0.8.36+commit.8a079791") { return refuse(); }
   const { compilerInput, bytecode, runtime } = decodeCompilerOutput(artifact, build, pin.contract);
-  return { artifact: { contract: pin.contract as ProductionArtifactPin["contract"], compilerVersion: "0.8.36", creationBytecode: bytecode.object as `0x${string}`, runtimeBytecode: runtime.object as `0x${string}`, artifactSha256: pin.artifactSha256, buildInfoSha256: pin.buildInfoSha256, compilerInputSha256: sha256(deploymentBytes(compilerInput)), immutableReferences: immutableReferences(runtime) }, files: {
+  return { artifact: { contract: pin.contract as ProductionArtifactPin["contract"], compilerVersion: "0.8.36", creationBytecode: bytecode.object as `0x${string}`, runtimeBytecode: runtime.object as `0x${string}`, artifactSha256: pin.artifactSha256, buildInfoSha256: pin.buildInfoSha256, compilerInputSha256: sha256(deploymentBytes(compilerInput)), immutableReferences: productionImmutableReferences(runtime, build, pin.contract) }, files: {
     [`${pin.contract.toLowerCase()}.artifact.json`]: artifactBytes,
     [`${pin.contract.toLowerCase()}.build-info.json`]: buildBytes,
   } };
@@ -125,6 +125,39 @@ function immutableReferences(runtime: Record<string, unknown>): readonly { reado
     }).toSorted((a, b) => a.start - b.start);
     if (!references.length || references.some((r, i) => i > 0 && r.start < references[i - 1]!.start + 32)) { return refuse(); }
     return references;
+}
+
+function productionImmutableReferences(runtime: Record<string, unknown>, build: Record<string, unknown>, contract: string): readonly { readonly name: string; readonly start: number; readonly length: 32 }[] {
+    const names = immutableNames(build);
+    const references = Object.entries(record(runtime.immutableReferences)).flatMap(([identifier, value]) => {
+      const name = names.get(identifier);
+      if (!name || !Array.isArray(value)) { return refuse(); }
+      return value.map(item => {
+        const r = record(item); exact(r, ["start", "length"]);
+        if (!Number.isSafeInteger(r.start) || (r.start as number) < 0 || r.length !== 32 || ((r.start as number) + 32) * 2 > (runtime.object as string).length - 2) { return refuse(); }
+        return { name, start: r.start as number, length: 32 as const };
+      });
+    }).toSorted((a, b) => a.start - b.start);
+    const expected = contract === "AGTMAICCIPToken" ? ["GENESIS_ALLOCATION_HASH", "INITIAL_CCIP_ADMIN", "INITIAL_SUPPLY"]
+      : contract === "FounderGrantReserve" ? ["TOKEN", "VAULT"]
+      : contract === "ReserveController" ? ["CONTROLLER", "PER_GRANT_CAP", "PURPOSE", "ROLLING_CAP", "TOKEN"] : [];
+    const observedNames = [...new Set(references.map(reference => reference.name))].toSorted();
+    if (observedNames.join() !== expected.toSorted().join()
+      || references.some((reference, index) => index > 0 && reference.start < references[index - 1]!.start + 32)) { return refuse(); }
+    return references;
+}
+
+function immutableNames(build: Record<string, unknown>): ReadonlyMap<string, string> {
+    const names = new Map<string, string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) { for (const item of value) { visit(item); } return; }
+      if (value === null || typeof value !== "object") { return; }
+      const item = value as Record<string, unknown>;
+      if (item.nodeType === "VariableDeclaration" && item.mutability === "immutable" && Number.isSafeInteger(item.id) && typeof item.name === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(item.name)) { names.set(String(item.id), item.name); }
+      for (const child of Object.values(item)) { visit(child); }
+    };
+    visit(record(record(build.output).sources));
+    return names;
 }
 
 /** Reopen the actual pinned inputs; a claimed artifact hash alone cannot authenticate immutable slots. */

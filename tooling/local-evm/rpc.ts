@@ -13,6 +13,11 @@ const VERIFY_METHODS = new Set([
   "eth_getTransactionByHash",
   "eth_getTransactionReceipt",
 ]);
+const LOCAL_EXECUTION_METHODS = new Set([
+  "eth_call", "eth_chainId", "net_version", "eth_getCode", "eth_getBalance", "eth_getStorageAt",
+  "eth_getTransactionCount", "eth_estimateGas", "eth_getTransactionByHash",
+  "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_blockNumber", "anvil_setNonce",
+]);
 
 interface PrivateRpcEndpoint {
   readonly port: number;
@@ -41,6 +46,25 @@ export function createRpcClient(rpcUrl: string): RpcClient {
       if (!isRecord(value) || value.id !== requestId || value.jsonrpc !== "2.0" || !("result" in value) || value.error !== undefined) {
         throw new LocalEvmError("VERIFY_RPC_RESPONSE_INVALID", `local RPC returned an invalid response for ${method}`);
       }
+      return value.result;
+    },
+  };
+}
+
+/** Authenticated loopback client used only by the disposable execution proof. */
+export function createLocalExecutionRpcClient(rpcUrl: string): RpcClient {
+  const endpoint = parsePrivateRpcUrl(rpcUrl);
+  let identifier = 0;
+  return {
+    async request(method, params = []): Promise<unknown> {
+      if (!LOCAL_EXECUTION_METHODS.has(method)) {throw new LocalEvmError("LOCAL_EVM_RPC_METHOD_INVALID", "RPC method is not allowlisted for local execution");}
+      const requestId = identifier += 1;
+      const value = await directJsonRpc(endpoint, {identifier: requestId, method, params}, 10_000, "LOCAL_EVM");
+      if (isRecord(value) && value.id === requestId && value.jsonrpc === "2.0" && isRecord(value.error)
+        && typeof value.error.code === "number" && typeof value.error.message === "string") {
+        throw new LocalEvmError("LOCAL_EVM_RPC_EXECUTION_ERROR", `local RPC rejected ${method}`);
+      }
+      if (!isRecord(value) || value.id !== requestId || value.jsonrpc !== "2.0" || !Object.hasOwn(value, "result") || value.error !== undefined) {throw new LocalEvmError("LOCAL_EVM_RPC_RESPONSE_INVALID", `local RPC returned an invalid response for ${method}`);}
       return value.result;
     },
   };

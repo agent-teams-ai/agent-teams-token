@@ -5,10 +5,29 @@ import { Socket } from "node:net";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { assertPrivateRpcUrl, bootstrapRpcRequest, createRpcClient } from "../rpc.ts";
+import { realpath } from "node:fs/promises";
+import { resolve as resolvePath } from "node:path";
+import { assertPrivateRpcUrl, bootstrapRpcRequest, createLocalExecutionRpcClient, createRpcClient } from "../rpc.ts";
+import { startOwnedAnvil } from "../process.ts";
+import { pinnedFoundryBinaries } from "../toolchain.ts";
 
 const servers = new Set<Server>();
 const execute = promisify(execFile);
+const repositoryRoot = await realpath(resolvePath(import.meta.dirname, "../../.."));
+
+test("owned Anvil accepts only canonical chain-one proof options", {timeout: 20_000}, async () => {
+  const first = "0x7000000000000000000000000000000000000001";
+  const {anvil: anvilBinary} = pinnedFoundryBinaries(repositoryRoot);
+  await assert.rejects(startOwnedAnvil(anvilBinary, first, undefined, {chainId: "01"}), /options must be canonical local-only values/);
+  await assert.rejects(startOwnedAnvil(anvilBinary, first, undefined, {chainId: "1", autoImpersonate: true} as never), /options must be canonical local-only values/);
+  const anvil = await startOwnedAnvil(anvilBinary, first, undefined, {chainId: "1", timestamp: "1800000000"});
+  try {
+    const rpc = createLocalExecutionRpcClient(anvil.rpcUrl);
+    assert.equal(BigInt(await rpc.request("eth_chainId") as string).toString(), "1");
+    assert.equal(await rpc.request("net_version"), "1");
+    assert.equal(BigInt(await rpc.request("eth_getBalance", [first, "latest"]) as string) > 0n, true);
+  } finally {await anvil.stop();}
+});
 
 afterEach(async () => {
   await Promise.all([...servers].map(async (server) => await new Promise<void>((resolve) => {
@@ -254,6 +273,21 @@ test("transport rejects malformed methods and bounded oversized responses", asyn
   await assert.rejects(bootstrapRpcRequest(oversized, "eth_sendRawTransaction", []), hasCode("LOCAL_EVM_RPC_METHOD_INVALID"));
   await assert.rejects(createRpcClient(oversized).request("eth_sendRawTransaction"), hasCode("VERIFY_RPC_METHOD_INVALID"));
   await assert.rejects(createRpcClient(oversized).request("eth_chainId"), hasCode("VERIFY_RPC_RESPONSE_TOO_LARGE"));
+});
+
+test("local execution RPC distinguishes a bounded EVM revert from malformed transport", async () => {
+  const url = await listen(createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {id: number};
+      response.writeHead(200, {"content-type": "application/json"});
+      response.end(JSON.stringify({jsonrpc: "2.0", id: body.id, error: {code: -32_000, message: "execution reverted", data: "0x"}}));
+    });
+  }));
+  await assert.rejects(createLocalExecutionRpcClient(url).request("eth_call", []), hasCode("LOCAL_EVM_RPC_EXECUTION_ERROR"));
+  await assert.rejects(createLocalExecutionRpcClient(url).request("eth_sendTransaction", []), hasCode("LOCAL_EVM_RPC_METHOD_INVALID"));
+  await assert.rejects(createLocalExecutionRpcClient(url).request("eth_sendRawTransaction", []), hasCode("LOCAL_EVM_RPC_METHOD_INVALID"));
 });
 
 async function listen(server: Server): Promise<string> {

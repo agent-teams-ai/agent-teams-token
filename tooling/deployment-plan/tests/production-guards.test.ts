@@ -33,7 +33,7 @@ const preparedOperations = (operations: ReturnType<typeof completeFixture>["expe
   ? { id: operation.id, kind: operation.kind, intentHash: operation.intentHash, nonce: operation.nonce, expectedAddress: operation.expectedAddress, ...(operation.nestedAddress === undefined ? {} : { nestedAddress: operation.nestedAddress }), initcode: operation.initcode, value: operation.value }
   : { id: operation.id, kind: operation.kind, intentHash: operation.intentHash, nonce: operation.nonce, to: operation.expectedAddress, calldata: operation.calldata, value: operation.value });
 const preparedEnvelope = (fixture: ReturnType<typeof completeFixture>) => {
-  const artifacts: { contract: string; compilerVersion: string; artifactSha256: string; buildInfoSha256: string; compilerInputSha256: string; creationBytecode: string; runtimeBytecode: string; immutableReferences: { start: number; length: number }[] }[] = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"].map(contract => ({ contract, compilerVersion: "0.8.36", artifactSha256: hash, buildInfoSha256: hash, compilerInputSha256: hash, creationBytecode: bytes, runtimeBytecode: bytes, immutableReferences: [] }));
+  const artifacts: { contract: string; compilerVersion: string; artifactSha256: string; buildInfoSha256: string; compilerInputSha256: string; creationBytecode: string; runtimeBytecode: string; immutableReferences: { name: string; start: number; length: number }[] }[] = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"].map(contract => ({ contract, compilerVersion: "0.8.36", artifactSha256: hash, buildInfoSha256: hash, compilerInputSha256: hash, creationBytecode: bytes, runtimeBytecode: bytes, immutableReferences: [] }));
   return {
     schema: "agtmai-prepared-production-deployment-v1", broadcastAllowed: false, coverage: "token-and-reserves-only",
     configurationSha256: hash, reserveConfigurationSha256: hash,
@@ -198,7 +198,7 @@ test("preflight compares complete embedded expectations and every prepared opera
 
 test("preflight blocks an authenticated package whose immutable runtime proof is unresolved", () => {
   const fixture = completeFixture(), prepared = preparedEnvelope(fixture);
-  prepared.artifacts[0]!.immutableReferences = [{ start: 1, length: 32 }];
+  prepared.artifacts[0]!.immutableReferences = [{ name: "INITIAL_SUPPLY", start: 1, length: 32 }];
   (prepared as { runtimeVerification: unknown }).runtimeVerification = { status: "unresolved-immutables", reason: "PRODUCTION_RUNTIME_IMMUTABLES_REQUIRE_DETERMINISTIC_LOCAL_EXECUTION", contracts: prepared.artifacts.map(({ contract, compilerVersion, compilerInputSha256, immutableReferences }) => ({ contract, compilerVersion, compilerInputSha256, immutableReferences })) };
   const result = assessProductionPreflight({ prepared, expectations: fixture.expectations, observations: fixture.observations, attempt: fixture.attempt, nowSeconds: 150n, preparedConfigurationSha256: hash, preparedReserveConfigurationSha256: hash, preparedArtifactPinsSha256: hash });
   assert.equal(result.status, "blocked");

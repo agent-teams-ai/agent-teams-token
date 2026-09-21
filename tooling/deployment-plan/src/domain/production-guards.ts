@@ -18,13 +18,36 @@ export interface ProductionExpectations {
   readonly authority: readonly SafeState[];
 }
 export interface ProductionObservation {
+  readonly schema?: "agtmai-production-observation-v2";
   readonly chainId: string; readonly sender: string; readonly pendingNonce: string; readonly blockNumber: string;
   readonly blockHash: string; readonly observedAt: string; readonly expiresAt: string;
-  readonly operations: readonly { readonly id: string; readonly address?: string; readonly nestedAddress?: string; readonly creation?: string; readonly runtime?: string; readonly calldata?: string; readonly value?: string; readonly nonce?: string }[];
+  readonly observedTotalCostWei?: string;
+  readonly rpcEndpoint?: string; readonly netVersion?: string;
+  readonly binding?: { readonly sourceRevision: string; readonly configurationSha256: string; readonly reserveConfigurationSha256: string; readonly artifactPinsSha256: string };
+  readonly operations: readonly ProductionOperationObservation[];
   readonly checkedAddresses: readonly string[];
   readonly occupiedAddresses: readonly string[];
   readonly authority: readonly SafeState[];
+  readonly state?: ProductionStateObservation;
+  readonly cleanup?: { readonly processExited: boolean; readonly exitCode: string; readonly descriptorsClosed: boolean; readonly temporaryRootRemoved: boolean; readonly diagnostic: string | null };
 }
+export interface ProductionOperationObservation {
+  readonly id: string; readonly address?: string; readonly nestedAddress?: string; readonly creation?: string; readonly runtime?: string; readonly runtimeHash?: string; readonly calldata?: string; readonly value?: string; readonly nonce?: string;
+  readonly transactionHash?: string; readonly receiptTransactionHash?: string; readonly transactionIndex?: string; readonly sender?: string; readonly input?: string; readonly status?: string; readonly blockNumber?: string; readonly blockHash?: string; readonly timestamp?: string; readonly expectedAddress?: string; readonly actualAddress?: string | null;
+  readonly gasLimit?: string; readonly maxFeePerGas?: string; readonly maxPriorityFeePerGas?: string; readonly gasUsed?: string; readonly effectiveGasPrice?: string; readonly observedCostWei?: string;
+  readonly artifact?: string; readonly artifactSha256?: string; readonly immutableReferences?: readonly { readonly name: string; readonly start: string; readonly length: string; readonly value: string }[];
+}
+export interface ProductionStateObservation {
+  readonly blockNumber: string; readonly blockHash: string;
+  readonly token: { readonly address: string; readonly name: string; readonly symbol: string; readonly decimals: string; readonly initialSupply: string; readonly totalSupply: string; readonly genesisAllocationHash: string; readonly ccipAdmin: string };
+  readonly founderReserve: { readonly address: string; readonly token: string; readonly vault: string };
+  readonly founderVault: { readonly address: string; readonly token: string; readonly beneficiary: string; readonly originalReserve: string; readonly controller: string; readonly funded: boolean; readonly terms: GrantTermsObservation };
+  readonly controller: { readonly address: string; readonly token: string; readonly controller: string; readonly purpose: string; readonly rollingCap: string; readonly perGrantCap: string; readonly window: string; readonly grossCommitted: string; readonly rollingCommitted: string };
+  readonly allocations: readonly { readonly identifier: string; readonly bps: string; readonly amountBaseUnits: string; readonly recipient: string; readonly balance: string; readonly syntheticPreparedAddress: true }[];
+  readonly funding: { readonly caller: string; readonly amountBaseUnits: string; readonly beforeBlockNumber: string; readonly beforeBlockHash: string; readonly afterBlockNumber: string; readonly afterBlockHash: string; readonly reserveBefore: string; readonly reserveAfter: string; readonly vaultBefore: string; readonly vaultAfter: string; readonly allowanceBefore: string; readonly allowanceAfter: string; readonly fundedBefore: false; readonly fundedAfter: true; readonly secondCallRejected: true };
+  readonly conservation: { readonly totalSupplyBaseUnits: string; readonly observedBalancesBaseUnits: string };
+}
+export interface GrantTermsObservation { readonly allocation: string; readonly start: string; readonly cliff: string; readonly end: string; readonly kind: string; readonly originalPurpose: string }
 export interface ProductionAttempt {
   readonly schema: "agtmai-production-attempt-state-v1"; readonly identity: string;
   readonly states: readonly { readonly operationId: string; readonly state: "unattempted" | "pending" | "uncertain" | "finalized-success" | "finalized-revert"; readonly intent: string }[];
@@ -61,8 +84,9 @@ function evaluateProductionGuardsUnchecked(expectations: ProductionExpectations,
   const expectedTotalCeiling = parseUint(expectations.maxTotalCostWei, "maxTotalCostWei"), approvedTotalCeiling = parseUint(policy.evmMaxTotalFeeWei, "policy.evmMaxTotalFeeWei");
   validateAggregate(total, expectedTotalCeiling, approvedTotalCeiling, reasons);
   if (attempt?.schema !== "agtmai-production-attempt-state-v1" || !digest(attempt.identity) || attempt.identity !== expectations.attemptIdentity) {return { status: "invalid", broadcastAllowed: false, reasons: ["attempt-state-invalid"] };}
-  validateAttempt(attempt, operations, reasons);
-  if (parseUint(observations.pendingNonce, "pendingNonce") !== parseUint(expectations.startingNonce, "startingNonce")) {fail(reasons, "unexpected-pending-nonce");}
+  validateAttempt(attempt, operations, reasons, observations.schema === "agtmai-production-observation-v2");
+  const expectedPendingNonce = parseUint(expectations.startingNonce, "startingNonce") + (observations.schema === "agtmai-production-observation-v2" ? 4n : 0n);
+  if (parseUint(observations.pendingNonce, "pendingNonce") !== expectedPendingNonce) {fail(reasons, "unexpected-pending-nonce");}
   return { status: reasons.length ? "blocked" : "checks-passed-offline", broadcastAllowed: false, reasons, totalWorstCaseWei: total.toString() };
 }
 
@@ -99,13 +123,13 @@ function validateAggregate(total: bigint, expectedCeiling: bigint, approvedCeili
   if (total > expectedCeiling || total > approvedCeiling) {fail(reasons, "aggregate-cost-exceeded");}
 }
 
-function validateAttempt(attempt: ProductionAttempt, operations: readonly ProductionOperation[], reasons: string[]): void {
+function validateAttempt(attempt: ProductionAttempt, operations: readonly ProductionOperation[], reasons: string[], executionEvidence = false): void {
   const attemptIds = new Set(attempt.states.map(state => state.operationId));
   if (attemptIds.size !== attempt.states.length || attemptIds.size !== operations.length || operations.some(operation => !attemptIds.has(operation.id))) {fail(reasons, "attempt-history-unknown");}
   if (attempt.states.some(state => typeof state.intent !== "string" || state.intent.length === 0)) {fail(reasons, "attempt-intent-missing");}
   for (const state of attempt.states) {
     const operation = operations.find(candidate => candidate.id === state.operationId);
-    if (state.state !== "unattempted") {fail(reasons, `attempt-${state.state}`);}
+    if (state.state !== (executionEvidence ? "finalized-success" : "unattempted")) {fail(reasons, `attempt-${state.state}`);}
     if (!operation || state.intent !== operation.intentHash) {fail(reasons, "attempt-intent-mismatch");}
   }
 }
@@ -115,6 +139,7 @@ function evaluateOperations(expectations: ProductionExpectations, observations: 
   if (operations.length !== requiredOrder.length || new Set(operations.map(operation => operation.id)).size !== operations.length) {fail(reasons, "operation-inventory-invalid");}
   if (operations.some((operation, index) => operation.id !== requiredOrder[index])) {fail(reasons, "operation-order-mismatch");}
   if (operations.some((operation, index) => operation.kind !== (index < 3 ? "create" : "call") || !digest(operation.intentHash))) {fail(reasons, "operation-kind-mismatch");}
+  if (observations.operations.some((operation, index) => operation.id !== requiredOrder[index])) {fail(reasons, "observation-order-mismatch");}
   if (new Set(observations.operations.map(operation => operation.id)).size !== observations.operations.length || observations.operations.some(operation => !operations.some(expected => expected.id === operation.id))) {fail(reasons, "observation-inventory-invalid");}
   const observed = new Map(observations.operations.map(operation => [operation.id, operation]));
   let total = 0n;
@@ -126,7 +151,7 @@ function evaluateOperations(expectations: ProductionExpectations, observations: 
     validateOperationShape(expectations, observations, operation, nonce, reasons);
     const seen = observed.get(operation.id);
     if (!seen) {fail(reasons, "observation-missing"); continue;}
-    validateObservedOperation(operation, seen, nonce, reasons);
+    validateObservedOperation(operation, seen, nonce, reasons, observations.schema === "agtmai-production-observation-v2");
     total = evaluateGas(operation, policy, reasons, total);
   }
   if (observations.checkedAddresses && operations.some(operation => operation.expectedAddress !== undefined && !observations.checkedAddresses.includes(operation.expectedAddress) || operation.nestedAddress !== undefined && !observations.checkedAddresses.includes(operation.nestedAddress))) {fail(reasons, "address-observation-missing");}
@@ -145,12 +170,13 @@ function validateOperationShape(expectations: ProductionExpectations, observatio
   if (operation.expectedAddress && observations.occupiedAddresses.includes(operation.expectedAddress) || operation.nestedAddress && observations.occupiedAddresses.includes(operation.nestedAddress)) {fail(reasons, "target-address-occupied");}
 }
 
-function validateObservedOperation(operation: ProductionOperation, seen: ProductionObservation["operations"][number], nonce: bigint | undefined, reasons: string[]): void {
+// oxlint-disable-next-line complexity -- this is the single operation binding gate.
+function validateObservedOperation(operation: ProductionOperation, seen: ProductionObservation["operations"][number], nonce: bigint | undefined, reasons: string[], executionEvidence = false): void {
   if (seen.nonce === undefined || nonce === undefined || parseUint(seen.nonce, `${operation.id}.observedNonce`) !== nonce) {fail(reasons, "observed-nonce-mismatch");}
   if (operation.expectedAddress && seen.address !== operation.expectedAddress) {fail(reasons, "observed-address-mismatch");}
   if (operation.nestedAddress !== seen.nestedAddress) {fail(reasons, "observed-nested-address-mismatch");}
   if (operation.initcode !== undefined && seen.creation !== operation.initcode) {fail(reasons, "observed-creation-mismatch");}
-  if (operation.runtime !== undefined && (!hex(operation.runtime) || seen.runtime !== operation.runtime || !digest(operation.runtimeHash) || keccak256(Buffer.from(operation.runtime.slice(2), "hex")) !== operation.runtimeHash)) {fail(reasons, "runtime-bytes-mismatch");}
+  if (operation.runtime !== undefined && (!hex(operation.runtime) || (!executionEvidence && seen.runtime !== operation.runtime) || (executionEvidence && (!hex(seen.runtime) || !digest(seen.runtimeHash) || keccak256(Buffer.from(seen.runtime.slice(2), "hex")) !== seen.runtimeHash)) || (!executionEvidence && (!digest(operation.runtimeHash) || keccak256(Buffer.from(operation.runtime.slice(2), "hex")) !== operation.runtimeHash)))) {fail(reasons, "runtime-bytes-mismatch");}
   if (operation.kind === "call" && (seen.calldata !== operation.calldata || seen.value !== operation.value)) {fail(reasons, "observed-call-binding-mismatch");}
 }
 

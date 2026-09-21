@@ -10,6 +10,7 @@ import {
   FORGE_ARTIFACT_JSON_LIMITS,
   FORGE_BUILD_INFO_JSON_LIMITS,
   POLICY_JSON_LIMITS,
+  PRODUCTION_OBSERVATION_JSON_LIMITS,
   parseBoundedJson,
 } from "./bounded-json.ts";
 
@@ -157,6 +158,10 @@ export function parseNativeNoReplaceEvidence(bytes: Uint8Array): NativeNoReplace
 
 export function parseJsonWithoutDuplicates(bytes: Uint8Array): unknown {
   return parseBoundedJson(bytes, POLICY_JSON_LIMITS);
+}
+
+export function parseProductionJsonWithoutDuplicates(bytes: Uint8Array): unknown {
+  return parseBoundedJson(bytes, PRODUCTION_OBSERVATION_JSON_LIMITS);
 }
 
 export function parseRawArtifactJson(

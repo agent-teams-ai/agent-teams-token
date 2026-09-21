@@ -35,6 +35,10 @@ const FOUNDRY_SHA256 = {
     forge: "c0fbe3ba32d7f498507042dbb94f5954be51126a76ce84e37d71749e7c9c571f",
   },
 } as const;
+const FOUNDRY_ARCHIVE = {
+  "darwin-arm64": {name: "foundry-v1.8.0-darwin-arm64.tar.gz", sha256: "0599b28a19af97c3ae91fab12ad868a1922db7770c4adff6b6d26235862153d0"},
+  "linux-x64": {name: "foundry-v1.8.0-linux-amd64.tar.gz", sha256: "8c8560de380d58d1ee145934427887b107182367600a3c33aa71f16f2ce7ac57"},
+} as const;
 
 export interface FoundryBinaries {
   readonly anvil: string;
@@ -101,6 +105,7 @@ export function pinnedFoundryBinaries(
   const root = canonicalCallerPath(repositoryRoot, "LOCAL_EVM_REPOSITORY_PATH", "repository root");
   const platform = supportedPlatform();
   const lock = parseFoundryLock(stableRead(join(root, "tooling/toolchain.lock.json")), platform);
+  assertPinnedFoundryArchive(root, lock.archiveName, lock.archiveSha256);
   const install = contained(root, `.tools/${lock.installDirectory}`, "LOCAL_EVM_FOUNDRY_LOCK");
   const anvil = environment.AGTMAI_ANVIL_BINARY;
   const forge = environment.AGTMAI_FORGE_BINARY;
@@ -266,6 +271,8 @@ function parseLock(bytes: Buffer, platform: keyof typeof PLATFORM_SHA256): { rea
 function parseFoundryLock(bytes: Buffer, platform: keyof typeof PLATFORM_SHA256): {
   readonly hashes: Readonly<Record<keyof (typeof FOUNDRY_SHA256)[typeof platform], string>>;
   readonly installDirectory: string;
+  readonly archiveName: string;
+  readonly archiveSha256: string;
 } {
   const parsed: unknown = JSON.parse(bytes.toString("utf8"));
   const lock = record(parsed, "LOCAL_EVM_TOOLCHAIN_LOCK");
@@ -274,6 +281,8 @@ function parseFoundryLock(bytes: Buffer, platform: keyof typeof PLATFORM_SHA256)
   const platforms = record(foundry.platforms, "LOCAL_EVM_FOUNDRY_LOCK");
   const artifact = record(platforms[platform], "LOCAL_EVM_FOUNDRY_LOCK");
   const installDirectory = string(artifact.installDirectory, "LOCAL_EVM_FOUNDRY_LOCK");
+  const archiveName = string(artifact.archiveName, "LOCAL_EVM_FOUNDRY_LOCK");
+  const archiveSha256 = string(artifact.sha256, "LOCAL_EVM_FOUNDRY_LOCK");
   const hashes = record(artifact.expectedFileSha256, "LOCAL_EVM_FOUNDRY_LOCK");
   const expectedHashes = FOUNDRY_SHA256[platform];
   const hashesMatch = Object.entries(expectedHashes)
@@ -281,11 +290,19 @@ function parseFoundryLock(bytes: Buffer, platform: keyof typeof PLATFORM_SHA256)
     && Object.keys(hashes).length === Object.keys(expectedHashes).length;
   if (foundry.version !== "1.8.0" || foundry.commit !== "61ae26af36320d4fa1020f7db53785885e29eeb5"
     || installDirectory !== `foundry-v1.8.0-${platform}`
+    || archiveName !== FOUNDRY_ARCHIVE[platform].name || archiveSha256 !== FOUNDRY_ARCHIVE[platform].sha256
     || JSON.stringify(artifact.expectedFiles) !== JSON.stringify(["forge", "cast", "anvil", "chisel"])
     || !hashesMatch) {
     throw new LocalEvmError("LOCAL_EVM_FOUNDRY_LOCK", "Foundry platform lock must match the exact 1.8.0 binary inventory");
   }
-  return {hashes: expectedHashes, installDirectory};
+  return {hashes: expectedHashes, installDirectory, archiveName, archiveSha256};
+}
+
+function assertPinnedFoundryArchive(root: string, name: string, expectedSha256: string): void {
+  const archive = contained(root, `.tools/downloads/${name}`, "LOCAL_EVM_FOUNDRY_ARCHIVE");
+  if (createHash("sha256").update(stableRead(archive)).digest("hex") !== expectedSha256) {
+    throw new LocalEvmError("LOCAL_EVM_FOUNDRY_ARCHIVE_CHECKSUM_MISMATCH", "Foundry archive differs from the exact platform lock SHA-256");
+  }
 }
 
 function assertPinnedFoundryFile(path: string, expectedSha256: string, name: FoundryBinaryName): void {

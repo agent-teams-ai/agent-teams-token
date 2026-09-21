@@ -14,7 +14,7 @@ import type { Hex } from "../domain/deployment.js";
 
 export const deploymentCompilerPorts = { sha256, encodeToken: encodeDeploymentToken, encodeGrant: encodeDeploymentGrant,
   expectedTokenCalls, expectedGrantCalls, createAddress: deploymentCreateAddress };
-const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,
+export const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,
   encodeReserveController: (input: { token: Hex; controller: Hex; purpose: Hex; rollingCap: string; perGrantCap: string }) => encodeProductionReserveController(input.token, input.controller, input.purpose, input.rollingCap, input.perGrantCap), createAddress: deploymentCreateAddress, keccak256: keccakBytes };
 const text = async (path: string): Promise<string> => new TextDecoder().decode(await readDeploymentFile(path));
 export async function loadPreparedDeployment(path: string): Promise<PreparedDeployment> {
@@ -87,5 +87,6 @@ export function parseProductionExpectations(source: string): ProductionExpectati
   return root as unknown as ProductionExpectation;
 }
 export { readDeploymentFile, verifyDeploymentFiles, publishDeploymentFiles } from "../adapters/deployment-store.js";
+export { readProductionArtifactPins } from "../adapters/deployment-artifacts.js";
 export { parseDeploymentSource } from "../adapters/deployment-source.js";
 export { parseStrict };

@@ -127,6 +127,11 @@ export interface OwnedAnvil {
   stop(): Promise<void>;
 }
 
+export interface OwnedAnvilOptions {
+  readonly chainId?: string;
+  readonly timestamp?: string;
+}
+
 export interface OwnedProcessIdentity {
   readonly pid: number;
   readonly processStart: string;
@@ -136,8 +141,9 @@ export async function startOwnedAnvil(
   executable: string,
   fundedAddress: string,
   registerIdentity?: (identity: OwnedProcessIdentity) => Promise<void>,
+  options: OwnedAnvilOptions = {},
 ): Promise<OwnedAnvil> {
-  const supervisor = spawn(process.execPath, [fileURLToPath(import.meta.url), "--supervise-anvil", executable, fundedAddress], {
+  const supervisor = spawn(process.execPath, [fileURLToPath(import.meta.url), "--supervise-anvil", executable, fundedAddress, JSON.stringify(options)], {
     stdio: ["pipe", "pipe", "pipe"], env: process.env,
   });
   supervisor.stdin.on("error", () => {});
@@ -170,15 +176,16 @@ export async function startOwnedAnvil(
   }
 }
 
-async function superviseAnvil(executable: string, fundedAddress: string): Promise<void> {
+async function superviseAnvil(executable: string, fundedAddress: string, options: OwnedAnvilOptions = {}): Promise<void> {
   const control = supervisorControl();
   let failure: {cause: unknown} | undefined;
   let cleanupFailure: {cause: unknown} | undefined;
   try {
-    const child = spawn(executable, [
-      "--host", "127.0.0.1", "--port", "0", "--chain-id", "31337", "--accounts", "0",
-      "--fund-accounts", `${fundedAddress}:1000000000000000000`,
-    ], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    validateOwnedAnvilOptions(options);
+    const chainId = options.chainId ?? "31337";
+    const anvilArguments = ["--host", "127.0.0.1", "--port", "0", "--chain-id", chainId, "--accounts", "0", "--fund-accounts", `${fundedAddress}:1000000000000000000`];
+    if (options.timestamp !== undefined) {anvilArguments.push("--timestamp", options.timestamp);}
+    const child = spawn(executable, anvilArguments, { stdio: ["ignore", "pipe", "pipe"], env: process.env });
     if (child.pid === undefined) {
       await listeningUrl(child);
       throw new LocalEvmError("LOCAL_EVM_ANVIL_PID_MISSING", "Anvil did not expose an owned process ID");
@@ -226,6 +233,15 @@ async function superviseAnvil(executable: string, fundedAddress: string): Promis
   }
   if (failure) {throw failure.cause;}
   if (cleanupFailure) {throw cleanupFailure.cause;}
+}
+
+function validateOwnedAnvilOptions(options: OwnedAnvilOptions): void {
+  if (!options || typeof options !== "object" || Array.isArray(options)
+    || Object.keys(options).some(key => !["chainId", "timestamp"].includes(key))
+    || (options.chainId !== undefined && !/^[1-9][0-9]*$/u.test(options.chainId))
+    || (options.timestamp !== undefined && !/^(0|[1-9][0-9]*)$/u.test(options.timestamp))) {
+    throw new LocalEvmError("LOCAL_EVM_ANVIL_OPTIONS_INVALID", "Anvil options must be canonical local-only values");
+  }
 }
 
 function supervisorControl() {
@@ -453,9 +469,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === "-
   const fundedAddress = process.argv[4];
   if (!executable || !fundedAddress) {process.exitCode = 2;}
   else {
-    superviseAnvil(executable, fundedAddress).catch((cause: unknown) => {
-      process.stderr.write(`${redact(cause instanceof Error ? cause.message : String(cause))}\n`);
-      process.exitCode = 1;
-    });
+    try {
+      const options = process.argv[5] ? JSON.parse(process.argv[5]) as OwnedAnvilOptions : {};
+      superviseAnvil(executable, fundedAddress, options).catch((cause: unknown) => {
+        process.stderr.write(`${redact(cause instanceof Error ? cause.message : String(cause))}\n`);
+        process.exitCode = 1;
+      });
+    } catch {process.exitCode = 2;}
   }
 }

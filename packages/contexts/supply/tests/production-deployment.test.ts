@@ -164,9 +164,9 @@ test("production preparation rejects all-zero Safe code and provenance evidence 
 
 test("runtime immutable claims remain explicitly unresolved while preparation stays truthful", () => {
   const fixture = syntheticPreparation();
-  const artifact = fixture.pins.artifacts[0] as unknown as { runtimeBytecode: Hex; immutableReferences: { start: number; length: 32 }[] };
+  const artifact = fixture.pins.artifacts[0] as unknown as { runtimeBytecode: Hex; immutableReferences: { name: string; start: number; length: 32 }[] };
   artifact.runtimeBytecode = `0x${"00".repeat(33)}`;
-  artifact.immutableReferences = [{ start: 1, length: 32 }];
+  artifact.immutableReferences = [{ name: "TOKEN", start: 1, length: 32 }];
   const operation = fixture.pins.expectations.operations.find(item => item.id === "controller-create") as { runtime: Hex; runtimeHash: Hex };
   operation.runtime = artifact.runtimeBytecode; operation.runtimeHash = sha256(Uint8Array.from({ length: 33 }, () => 0));
   (fixture.pins.expectations as { artifactPinsSha256: Hex }).artifactPinsSha256 = sha256(new TextEncoder().encode(canonicalJson({ schema: "agtmai-production-artifact-pins-v1", sourceRevision: fixture.pins.artifactSourceRevision, artifacts: fixture.pins.artifacts.toSorted((left, right) => left.contract.localeCompare(right.contract)) } as unknown as JsonValue)));

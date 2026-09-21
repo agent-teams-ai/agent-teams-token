@@ -20,6 +20,16 @@ export const POLICY_JSON_LIMITS = immutableLimits({
   stringBytes: 16 * 1024,
 });
 
+// Exact creation/runtime bytes make the closed four-operation production
+// envelope larger than policy JSON without approaching build-info scale.
+export const PRODUCTION_OBSERVATION_JSON_LIMITS = immutableLimits({
+  bytes: 2 * 1024 * 1024,
+  depth: 32,
+  members: 256,
+  arrayItems: 1_024,
+  stringBytes: 512 * 1024,
+});
+
 // A genuine Forge 1.8.0 build-info was measured at 1,366,773 bytes, depth 26,
 // 33,914 string bytes, 19 object members, and 31 array items. These ceilings
 // provide finite format headroom without weakening policy/evidence parsing.
