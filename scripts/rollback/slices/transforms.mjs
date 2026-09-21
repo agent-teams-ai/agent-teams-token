@@ -1,9 +1,15 @@
 import { basicRun, gitExecutable } from "../runtime/candidate.mjs";
-import { repositoryRoot } from "./config.mjs";
+import {
+  deploymentPlanSharedEditBaseline,
+  repositoryRoot,
+} from "./config.mjs";
 import {
   snapshotRollbackSharedPaths,
 } from "./shared-paths.mjs";
-import { editRollbackSharedText } from "./shared-file-operations.mjs";
+import {
+  editRollbackSharedText,
+  restoreRollbackSharedFile,
+} from "./shared-file-operations.mjs";
 
 function run(command, commandArguments, options = {}) {
   return basicRun(command === "git" ? gitExecutable() : command, commandArguments, {
@@ -62,6 +68,15 @@ export function restoreArchitectureBoundarySource(source, baseline, sliceId) {
     throw new Error("ROLLBACK_SOURCE_SCHEMA_UNSUPPORTED");
   }
   return current;
+}
+
+export function restoreDeploymentPlanSharedEdits(root, sharedPlan, workspaceHandle) {
+  for (const path of deploymentPlanSharedEditBaseline.paths) {
+    const content = run("git", [
+      "show", `${deploymentPlanSharedEditBaseline.sha}:${path}`,
+    ], { cwd: root });
+    restoreRollbackSharedFile(root, path, sharedPlan, workspaceHandle, content);
+  }
 }
 
 export function editPackage(root, sliceId, options = {}) {

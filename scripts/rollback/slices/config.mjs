@@ -35,6 +35,21 @@ export const sliceRoots = Object.freeze({
   slither: "tooling/security/slither",
 });
 
+export const deploymentPlanSharedEditBaseline = Object.freeze({
+  sha: "dfe89da4c77a186aefbaead50981a327317f3bc4",
+  paths: Object.freeze([
+    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+    "packages/contexts/supply/tests/deployment-cli.test.ts",
+    "packages/contexts/supply/tests/production-deployment.test.ts",
+    "tooling/local-evm/process.ts",
+    "tooling/local-evm/rpc.ts",
+    "tooling/local-evm/tests/rpc.test.ts",
+    "tooling/local-evm/toolchain.ts",
+  ]),
+});
+
 export const expectedSharedPaths = Object.freeze({
   "local-solana": [
     ".github/workflows/ci.yml",

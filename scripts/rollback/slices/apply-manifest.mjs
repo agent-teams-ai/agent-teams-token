@@ -27,6 +27,7 @@ import {
   editWorkflowTest,
   removeWorkflowJob,
   restoreArchitectureBoundaries,
+  restoreDeploymentPlanSharedEdits,
 } from "./transforms.mjs";
 
 function run(command, commandArguments, options = {}) {
@@ -211,6 +212,9 @@ function applySharedEdits(context) {
     editPackage(root, manifest.sliceId, { sharedPlan, workspaceHandle });
     removeWorkflowJob(root, manifest, sharedPlan, workspaceHandle);
     editWorkflowTest(root, manifest, sharedPlan, workspaceHandle);
+    if (manifest.sliceId === "deployment-plan") {
+      restoreDeploymentPlanSharedEdits(root, sharedPlan, workspaceHandle);
+    }
     if (manifest.sharedPaths.includes("tooling/toolchain.lock.json")) {
       editToolchain(root, manifest.sliceId, sharedPlan, workspaceHandle);
     }
@@ -243,9 +247,12 @@ function additionalRemovalPaths(sliceId) {
   if (sliceId === "slither") {
     return [];
   }
-  return [sliceId === "local-solana"
-    ? "scripts/solana/local-fixture.ts"
-    : "scripts/deployment/estimate-local.ts"];
+  return sliceId === "local-solana"
+    ? ["scripts/solana/local-fixture.ts"]
+    : [
+      "scripts/deployment/estimate-local.ts",
+      "scripts/deployment/local-execution-proof.ts",
+    ];
 }
 
 function rollbackApplicationReport(quarantine, directoryCleanup) {
