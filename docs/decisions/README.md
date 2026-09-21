@@ -19,6 +19,7 @@ instead of editing the accepted decision.
 
 ## Accepted
 
+- [ADR-0009: Custody split and launch gates](0009-custody-split-and-launch-gates.md)
 - [ADR-0008: Production reserve commitment policy](0008-production-reserve-commitment-policy.md)
 - [ADR-0005: CCIP testnet protocol line](0005-ccip-testnet-protocol-line.md)
 - [ADR-0001: Hybrid native macOS and Linux CI toolchain](0001-hybrid-toolchain.md)

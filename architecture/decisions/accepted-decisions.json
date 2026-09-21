@@ -26,6 +26,11 @@
       "id": "ADR-0008",
       "path": "docs/decisions/0008-production-reserve-commitment-policy.md",
       "immutableDigest": "sha256:c53d7f8a5292eaee2764965b2ce6a5bb3d31903ec2e7d643c6f5a67befbd86c9"
+    },
+    {
+      "id": "ADR-0009",
+      "path": "docs/decisions/0009-custody-split-and-launch-gates.md",
+      "immutableDigest": "sha256:b1eedb5f6fec1ed0db95a4b1869a9d2a0a26eb308f0691cae2fb3cba63894aca"
     }
   ]
 }

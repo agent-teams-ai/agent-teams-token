@@ -7,8 +7,10 @@ Bridge/Treasury/Emergency-signer, governance-activation, liquidity and airdrop
 assumptions. The accepted policy is `Agent Teams AI` (`AGTMAI`): a fixed supply
 of `100,000,000` tokens at `9` decimals. It is recorded in the accepted
 [production reserve policy](decisions/0008-production-reserve-commitment-policy.md);
-the committed local implementation and its proofs are not deployment or mainnet
-readiness evidence.
+the custody split and launch boundary are recorded in
+[ADR-0009](decisions/0009-custody-split-and-launch-gates.md). The committed
+local implementation and its proofs are not deployment or mainnet readiness
+evidence.
 
 The canonical allocation identifiers and envelope are:
 

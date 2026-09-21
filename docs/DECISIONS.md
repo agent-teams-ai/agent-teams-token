@@ -88,7 +88,8 @@ The accepted custody split uses separate Project Controller Safe and Founder
 Beneficiary Safe configurations. Each Safe is 2-of-3 and uses separate
 keys/devices, while beneficial control remains with the solo founder. Multiple
 keys are not independent humans. Exact Safe addresses and owner addresses remain
-mandatory unresolved deployment inputs.
+mandatory unresolved deployment inputs. This split is recorded in
+[ADR-0009](decisions/0009-custody-split-and-launch-gates.md).
 
 For the bounded production-code custody slice, each founder/team grant uses one
 immutable `GrantVault` with no beneficiary, controller or ownership transfer.
