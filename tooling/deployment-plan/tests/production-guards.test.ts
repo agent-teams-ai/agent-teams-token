@@ -154,6 +154,32 @@ test("approved fee, gas, observation, token and deadline policies are hard ceili
   for (const [label, evaluate, reason] of cases) {assert.ok(evaluate().reasons.includes(reason), label);}
 });
 
+test("funding deadline is inclusive and blocks the next second", () => {
+  const fixture = completeFixture();
+  const boundaryPolicy = { ...policy, fundingDeadline: "200" };
+  const observations = { ...fixture.observations, observedAt: "101", expiresAt: "201" };
+  assert.equal(evaluateProductionGuards(fixture.expectations, observations, fixture.attempt, 200n, boundaryPolicy).status, "checks-passed-offline");
+  const late = evaluateProductionGuards(fixture.expectations, observations, fixture.attempt, 201n, boundaryPolicy);
+  assert.equal(late.status, "blocked");
+  assert.ok(late.reasons.includes("production-deadline-policy-mismatch"));
+});
+
+test("all-zero Safe code, provenance and observation block evidence digests fail closed", () => {
+  const zeroDigest = `0x${"0".repeat(64)}`;
+  const fixture = completeFixture();
+  const block = evaluateProductionGuards(fixture.expectations, { ...fixture.observations, blockHash: zeroDigest }, fixture.attempt, 150n, policy);
+  assert.ok(block.reasons.includes("observation-context-invalid"));
+  for (const field of ["proxyCodeHash", "singletonCodeHash", "setupProvenance"] as const) {
+    for (const source of ["expectations", "observations"] as const) {
+      const expectations = structuredClone(fixture.expectations);
+      const observations = structuredClone(fixture.observations);
+      (source === "expectations" ? expectations.authority[0]! : observations.authority[0]!)[field] = zeroDigest;
+      const result = evaluateProductionGuards(expectations, observations, fixture.attempt, 150n, policy);
+      assert.ok(result.reasons.includes("authority-invalid"), `${source}.${field}`);
+    }
+  }
+});
+
 test("preflight compares complete embedded expectations and every prepared operation field", () => {
   const fixture = completeFixture();
   const base = preparedEnvelope(fixture);

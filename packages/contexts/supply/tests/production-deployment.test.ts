@@ -151,6 +151,17 @@ test("production preparation rejects caller-asserted nonce, calldata, intent, Sa
   }
 });
 
+test("production preparation rejects all-zero Safe code and provenance evidence digests", () => {
+  const zeroDigest = `0x${"0".repeat(64)}` as Hex;
+  for (const field of ["proxyCodeHash", "singletonCodeHash", "setupProvenance"] as const) {
+    const fixture = syntheticPreparation();
+    (fixture.pins.expectations.authority[0] as unknown as Record<string, Hex>)[field] = zeroDigest;
+    const result = prepareProductionDeployment(fixture.value, fixture.pins, fixture.ports, sha256);
+    assert.equal(result.prepared, undefined, field);
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === "PRODUCTION_EXPECTATIONS"), field);
+  }
+});
+
 test("runtime immutable claims remain explicitly unresolved while preparation stays truthful", () => {
   const fixture = syntheticPreparation();
   const artifact = fixture.pins.artifacts[0] as unknown as { runtimeBytecode: Hex; immutableReferences: { start: number; length: 32 }[] };

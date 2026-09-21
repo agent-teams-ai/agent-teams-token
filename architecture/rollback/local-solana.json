@@ -66,13 +66,13 @@
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "49d386d699890ddca16b76fa147093c6ae85cd99ebc40a2234983ae53207064d",
-      "afterSha256": "906765ff3945f7f1c2dc896cc3c36dc0c6201701ead8d689ab56e45d8cb070b2"
+      "beforeSha256": "9d88f7f7dc6ed68d2e35de5c7f82e0ef4e30d257a7a07b4e8b9664c346a594a1",
+      "afterSha256": "9ef0f26ede00bcf485f9d569f7a26eb235441f2378ab3d23749dbd33d1a34708"
     },
     {
       "path": "package.json",
-      "beforeSha256": "24d682d2de87dfa6261476c5127ae5c38192f05b091b611fec693bc14aea874b",
-      "afterSha256": "65f9d68b2d240162b4690c1b50cab90d9f61a2721bf990bd32dc087ad5a09570"
+      "beforeSha256": "d39815018e26df459699c81e31a281a3d24957d3f407d75160f8767931c3ba9b",
+      "afterSha256": "542da48bfc89046ffaef69cf6b84b10ee997c1bf5b8213325e70ecff78fbd83e"
     },
     {
       "path": "scripts/solana/local-fixture.ts",

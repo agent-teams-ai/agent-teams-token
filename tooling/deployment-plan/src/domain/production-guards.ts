@@ -39,10 +39,11 @@ export interface ApprovedProductionPolicy {
 const hex = (value: unknown, bytes?: number): value is string => typeof value === "string" && new RegExp(`^0x[0-9a-f]{${bytes === undefined ? "2," : `${bytes * 2}`}}$`).test(value);
 const address = (value: unknown): value is string => typeof value === "string" && /^0x[0-9a-f]{40}$/.test(value) && !/^0x0{40}$/.test(value);
 const digest = (value: unknown): value is string => typeof value === "string" && /^0x[0-9a-f]{64}$/.test(value);
+const evidenceDigest = (value: unknown): value is string => digest(value) && !/^0x0{64}$/.test(value);
 const fail = (reasons: string[], reason: string): void => { if (!reasons.includes(reason)) {reasons.push(reason);} };
 const safeShape = (safe: SafeState): boolean => {
   if (!safe || typeof safe !== "object") {return false;}
-  return address(safe.address) && safe.threshold === 2 && Array.isArray(safe.owners) && safe.owners.length === 3 && safe.owners.every(address) && new Set(safe.owners).size === 3 && /^(0|[1-9][0-9]*)$/.test(safe.nonce) && digest(safe.proxyCodeHash) && digest(safe.singletonCodeHash) && address(safe.singletonAddress) && hex(safe.singletonSlot, 32) && Array.isArray(safe.modules) && safe.modules.every(address) && (safe.guard === null || address(safe.guard)) && (safe.fallbackHandler === null || address(safe.fallbackHandler)) && digest(safe.setupProvenance);
+  return address(safe.address) && safe.threshold === 2 && Array.isArray(safe.owners) && safe.owners.length === 3 && safe.owners.every(address) && new Set(safe.owners).size === 3 && /^(0|[1-9][0-9]*)$/.test(safe.nonce) && evidenceDigest(safe.proxyCodeHash) && evidenceDigest(safe.singletonCodeHash) && address(safe.singletonAddress) && hex(safe.singletonSlot, 32) && Array.isArray(safe.modules) && safe.modules.every(address) && (safe.guard === null || address(safe.guard)) && (safe.fallbackHandler === null || address(safe.fallbackHandler)) && evidenceDigest(safe.setupProvenance);
 };
 
 /** Pure, fail-closed checks. Malformed decimal or overflow input is invalid, never an exception path. */
@@ -74,9 +75,9 @@ function validateContext(expectations: ProductionExpectations, observations: Pro
   const maxObservationAge = parseUint(expectations.maxObservationAgeSeconds, "maxObservationAgeSeconds");
   parseUint(observations.blockNumber, "blockNumber");
   if (expiresAt < observedAt || nowSeconds < observedAt || nowSeconds > expiresAt || nowSeconds - observedAt > maxObservationAge) {fail(reasons, "observation-stale-or-future");}
-  if (!digest(observations.blockHash)) {fail(reasons, "observation-context-invalid");}
+  if (!evidenceDigest(observations.blockHash)) {fail(reasons, "observation-context-invalid");}
   if (maxObservationAge > parseUint(policy.observationMaxAgeSeconds, "policy.observationMaxAgeSeconds") || maxObservationAge > parseUint(policy.estimateValiditySeconds, "policy.estimateValiditySeconds")) {fail(reasons, "observation-policy-relaxed");}
-  if (nowSeconds > parseUint(policy.executionDeadline, "policy.executionDeadline") || parseUint(policy.fundingDeadline, "policy.fundingDeadline") > parseUint(policy.executionDeadline, "policy.executionDeadline") || parseUint(policy.fundingDeadline, "policy.fundingDeadline") > parseUint(policy.founderStart, "policy.founderStart") - parseUint(policy.fundingLeadSeconds, "policy.fundingLeadSeconds")) {fail(reasons, "production-deadline-policy-mismatch");}
+  if (nowSeconds > parseUint(policy.executionDeadline, "policy.executionDeadline") || nowSeconds > parseUint(policy.fundingDeadline, "policy.fundingDeadline") || parseUint(policy.fundingDeadline, "policy.fundingDeadline") > parseUint(policy.executionDeadline, "policy.executionDeadline") || parseUint(policy.fundingDeadline, "policy.fundingDeadline") > parseUint(policy.founderStart, "policy.founderStart") - parseUint(policy.fundingLeadSeconds, "policy.fundingLeadSeconds")) {fail(reasons, "production-deadline-policy-mismatch");}
   if (parseUint(policy.tokenExpenditureBaseUnits, "policy.tokenExpenditureBaseUnits") > parseUint(policy.tokenExpenditureCeilingBaseUnits, "policy.tokenExpenditureCeilingBaseUnits")) {fail(reasons, "token-expenditure-exceeded");}
 }
 

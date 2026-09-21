@@ -60,6 +60,7 @@ export interface PreparedProductionDeployment {
 
 const invalid = (code: string, pointer: string): Diagnostic => ({ code: `PRODUCTION_${code}`, pointer, severity: "error", message: "production preparation refused" });
 const digest = (value: unknown): value is Hex => typeof value === "string" && /^0x[0-9a-f]{64}$/.test(value);
+const evidenceDigest = (value: unknown): value is Hex => digest(value) && !/^0x0{64}$/.test(value);
 const address = (value: unknown): value is Hex => typeof value === "string" && /^0x[0-9a-f]{40}$/.test(value) && !/^0x0{40}$/.test(value);
 const bytes = (value: unknown): value is Hex => typeof value === "string" && /^0x(?:[0-9a-f]{2})+$/.test(value);
 const decimal = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
@@ -130,7 +131,7 @@ function expectationIdentityValid(expectations: ProductionExpectation, configura
 }
 
 function validAuthority(safe: ProductionExpectation["authority"][number]): boolean {
-  return safe !== null && typeof safe === "object" && Array.isArray(safe.owners) && Array.isArray(safe.modules) && address(safe.address) && safe.threshold === 2 && safe.owners.length === 3 && safe.owners.every(address) && new Set(safe.owners).size === 3 && /^(0|[1-9][0-9]*)$/.test(safe.nonce) && digest(safe.proxyCodeHash) && digest(safe.singletonCodeHash) && address(safe.singletonAddress) && /^0x[0-9a-f]{64}$/.test(safe.singletonSlot) && safe.modules.every(address) && (safe.guard === null || address(safe.guard)) && (safe.fallbackHandler === null || address(safe.fallbackHandler)) && digest(safe.setupProvenance);
+  return safe !== null && typeof safe === "object" && Array.isArray(safe.owners) && Array.isArray(safe.modules) && address(safe.address) && safe.threshold === 2 && safe.owners.length === 3 && safe.owners.every(address) && new Set(safe.owners).size === 3 && /^(0|[1-9][0-9]*)$/.test(safe.nonce) && evidenceDigest(safe.proxyCodeHash) && evidenceDigest(safe.singletonCodeHash) && address(safe.singletonAddress) && /^0x[0-9a-f]{64}$/.test(safe.singletonSlot) && safe.modules.every(address) && (safe.guard === null || address(safe.guard)) && (safe.fallbackHandler === null || address(safe.fallbackHandler)) && evidenceDigest(safe.setupProvenance);
 }
 
 function validateArtifacts(pins: { readonly artifactSourceRevision: string; readonly artifacts: readonly ProductionArtifactPin[]; readonly expectations: ProductionExpectation }, canonicalArtifacts: readonly ProductionArtifactPin[], sha256: (bytes: Uint8Array) => Hex, diagnostics: Diagnostic[]): void {
