@@ -136,6 +136,12 @@ documents:
     status: "active"
     owner: "architecture"
     summary: "Records Engineering baseline research."
+  docs/research/FEE-QUOTER-MAINNET-EVIDENCE-2026-09-21.md:
+    id: "token.research.fee-quoter-mainnet-evidence-2026-09-21"
+    type: "research"
+    status: "active"
+    owner: "architecture"
+    summary: "Records finalized Fee Quoter artifact and authority evidence."
   docs/research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md:
     id: "token.research.genesis-core-code-review-2026-08-28"
     type: "research"

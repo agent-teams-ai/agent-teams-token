@@ -56,6 +56,13 @@ matching official artifact hashes are:
 The Fee Quoter mismatch blocks qualification. It must not be assigned an
 adjacent release version.
 
+The bounded finalized-RPC, authority, and artifact comparison record is
+[Fee Quoter mainnet attribution evidence](../research/FEE-QUOTER-MAINNET-EVIDENCE-2026-09-21.md).
+It establishes no exact Fee Quoter artifact attribution: the source commit,
+build/toolchain provenance, and official matching `.so` remain missing. The
+result is evidence to keep this ADR proposed and mainnet lane qualification
+blocked, not a release selection.
+
 Encoding is directional: Ethereum token identities stored in Solana remote
 configuration are ABI32 and Ethereum pool identities there are raw20. Solana
 mint and pool identities stored in Ethereum remote configuration are raw32.
@@ -76,6 +83,12 @@ release/build match; EVM artifacts and finalized code/configuration evidence;
 actual registry account/version evidence; both-direction compatibility; enabled
 peer configuration; and authority/backing proofs are independently reviewed.
 It authorizes no deployment, signing, repair, or broadcast.
+
+Before that evidence exists, only protocol-independent pubkey/base58/selector/
+PDA/Upgradeable Loader/raw-hashing observation tooling may proceed, and only
+behind an explicitly unqualified fail-closed preparation profile. This excludes
+semantic Fee Quoter adapters, instruction construction, fee calculation,
+monitoring, lane qualification, signing, and broadcast.
 
 ## Consequences
 

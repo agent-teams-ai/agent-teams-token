@@ -56,6 +56,7 @@ the generated Skill, caller workflow, package pins, and managed state.
 - [Six-critic review of the token foundation](research/CRITIQUE-ROUND-2026-08-27.md)
 - [E2E execution reconciliation, 2026-09-04](research/E2E-RECONCILIATION-2026-09-04.md)
 - [Engineering baseline research](research/ENGINEERING-BASELINE-2026-08-27.md)
+- [Fee Quoter mainnet attribution evidence](research/FEE-QUOTER-MAINNET-EVIDENCE-2026-09-21.md)
 - [Genesis Core implementation review ledger - 2026-08-28](research/GENESIS-CORE-CODE-REVIEW-2026-08-28.md)
 - [Genesis Core plan critique - 2026-08-28](research/GENESIS-CORE-PLAN-CRITIQUE-2026-08-28.md)
 - [Main reconciliation review, 2026-09-04](research/MAIN-RECONCILIATION-PLAN-2026-09-04.md)
