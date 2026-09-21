@@ -40,6 +40,12 @@ per-grant cap. Commitments are charged on successful funding and refunds do not
 restore capacity. Exact production cap amounts, commitment-count limits and rate
 limits remain required inputs and must not be invented.
 
+The MVP does not include the former global 30/90-day liquidization budget.
+Before any later public market or liquidity launch, publish circulating-supply
+and synchronized-unlock analysis and explicitly accept or reject a separate
+global unlock/liquidization budget. That future decision does not block code-only
+deployment preparation.
+
 ## Open deployment inputs before mainnet genesis
 
 1. Record and qualify the real Project Controller Safe and Founder Beneficiary
@@ -67,6 +73,11 @@ product integration, not an investment-return or ownership promise, and it does
 not block code-only deployment preparation. ReviewRouter is not a blocker.
 These excluded activities require separate future decisions and must not be
 presented as current launch scope.
+
+Legal work is outside this repository's code scope, not waived. External entity,
+jurisdiction, classification and disclosure review is required before mainnet
+genesis or any public sale, airdrop, liquidity promotion or user-facing utility
+offer.
 
 ## Mandatory TODO before any Ethereum Mainnet deployment
 

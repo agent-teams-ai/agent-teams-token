@@ -38,6 +38,22 @@ remain pending. The earlier uncommitted-patch delivery instructions below are
 historical; the reserve implementation is committed. Fresh exact-SHA security
 and rollback evidence is a separate follow-up after this remediation commit.
 
+Current protocol guidance is a proven mixed snapshot, not a single live Solana
+CCIP `1.6.3` baseline: Router, BurnMint and LockRelease match
+`solana-v1.6.2`; OffRamp and RMN match `solana-v1.6.3`; Fee Quoter has no exact
+match in supplied `solana-v1.6.0` through `solana-v1.6.4` artifacts. Protocol
+qualification remains blocked. This does not accept proposed ADR-0007.
+
+The MVP intentionally uses rolling 365-day gross commitment caps and per-grant
+caps. It does not restore the former global 30/90-day liquidization budget.
+Before any later public market or liquidity launch, publish circulating-supply
+and synchronized-unlock analysis and explicitly accept or reject a separate
+global unlock/liquidization budget. This future decision does not block code-only
+deployment preparation. Legal work is outside repository code scope, not waived:
+external entity, jurisdiction, classification and disclosure review is required
+before mainnet genesis or any public sale, airdrop, liquidity promotion or
+user-facing utility offer.
+
 ## Grant custody qualification, 2026-09-16
 
 The bounded qualification starts from `3ff3d11a70bab96d27e9979ccbb16250a27bc788`.
@@ -52,8 +68,11 @@ Confirmed corrections: funding is permitted **through** the start timestamp
 Approval may precede funding; the full reserve pull and activation are atomic
 inside `fund()`. Beneficiary address immutability does not freeze wallet control.
 Team cancellation uses its successful transaction timestamp, not a departure,
-scheduling or signing timestamp. The selected custody baseline is solo-founder
-Safe 2-of-3; older independent 3-of-5 governance descriptions remain proposals.
+scheduling or signing timestamp. The selected custody baseline is separate
+Project Controller Safe and Founder Beneficiary Safe configurations, each
+solo-founder Safe 2-of-3 with separate keys/devices. Multiple keys do not prove
+independent humans; exact Safe and owner addresses remain deployment inputs.
+Older independent 3-of-5 governance descriptions remain proposals.
 ADR-0006 remains proposed.
 
 Historically, this September 16 custody-only slice did not include production
@@ -143,8 +162,9 @@ The active delivery adds one immutable `GrantVault` per grant around the existin
 reserve, controller, allocation, kind and exact UTC schedule at construction;
 only the reserve can atomically fund the full allocation. The beneficiary can
 release vested tokens only to the bound address. The controller is an immutable
-address intended for the selected Safe 2-of-3 and may cancel only a funded team
-grant at the transaction timestamp. Cancellation returns only unvested tokens to
+address intended for the Project Controller Safe 2-of-3 and may cancel only a
+funded team grant at the transaction timestamp. The Founder Beneficiary Safe is
+a separate Safe 2-of-3 configuration. Cancellation returns only unvested tokens to
 the bound originating reserve and leaves vested-but-unreleased tokens claimable.
 Founder cancellation remains permanently forbidden.
 
@@ -1114,13 +1134,13 @@ Tokenomics является отдельным product/security workstream, а �
 | D-18 | Launch access | Utility/community beta + один highly volatile experimental pool | Permissionless pool доступен всем; первые buyers ограничены token-side cap |
 | D-19 | Initial bridge allocation | Только exact final commitment; generic treasury buffer = 0 | Обычный Squads ATA обходит EVM policy и считается liquid overhang |
 | D-20 | Rate-limit risk budget | Пользователь задаёт максимальный ущерб | Limits должны исходить из tolerable loss |
-| D-20A | 30/90-day liquid-supply shock | Утвердить числовой budget | Fixed supply не ограничивает dump pressure |
+| D-20A | Future 30/90-day liquid-supply analysis | Publish before any public market/liquidity launch | This is not a current MVP implementation requirement |
 | D-20B | Treasury sale/buyback policy | Zero в beta | Не допустить скрытого price support или treasury dump |
 | D-20C | Airdrop pilot/Sybil budget | ≤ min(0.25% supply, price-impact budget) | Первая wave должна быть обратимо малой |
 | D-20D | Cliff semantics | Zero до cliff, затем linear с нуля | Исключить catch-up dump в один день |
 | D-20E | Circulating/liquid-overhang formula | Machine-readable и dashboarded | Пользователь должен видеть будущий sell pressure |
 | D-20F | Governance activation gate | Ethereum-only aged vote escrow + Constitutional/Operational split; точные параметры ещё утвердить | Governor на genesis и dual-chain vote преждевременны |
-| D-20G | Global liquidization cap | Отдельно от commitment caps, списывается по earliest possible release и охватывает все vaults/Solana accounts | Иначе старые schedules могут разблокироваться одновременно |
+| D-20G | Future global unlock/liquidization budget | Explicitly accept or reject after circulating-supply and synchronized-unlock analysis | Separate from commitment caps and not a current MVP implementation requirement |
 
 ## Как одобрять liquidity
 
@@ -1672,8 +1692,9 @@ Token properties:
 
 Policy-vault этап после продуктового approval сохраняет требования из
 [`CONTRACTS.md`](CONTRACTS.md): purpose-specific contracts без generic execute,
-transfer/approve bypass, proxy или controller replacement; commitment и global
-liquidization limits доказываются stateful tests.
+transfer/approve bypass, proxy или controller replacement. Current MVP tests
+prove commitment and per-grant caps; a global unlock/liquidization budget is a
+separate later decision, not a current implementation requirement.
 
 ## Phase 3 — Ethereum CCIP pool
 

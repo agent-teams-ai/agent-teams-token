@@ -9,7 +9,7 @@ TypeScript 7 for Solana and CCIP tooling, deployment plans, reconciliation,
 monitoring and the dashboard. Use native macOS arm64 binaries for feedback and
 digest-pinned Linux containers for CI parity.
 
-Verified current baseline:
+Historical baseline at the research date:
 
 | Component | Selected or observed version | Policy |
 | --- | --- | --- |
@@ -22,7 +22,7 @@ Verified current baseline:
 | Chainlink CCIP SDK | 1.13.0 current | Add only with the first real adapter |
 | Chainlink Local | 0.2.9 current | Isolated test-only package because its CCIP contracts trail production |
 | Chainlink CCIP EVM | 1.6.4 versus 2.0.0 unresolved | Execute compatibility spike against live SVM lane, then ADR and exact pin |
-| Chainlink CCIP SVM | 1.6.3 live line | Pin program artifacts/digests only after EVM compatibility proof |
+| Chainlink CCIP SVM | Superseded: single 1.6.3 live-line claim | Corrected snapshot: Router, BurnMint and LockRelease match `solana-v1.6.2`; OffRamp and RMN match `solana-v1.6.3`; Fee Quoter has no exact match in supplied `solana-v1.6.0` through `solana-v1.6.4` artifacts, so qualification remains blocked |
 | OpenZeppelin Contracts | v5.7.0 stable release | Pin only after compiler and Chainlink compatibility spike |
 | Solidity | 0.8.36 current | Candidate, not a contract baseline until the compatibility spike passes |
 
@@ -31,6 +31,10 @@ Sources: [Engineering Foundation](https://github.com/agent-teams-ai/engineering-
 SDK](https://www.npmjs.com/package/@chainlink/ccip-sdk), [Chainlink Local](https://www.npmjs.com/package/@chainlink/local),
 [OpenZeppelin releases](https://github.com/OpenZeppelin/openzeppelin-contracts/releases),
 and [Solidity releases](https://github.com/ethereum/solidity/releases).
+
+Correction, 2026-09-21: the former single live SVM `1.6.3` baseline is
+superseded by the proven mixed snapshot in the table above. This dated research
+does not accept ADR-0007 or qualify a protocol line.
 
 Do not install every researched tool pre-emptively. `viem`, Safe Protocol Kit,
 Squads, Solana clients, Slither, Echidna, Medusa and Halmos enter only with a real

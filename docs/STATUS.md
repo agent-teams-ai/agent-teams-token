@@ -32,6 +32,22 @@ and exact UTC schedule remain unset. Reserve caps, production genesis wiring,
 audit, committed-candidate Slither and Linux rollback qualification remain
 separate gates. No public network or blockchain transaction was used.
 
+Current protocol guidance is a proven mixed snapshot, not a single live Solana
+CCIP `1.6.3` lane: Router, BurnMint and LockRelease match `solana-v1.6.2`;
+OffRamp and RMN match `solana-v1.6.3`; Fee Quoter has no exact match in supplied
+`solana-v1.6.0` through `solana-v1.6.4` artifacts. Protocol qualification remains
+blocked, and proposed ADR-0007 is not accepted.
+
+The MVP intentionally uses rolling 365-day gross commitment caps and per-grant
+caps, without the former global 30/90-day liquidization budget. Before any later
+public market or liquidity launch, circulating-supply and synchronized-unlock
+analysis must be published and a separate global unlock/liquidization budget
+must be explicitly accepted or rejected. This does not block code-only deployment
+preparation. Legal work remains outside repository code scope, not waived:
+external entity, jurisdiction, classification and disclosure review is required
+before mainnet genesis or any public sale, airdrop, liquidity promotion or
+user-facing utility offer.
+
 ## Historical accounting-only checkpoint, 2026-09-14
 
 Implemented the internal contributor-grant ledger and test-only harness:
@@ -644,13 +660,12 @@ ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
   The local Genesis Core plan uses accepted ADR-0003 for the new manifest
   feature but leaves the generic bootstrap unchanged until ADR-0004 is accepted
   or rejected, avoiding a temporary double migration.
-- Purpose-specific release/vesting vault proposal, rolling commitments and global
-  liquidization budget; governance-reserve activation remains an explicit open
-  decision and ABI blocker.
+- Purpose-specific release/vesting vault proposal and rolling commitments;
+  governance-reserve activation remains an explicit open decision and ABI blocker.
 - Production genesis wiring, vesting and treasury contracts.
 - Chainlink CCIP Ethereum and Solana pool configuration.
 - CCIP EVM `1.6.4` versus `2.0.0` compatibility ADR and canonical backing-holder
-  model for the live SVM `1.6.3` lane.
+  model. The SVM evidence is the mixed snapshot above, not a live `1.6.3` lane.
 - Production tokenomics approval envelope/compiler; the implemented local
   fixture manifest/hash is deliberately test-only and cannot approve launch.
 - Event-sourced cross-chain monitor and public transparency dashboard.

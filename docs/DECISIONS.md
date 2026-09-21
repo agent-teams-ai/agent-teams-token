@@ -84,6 +84,12 @@ allocation amounts, reserve caps and production deployment remain open.
 
 ## Custody implementation decisions, 2026-09-15
 
+The accepted custody split uses separate Project Controller Safe and Founder
+Beneficiary Safe configurations. Each Safe is 2-of-3 and uses separate
+keys/devices, while beneficial control remains with the solo founder. Multiple
+keys are not independent humans. Exact Safe addresses and owner addresses remain
+mandatory unresolved deployment inputs.
+
 For the bounded production-code custody slice, each founder/team grant uses one
 immutable `GrantVault` with no beneficiary, controller or ownership transfer.
 The immutable controller address is intended for the selected Safe 2-of-3 and is

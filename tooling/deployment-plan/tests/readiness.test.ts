@@ -100,7 +100,11 @@ test("evaluate CLI binds the manifest protocol pins but emits an incomplete repo
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, "incomplete");
   assert.ok(report.reasons.includes("protocol-profile-unverified"));
-  assert.equal((JSON.parse(await readFile(output, "utf8")) as { status: string }).status, "incomplete");
+  assert.ok(!report.reasons.includes("protocol-manifest-unbound"));
+  const persisted = JSON.parse(await readFile(output, "utf8")) as { status: string; reasons: string[] };
+  assert.equal(persisted.status, "incomplete");
+  assert.ok(persisted.reasons.includes("protocol-profile-unverified"));
+  assert.ok(!persisted.reasons.includes("protocol-manifest-unbound"));
 });
 
 
