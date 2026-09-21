@@ -57,7 +57,7 @@ The Fee Quoter mismatch blocks qualification. It must not be assigned an
 adjacent release version.
 
 The bounded finalized-RPC, authority, and artifact comparison record is
-[Fee Quoter mainnet attribution evidence](../research/FEE-QUOTER-MAINNET-EVIDENCE-2026-09-21.md).
+[Fee Quoter mainnet attribution evidence](../architecture/fee-quoter-mainnet-evidence-2026-09-21.md).
 It establishes no exact Fee Quoter artifact attribution: the source commit,
 build/toolchain provenance, and official matching `.so` remain missing. The
 result is evidence to keep this ADR proposed and mainnet lane qualification
