@@ -47,25 +47,18 @@ test("unsigned preparation refuses draft input and binds canonical configuration
   assert.deepEqual(deploymentBytes(compileDeployment(other, { sourceRevision: revision, artifacts }, ports).prepared), deploymentBytes(result.prepared));
 });
 
-test("accepted production input requires a separate selected approval and fails after configuration drift", () => {
-  // Synthetic expected mainnet values exercise validation only; this is no deployment or product approval.
+test("legacy mainnet-shaped compilation is rejected even with a caller approval", () => {
   const local = JSON.parse(readFileSync("tests/fixtures/deployment/local-test.json", "utf8"));
   const evm = "0x1111111111111111111111111111111111111111", sol = "11111111111111111111111111111111";
   const limit = { enabled: false, capacity: "0", rate: "0" };
   const config = { ...local, status: "accepted", testScenario: null,
-    environment: { mode: "mainnet-dry-run", evmChainId: "1", solanaGenesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", evmSelector: "5009297550715157269", solanaSelector: "124615329519749607" },
+    environment: { ...local.environment, mode: "mainnet-dry-run", evmChainId: "1" },
     bridge: { protocol: { reference: "synthetic-test-only", snapshotSha256: `0x${"ab".repeat(32)}`, networkDataSha256: `0x${"cd".repeat(32)}` },
       ethereum: { token: null, pool: null, router: evm, rmn: evm, registry: evm, registryModule: evm, registryAdministrator: evm, poolOwner: evm, rateLimitAdministrator: evm, rebalancer: null, inbound: limit, outbound: limit },
-      solana: { mint: null, pool: null, poolSigner: null, poolTokenAccount: null, lookupTable: null,
-        tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", router: sol, offRamp: sol, rmn: sol, feeQuoter: sol, burnMintProgram: sol, poolAdministrator: sol, registryAdministrator: sol, upgradeAuthority: null, inbound: limit, outbound: limit } } };
-  assert.deepEqual(validateDeployment(config).diagnostics, []);
-  const prepared = (approval?: { schema: "agtmai-deployment-approval-v1"; reference: string; configurationSha256: `0x${string}` }) => compileDeployment(config, { sourceRevision: revision, artifacts, ...(approval ? { approval } : {}) }, ports);
-  assert.ok(prepared().diagnostics.some(d => d.code === "DEPLOYMENT_APPROVAL_REQUIRED"));
-  const approval = { schema: "agtmai-deployment-approval-v1" as const, reference: "synthetic-fixture-only", configurationSha256: sha256(deploymentBytes(validateDeployment(config).value)) };
-  assert.equal(prepared(approval).prepared?.broadcastAllowed, false);
-  config.grants[0].beneficiary = "0x2222222222222222222222222222222222222222";
-  assert.ok(prepared(approval).diagnostics.some(d => d.code === "DEPLOYMENT_APPROVAL_REQUIRED"));
-  assert.equal(prepared({ ...approval, privateKey: "never-publish" } as typeof approval).prepared, undefined);
+      solana: { mint: null, pool: null, poolSigner: null, poolTokenAccount: null, lookupTable: null, tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", router: sol, offRamp: sol, rmn: sol, feeQuoter: sol, burnMintProgram: sol, poolAdministrator: sol, registryAdministrator: sol, upgradeAuthority: null, inbound: limit, outbound: limit } } };
+  const result = compileDeployment(config, { sourceRevision: revision, artifacts }, ports);
+  assert.ok(result.diagnostics.some(d => d.code === "DEPLOYMENT_PRODUCTION_ENVELOPE_REQUIRED"));
+  assert.equal(result.prepared, undefined);
 });
 
 test("canonical deployment bytes reject implicit numeric or object coercion", () => {

@@ -6,3 +6,5 @@ export { sha256 } from "./adapters/digest.js";
 export { parseLocalSource, parseProposal } from "./adapters/strict-source.js";
 export { validateReserveGenesis, type ReserveGenesis } from "./domain/reserve-genesis.js";
 export { verifyReserveFacts, type ReserveFactsPorts } from "./application/reserve-facts.js";
+export { validateProductionDeployment } from "./domain/production-deployment.js";
+export type { ProductionDeploymentConfig, ProductionValidation, ValidatedProductionDeployment } from "./domain/production-deployment.js";

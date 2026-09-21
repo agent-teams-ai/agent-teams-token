@@ -35,12 +35,15 @@ export function compileDeployment(input: unknown, pins: { readonly sourceRevisio
   const validated = validateDeployment(input);
   if (!validated.value || !validated.allocations) { return { diagnostics: validated.diagnostics }; }
   const config = validated.value, diagnostics: Diagnostic[] = [];
+  // Mainnet-shaped v1 input is intentionally no longer a compilation authority.
+  // Production preparation must first bind the accepted reserve envelope.
+  if (config.environment.mode === "mainnet-dry-run") {
+    diagnostics.push(failure("PRODUCTION_ENVELOPE_REQUIRED", "/"));
+    return { diagnostics };
+  }
   const configurationSha256 = ports.sha256(deploymentBytes(config));
   if (config.status === "draft") { diagnostics.push(failure("DEPLOYMENT_DRAFT_NOT_COMPILABLE", "/status")); }
   if (!/^[0-9a-f]{40}$/.test(pins.sourceRevision)) { diagnostics.push(failure("DEPLOYMENT_SOURCE_REVISION", "/sourceRevision")); }
-  if (config.environment.mode === "mainnet-dry-run" && (pins.approval?.schema !== "agtmai-deployment-approval-v1" || Object.keys(pins.approval).toSorted().join() !== "configurationSha256,reference,schema" || pins.approval.configurationSha256 !== configurationSha256 || !/^[a-zA-Z0-9][a-zA-Z0-9./_-]{0,159}$/.test(pins.approval.reference))) {
-    diagnostics.push(failure("DEPLOYMENT_APPROVAL_REQUIRED", "/approval"));
-  }
   diagnostics.push(...validateArtifacts(pins.artifacts));
   if (diagnostics.length) { return { diagnostics }; }
   const encoded = ports.encodeToken(config, validated.allocations);
@@ -48,7 +51,7 @@ export function compileDeployment(input: unknown, pins: { readonly sourceRevisio
   const initcode: Hex = `${artifact.creationBytecode}${encoded.constructorArgs.slice(2)}`;
   return { diagnostics: [], prepared: { schema: "agtmai-prepared-deployment-v1", broadcastAllowed: false,
     sourceRevision: pins.sourceRevision, configuration: config, configurationSha256,
-    approval: config.environment.mode === "mainnet-dry-run" ? pins.approval! : null,
+    approval: null,
     artifacts: [...pins.artifacts].toSorted((a, b) => a.contract < b.contract ? -1 : 1), token: { ...encoded, initcode } } };
 }
 

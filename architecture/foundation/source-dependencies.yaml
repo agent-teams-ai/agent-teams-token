@@ -48,6 +48,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/domain/deployment.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/grant-schedule.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/reserve-genesis.ts
+      - packages/contexts/supply/src/features/genesis-manifest/domain/production-deployment.ts
     allow:
       boundaries: []
       packages: []
@@ -63,6 +64,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/application/passport.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/canonical.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts
     allow:
       boundaries:
         - supply.genesis-manifest.domain
@@ -203,6 +205,7 @@ boundaries:
       - tooling/deployment-plan/src/domain/identity.ts
       - tooling/deployment-plan/src/domain/model.ts
       - tooling/deployment-plan/src/domain/readiness.ts
+      - tooling/deployment-plan/src/domain/production-guards.ts
     allow:
       boundaries: []
       packages: []
@@ -217,6 +220,7 @@ boundaries:
       - tooling/deployment-plan/src/application/ports.ts
       - tooling/deployment-plan/src/application/verifier.ts
       - tooling/deployment-plan/src/application/readiness.ts
+      - tooling/deployment-plan/src/application/production-preflight.ts
     allow:
       boundaries:
         - tooling.deployment-plan.domain
@@ -236,11 +240,13 @@ boundaries:
       - tooling/deployment-plan/src/adapters/readiness-evm.ts
       - tooling/deployment-plan/src/adapters/readiness-solana.ts
       - tooling/deployment-plan/src/adapters/readiness-evidence.ts
+      - tooling/deployment-plan/src/adapters/production-inputs.ts
     allow:
       boundaries:
         - tooling.deployment-plan.application
         - tooling.deployment-plan.domain
-      packages: []
+      packages:
+        - "@agent-teams/supply"
       builtins:
         - node:child_process
         - node:crypto
@@ -256,6 +262,7 @@ boundaries:
     entrypoints:
       - tooling/deployment-plan/src/composition/index.ts
       - tooling/deployment-plan/src/composition/readiness.ts
+      - tooling/deployment-plan/src/composition/production-preflight.ts
     allow:
       boundaries:
         - tooling.deployment-plan.adapters

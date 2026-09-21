@@ -1,5 +1,6 @@
 import { basename, dirname, resolve, join } from "node:path";
 import { deploymentBytes, type DeploymentArtifact, type PreparedDeployment } from "../application/compile-deployment.js";
+import type { ProductionArtifactPin } from "../application/prepare-production-deployment.js";
 import { isDigest } from "../domain/deployment.js";
 import { readDeploymentFile } from "./deployment-store.js";
 import { sha256 } from "./digest.js";
@@ -29,6 +30,41 @@ export async function readArtifactPins(path: string): Promise<{ readonly sourceR
   }
   if (new Set(artifacts.map(a => a.contract)).size !== 2) { return refuse(); }
   return { sourceRevision: pins.sourceRevision, artifacts, files };
+}
+
+/** Read and re-open the closed production artifact set, including the two reserve contracts. */
+export async function readProductionArtifactPins(path: string): Promise<{ readonly sourceRevision: string; readonly artifacts: readonly ProductionArtifactPin[]; readonly files: Readonly<Record<string, Uint8Array>> }> {
+  const parsed = parseStrict(new TextDecoder().decode(await readDeploymentFile(path, 1_048_576)));
+  if (parsed.diagnostics.length) { return refuse(); }
+  const pins = record(parsed.value);
+  exact(pins, ["schema", "sourceRevision", "artifacts"]);
+  if (pins.schema !== "agtmai-production-artifact-pins-v1" || typeof pins.sourceRevision !== "string" || !/^[0-9a-f]{40}$/.test(pins.sourceRevision) || !Array.isArray(pins.artifacts) || pins.artifacts.length !== 3) { return refuse(); }
+  const artifacts: ProductionArtifactPin[] = [];
+  const files: Record<string, Uint8Array> = {};
+  for (const input of pins.artifacts) {
+    const loaded = await readProductionPinnedArtifact(input, path);
+    artifacts.push(loaded.artifact); Object.assign(files, loaded.files);
+  }
+  if (new Set(artifacts.map(a => a.contract)).size !== 3) { return refuse(); }
+  return { sourceRevision: pins.sourceRevision, artifacts, files };
+}
+
+async function readProductionPinnedArtifact(input: unknown, path: string): Promise<{ readonly artifact: ProductionArtifactPin; readonly files: Record<string, Uint8Array> }> {
+  const pin = record(input);
+  exact(pin, ["contract", "artifactPath", "artifactSha256", "buildInfoPath", "buildInfoSha256"]);
+  const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"];
+  if (typeof pin.contract !== "string" || !contracts.includes(pin.contract) || typeof pin.artifactPath !== "string" || typeof pin.buildInfoPath !== "string" || !isDigest(pin.artifactSha256) || !isDigest(pin.buildInfoSha256)) { return refuse(); }
+  const artifactPath = pinnedPath(path, pin.artifactPath, [`${pin.contract}.json`, `${pin.contract.toLowerCase()}.artifact.json`]);
+  const buildInfoPath = pinnedPath(path, pin.buildInfoPath, [`${pin.contract.toLowerCase()}.build-info.json`], true);
+  const artifactBytes = await readDeploymentFile(artifactPath), buildBytes = await readDeploymentFile(buildInfoPath);
+  if (sha256(artifactBytes) !== pin.artifactSha256 || sha256(buildBytes) !== pin.buildInfoSha256) { return refuse(); }
+  const artifact = json(artifactBytes), build = json(buildBytes);
+  if (build.solcVersion !== "0.8.36" || record(artifact.metadata).compiler === undefined || record(record(artifact.metadata).compiler).version !== "0.8.36+commit.8a079791") { return refuse(); }
+  const { compilerInput, bytecode, runtime } = decodeCompilerOutput(artifact, build, pin.contract);
+  return { artifact: { contract: pin.contract as ProductionArtifactPin["contract"], creationBytecode: bytecode.object as `0x${string}`, runtimeBytecode: runtime.object as `0x${string}`, artifactSha256: pin.artifactSha256, buildInfoSha256: pin.buildInfoSha256, compilerInputSha256: sha256(deploymentBytes(compilerInput)), immutableReferences: immutableReferences(runtime) }, files: {
+    [`${pin.contract.toLowerCase()}.artifact.json`]: artifactBytes,
+    [`${pin.contract.toLowerCase()}.build-info.json`]: buildBytes,
+  } };
 }
 
 async function readPinnedArtifact(input: unknown, path: string): Promise<{ artifact: DeploymentArtifact; files: Record<string, Uint8Array> }> {
@@ -78,13 +114,13 @@ function decodeCompilerOutput(artifact: Record<string, unknown>, build: Record<s
     if (typeof bytecode.object !== "string" || !/^0x(?:[0-9a-f]{2})+$/.test(bytecode.object) || typeof runtime.object !== "string" || !/^0x(?:[0-9a-f]{2})+$/.test(runtime.object)) { return refuse(); }
     return { compilerInput, bytecode, runtime, references: immutableReferences(runtime) };
 }
-function immutableReferences(runtime: Record<string, unknown>) {
+function immutableReferences(runtime: Record<string, unknown>): readonly { readonly start: number; readonly length: 32 }[] {
     const references = Object.values(record(runtime.immutableReferences)).flatMap(value => {
       if (!Array.isArray(value)) { return refuse(); }
       return value.map(item => {
         const r = record(item); exact(r, ["start", "length"]);
         if (!Number.isSafeInteger(r.start) || (r.start as number) < 0 || r.length !== 32 || ((r.start as number) + 32) * 2 > (runtime.object as string).length - 2) { return refuse(); }
-        return { start: r.start as number, length: 32 };
+        return { start: r.start as number, length: 32 as const };
       });
     }).toSorted((a, b) => a.start - b.start);
     if (!references.length || references.some((r, i) => i > 0 && r.start < references[i - 1]!.start + 32)) { return refuse(); }

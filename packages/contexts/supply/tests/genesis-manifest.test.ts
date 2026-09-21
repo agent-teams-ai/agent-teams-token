@@ -233,13 +233,14 @@ test("all three committed schemas are strict and conform to accepted runtime val
   }
 });
 
-test("CLI distinguishes validation and I/O exits and exposes no production command", async () => {
+test("CLI distinguishes validation and I/O exits and exposes only the bounded production route", async () => {
   const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   assert.equal(Object.keys(packageJson.scripts).some((name) => name.includes("production")), false);
   const cli = pathToFileURL(join(packageRoot, ".local/tests/src/features/genesis-manifest/composition/cli.js"));
   assert.equal((await runCli(cli, ["compile-local", join(repositoryRoot, "config/tokenomics.proposal.yaml"), join(repositoryRoot, ".local/proposal-must-not-compile")])).code, 2);
   assert.equal((await runCli(cli, ["validate-proposal", ".local/does-not-exist.yaml"])).code, 3);
   assert.equal((await runCli(cli, ["compile-production"])).code, 2);
+  assert.equal((await runCli(cli, ["deployment", "validate-production", "--config", ".local/does-not-exist.json"])).code, 3);
 });
 
 function validatedLocalSource(source: LocalGenesisSource) {

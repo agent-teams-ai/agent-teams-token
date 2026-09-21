@@ -5,6 +5,7 @@ import { encodeAllocationId, parseCanonicalUint } from "../domain/model.js";
 
 const hex = (bytes: Uint8Array): Hex => `0x${Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("")}`;
 const hash = (signature: string): Hex => hex(keccak_256(new TextEncoder().encode(signature)));
+export const keccakBytes = (bytes: Uint8Array): Hex => hex(keccak_256(bytes));
 const word = (value: bigint): string => value.toString(16).padStart(64, "0");
 const addressWord = (value: string): string => value.slice(2).padStart(64, "0");
 const scalar = (value: bigint): Hex => `0x${word(value)}`;

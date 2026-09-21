@@ -10,6 +10,10 @@ const addressWord = (value: string): string => {
   if (!isEvmAddress(value)) { throw new Error("DEPLOYMENT_ABI_ADDRESS"); }
   return value.slice(2).padStart(64, "0");
 };
+const productionWord = (value: bigint): string => {
+  if (value < 0n || value >= 1n << 256n) { throw new Error("DEPLOYMENT_ABI_UINT_WIDTH"); }
+  return value.toString(16).padStart(64, "0");
+};
 
 export function encodeDeploymentToken(config: DeploymentConfig, allocations: readonly NormalizedAllocation[]): { constructorArgs: Hex; rawAllocationAbi: Hex; genesisAllocationHash: Hex } {
   const body = allocations.map(a => `${a.idBytes32.slice(2)}${addressWord(a.recipient)}${word(BigInt(a.amountBaseUnits))}`).join("");
@@ -31,4 +35,12 @@ export function encodeDeploymentGrant(config: DeploymentConfig, grant: Deploymen
   return `0x${[addressWord(token), addressWord(grant.beneficiary), addressWord(reserve.recipient), addressWord(safe.address),
     word(BigInt(grant.amountBaseUnits)), word(BigInt(grant.schedule.start)), word(BigInt(grant.schedule.cliff)), word(BigInt(grant.schedule.end)),
     word(grant.kind === "founder" ? 0n : 1n), grant.originalPurpose.slice(2)].join("")}`;
+}
+
+export function encodeProductionFounderReserve(token: Hex, beneficiary: Hex, controller: Hex, allocation: string, start: string, cliff: string, end: string, purpose: Hex): Hex {
+  return `0x${[addressWord(token), addressWord(beneficiary), addressWord(controller), productionWord(BigInt(allocation)), productionWord(BigInt(start)), productionWord(BigInt(cliff)), productionWord(BigInt(end)), productionWord(0n), purpose.slice(2)].join("")}`;
+}
+
+export function encodeProductionReserveController(token: Hex, controller: Hex, purpose: Hex, rollingCap: string, perGrantCap: string): Hex {
+  return `0x${[addressWord(token), addressWord(controller), purpose.slice(2), productionWord(BigInt(rollingCap)), productionWord(BigInt(perGrantCap))].join("")}`;
 }

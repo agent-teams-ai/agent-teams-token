@@ -333,3 +333,28 @@ secrets. It must execute a fresh small Sepolia custody scenario, official
 E→A/A→E/E→B transfers using liquid tokens, and publish finalized native evidence.
 Local time-warp proofs and offline captures cannot substitute for that run.
 Read-only mainnet observation remains separate and cannot submit transactions.
+
+## Bounded production deployment slices
+
+The production envelope, artifact preparation and offline preflight are a
+feature-local extension of the existing Supply and deployment-plan boundaries.
+The CLI remains static composition, filesystem and chain readers remain
+technical adapters, and the disposable Anvil harness remains dev-only
+composition. This does not add an Assembly graph node, adoption profile or
+general deployment framework.
+
+After the offline preflight is accepted, implementation stays limited to two
+reviewable slices. The first emits one deterministic unsigned package for the
+token, contributor reserve, founder reserve with its nested vault, and founder
+funding call. It binds predicted addresses to genesis recipients and records
+artifact, constructor, source and operation provenance. The second executes
+that exact package only against the existing disposable Anvil environment and
+verifies code, immutable terms, reserve balances, the nested founder vault,
+permissionless founder funding, fixed supply and the 3% founder, 17%
+contributors and 80% remaining allocations.
+
+Both slices remain non-broadcasting and use one fixed topology. Mainnet forks,
+generic deployment platforms, generic Solana observation tooling, utility
+pricing, checkout or burn, AMM or liquidity, public sale, airdrop, DAO and legal
+model work stay outside this scope. Live Safe addresses, beneficiaries, dates,
+caps and rate limits remain required owner inputs and are never inferred.
