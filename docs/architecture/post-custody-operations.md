@@ -317,6 +317,15 @@ canonical UTC seconds inside the observation interval. Authority observations
 must identify a configured chain and controlled address; known capabilities must
 also match their exact manifest target. Unconfigured capabilities remain
 explicitly unresolved, and duplicate capability observations are rejected.
+The passport lists each recorded token and grant deployment address,
+transaction, block and artifact/compiler-input digest. An empty manifest says
+that no deployment transaction is recorded. These facts come from the verified
+manifest; they do not claim explorer source verification or current live state.
+
+```bash
+pnpm token:passport generate --manifest "$DEPLOYMENT/deployment-manifest.json" --observations "$OBSERVATIONS" --output "$PUBLIC_FACTS"
+pnpm token:passport check --manifest "$DEPLOYMENT/deployment-manifest.json" --observations "$OBSERVATIONS" --passport "$PUBLIC_FACTS/token-passport.md" --registry "$PUBLIC_FACTS/authority-registry.v1.json" --now "$NOW_UTC_SECONDS"
+```
 
 ## Recovery and external execution
 
