@@ -23,11 +23,32 @@ test("passport and registry are deterministic and retain unresolved deployment f
   assert.deepEqual(first, second);
   assert.match(first.markdown, /Ethereum token: `unresolved`/);
   assert.match(first.markdown, /vault `unresolved`/);
+  assert.match(first.markdown, /No deployment transactions recorded/);
   assert.ok(first.authorityRegistry.entries.every(entry => entry.expected !== null));
   assert.equal(new TextDecoder().decode(renderPassport(first)), first.markdown);
   assert.match(new TextDecoder().decode(renderAuthorityRegistry(first)), /agtmai-authority-registry-v1/);
   assert.equal(first.manifestSha256, sha256(deploymentBytes(manifest)));
   assert.equal(first.observationsSha256, sha256(deploymentBytes(observations)));
+});
+
+test("passport publishes manifest-bound deployment transaction and artifact identities", () => {
+  const transactionHash = `0x${"44".repeat(32)}` as const;
+  const block = { number: "42", hash: `0x${"55".repeat(32)}` as const, timestamp: "1700000000" };
+  const deployed: DeploymentManifest = { ...manifest, status: "deployed",
+    token: { address: "0x0000000000000000000000000000000000000080", transactionHash, block,
+      constructorArgs: "0x", artifactSha256: manifest.preparedSha256,
+      compilerInputSha256: manifest.configurationSha256, genesisAllocationHash: manifest.configurationSha256 },
+    grants: [{ grantId: config.grants[0].id, address: "0x0000000000000000000000000000000000000081",
+      transactionHash: `0x${"66".repeat(32)}`, block, constructorArgs: "0x",
+      artifactSha256: manifest.preparedSha256, compilerInputSha256: manifest.configurationSha256 }],
+  };
+  const passport = generatePassport(deployed, observations);
+  assert.match(passport.markdown, new RegExp(transactionHash));
+  assert.match(passport.markdown, new RegExp(`0x${"66".repeat(32)}`));
+  assert.match(passport.markdown, /block 42/);
+  assert.match(passport.markdown, /Explorer source verification and live contract state require separate checks/);
+  assert.doesNotMatch(passport.markdown, /No deployment transactions recorded/);
+  checkPassport(deployed, observations, passport, "1700000100");
 });
 
 test("public deployment import and passport generation need only the injected SHA-256 port", () => {
