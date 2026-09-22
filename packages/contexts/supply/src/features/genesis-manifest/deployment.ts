@@ -10,6 +10,8 @@ export { compileDeployment, prepareGrant, deploymentBytes } from "./application/
 export { prepareProductionDeployment } from "./application/prepare-production-deployment.js";
 export type { ProductionArtifactPin, ProductionExpectation, ProductionApproval, PreparedProductionDeployment, ProductionPreparationPorts } from "./application/prepare-production-deployment.js";
 export type { DeploymentArtifact, DeploymentApproval, PreparedDeployment, DeploymentCompilerPorts } from "./application/compile-deployment.js";
+export { validateCcipPreparation } from "./domain/ccip-preparation.js";
+export type { AuthenticatedLockReleasePoolIdentity, CcipPreparationContext, CcipPreparationInput, CcipPreparationValidation, PreparedCcipDeployment, VerifiedPr21TokenIdentity } from "./domain/ccip-preparation.js";
 export { materializeDeploymentManifest, verifyDeploymentRuntime } from "./application/deployment-manifest.js";
 export type { DeploymentBlock, ContractDeploymentEvidence, DeploymentEvidence, DeploymentManifest, DeploymentManifestPorts } from "./application/deployment-manifest.js";
 export { parseCanonicalUint, UINT64_MAX, UINT256_MAX } from "./domain/model.js";

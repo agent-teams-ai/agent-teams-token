@@ -49,6 +49,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/domain/grant-schedule.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/reserve-genesis.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/production-deployment.ts
+      - packages/contexts/supply/src/features/genesis-manifest/domain/ccip-preparation.ts
     allow:
       boundaries: []
       packages: []
