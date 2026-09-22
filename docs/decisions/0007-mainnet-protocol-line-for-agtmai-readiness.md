@@ -78,6 +78,17 @@ withdrawal powers, Solana pool administration, and ProgramData upgrade
 authority require authenticated capability records. This requirement is not
 currently enforced fail-closed by the readiness implementation.
 
+The official EVM `LockReleaseTokenPool` source at
+[`contracts-ccip-v1.6.1`](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/LockReleaseTokenPool.sol)
+and [`contracts-ccip-v1.6.4`](https://github.com/smartcontractkit/chainlink-ccip/blob/bccdd15b734ea6c0e6d1b3d36c482e64ced2d441/chains/evm/contracts/pools/LockReleaseTokenPool.sol)
+allows the owner to set a rebalancer, which can call `withdrawLiquidity` to
+remove locked tokens. A direct Safe owner therefore retains a route to remove
+backing, even if the observed rebalancer is initially zero. Before claiming
+that backing is inaccessible to the owner, the exact pool artifact and a
+restricted ownership path must be proven, or that claim must be revised.
+Rate limits alone do not close this withdrawal route. This is an unresolved
+mainnet trust boundary, not a reason to relax the Fee Quoter qualification gate.
+
 This ADR remains proposed until the Fee Quoter has an exact official
 release/build match; EVM artifacts and finalized code/configuration evidence;
 actual registry account/version evidence; both-direction compatibility; enabled
