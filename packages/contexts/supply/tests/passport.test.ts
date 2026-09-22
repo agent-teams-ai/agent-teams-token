@@ -116,3 +116,41 @@ test("authority evidence binds capability, chain and controlled contract to the 
   assert.equal(generatePassport(deployed, { ...observations, authorities: [unresolved] }).authorityRegistry.entries.find(e => e.capability === unresolved.capability)!.expected, null);
   assert.throws(() => generatePassport(deployed, { ...observations, authorities: [{ ...unresolved, chain: "11155111" }] }), /PASSPORT_AUTHORITY_BINDING/);
 });
+
+test("bridge authority registry exposes backing withdrawal and upgrade powers even without observations", () => {
+  const evmPool = "0x0000000000000000000000000000000000000090";
+  const registry = "0x0000000000000000000000000000000000000091";
+  const owner = "0x0000000000000000000000000000000000000092";
+  const solanaMint = "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau";
+  const solanaPool = "DQ2LpgGVwXc62NNkqrwmhLMkUWuxVzMJhyt4p2Yw5aiJ";
+  const burnMintProgram = "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB";
+  const feeQuoter = "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi";
+  const bridge = {
+    protocol: { reference: "test-only", snapshotSha256: manifest.configurationSha256, networkDataSha256: manifest.configurationSha256 },
+    ethereum: { token: null, pool: evmPool, router: registry, rmn: registry, registry, registryModule: registry,
+      registryAdministrator: owner, poolOwner: owner, rateLimitAdministrator: owner, rebalancer: null,
+      inbound: { enabled: false, capacity: "0", rate: "0" }, outbound: { enabled: false, capacity: "0", rate: "0" } },
+    solana: { mint: solanaMint, pool: solanaPool, poolSigner: solanaPool, poolTokenAccount: solanaPool, lookupTable: null,
+      tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", router: solanaPool, offRamp: solanaPool,
+      rmn: solanaPool, feeQuoter, burnMintProgram, poolAdministrator: solanaPool, registryAdministrator: solanaPool,
+      upgradeAuthority: null, inbound: { enabled: false, capacity: "0", rate: "0" }, outbound: { enabled: false, capacity: "0", rate: "0" } },
+  };
+  const bridged = { ...manifest, configuration: { ...config, bridge } } as DeploymentManifest;
+  const passport = generatePassport(bridged, observations);
+  const entries = new Map(passport.authorityRegistry.entries.map(entry => [entry.capability, entry]));
+  assert.equal(entries.get("bridge.ethereum.pool-owner")?.controlled, evmPool);
+  assert.equal(entries.get("bridge.ethereum.pool-owner")?.expected, owner);
+  assert.equal(entries.get("bridge.ethereum.rebalancer")?.expected, null);
+  assert.match(entries.get("bridge.ethereum.rebalancer")!.limitation, /assigning one later/);
+  assert.equal(entries.get("bridge.solana.mint-authority")?.controlled, solanaMint);
+  assert.equal(entries.get("bridge.solana.program-upgrade")?.controlled, burnMintProgram);
+  assert.equal(entries.get("bridge.solana.fee-quoter-upgrade")?.controlled, feeQuoter);
+  assert.equal(entries.get("bridge.solana.fee-quoter-upgrade")?.expected, null);
+  assert.equal(entries.get("bridge.ethereum.pool-owner")?.observed, null);
+  assert.equal(entries.get("bridge.ethereum.pool-owner")?.mechanism, "unknown");
+  assert.match(passport.markdown, /bridge\.ethereum\.rebalancer.*withdraw locked backing/);
+  const valid = { ...observations, authorities: [{ capability: "bridge.ethereum.pool-owner", chain: "31337", controlled: evmPool, observed: owner }] };
+  assert.equal(generatePassport(bridged, valid).authorityRegistry.entries.find(entry => entry.capability === "bridge.ethereum.pool-owner")?.observed, owner);
+  assert.throws(() => generatePassport(bridged, { ...observations, authorities: [{ ...valid.authorities[0]!, controlled: registry }] }), /PASSPORT_AUTHORITY_BINDING/);
+  assert.throws(() => generatePassport(bridged, { ...observations, authorities: [{ capability: "bridge.solana.fee-quoter-upgrade", chain: config.environment.solanaGenesisHash, controlled: solanaPool, observed: solanaPool }] }), /PASSPORT_AUTHORITY_BINDING/);
+});
