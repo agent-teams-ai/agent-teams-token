@@ -61,8 +61,8 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "a288d05ff09bade14393fea1dc7112b90f9c18f02637bc93ac17ef1ddaf275cc",
-      "afterSha256": "d1583760ebcec9fba6ae449044d7e0a959925b5f684849dd2a36b26c8753747c"
+      "beforeSha256": "e6d586db4197e3ae6105e6afea971afe2e22323ca6e1836677d213590592d073",
+      "afterSha256": "7bbc11f63f769244c4e326c899b6d5ec0308473c50a1ae3845a5f1bd1da670c6"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
@@ -81,8 +81,8 @@
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "10484deee16d9c480ca5bb598842cb0728986375d4a93b1161ee8ac703a3cdee",
-      "afterSha256": "845c42d4659117c32a3c9ad7173c0dfb801452f7b44e2581aedbf02c9a08ec52"
+      "beforeSha256": "3dcd49beced5afb50b408dcd24c3ac2dd4fd05dbf9da3bbf675cc7f959d4ae32",
+      "afterSha256": "93d1c910de43a51375d157c1494ac590d456ab41c3344b4fe766218a3a0ef462"
     },
     {
       "path": "tooling/toolchain.lock.json",

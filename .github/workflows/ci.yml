@@ -283,6 +283,9 @@ jobs:
       - name: Install frozen workspace
         shell: bash
         run: source scripts/env.sh && pnpm install --frozen-lockfile
+      - name: Build Supply workspace dependency
+        shell: bash
+        run: source scripts/env.sh && pnpm --filter @agent-teams/supply build
       - name: Prove unsigned deployment plan against loopback Anvil
         shell: bash
         env:

@@ -244,8 +244,18 @@ test("deployment-plan job proves the real unsigned loopback path", () => {
   assert.deepEqual(job.needs, ["foundation-and-typescript", "solidity"]);
   const commands = runs("deployment-plan-e2e").join("\n");
   assert.match(commands, /bootstrap verify --offline[\s\S]*doctor --scope=core/);
+  const install = job.steps.find((step) => step.name === "Install frozen workspace");
+  const supplyBuild = job.steps.find((step) => step.name === "Build Supply workspace dependency");
+  const deploymentPlan = job.steps.find((step) => step.name === "Prove unsigned deployment plan against loopback Anvil");
+  assert.ok(install, "Install frozen workspace step is required");
+  assert.ok(supplyBuild, "Build Supply workspace dependency step is required");
+  assert.ok(deploymentPlan, "Prove unsigned deployment plan against loopback Anvil step is required");
+  assert.equal(supplyBuild.run, "source scripts/env.sh && pnpm --filter @agent-teams/supply build");
+  assert.equal(supplyBuild.if, undefined);
+  assert.ok(job.steps.indexOf(install) < job.steps.indexOf(supplyBuild));
+  assert.ok(job.steps.indexOf(supplyBuild) < job.steps.indexOf(deploymentPlan));
   assert.match(commands, /pnpm test:deployment-plan/);
-  assert.match(job.steps.find((step) => step.name === "Prove unsigned deployment plan against loopback Anvil").env.AGTMAI_ANVIL_BINARY, /foundry-v1\.8\.0-linux-x64\/anvil/u);
+  assert.match(deploymentPlan.env.AGTMAI_ANVIL_BINARY, /foundry-v1\.8\.0-linux-x64\/anvil/u);
   assert.doesNotMatch(JSON.stringify(job), /public-rpc|sepolia|mainnet|sendTransaction|continue-on-error/i);
 });
 
