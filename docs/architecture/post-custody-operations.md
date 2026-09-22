@@ -321,6 +321,9 @@ The passport lists each recorded token and grant deployment address,
 transaction, block and artifact/compiler-input digest. An empty manifest says
 that no deployment transaction is recorded. These facts come from the verified
 manifest; they do not claim explorer source verification or current live state.
+It also publishes configured allocation amounts, recipients, Safe owners,
+thresholds and beneficial-control labels, explicitly distinct from observed
+balances and current Safe state.
 
 ```bash
 pnpm token:passport generate --manifest "$DEPLOYMENT/deployment-manifest.json" --observations "$OBSERVATIONS" --output "$PUBLIC_FACTS"

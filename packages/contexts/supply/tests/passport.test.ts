@@ -22,6 +22,11 @@ test("passport and registry are deterministic and retain unresolved deployment f
   const first = generatePassport(manifest, observations), second = generatePassport(structuredClone(manifest), structuredClone(observations));
   assert.deepEqual(first, second);
   assert.match(first.markdown, /Ethereum token: `unresolved`/);
+  assert.match(first.markdown, /## Allocations/);
+  assert.match(first.markdown, new RegExp(config.allocations[0].recipient));
+  assert.match(first.markdown, /## Configured custody/);
+  assert.match(first.markdown, new RegExp(config.custodySafes[0].owners[0]));
+  assert.match(first.markdown, /live balances, ownership and extensions require separate observations/);
   assert.match(first.markdown, /vault `unresolved`/);
   assert.match(first.markdown, /No deployment transactions recorded/);
   assert.ok(first.authorityRegistry.entries.every(entry => entry.expected !== null));
