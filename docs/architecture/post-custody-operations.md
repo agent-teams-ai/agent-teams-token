@@ -326,7 +326,7 @@ thresholds and beneficial-control labels, explicitly distinct from observed
 balances and current Safe state.
 When bridge configuration is present, the authority registry also lists the
 configured EVM pool owner, rebalancer, rate-limit and registry administrators,
-plus Solana pool, mint and program authorities. It leaves an unverified Fee
+plus Solana pool, registry, mint and program authorities. It leaves an unverified Fee
 Quoter upgrade authority unresolved. These entries disclose powers and
 configuration, not verified live control or qualified protocol artifacts.
 

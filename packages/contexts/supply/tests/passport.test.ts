@@ -123,6 +123,8 @@ test("bridge authority registry exposes backing withdrawal and upgrade powers ev
   const owner = "0x0000000000000000000000000000000000000092";
   const solanaMint = "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau";
   const solanaPool = "DQ2LpgGVwXc62NNkqrwmhLMkUWuxVzMJhyt4p2Yw5aiJ";
+  const solanaRouter = "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C";
+  const solanaRegistryAdmin = "GoFoFfEDgALWRTw5dSY3VZQSwbFpvBEhDv1sFAWzYpbf";
   const burnMintProgram = "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB";
   const feeQuoter = "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi";
   const bridge = {
@@ -131,8 +133,8 @@ test("bridge authority registry exposes backing withdrawal and upgrade powers ev
       registryAdministrator: owner, poolOwner: owner, rateLimitAdministrator: owner, rebalancer: null,
       inbound: { enabled: false, capacity: "0", rate: "0" }, outbound: { enabled: false, capacity: "0", rate: "0" } },
     solana: { mint: solanaMint, pool: solanaPool, poolSigner: solanaPool, poolTokenAccount: solanaPool, lookupTable: null,
-      tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", router: solanaPool, offRamp: solanaPool,
-      rmn: solanaPool, feeQuoter, burnMintProgram, poolAdministrator: solanaPool, registryAdministrator: solanaPool,
+      tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", router: solanaRouter, offRamp: solanaPool,
+      rmn: solanaPool, feeQuoter, burnMintProgram, poolAdministrator: solanaPool, registryAdministrator: solanaRegistryAdmin,
       upgradeAuthority: null, inbound: { enabled: false, capacity: "0", rate: "0" }, outbound: { enabled: false, capacity: "0", rate: "0" } },
   };
   const bridged = { ...manifest, configuration: { ...config, bridge } } as DeploymentManifest;
@@ -143,6 +145,8 @@ test("bridge authority registry exposes backing withdrawal and upgrade powers ev
   assert.equal(entries.get("bridge.ethereum.rebalancer")?.expected, null);
   assert.match(entries.get("bridge.ethereum.rebalancer")!.limitation, /assigning one later/);
   assert.equal(entries.get("bridge.solana.mint-authority")?.controlled, solanaMint);
+  assert.equal(entries.get("bridge.solana.registry-admin")?.controlled, solanaRouter);
+  assert.equal(entries.get("bridge.solana.registry-admin")?.expected, solanaRegistryAdmin);
   assert.equal(entries.get("bridge.solana.program-upgrade")?.controlled, burnMintProgram);
   assert.equal(entries.get("bridge.solana.fee-quoter-upgrade")?.controlled, feeQuoter);
   assert.equal(entries.get("bridge.solana.fee-quoter-upgrade")?.expected, null);

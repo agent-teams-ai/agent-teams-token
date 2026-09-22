@@ -61,6 +61,7 @@ function bridgeAuthorityExpectations(c: DeploymentManifest["configuration"]): Ex
     ["bridge.ethereum.rate-limit-admin", evmChain, evmPool, ethereum.rateLimitAdministrator, "change pool rate limits", "Rate limits do not prevent rebalancer withdrawal"],
     ["bridge.ethereum.registry-admin", evmChain, ethereum.registry, ethereum.registryAdministrator, "change the registered token pool", "Current TokenAdminRegistry administration requires live verification"],
     ["bridge.solana.pool-admin", solanaChain, solanaPool, solana.poolAdministrator, "change BurnMint pool configuration", "Configured pool administration is not live account evidence"],
+    ["bridge.solana.registry-admin", solanaChain, solana.router, solana.registryAdministrator, "change the registered pool for the configured mint", "The mint-specific TokenAdminRegistry PDA and live administrator require separate verification"],
     ["bridge.solana.mint-authority", solanaChain, solanaMint, solana.poolSigner, "mint Solana representation", "The actual SPL mint authority requires live verification"],
     ["bridge.solana.program-upgrade", solanaChain, solana.burnMintProgram, solana.upgradeAuthority, "upgrade the BurnMint program", "ProgramData upgrade authority and program bytes require live verification"],
     ["bridge.solana.fee-quoter-upgrade", solanaChain, solana.feeQuoter, null, "upgrade the shared Fee Quoter program", "Exact Fee Quoter artifact and upgrade authority remain unqualified"],
