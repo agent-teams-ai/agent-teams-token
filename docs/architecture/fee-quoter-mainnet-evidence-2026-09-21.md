@@ -1,6 +1,7 @@
 # Fee Quoter mainnet attribution evidence
 
-Date: 2026-09-21. Scope: read-only evidence captured at repository base
+Date: 2026-09-21; official artifact recheck: 2026-09-22. Scope: read-only
+evidence captured at repository base
 `6c9f23bb1e898883a446fe621b60c0d398b90b09`. This record does not qualify a
 lane, a deployed program's semantics, or a mainnet operation.
 
@@ -60,6 +61,21 @@ examined current localtest artifacts sharing the v1.6.4 output also mismatch.
 `cmp` diverged in ELF-header entry-point bytes, and `.text`, `.rodata`,
 `.data.rel.ro`, and relocation comparisons differed. This excludes a
 padding-only or metadata-only explanation (high confidence).
+
+On 2026-09-22 the official GitHub release inventory still ended at
+`solana-v1.6.4`. Three additional official `solana-artifacts-localtest` archives
+were downloaded with `gh release download`, checked against their GitHub asset
+SHA-256, and their `target/deploy/fee_quoter.so` entries hashed directly:
+
+| Localtest release | Archive SHA-256 | Fee Quoter `.so` SHA-256 |
+| --- | --- | --- |
+| [`ea7ff77a0ddb`](https://github.com/smartcontractkit/chainlink-ccip/releases/tag/solana-artifacts-localtest-ea7ff77a0ddb) | `7072880e49ac873a7b6d6dbf5547b0517c87e17cd681e6143262a6c5fe803fc5` | `429806e3f07dd18f26148d99d2a8a2aecad04bc277967c126f8e0dec489e6d0d` |
+| [`50f521d70e62`](https://github.com/smartcontractkit/chainlink-ccip/releases/tag/solana-artifacts-localtest-50f521d70e62) | `845f32800c5124614a69e9674ee825ecc69fb9ba495e0e5ca7887697b6fc60ef` | `37a3f232e0f125811c8e0e7e066c7374278db429539dd18f9c8cffbafe7c7d65` |
+| [`720a003dab50`](https://github.com/smartcontractkit/chainlink-ccip/releases/tag/solana-artifacts-localtest-720a003dab50) | `38f0cf181de18285a23980ff80cda6ff1dfcac542208945c9adbe003994713e5` | `37a3f232e0f125811c8e0e7e066c7374278db429539dd18f9c8cffbafe7c7d65` |
+
+None matches the deployed ELF digest `f9fae84db2b68e104f19902fa38e55776ec0ab6daf0dc438392a57d382a23ff9`.
+This extends the inspected artifact set; it does not attribute the deployed
+program or change ADR-0007's proposed status.
 
 ## Reproducibility and provenance boundary
 
