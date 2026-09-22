@@ -330,6 +330,97 @@ pnpm token:passport generate --manifest "$DEPLOYMENT/deployment-manifest.json" -
 pnpm token:passport check --manifest "$DEPLOYMENT/deployment-manifest.json" --observations "$OBSERVATIONS" --passport "$PUBLIC_FACTS/token-passport.md" --registry "$PUBLIC_FACTS/authority-registry.v1.json" --now "$NOW_UTC_SECONDS"
 ```
 
+## Public read-only verification
+
+This guide becomes usable only after the project publishes a mainnet deployment
+manifest, a current token passport, and official Ethereum and Solana addresses.
+An address in a proposal or testnet report is not a mainnet address. Do not send
+funds to an address taken only from this repository.
+
+### 1. Establish the right contracts
+
+Start with the signed official address manifest. Match its Ethereum chain ID,
+token address, deployment transaction and block to the public deployment
+manifest. Match the manifest SHA-256 shown in the token passport to the
+published manifest. Run the repository's read-only passport check with the
+current UTC time in seconds:
+
+```bash
+pnpm token:passport check \
+  --manifest "$DEPLOYMENT/deployment-manifest.json" \
+  --observations "$OBSERVATIONS" \
+  --passport "$PUBLIC_FACTS/token-passport.md" \
+  --registry "$PUBLIC_FACTS/authority-registry.v1.json" \
+  --now "$NOW_UTC_SECONDS"
+```
+
+This detects edited or stale published files. It does not prove that the
+observations match the chains. Check the deployment transaction's contract
+creation address, bytecode and verified source in an Ethereum explorer against
+the exact artifact and compiler-input hashes in the manifest. If source is not
+verified, treat the implementation as unverified even when a name and symbol
+appear correct.
+
+### 2. Check issuance and allocations
+
+With a trusted Ethereum RPC and the published token address, the following
+calls are read-only. The expected fixed supply is `100000000000000000` base
+units: 100 million AGTMAI with 9 decimals.
+
+```bash
+cast call "$TOKEN" 'name()(string)' --rpc-url "$ETH_RPC_URL"
+cast call "$TOKEN" 'symbol()(string)' --rpc-url "$ETH_RPC_URL"
+cast call "$TOKEN" 'decimals()(uint8)' --rpc-url "$ETH_RPC_URL"
+cast call "$TOKEN" 'INITIAL_SUPPLY()(uint256)' --rpc-url "$ETH_RPC_URL"
+cast call "$TOKEN" 'totalSupply()(uint256)' --rpc-url "$ETH_RPC_URL"
+cast call "$TOKEN" 'GENESIS_ALLOCATION_HASH()(bytes32)' --rpc-url "$ETH_RPC_URL"
+```
+
+Expected name and symbol are `Agent Teams AI` and `AGTMAI`. The genesis hash
+must match the approved deployment configuration's computed hash. The manifest
+lists the configured allocation recipients and amounts; check the genesis
+`GenesisAllocation` events in the creation receipt against it. Current balances
+can differ after transfers. A matching total supply alone does not prove
+allocations, vesting or bridge backing.
+
+### 3. Check custody and grants
+
+For each published Safe, inspect the *current* owners, threshold and enabled
+modules on that Safe, not only the configured values in the passport. The
+disclosed 2-of-3 setup has one beneficial controller; three keys do not mean
+three independent people. For each grant vault, compare its token, beneficiary,
+original reserve, controller, terms and funded state to the published grant
+manifest and on-chain balance. A founder grant is non-cancellable; a cancelled
+team grant returns the unvested remainder to its originating reserve while the
+vested remainder stays claimable by the beneficiary.
+
+### 4. Check bridge backing before trusting cross-chain supply
+
+The Ethereum bridge uses lock/release: tokens sent to Solana are locked in the
+Ethereum pool, not burned. The Solana representation is minted/burned. At a
+single coherent finalized observation point, compare Ethereum pool balance,
+Solana mint supply, and every finalized-but-unsettled message in both
+directions. In base units, the required relation is:
+
+```text
+Ethereum pool balance
+  = Solana mint supply
+  + pending Ethereum-to-Solana amount
+  + pending Solana-to-Ethereum amount
+```
+
+The pending inventory must be complete and each source message must bind to a
+unique destination receipt. If an inventory, receipt, finality proof, mint
+authority, pool authority or protocol version is missing, the result is
+*unknown*, not `exact`. A surplus or deficit needs investigation before any
+backing claim. Check the pool owner and rebalancer powers too: the standard
+LockRelease pool can allow its rebalancer to withdraw locked liquidity.
+
+As of this draft, the mainnet bridge protocol line is **not qualified** under
+[ADR-0007](../decisions/0007-mainnet-protocol-line-for-agtmai-readiness.md), and
+no AGTMAI mainnet bridge canary has been proven. The published Sepolia/Devnet
+round trip is testnet evidence only.
+
 ## Recovery and external execution
 
 Custody orchestration advances one operation at a time. Preserve signed
