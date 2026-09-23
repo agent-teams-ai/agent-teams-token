@@ -102,7 +102,8 @@ test("reclamation preserves captured child custody before supervisor disconnect 
       let exited = false;
       for (let attempt = 0; attempt < 200 && !exited; attempt += 1) {
         const value = await readFile(`/proc/${pid}/stat`, "utf8").catch((cause) => {
-          if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return null; } throw cause;
+          if (["ENOENT", "ESRCH"].includes((cause as NodeJS.ErrnoException).code ?? "")) { return null; }
+          throw cause;
         });
         exited = value === null || value.slice(value.lastIndexOf(")") + 2).startsWith("Z ");
         if (!exited) { await new Promise((resolve) => { setTimeout(resolve, 10); }); }
