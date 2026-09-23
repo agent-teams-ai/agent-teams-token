@@ -30,6 +30,8 @@
     "tooling/deployment-plan/src/application/raw-artifact-verifier.ts",
     "tooling/deployment-plan/src/application/readiness.ts",
     "tooling/deployment-plan/src/application/verifier.ts",
+    "tooling/deployment-plan/src/composition/contributor-commitment-intent.ts",
+    "tooling/deployment-plan/src/composition/contributor-commitment.ts",
     "tooling/deployment-plan/src/composition/index.ts",
     "tooling/deployment-plan/src/composition/production-preflight.ts",
     "tooling/deployment-plan/src/composition/readiness.ts",
@@ -41,6 +43,7 @@
     "tooling/deployment-plan/tests/anvil.integration.test.ts",
     "tooling/deployment-plan/tests/artifact.test.ts",
     "tooling/deployment-plan/tests/bounded-json.test.ts",
+    "tooling/deployment-plan/tests/contributor-commitment.test.ts",
     "tooling/deployment-plan/tests/domain.test.ts",
     "tooling/deployment-plan/tests/fixtures/forge-build-info-1.8.0-representative.json",
     "tooling/deployment-plan/tests/helpers/no-replace-directory-rename.ts",
@@ -77,12 +80,12 @@
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "9d88f7f7dc6ed68d2e35de5c7f82e0ef4e30d257a7a07b4e8b9664c346a594a1",
+      "beforeSha256": "5d3b4fcb95c171e84e7f6ed57f98ff0e30830742908f826cfc299faf023e5c42",
       "afterSha256": "bc7ab156085048061efd75a21ee426cfbffaea8dbcc25023ab23a11c13902a72"
     },
     {
       "path": "package.json",
-      "beforeSha256": "aaf78da8b768bad98f5fe606a5d5bc17976bbdd19e8a7187d14326229b1ca074",
+      "beforeSha256": "4e0aafe4e7bea92f7f695849a37254078c05e827edcab388d42affe76ccffceb",
       "afterSha256": "a692df291974c41d90d97136b008ba54a1c0589e9f65fa42d75365699399f10e"
     },
     {

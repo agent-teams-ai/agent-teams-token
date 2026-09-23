@@ -60,6 +60,7 @@
     "docs:protocol:check": "pnpm docs:check",
     "deployment:config": "pnpm build && .tools/bin/node packages/contexts/supply/dist/features/genesis-manifest/composition/cli.js deployment",
     "deployment:readiness": ".tools/bin/node tooling/deployment-plan/src/composition/readiness.ts",
+    "deployment:contributor-commitment": "pnpm build && .tools/bin/node tooling/deployment-plan/src/composition/contributor-commitment.ts",
     "deployment:preflight": "pnpm build && .tools/bin/node tooling/deployment-plan/src/composition/production-preflight.ts",
     "deployment:production-preflight": "pnpm build && .tools/bin/node tooling/deployment-plan/src/composition/production-preflight.ts",
     "token:passport": "pnpm build && .tools/bin/node packages/contexts/supply/dist/features/genesis-manifest/composition/passport-cli.js",

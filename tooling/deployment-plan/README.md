@@ -1,5 +1,15 @@
 # Unsigned local deployment planner
 
+## Contributor commitment intent
+
+`pnpm deployment:contributor-commitment -- --prepared <verified-production-package-directory> --input <grant.json> --observation <capacity.json> --output <new-intent.json>` writes one canonical unsigned artifact and prints a short review summary. The output path must be new. This command does not connect to a chain, sign, or submit a transaction. Its `intentDigest` is SHA-256 over the canonical, domain-separated intent, including the full input, supplied observation, and Safe call; it is **not** a Safe transaction hash.
+
+The input uses schema `agtmai-contributor-commitment-input-v1` with explicit `chainId`, `token`, `reserve`, `projectControllerSafe`, `safeNonce`, `beneficiary`, `amountBaseUnits`, `purpose`, `schedule`, `configurationSha256`, `reserveConfigurationSha256`, `artifactPinsSha256`, and `sourceRevision`. The schedule uses the existing `calendar-12-48` deployment profile with exact UTC-second `start`, `cliff`, and `end`, plus `anniversaryRule` for a leap-day start. All addresses, caps, dates, and hashes come from the approved package or explicit operator input; this command supplies none.
+
+The separate observation uses schema `agtmai-contributor-capacity-observation-v1` and `provenance: "supplied-unverified"`. It must include `chainId`, `blockNumber`, `blockHash`, `blockTimestamp`, `observedAt`, `token`, `reserve`, `projectControllerSafe`, `safeNonce`, `safeThreshold`, `safeOwners`, `safeProxyCodeHash`, `safeSingletonCodeHash`, `safeSingletonAddress`, `controllerToken`, `controllerSafe`, `controllerPurpose`, `rollingCapBaseUnits`, `perGrantCapBaseUnits`, `controllerWindowSeconds`, `rollingCommittedBaseUnits`, `grossCommittedBaseUnits`, and `reserveBalanceBaseUnits`. These values must all be from one coherent block. The command checks consistency and freshness against the deployment configuration's observation age policy, but does not authenticate RPC provenance, contract code, Safe setup, balances, or counters. In particular, a supplied balance does not prove inventory. Obtain separate authenticated, finalized chain evidence before execution review.
+
+The artifact contains exactly one zero-value Safe `CALL` to `ReserveController.commit(address,Terms)`, with team-service kind, approved purpose, and calendar terms. Rolling capacity uses gross committed amounts in the exact 365-day window. Refunds do not restore it. `capacityAfterIfExecutedBaseUnits` is conditional arithmetic against the supplied snapshot; the intent does not reserve funds or cap capacity. It contains no signatures, Safe gas settings, execution options, or broadcast path. Fresh state and Safe nonce must be rechecked before any separately authorized transaction.
+
 This feature creates a deterministic stable plan and a separate volatile fee
 quote for an exact AGTMAIToken creation input on loopback Anvil (`31337`). All
 gas, fee and cap values are canonical decimal strings converted to `bigint`.

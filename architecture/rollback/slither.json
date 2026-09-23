@@ -122,13 +122,13 @@
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "9d88f7f7dc6ed68d2e35de5c7f82e0ef4e30d257a7a07b4e8b9664c346a594a1",
-      "afterSha256": "66032a90c7f5d5425fd879cbf6eea88c1dbf4c997139f3bb8bbae1b89969e1fa"
+      "beforeSha256": "5d3b4fcb95c171e84e7f6ed57f98ff0e30830742908f826cfc299faf023e5c42",
+      "afterSha256": "7e854f2b6d324cc01f408321f047c2675f198913025b05ca478f8bf962d118b7"
     },
     {
       "path": "package.json",
-      "beforeSha256": "aaf78da8b768bad98f5fe606a5d5bc17976bbdd19e8a7187d14326229b1ca074",
-      "afterSha256": "7bcd88e86f74039a1b6bf54428e3b41d342ebb64c491d50dcf488e0a0f307a7c"
+      "beforeSha256": "4e0aafe4e7bea92f7f695849a37254078c05e827edcab388d42affe76ccffceb",
+      "afterSha256": "65dd7abede5999aa3103440574ff0f706cc74c8cd5e0a154d52f3eea6f64d67f"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",

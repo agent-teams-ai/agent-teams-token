@@ -13,7 +13,7 @@ const hex = (value: Hex): Uint8Array => Uint8Array.from(value.slice(2).match(/..
 const hashValue = (value: unknown): Hex => sha256(deploymentBytes(value));
 
 const makeSafe = (id: string, address: string, owners: string[]) => ({ id, address, owners, threshold: 2, beneficialControl: "solo-founder", disclosure: "Synthetic test-only Safe identity." });
-function syntheticProductionEnvelope(): Record<string, unknown> {
+export function syntheticProductionEnvelope(): Record<string, unknown> {
   const shares = [3000, 3000, 300, 1700, 900, 500, 500, 100];
   const ids = ["long-term", "users", "founder", "contributors", "operations", "ecosystem", "financing", "liquidity"];
   const allocations = shares.map((bps, index) => ({ id: ids[index], recipient: `0x${String(index + 1).padStart(40, "0")}`, amountBaseUnits: String(BigInt(bps) * 10_000_000_000_000n), bps }));
