@@ -17,6 +17,7 @@ const exact = (value: unknown, fields: readonly string[]): Record<string, unknow
 };
 const word = (value: bigint): string => value.toString(16).padStart(64, "0");
 const addressWord = (value: string): string => value.slice(2).padStart(64, "0");
+const fail = (reason: string): never => {throw new Error(`COMMIT_${reason}`);};
 
 export interface ContributorCommitmentInput {
   readonly schema: "agtmai-contributor-commitment-input-v1";
@@ -64,15 +65,14 @@ export interface ContributorCapacityObservation {
   readonly reserveBalanceBaseUnits: string;
 }
 
-// oxlint-disable-next-line complexity, max-params -- one closed boundary checks the complete commitment and one supplied snapshot.
+// oxlint-disable-next-line complexity -- one closed boundary checks the complete commitment and one supplied snapshot.
 export function createContributorCommitmentIntent(prepared: PreparedProductionDeployment, input: ContributorCommitmentInput, observation: ContributorCapacityObservation, nowSeconds: bigint) {
-  const fail = (reason: string): never => {throw new Error(`COMMIT_${reason}`);};
   exact(input, ["schema", "chainId", "token", "reserve", "projectControllerSafe", "safeNonce", "beneficiary", "amountBaseUnits", "purpose", "schedule", "configurationSha256", "reserveConfigurationSha256", "artifactPinsSha256", "sourceRevision"]);
   exact(observation, ["schema", "provenance", "chainId", "blockNumber", "blockHash", "blockTimestamp", "observedAt", "token", "reserve", "projectControllerSafe", "safeNonce", "safeThreshold", "safeOwners", "safeProxyCodeHash", "safeSingletonCodeHash", "safeSingletonAddress", "controllerToken", "controllerSafe", "controllerPurpose", "rollingCapBaseUnits", "perGrantCapBaseUnits", "controllerWindowSeconds", "rollingCommittedBaseUnits", "grossCommittedBaseUnits", "reserveBalanceBaseUnits"]);
   if (input.schema !== "agtmai-contributor-commitment-input-v1" || observation.schema !== "agtmai-contributor-capacity-observation-v1" || observation.provenance !== "supplied-unverified") {fail("VERSION");}
   if (!prepared || prepared.schema !== "agtmai-prepared-production-deployment-v1" || prepared.broadcastAllowed !== false || prepared.coverage !== "token-and-reserves-only") {fail("PREPARED");}
   const validated = validateProductionDeployment(prepared.configuration);
-  if (!validated.value) {fail("CONFIGURATION");}
+  if (!validated.value) {throw new Error("COMMIT_CONFIGURATION");}
   const config = validated.value;
   const expectedConfiguration = sha256Hex(deploymentBytes(config.deployment));
   const expectedReserve = sha256Hex(deploymentBytes(config.reserveGenesis));
@@ -83,10 +83,12 @@ export function createContributorCommitmentIntent(prepared: PreparedProductionDe
   const token = prepared.operations.find(operation => operation.id === "token-create");
   const controller = prepared.operations.find(operation => operation.id === "controller-create");
   const policy = config.reserveGenesis.contributors;
-  if (!projectSafe || prepared.operations.map(operation => `${operation.id}:${operation.kind}`).join() !== "token-create:create,founder-reserve-create:create,controller-create:create,founder-fund:call" || !token?.expectedAddress || !controller?.expectedAddress || input.chainId !== "1" || observation.chainId !== "1" || input.chainId !== config.deployment.environment.evmChainId || !address(input.token) || !address(input.reserve) || !address(input.projectControllerSafe) || !address(input.beneficiary) || !hash(input.purpose) || input.token !== token.expectedAddress || input.reserve !== controller.expectedAddress || input.projectControllerSafe !== projectSafe.address || input.projectControllerSafe !== policy.controller || input.purpose !== policy.purpose || input.beneficiary === input.token || input.beneficiary === input.reserve) {fail("IDENTITY");}
+  if (!projectSafe) {throw new Error("COMMIT_IDENTITY");}
+  if (prepared.operations.map(operation => `${operation.id}:${operation.kind}`).join() !== "token-create:create,founder-reserve-create:create,controller-create:create,founder-fund:call" || !token?.expectedAddress || !controller?.expectedAddress || input.chainId !== "1" || observation.chainId !== "1" || input.chainId !== config.deployment.environment.evmChainId || !address(input.token) || !address(input.reserve) || !address(input.projectControllerSafe) || !address(input.beneficiary) || !hash(input.purpose) || input.token !== token.expectedAddress || input.reserve !== controller.expectedAddress || input.projectControllerSafe !== projectSafe.address || input.projectControllerSafe !== policy.controller || input.purpose !== policy.purpose || input.beneficiary === input.token || input.beneficiary === input.reserve) {fail("IDENTITY");}
   if (!expectedSafeState || observation.token !== input.token || observation.reserve !== input.reserve || observation.projectControllerSafe !== input.projectControllerSafe || observation.safeNonce !== input.safeNonce || observation.controllerToken !== input.token || observation.controllerSafe !== input.projectControllerSafe || observation.controllerPurpose !== input.purpose || observation.rollingCapBaseUnits !== policy.rollingCapBaseUnits || observation.perGrantCapBaseUnits !== policy.perGrantCapBaseUnits || observation.controllerWindowSeconds !== "31536000" || observation.safeThreshold !== 2 || !Array.isArray(observation.safeOwners) || observation.safeOwners.length !== 3 || observation.safeOwners.some(owner => !address(owner)) || new Set(observation.safeOwners).size !== 3 || observation.safeOwners.toSorted().join() !== projectSafe.owners.toSorted().join() || !hash(observation.safeProxyCodeHash) || observation.safeProxyCodeHash !== expectedSafeState.proxyCodeHash || !hash(observation.safeSingletonCodeHash) || observation.safeSingletonCodeHash !== expectedSafeState.singletonCodeHash || !address(observation.safeSingletonAddress) || observation.safeSingletonAddress !== expectedSafeState.singletonAddress) {fail("OBSERVATION_BINDING");}
   decimal(input.safeNonce); decimal(observation.blockNumber); const blockTime = decimal(observation.blockTimestamp, UINT64); const seenAt = decimal(observation.observedAt, UINT64);
-  if (!hash(observation.blockHash) || seenAt < blockTime || nowSeconds < seenAt || nowSeconds - seenAt > decimal(config.deployment.policy.observationMaxAgeSeconds) || nowSeconds > UINT64) {fail("STALE_OBSERVATION");}
+  const maxAge = decimal(config.deployment.policy.observationMaxAgeSeconds);
+  if (!hash(observation.blockHash) || seenAt < blockTime || nowSeconds < seenAt || nowSeconds - seenAt > maxAge || nowSeconds - blockTime > maxAge || nowSeconds > UINT64) {fail("STALE_OBSERVATION");}
   const amount = decimal(input.amountBaseUnits);
   const rolling = decimal(observation.rollingCommittedBaseUnits);
   const gross = decimal(observation.grossCommittedBaseUnits);

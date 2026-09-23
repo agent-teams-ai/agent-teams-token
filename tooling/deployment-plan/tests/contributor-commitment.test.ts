@@ -75,6 +75,7 @@ test("cap edges, inventory, freshness and refunds never restore capacity", () =>
   assert.equal(build({...fixture, input: {...fixture.input, amountBaseUnits: "5000000000000000"}, observation: {...fixture.observation, reserveBalanceBaseUnits: "5000000000000000"}}).safeTransaction.value, "0");
   assert.throws(() => build(changed(fixture, "observation", "reserveBalanceBaseUnits", "999")));
   assert.throws(() => createContributorCommitmentIntent(fixture.prepared, fixture.input, fixture.observation, now + 201n));
+  assert.throws(() => build(changed(fixture, "observation", "blockTimestamp", (now - 31536000n).toString())));
   assert.throws(() => build(changed(fixture, "observation", "grossCommittedBaseUnits", "9")));
   const refunded = {...fixture.observation, rollingCommittedBaseUnits: (cap - 999n).toString(), grossCommittedBaseUnits: cap.toString(), reserveBalanceBaseUnits: "100000"};
   assert.throws(() => build({...fixture, observation: refunded}));
