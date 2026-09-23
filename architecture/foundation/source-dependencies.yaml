@@ -263,6 +263,8 @@ boundaries:
     entrypoints:
       - tooling/deployment-plan/src/composition/index.ts
       - tooling/deployment-plan/src/composition/readiness.ts
+      - tooling/deployment-plan/src/composition/contributor-commitment.ts
+      - tooling/deployment-plan/src/composition/contributor-commitment-intent.ts
       - tooling/deployment-plan/src/composition/production-preflight.ts
     allow:
       boundaries:

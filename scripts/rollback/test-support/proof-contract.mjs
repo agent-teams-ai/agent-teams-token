@@ -21,6 +21,14 @@ test("every operational package rollback strips proof recursion", () => {
       assert.equal(transformed.scripts["rollback:test"], undefined);
       assert.equal(transformed.scripts["rollback:prove"], undefined);
       assert.equal(transformed.scripts["check:linux"], undefined);
+      if (slice === "deployment-plan") {
+        assert.equal(transformed.scripts["deployment:contributor-commitment"], undefined);
+      } else {
+        assert.equal(
+          transformed.scripts["deployment:contributor-commitment"],
+          JSON.parse(source.toString("utf8")).scripts["deployment:contributor-commitment"],
+        );
+      }
       assert.doesNotMatch(transformed.scripts.check, /rollback:(?:preflight|test|prove)/u);
       const manifest = manifests().find(({ sliceId }) => sliceId === slice);
       const expected = manifest.reverseEdits.find(({ path }) => path === "package.json").afterSha256;
