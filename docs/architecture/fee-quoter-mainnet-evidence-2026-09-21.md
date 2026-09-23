@@ -1,7 +1,8 @@
 # Fee Quoter mainnet attribution evidence
 
-Date: 2026-09-21; official artifact recheck: 2026-09-22; Router observation:
-2026-09-23. Original read-only evidence was captured at repository base
+Date: 2026-09-21; official artifact recheck: 2026-09-22; Router and Fee Quoter
+configuration observations: 2026-09-23. Original read-only evidence was captured
+at repository base
 `6c9f23bb1e898883a446fe621b60c0d398b90b09`. This record does not qualify a
 lane, a deployed program's semantics, or a mainnet operation.
 
@@ -99,6 +100,56 @@ The exact public account data, returned identically by both RPCs, is
 This establishes the configured Solana-to-Ethereum destination-chain account
 at those slots. It does not establish current fee acceptance, OffRamp execution,
 AGTMAI peer registration, or a qualified bidirectional lane.
+
+### Diagnostic Fee Quoter config observation, 2026-09-23
+
+The PDA derived from `b"config"` and the Fee Quoter program ID is
+`Jexa4tyW5xjDuucnNpTc3cz3Jsq1qY8fp4P4Dd4NQAb` (bump `253`). At finalized
+slots `449645856` and `449645978`, the two RPCs above returned the same
+155-byte account owned by the Fee Quoter program, with SHA-256
+`21de4f4de300e0522f9cd62a095ea975372a4ef229d0075d93c738d0858a80d7`.
+Its `account:Config` discriminator and version `1` match the candidate
+[`solana-v1.6.3` layout](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/programs/fee-quoter/src/state.rs)
+and [PDA constraint](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/programs/fee-quoter/src/context.rs).
+Under that layout, `onramp` points back to Router
+`Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C`, the owner is
+`GoFoFfEDgALWRTw5dSY3VZQSwbFpvBEhDv1sFAWzYpbf`, default code version is
+`V1`, local LINK decimals are `9`, and `max_fee_juels_per_msg` is
+`200000000000000000000`. The exact public account data returned by both RPCs
+is retained here (base64, line breaks added):
+
+```text
+mwyq4B76zIIB6rjArgURWACQPO3/FCieVBlI0ChXBc5le3xg3GY+
+6T4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIMZa
+vI7XCgAAAAAAAAAFDUlC14STn4XZIgvTCI8VnN55JwY38ECyqv1L
+WYU5Awmslyl34bq1//bGhikfmU/1LzSr7RvH34j3b0P5JlksjwE=
+```
+
+This is a layout-compatible diagnostic, not attribution of the mismatched ELF
+or proof of Fee Quoter execution semantics. The observed maximum-fee field is
+not an execution-time spending bound for an AGTMAI transaction. ADR-0007 and
+the mainnet lane remain unqualified.
+
+The candidate layout also derives an Ethereum `DestChain` PDA from
+`b"dest_chain"` and selector bytes `157b9cfc94998445`:
+`JCY1GFP2ayVmEsQxeRQXGZvk3nR9TovFbXF8rzcfgjHA` (bump `255`). Two finalized
+RPC observations at slots `449646716` and `449646890` returned the same
+120-byte, Fee-Quoter-owned account with SHA-256
+`905d2e08f60128370701f90c36c10ad2c05bac61fbb5c7c80a7151f82589199d`.
+Its `account:DestChain` discriminator and version `1` match the candidate
+layout. Under that layout, selector is `"5009297550715157269"`,
+`is_enabled = true`, `max_number_of_tokens_per_msg = 1`, and
+`max_per_msg_gas_limit = 3000000`. Both RPCs returned identical public data:
+
+```text
+TRLxhNQ22hABFXuc/JSZhEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAac6CI7Oroez
+agAAAAABAAEAMHUAAMDGLQDobgMAEAAAACgAAAC4CwAAAAAAABAAAACWAJBfAQBA
+DQMAAADuBCz8Qw8yAAAAkF8BAAEoEtUs
+```
+
+This is evidence of an enabled destination-chain setting under an unverified
+layout interpretation, not a successful `get_fee` call, charged-fee bound,
+source attribution, or proof that AGTMAI tokens can cross the lane.
 
 ## Official-artifact mismatch matrix
 
