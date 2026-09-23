@@ -95,11 +95,16 @@ actual registry account/version evidence; both-direction compatibility; enabled
 peer configuration; and authority/backing proofs are independently reviewed.
 It authorizes no deployment, signing, repair, or broadcast.
 
-Before that evidence exists, only protocol-independent pubkey/base58/selector/
-PDA/Upgradeable Loader/raw-hashing observation tooling may proceed, and only
-behind an explicitly unqualified fail-closed preparation profile. This excludes
-semantic Fee Quoter adapters, instruction construction, fee calculation,
-monitoring, lane qualification, signing, and broadcast.
+Before that evidence exists, an explicitly unqualified preparation profile may
+perform read-only account decoding, diagnostic fee quotes, and unsigned
+simulation against pinned upstream layouts and SDK behavior. It must bind each
+observation to the program ID, account owner, finalized slot, raw account hash,
+and assumed source revision; unknown layouts or failed decoding remain unknown.
+Unsigned instructions may be constructed solely for simulation. These results
+cannot qualify the deployed Fee Quoter, establish a fee ceiling, or be promoted
+to a production monitor or readiness claim. Signing, repair, deployment, and
+broadcast remain blocked. An exact artifact match and the other evidence above
+remain required for mainnet qualification.
 
 ## Consequences
 

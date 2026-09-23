@@ -115,16 +115,19 @@ controller artifact, or decoded governance semantics. Those remain unqualified.
 
 ## Explicitly unqualified preparation profile
 
-Only protocol-independent observation tooling may proceed behind an explicitly
-unqualified, fail-closed preparation profile: pubkey/base58 validation;
-decimal-string or `bigint` selector encoding; generic PDA derivation with fixed
-test vectors; Upgradeable Loader parsing; finalized read-only account capture;
-and raw account/ELF hashing and comparison.
+An explicitly unqualified, fail-closed preparation profile may capture and
+decode finalized accounts, calculate diagnostic fees through a pinned official
+SDK, and construct unsigned instructions solely for simulation. Preserve the
+program ID, account owner, finalized slot, raw account hash, assumed source
+revision, RPC endpoint, and simulation response with each observation. Reject
+unknown layouts and decode failures instead of assigning an adjacent release.
 
-That profile must reject rather than infer semantic Fee Quoter adapters,
-instruction construction, fee calculation, monitoring, lane qualification,
-signing, or broadcast. It does not authorize a deployment or acceptance of
-ADR-0007.
+This is preparation evidence, not attribution or a production fee guard. A fee
+quote does not cap the fee charged by a later transaction, and the Fee Quoter
+also contributes message parameters beyond the quoted amount. Do not promote
+these observations to a qualified lane, production monitor, mainnet-ready
+claim, or approval of ADR-0007. Signing, repair, deployment, and broadcast
+remain blocked by the proposed ADR's qualification and approval gates.
 
 ## Primary sources
 
@@ -132,5 +135,7 @@ ADR-0007.
 - [Pinned Chainlink mainnet lanes directory](https://github.com/smartcontractkit/documentation/blob/b14cf1fbd45f88a4617cc7c8dbf668121e56649c/src/config/data/ccip/v1_2_0/mainnet/lanes.json)
 - [Fee Quoter account constraints at v1.6.3](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/programs/fee-quoter/src/context.rs)
 - [Fee Quoter state layouts at v1.6.3](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/programs/fee-quoter/src/state.rs)
+- [Router onramp use of the Fee Quoter at v1.6.2](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-router/src/instructions/v1/onramp.rs)
+- [Official CCIP SDK documentation](https://docs.chain.link/ccip/tools/sdk/)
 - [Official verified-build workflow](https://github.com/smartcontractkit/chainlink-ccip/blob/c73892d4d33926195eee87b77013883e650a833c/.github/workflows/solana-verified-build.yml)
 - [Official SVM upgradability description](https://github.com/smartcontractkit/documentation/blob/b14cf1fbd45f88a4617cc7c8dbf668121e56649c/src/content/ccip/concepts/architecture/onchain/svm/upgradability.mdx)
