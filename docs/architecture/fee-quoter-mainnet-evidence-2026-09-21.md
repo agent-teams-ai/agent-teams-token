@@ -151,6 +151,59 @@ This is evidence of an enabled destination-chain setting under an unverified
 layout interpretation, not a successful `get_fee` call, charged-fee bound,
 source attribution, or proof that AGTMAI tokens can cross the lane.
 
+### Direct diagnostic `getFee` simulations, 2026-09-23
+
+Two read-only RPCs, `https://api.mainnet-beta.solana.com` and
+`https://solana-rpc.publicnode.com`, simulated unsigned `GetFee` instructions
+against finalized state at slots `449703049` and `449703050`-`449703051`,
+respectively. Neither
+transaction was signed or broadcast. Both observed the same Fee Quoter config
+SHA-256 `21de4f4de300e0522f9cd62a095ea975372a4ef229d0075d93c738d0858a80d7`.
+The Ethereum destination-chain account instead had SHA-256
+`9754b747aca2fb9a0dbb7cb096290e1b3dd6801d2ebf675efbc36019137b3262`,
+different from the earlier snapshot above. Its live configuration must be
+re-read for any future operation. The ProgramData header at these slots still
+reported last deployment slot `437468573` and upgrade authority
+`GoFoFfEDgALWRTw5dSY3VZQSwbFpvBEhDv1sFAWzYpbf`; its 45-byte header
+SHA-256 was `8b718bf684c181d7d1dbdbd0fb1594e543298dc3c58a9c6f8b0c22c47e621e01`.
+
+The diagnostic used the candidate `solana-v1.6.3` [IDL](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/target/idl/fee_quoter.json),
+[account constraints](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/programs/fee-quoter/src/context.rs)
+and [message validation](https://github.com/smartcontractkit/chainlink-ccip/blob/1f9fb0b2d9e57626d5bb2d5c64840415228be732/chains/solana/contracts/programs/fee-quoter/src/instructions/v1/messages.rs)
+only as an assumed layout. The receiver was a 32-byte ABI-encoded diagnostic
+EVM address; destination selector was `5009297550715157269`; native SOL was
+selected as the fee token. Extra args requested 200,000 destination gas and
+out-of-order execution. The token path used the existing Solana LINK mint with
+1,000,000 base units, not AGTMAI. The full candidate `GetFeeResult`, including
+processed extra args, was decoded and its raw bytes retained.
+
+| Simulation | Both RPC results | Candidate decoded return |
+| --- | --- | --- |
+| Empty message | success | 11,520,129 lamports; 105,083,590,000,000,000 juels; gas 200,000; out-of-order true; no token-transfer additional data |
+| LINK token message | success | 21,576,154 lamports; 196,812,009,000,000,000 juels; gas 200,000; out-of-order true; token-transfer overhead 32 destination bytes and 90,000 destination gas |
+| 20-byte EVM receiver | error `10009` (`InvalidEVMAddress`) | no return data |
+| Invalid extra-args tag | error `8029` (`InvalidExtraArgsTag`) | no return data |
+| Wrong token billing PDA | error `8015` (`InvalidInputsBillingTokenConfig`) | no return data |
+
+The two RPCs returned identical result bytes and error codes for these exact
+inputs. The unsigned instruction bytes, ordered account metas, raw return data,
+logs, account hashes and slots are retained in the worker's durable evidence
+directory
+`/srv/worker-state/jobs/agent-teams-token/mainnet-readiness-20260923/evidence/fee-quoter-diagnostic-20260923-v3/`.
+The diagnostic script SHA-256 is
+`cdd8a26fdf164c43c87c56ed77de487d6e3c23dc003c1b50b8d253cf3d0c1192`;
+the official-RPC and PublicNode JSON SHA-256 values are
+`7c572f090a64859a56861c56a726e52139d254a446ebb6a38a490331f38eb427`
+and `6aa42f4903ed35cb97551c4ea2110fc58346e4125d6312306b9851c9b3832a4d`.
+The script used `@solana/web3.js@1.99.0` with retained lockfile SHA-256
+`5453056ad611811f6a15f21b27739d2485139c8c9157bacb8805d6f4798b9427`.
+
+These observations show bounded behavior for two sample message shapes at
+those slots. Two RPC operators are not independent consensus proof. The tests
+do not exercise an AGTMAI mint/pool, establish an execution-time spending cap,
+authenticate the deployed ELF's source, or qualify the bidirectional lane.
+ADR-0007 remains proposed.
+
 ## Official-artifact mismatch matrix
 
 Each official release's `fee_quoter.so` differs from the canonical deployed ELF

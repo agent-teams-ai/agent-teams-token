@@ -84,6 +84,10 @@ ADR and mainnet lane qualification remain open. Exact source attribution is
 stronger assurance, but the proposed alternative below would explicitly trust
 Chainlink's deployed implementation and upgrade governance rather than claim
 that the deployed binary was source-verified.
+Direct finalized-RPC diagnostic `GetFee` simulations now demonstrate quotes and
+expected rejections for sample empty and LINK-token messages on two RPCs, with
+full return parameters retained. They do not exercise the intended AGTMAI
+transfer shape or close the execution-time fee bound and source-attribution gaps.
 
 Encoding is directional: Ethereum token identities stored in Solana remote
 configuration are ABI32 and Ethereum pool identities there are raw20. Solana
