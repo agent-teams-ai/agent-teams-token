@@ -1,14 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { accountTransfers, matchRequest } from '../src/domain/transfer-status.mjs';
+import { projectMessage } from '../../../packages/domain/src/features/ccip-status/message.ts';
 import { solanaEffect, evmEffect } from '../src/adapters/transfer-status-native.mjs';
 import { REVERSE } from '../src/domain/solana-reverse.mjs';
 const snapshot = { coherent: true, solanaSlot: 10, ethereumHeight: 10n, fixedSupply: 100_000_000_000n, lockedOnEthereum: 1_000_000_000n, supplyOnSolana: 0n };
 const pending = direction => ({ identity: { messageId: 'id', direction }, pendingAmount: 1_000_000_000n, events: [] });
-test('both pending directions preserve conserved supply', () => {
+const observed = (direction, messageId = 'id', amount = 1_000_000_000n) => {
+  const identity = { messageId, direction, amount, sourceToken: 'source', destinationToken: 'destination', recipient: 'recipient' };
+  const [sourceChain, sourceKind, destinationChain, destinationKind] = direction === 'ethereum-to-solana' ?
+    ['ethereum', 'lock', 'solana', 'mint'] : ['solana', 'burn', 'ethereum', 'release'];
+  const event = (chain, kind) => ({ ...identity, chain, kind, transactionId: `${messageId}-${chain}`,
+    eventIndex: 0, blockHash: `${messageId}-${chain}-block`, blockHeight: 1n, finality: 'finalized' });
+  return { identity, source: event(sourceChain, sourceKind), destination: event(destinationChain, destinationKind) };
+};
+const settledTransfer = (direction, messageId = 'id') => {
+  const { identity, source, destination } = observed(direction, messageId);
+  return { ...projectMessage(identity, [source, destination]), events: [source, destination] };
+};
+test('both pending directions fail closed without proof of nonsettlement', () => {
+  const apparentlyExact = { ...snapshot, fixedSupply: 100n, lockedOnEthereum: 2n, supplyOnSolana: 1n };
   for (const direction of ['ethereum-to-solana', 'solana-to-ethereum']) {
-    const result = accountTransfers([pending(direction)], snapshot, true);
-    assert.equal(result.status, 'exact'); assert.equal(result.adjustedGlobalSupply, snapshot.fixedSupply);
+    const { identity, source } = observed(direction, 'id', 1n);
+    const sourceOnly = { ...projectMessage(identity, [source]), events: [source] };
+    for (const transfer of [sourceOnly, { identity: { messageId: 'forged', direction }, pendingAmount: 1n, events: [] }]) {
+      const result = accountTransfers([transfer], apparentlyExact, true);
+      assert.equal(result.status, 'unknown');
+      assert.equal(result.adjustedGlobalSupply, undefined);
+      assert.equal(result.backingSurplus, undefined);
+    }
+  }
+});
+test('only coherent settled observations contribute zero pending', () => {
+  for (const direction of ['ethereum-to-solana', 'solana-to-ethereum']) {
+    const transfer = settledTransfer(direction);
+    assert.equal(accountTransfers([transfer], { ...snapshot, supplyOnSolana: 1_000_000_000n }, true).status, 'exact');
+    for (const changed of [{ ...transfer, status: 'pending' }, { ...transfer, events: [transfer.events[0]] },
+      { ...transfer, pendingAmount: 1n }, { ...transfer, events: [] }]) {
+      assert.equal(accountTransfers([changed], snapshot, true).status, 'unknown');
+    }
   }
 });
 test('unknown inventory, pending, stale snapshot and duplicate cannot be green', () => {
@@ -154,7 +184,7 @@ test('fixed three-message inventory preserves historical A and excludes B revers
   assert.throws(() => validateStatusTransfers([entries[0], { ...entries[0], sourceHash: 'another' }]), /Duplicate/);
   assert.throws(() => statusRecipient('solana-to-ethereum', FORWARD_RECIPIENT_B), /only recipient A/);
   assert.throws(() => statusRecipient('ethereum-to-solana', 'arbitrary'), /fixed forward/);
-  const settled = entries.map((entry, i) => ({ identity: { messageId: String(i), direction: entry.direction }, pendingAmount: 0n, events: [] }));
+  const settled = entries.map((entry, i) => settledTransfer(entry.direction, String(i)));
   const result = accountTransfers(settled, { ...snapshot, supplyOnSolana: 1_000_000_000n }, true);
   assert.equal(result.status, 'exact'); assert.equal(result.adjustedGlobalSupply, 100_000_000_000n);
 });
@@ -490,7 +520,7 @@ test('report finalization rechecks all observation ages after inspection and cle
         const { snapshot: value } = await freshnessFixture(options);
         assert.equal(accountTransfers([], value, true).status, 'exact');
         const original = structuredClone(value);
-        const transfers = [{ status: 'settled', identity: { messageId: 'settled' }, pendingAmount: 0n, events: [] }];
+        const transfers = [settledTransfer('ethereum-to-solana', 'settled')];
         const order = [];
         const report = await finalizeStatusReport(async () => {
           order.push('inspect');
