@@ -50,7 +50,7 @@ test("unsigned preparation refuses draft input and binds canonical configuration
 test("legacy mainnet-shaped compilation is rejected even with a caller approval", () => {
   const local = JSON.parse(readFileSync("tests/fixtures/deployment/local-test.json", "utf8"));
   const evm = "0x1111111111111111111111111111111111111111", sol = "11111111111111111111111111111111";
-  const limit = { enabled: false, capacity: "0", rate: "0" };
+  const limit = { enabled: true, capacity: "0", rate: "0" };
   const config = { ...local, status: "accepted", testScenario: null,
     environment: { ...local.environment, mode: "mainnet-dry-run", evmChainId: "1" },
     bridge: { protocol: { reference: "synthetic-test-only", snapshotSha256: `0x${"ab".repeat(32)}`, networkDataSha256: `0x${"cd".repeat(32)}` },

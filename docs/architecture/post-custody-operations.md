@@ -60,6 +60,11 @@ registries never become a second editable fact source.
 - Ethereum issuance includes custody balances. Bridge backing is counted once.
   Equal Solana supply at two endpoints cannot prove absence of intervening
   mint/burn activity.
+- Mainnet dry-run bridge configuration requires all four rate-limit buckets
+  enabled. Enabled `0/0` pauses transfers; disabled `0/0` would be unlimited.
+  Each outbound capacity and refill rate must fit the opposite inbound bucket.
+  A positive production capacity requires a positive refill rate.
+  These checks do not prove the current live bucket state.
 - Published files contain allowlisted public fields only. Credentials, signer
   references and RPC settings remain private. A file-hash inventory is written
   last, excludes its own digest, and rejects changed/missing files.

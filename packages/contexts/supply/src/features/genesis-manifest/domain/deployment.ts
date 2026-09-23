@@ -234,11 +234,26 @@ function validatePolicy(input: unknown, checks: DeploymentChecks): void {
 }
 function validateBridge(input: unknown, production: boolean, checks: DeploymentChecks): void {
   const { object, uint, oneOf, address, fail } = checks;
-  const rate = (rateInput: unknown, pointer: string, max: bigint): void => {
+  const rate = (rateInput: unknown, pointer: string, max: bigint): { capacity: bigint; rate: bigint } | undefined => {
     const r = object(rateInput, pointer, ["enabled", "capacity", "rate"]);
     oneOf(r.enabled, `${pointer}/enabled`, [true, false]);
     const capacity = uint(r.capacity, `${pointer}/capacity`, max, false), perSecond = uint(r.rate, `${pointer}/rate`, max, false);
-    if (capacity !== undefined && perSecond !== undefined && (r.enabled === false ? capacity !== 0n || perSecond !== 0n : capacity === 0n || perSecond === 0n || perSecond > capacity)) { fail("LIMITER_INVALID", pointer); }
+    if (production && r.enabled === false) { fail("LIMITER_DISABLED", `${pointer}/enabled`); }
+    if (capacity === undefined || perSecond === undefined || typeof r.enabled !== "boolean") { return undefined; }
+    if (r.enabled === false ? capacity !== 0n || perSecond !== 0n : perSecond > capacity) {
+      fail("LIMITER_INVALID", pointer);
+      return undefined;
+    }
+    if (production && r.enabled === true && capacity > 0n && perSecond === 0n) {
+      fail("LIMITER_ZERO_RATE", `${pointer}/rate`);
+      return undefined;
+    }
+    return r.enabled ? { capacity, rate: perSecond } : undefined;
+  };
+  const compatible = (outbound: { capacity: bigint; rate: bigint } | undefined, inbound: { capacity: bigint; rate: bigint } | undefined, pointer: string): void => {
+    if (outbound === undefined || inbound === undefined) { return; }
+    if (outbound.capacity > inbound.capacity) { fail("LIMITER_CAPACITY_MISMATCH", `${pointer}/capacity`); }
+    if (outbound.rate > inbound.rate) { fail("LIMITER_RATE_MISMATCH", `${pointer}/rate`); }
   };
   if (input !== null) {
     const b = object(input, "/bridge", ["protocol", "ethereum", "solana"]);
@@ -248,12 +263,16 @@ function validateBridge(input: unknown, production: boolean, checks: DeploymentC
     const evmKeys = ["token", "pool", "router", "rmn", "registry", "registryModule", "registryAdministrator", "poolOwner", "rateLimitAdministrator", "rebalancer", "inbound", "outbound"];
     const e = object(b.ethereum, "/bridge/ethereum", evmKeys);
     for (const k of evmKeys.filter(key => key !== "inbound" && key !== "outbound")) { address(e[k], `/bridge/ethereum/${k}`, "evm", ["token", "pool", "rebalancer"].includes(k)); }
-    for (const k of ["inbound", "outbound"]) { rate(e[k], `/bridge/ethereum/${k}`, (1n << 128n) - 1n); }
+    const evmInbound = rate(e.inbound, "/bridge/ethereum/inbound", (1n << 128n) - 1n);
+    const evmOutbound = rate(e.outbound, "/bridge/ethereum/outbound", (1n << 128n) - 1n);
     const solKeys = ["mint", "pool", "poolSigner", "poolTokenAccount", "lookupTable", "tokenProgram", "router", "offRamp", "rmn", "feeQuoter", "burnMintProgram", "poolAdministrator", "registryAdministrator", "upgradeAuthority", "inbound", "outbound"];
     const s = object(b.solana, "/bridge/solana", solKeys);
     for (const k of solKeys.filter(key => key !== "inbound" && key !== "outbound")) { address(s[k], `/bridge/solana/${k}`, "solana", ["mint", "pool", "poolSigner", "poolTokenAccount", "lookupTable", "upgradeAuthority"].includes(k)); }
     oneOf(s.tokenProgram, "/bridge/solana/tokenProgram", ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]);
-    for (const k of ["inbound", "outbound"]) { rate(s[k], `/bridge/solana/${k}`, UINT64_MAX); }
+    const solanaInbound = rate(s.inbound, "/bridge/solana/inbound", UINT64_MAX);
+    const solanaOutbound = rate(s.outbound, "/bridge/solana/outbound", UINT64_MAX);
+    compatible(evmOutbound, solanaInbound, "/bridge/ethereum/outbound");
+    compatible(solanaOutbound, evmInbound, "/bridge/solana/outbound");
   } else if (production) { fail("BRIDGE_REQUIRED", "/bridge"); }
 
 }
