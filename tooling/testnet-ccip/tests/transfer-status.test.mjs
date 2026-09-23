@@ -513,15 +513,12 @@ test('report finalization rechecks all observation ages after inspection and cle
     for (const phase of ['inspection', 'cleanup']) {
       for (const delay of [5000, 6000]) {
         let clock = 1700000000000;
-        const timestamp = clock / 1000 - limit + 5;
-        const options = { [field]: field === 'ethereum' ? '0x' + timestamp.toString(16) : timestamp };
+        const timestamp = clock / 1000 - limit + 5, options = { [field]: field === 'ethereum' ? '0x' + timestamp.toString(16) : timestamp };
         // Keep the other Solana observation independently fresh.
         if (field === 'solana') { options.repeated = 1700000000; }
         const { snapshot: value } = await freshnessFixture(options);
         assert.equal(accountTransfers([], value, true).status, 'exact');
-        const original = structuredClone(value);
-        const transfers = [settledTransfer('ethereum-to-solana', 'settled')];
-        const order = [];
+        const original = structuredClone(value), transfers = [settledTransfer('ethereum-to-solana', 'settled')], order = [];
         const report = await finalizeStatusReport(async () => {
           order.push('inspect');
           await Promise.resolve();

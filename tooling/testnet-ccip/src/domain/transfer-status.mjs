@@ -155,14 +155,14 @@ export async function inspectTransfer({ sourceHash, direction, recipient, destin
   return { sourceHash, ...accounting,
     events, ...(discoveryOrigin ? { discoveryOrigin } : {}), discoveryStatus: metadata?.status ?? 'UNKNOWN', discoveryError, destinationError };
 }
+// A finalized source does not prove that its destination is still unsettled.
+// Only an observed settlement can contribute a known zero pending amount.
+const settled = t => {
+  if (t?.pendingAmount !== 0n || t.status !== 'settled' || !Array.isArray(t.events) || !t.identity) { return false; }
+  try { return projectMessage(t.identity, t.events).status === 'settled'; }
+  catch { return false; }
+};
 export function accountTransfers(transfers, snapshot, completeInventory = false) {
-  // A finalized source does not prove that its destination is still unsettled.
-  // Only an observed settlement can contribute a known zero pending amount.
-  const settled = t => {
-    if (t?.pendingAmount !== 0n || t.status !== 'settled' || !Array.isArray(t.events) || !t.identity) { return false; }
-    try { return projectMessage(t.identity, t.events).status === 'settled'; }
-    catch { return false; }
-  };
   if (!completeInventory || !snapshot.coherent || transfers.some(t => !settled(t)) ||
       new Set(transfers.map(t => t.identity.messageId)).size !== transfers.length ||
       transfers.some(t => t.events.some(e => (e.chain === 'solana' && e.blockHeight > BigInt(snapshot.solanaSlot)) || (e.chain === 'ethereum' && e.blockHeight > snapshot.ethereumHeight)))) {
