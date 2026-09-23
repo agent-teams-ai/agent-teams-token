@@ -66,12 +66,16 @@ Status: обязательные product/security invariants. Ослаблени
   cliff catch-up, transferable beneficiary ownership и отсутствие нужной revoke
   semantics противоречат правилам проекта.
 - Никогда не считать rolling commitment cap защитой от synchronized unlock.
-  Отдельный global liquidization budget списывается по earliest possible release.
+  До публичного рынка или liquidity launch публиковать анализ таких unlocks и
+  отдельно принять или отклонить global liquidization budget по
+  [ADR-0009](decisions/0009-custody-split-and-launch-gates.md).
+  В текущий reserve-contract MVP он не входит.
 
 ## Tokenomics и market
 
 - Никогда не выдавать fixed supply за доказательство безопасного liquid supply.
-  Обязательны 30/90-day overhang и worst-case sell-pressure budgets.
+  До публичного рынка или liquidity launch обязательны 30/90-day overhang и
+  worst-case sell-pressure budgets.
 - Никогда не запускать peg, APY, staking emissions, own-token insurance или
   rewards, не покрытые внешним проверяемым бюджетом/revenue.
 - Никогда не выдавать mainnet pool на `$100` за устойчивый рынок, справедливое

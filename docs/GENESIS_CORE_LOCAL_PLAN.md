@@ -1,5 +1,13 @@
 # AGTMAI Genesis Core: подробный план локальной реализации
 
+**Исторический план локального блока.** Его экономические предложения
+(`45/25/15/8/6/1`, старые сроки vesting и открытый fixed supply) заменены
+принятыми [ADR-0008](decisions/0008-production-reserve-commitment-policy.md)
+и [ADR-0009](decisions/0009-custody-split-and-launch-gates.md). Текущие
+deployment inputs и нерешённые вопросы перечислены в
+[OPEN_QUESTIONS.md](OPEN_QUESTIONS.md); этот документ не задаёт production
+allocation или права подписи.
+
 **Дата:** 28 августа 2026 года
 **Статус:** финальная верификация на integration branch `feat/genesis-core` от
 baseline `b11fbb9ef2d847bc172c3c4f03651bc93e4722c8`. Обе implementation wave

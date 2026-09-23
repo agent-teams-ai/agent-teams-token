@@ -6,10 +6,10 @@ Follow the [accepted owner decisions](DECISIONS.md#owner-decisions-2026-09-14)
 and [current custody scope](PLAN.md#approved-contributor-grant-custody-slice-2026-09-15).
 Local production code now binds a non-replaceable beneficiary, originating
 reserve and controller per grant, with exact full funding, real token releases,
-permanent founder non-cancellation and unvested-only team refunds. This does not
-approve or configure any percentage, supply, allocation, party, Safe, reserve
-cap, date, genesis or deployment input; every economic table below remains a
-proposal. Historically, the September 15 custody-only slice lacked production
+permanent founder non-cancellation and unvested-only team refunds. That
+September 15 custody-only slice did not approve or configure percentages,
+parties, Safes, caps, dates, genesis or deployment inputs; the economic tables
+below remain superseded proposals. Historically, it also lacked production
 purpose-specific reserve enforcement. The committed `ReserveController` now
 enforces per-grant caps and rolling 365-day gross commitments; refunds return
 inventory without restoring consumed spending authority. `FounderGrantReserve`

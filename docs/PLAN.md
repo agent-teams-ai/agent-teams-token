@@ -1081,9 +1081,18 @@ USDC берутся из faucets или создаются локально. Н�
 
 # 9. Продуктовые решения, которые нужно принять вместе с пользователем
 
-Tokenomics является отдельным product/security workstream, а не только строкой allocations. Пока `status: proposal`, `docs/TOKENOMICS.md` и `config/tokenomics.proposal.yaml` являются согласованным предложением, не execution truth. После явного принятия strict compiler создаёт canonical immutable genesis manifest, и только он допускается к deployment.
+Tokenomics является отдельным product/security workstream, а не только строкой
+allocations. Принятое распределение `30/30/20/9/5/5/1` и ограничения резервов
+зафиксированы в ADR-0008/0009; `config/tokenomics.proposal.yaml` остаётся
+предложением и не является production execution input. Точные адреса, даты и
+суммы caps ещё требуют утверждения и проверки до deployment.
 
-🔒 Инварианты tokenomics:
+### Архив прежнего предложения (не действующие требования)
+
+Следующий список сохранён для контекста старого обсуждения. В частности,
+`45% Community Governance Reserve`, `70% community-designated` и ранние
+лимиты contributors заменены принятыми ADR-0008/0009; текущие решения и
+открытые вопросы перечислены в `docs/OPEN_QUESTIONS.md`.
 
 - `100%` fixed supply распределяется между публично именованными allocation buckets;
 - сумма buckets и их onchain balances всегда проверяема;
@@ -1112,26 +1121,30 @@ Tokenomics является отдельным product/security workstream, а �
 
 ## P0 — блокируют rights/ABI freeze или mainnet deployment
 
+Текущие решения в этой таблице следуют ADR-0008/0009. Пункты про рынок,
+Solana custody и governance остаются будущими решениями, а не расширяют
+текущий reserve-contract MVP.
+
 | ID | Вопрос | Рекомендуемый default | Почему важно |
 |---|---|---|---|
 | D-01 | Финальное имя токена | ✅ `Agent Teams AI` утверждено владельцем 2026-08-27 | Имя попадёт в immutable Ethereum contract |
 | D-02 | Финальный symbol | ✅ `AGTMAI` утверждён владельцем 2026-08-27 | Exact collision не найден; formal clearance всё равно обязателен |
-| D-03 | Total supply | `100,000,000` | Стоимость deployment от supply не зависит |
-| D-04 | Decimals | `9` | Одинаковая точность Ethereum/Solana |
+| D-03 | Total supply | ✅ `100,000,000` по ADR-0008 | Стоимость deployment от supply не зависит |
+| D-04 | Decimals | ✅ `9` по ADR-0008 | Одинаковая точность Ethereum/Solana |
 | D-05 | Utility на старте | Минимум одна live consumptive function до public distribution | Не проектировать публичный запуск только вокруг будущего roadmap |
-| D-06 | Allocations | Рабочее предложение `45/25/15/8/6/1`, ещё обсуждается | Governance reserve, distributions, all contributors, operations, ecosystem grants, liquidity |
-| D-07 | Vesting | ✅ Founder и initial team: 12→48, отдельные старты, без catch-up; founder без отзыва; доли ещё обсуждаются | Не создавать отдельный свободный founder reserve и общий unlock cliff |
+| D-06 | Allocations | ✅ `30/30/20/9/5/5/1` по ADR-0008; founder 3%, contributors 17% | Exact recipients и cap amounts остаются deployment inputs |
+| D-07 | Vesting | ✅ Founder/team: 12→48, отдельные старты, без catch-up; founder 3% без отзыва, будущие team grants из 17% | Не создавать свободный founder reserve и общий unlock cliff |
 | D-08 | Public sale | Нет на первом beta | Снижает legal и operational scope |
 | D-09 | Entity и target jurisdictions | Решить до rights/ABI freeze, mainnet genesis и public communications | Local/test-only neutral implementation разрешена раньше |
-| D-10 | Ethereum signer sets | Bridge/Treasury 3-of-5, Emergency 2-of-3; `|B∩T|≤1`, `E∩(B∪T)=0` | Изолировать custody, configuration и bounded cancellation |
-| D-11 | Solana signer sets | Bridge/Treasury Squads 3-of-5 с 7-day timelock, без spending-limit bypass | Не путать Squads и SPL mint authority |
+| D-10 | Ethereum Safe custody | ✅ Project Controller и Founder Beneficiary Safe по 2-of-3, solo-founder control по ADR-0009 | Exact addresses/owners и устройство ключей остаются deployment inputs; это не независимые люди |
+| D-11 | Solana custody | Отдельное решение перед mainnet bridge; не входит в reserve-contract MVP | Не путать custody и SPL mint authority |
 | D-12 | Solana authority model | Recoverable только test/bounded beta; Pool Signer PDA до широкой public distribution/liquidity | Строгий mainnet supply invariant важнее удобства recovery |
 | D-13 | Metadata authority | Squads на beta | Можно исправить URI/logo, затем заморозить |
-| D-14 | Public liquidity depth | Experimental pool разрешён при total founder cash ≤$100 и token side ≤0.01%; mature target: `$100` ≤1%, `$500` ≤5% | Малый pool даёт trading, но маркируется как highly volatile и не valuation |
+| D-14 | Public liquidity depth | Будущее предложение: experimental pool только после отдельного approval; total founder cash ≤$100 и token side ≤0.01% | Малый pool highly volatile и не доказывает valuation |
 | D-15 | Initial pool ratio/token amount | UNSET до отдельного proposal | Tiny pool не является valuation или price discovery |
 | D-16 | Venue и fee tier | Сравнить Raydium CPMM, Orca Splash и current configs/costs | Не хардкодить venue или устаревший tier |
-| D-17 | LP custody | Squads, не burn | Сохраняет recovery на beta |
-| D-18 | Launch access | Utility/community beta + один highly volatile experimental pool | Permissionless pool доступен всем; первые buyers ограничены token-side cap |
+| D-17 | LP custody | Будущее решение перед liquidity launch; Squads, не burn - лишь кандидат | Сохранять recovery без ложного обещания locked LP |
+| D-18 | Launch access | Public market/pool требуют отдельного решения; не входят в reserve-contract MVP | Genesis сам по себе не разрешает торговлю или распределение |
 | D-19 | Initial bridge allocation | Только exact final commitment; generic treasury buffer = 0 | Обычный Squads ATA обходит EVM policy и считается liquid overhang |
 | D-20 | Rate-limit risk budget | Пользователь задаёт максимальный ущерб | Limits должны исходить из tolerable loss |
 | D-20A | Future 30/90-day liquid-supply analysis | Publish before any public market/liquidity launch | This is not a current MVP implementation requirement |
@@ -1139,7 +1152,7 @@ Tokenomics является отдельным product/security workstream, а �
 | D-20C | Airdrop pilot/Sybil budget | ≤ min(0.25% supply, price-impact budget) | Первая wave должна быть обратимо малой |
 | D-20D | Cliff semantics | Zero до cliff, затем linear с нуля | Исключить catch-up dump в один день |
 | D-20E | Circulating/liquid-overhang formula | Machine-readable и dashboarded | Пользователь должен видеть будущий sell pressure |
-| D-20F | Governance activation gate | Ethereum-only aged vote escrow + Constitutional/Operational split; точные параметры ещё утвердить | Governor на genesis и dual-chain vote преждевременны |
+| D-20F | Governance activation gate | Будущее решение; Governor не входит в текущий MVP | Не включать governance без отдельного анализа capture и cross-chain participation |
 | D-20G | Future global unlock/liquidization budget | Explicitly accept or reject after circulating-supply and synchronized-unlock analysis | Separate from commitment caps and not a current MVP implementation requirement |
 
 ## Как одобрять liquidity
@@ -2723,30 +2736,15 @@ https://www.sec.gov/newsroom/press-releases/2026-30-sec-clarifies-application-fe
 
 ---
 
-# 22. Текущий product intake
+# 22. Product intake после принятых решений
 
-Исходное первое сообщение выполнено частично: пользователь подтвердил hybrid native macOS arm64 + Linux CI, назначение токена для Agent Teams AI и необходимость community-first прозрачной tokenomics. Открытые решения ведутся в `docs/OPEN_QUESTIONS.md`, варианты названия — в `docs/NAMING.md`, allocation/vesting — в `docs/TOKENOMICS.md`.
-
-Не повторяй весь исходный опрос. Следующий пакет вопросов должен касаться только ещё не принятых P0 решений:
-
-> Я принял архитектуру: Ethereum fixed-supply ERC-20 → CCIP LockRelease → Solana BurnMint → Raydium TOKEN/USDC. Основную техническую работу начинаю автономно; mainnet останется за Safe/Squads approvals.
->
-> Мне нужен один пакет ответов на launch-blocking решения:
->
-> `Agent Teams AI / AGTMAI` уже утверждено. Остались вопросы:
->
-> 1. Оставляем рабочее предложение `45/25/15/8/6/1`, founder ≤3% внутри
->    contributors, `100,000,000` supply и 9 decimals, или меняем перед freeze?
-> 2. Какая live consumptive utility будет доступна до public distribution?
-> 3. Какая entity выпускает token и какие страны входят в launch scope?
-> 4. Кто входит в изолированные Bridge/Treasury/Emergency Safe и два Solana Squads?
-> 5. Подтверждаем recoverable authority только для test/bounded beta и обязательный
->    переход на Pool Signer PDA до широкой public distribution/liquidity?
-> 6. Какой максимальный bridge loss и 30/90-day liquid-supply shock допустим?
-> 7. Есть ли logo, domain, site и metadata URI?
->
-> Пока ты отвечаешь, я продолжаю локальную архитектуру и тестовую среду без
-> mainnet rights/ABI freeze, funds или private keys.
+Имя `Agent Teams AI`, символ `AGTMAI`, fixed supply `100,000,000`, 9 decimals,
+распределение `30/30/20/9/5/5/1` и solo-owner Safe 2-of-3 уже приняты.
+Предыдущий опрос с `45/25/15/8/6/1`, независимыми Bridge/Treasury/Emergency
+signers и обязательным Raydium pool устарел; не задавать эти вопросы повторно
+и не использовать его как deployment policy. Актуальные неутверждённые
+параметры и границы запуска перечислены в `docs/OPEN_QUESTIONS.md` и
+ADR-0008/0009. Mainnet broadcast требует отдельного свежего разрешения.
 
 ---
 

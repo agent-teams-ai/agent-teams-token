@@ -4,6 +4,15 @@ Architecture decisions and their lifecycle are indexed in
 [`decisions/README.md`](decisions/README.md). Accepted ADRs are immutable;
 changes use a proposed superseding ADR.
 
+Current production allocation, reserve policy and custody split are recorded
+in accepted [ADR-0008](decisions/0008-production-reserve-commitment-policy.md)
+and [ADR-0009](decisions/0009-custody-split-and-launch-gates.md):
+`30/30/20/9/5/5/1`, founder 3% and contributors 17%, with separate
+solo-owner Safe 2-of-3 configurations. Earlier dated entries below are a
+decision history; statements that percentages or signer independence remain
+open were superseded by these ADRs. Exact addresses, cap amounts and dates
+remain deployment inputs.
+
 Product decisions that are not yet accepted remain in
 [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) and the proposal config. They do not
 become deployment truth until explicitly approved and compiled into the

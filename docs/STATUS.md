@@ -447,14 +447,17 @@ for exact source commits, remaining work and the safe continuation contract.
 Approved product identity: `Agent Teams AI`, symbol `AGTMAI`. Formal pre-launch
 clearance remains required.
 
-Liquidity direction: trading is required, founder total cash contribution is
-capped at `$100`, and community liquidity must be added directly by its owners.
-The first pool is explicitly experimental and highly volatile, not depth or
-valuation evidence.
+Historical liquidity direction: a small experimental pool with at most `$100`
+of founder cash was considered, with community liquidity supplied by its owners.
+No pool, trading launch or liquidity depth has been approved for the current
+reserve-contract MVP. A later public market requires a separate decision and
+the circulating-supply analysis described above.
 
-Tokenomics working baseline, still under discussion: `45/25/15/8/6/1` for the
-community-governance reserve, distributions, all contributors, operations,
-ecosystem grants and liquidity. Founder is capped at 3% inside contributors.
+Historical tokenomics proposal, superseded by
+[ADR-0008](decisions/0008-production-reserve-commitment-policy.md):
+`45/25/15/8/6/1` for community-governance, distributions, contributors,
+operations, ecosystem and liquidity. The accepted allocation is
+`30/30/20/9/5/5/1`, with a 3% founder grant inside the 20% contributor envelope.
 
 ## Proven locally
 
