@@ -375,7 +375,8 @@ After deployment, verify the published source from a clean checkout at the
 manifest's `sourceRevision`, using the exact pinned Foundry profile and the
 ABI-encoded constructor arguments recorded in the manifest. For example, from
 the repository root, verify the token with [Foundry's documented
-command](https://getfoundry.sh/forge/reference/verify-contract/):
+command](https://getfoundry.sh/forge/reference/verify-contract/). Set
+`ETHERSCAN_API_KEY` in the shell without storing it in the manifest:
 
 ```bash
 set -euo pipefail
@@ -384,7 +385,8 @@ git diff --quiet HEAD
 test "$(git rev-parse HEAD)" = "$(jq -er '.sourceRevision' "$MANIFEST")"
 TOKEN_ADDRESS="$(jq -er '.token.address' "$MANIFEST")"
 TOKEN_ARGS="$(jq -er '.token.constructorArgs' "$MANIFEST")"
-.tools/bin/forge verify-contract --root contracts/evm --chain 1 --verifier sourcify \
+.tools/bin/forge verify-contract --root contracts/evm --chain 1 \
+  --verifier etherscan --etherscan-api-key "$ETHERSCAN_API_KEY" \
   --watch --constructor-args "$TOKEN_ARGS" "$TOKEN_ADDRESS" \
   src/features/token-genesis/AGTMAICCIPToken.sol:AGTMAICCIPToken
 ```
