@@ -53,15 +53,19 @@ matching official artifact hashes are:
 | RMN | `solana-v1.6.3` | `80523981fd2bc45966c887579b87413be158542adf02f1f509d599336b8d7e03` | `698ccbe5b017a8c895cb10030f2aef18033340851fad5e4d6fb58c50a4245e9d` |
 | Fee Quoter | no exact match in supplied `solana-v1.6.0`–`solana-v1.6.4` artifacts | `5dcbe5e23b0cf5b673fc191cdbe50e8bedd907c0482b55351689a2b3f22170ac` | none |
 
-The Fee Quoter mismatch blocks qualification. It must not be assigned an
-adjacent release version.
+The Fee Quoter must not be assigned an adjacent release version. Its exact
+source/build attribution remains unknown. The mismatch is not itself evidence
+of a vulnerability, but a directory identity or a successful fee quote cannot
+establish the deployed program's behavior.
 
 The bounded finalized-RPC, authority, and artifact comparison record is
 [Fee Quoter mainnet attribution evidence](../architecture/fee-quoter-mainnet-evidence-2026-09-21.md).
 It establishes no exact Fee Quoter artifact attribution: the source commit,
-build/toolchain provenance, and official matching `.so` remain missing. The
-result is evidence to keep this ADR proposed and mainnet lane qualification
-blocked, not a release selection.
+build/toolchain provenance, and official matching `.so` remain missing. This
+ADR and mainnet lane qualification remain open. Exact source attribution is
+stronger assurance, but the proposed alternative below would explicitly trust
+Chainlink's deployed implementation and upgrade governance rather than claim
+that the deployed binary was source-verified.
 
 Encoding is directional: Ethereum token identities stored in Solana remote
 configuration are ABI32 and Ethereum pool identities there are raw20. Solana
@@ -82,18 +86,42 @@ The official EVM `LockReleaseTokenPool` source at
 [`contracts-ccip-v1.6.1`](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/LockReleaseTokenPool.sol)
 and [`contracts-ccip-v1.6.4`](https://github.com/smartcontractkit/chainlink-ccip/blob/bccdd15b734ea6c0e6d1b3d36c482e64ced2d441/chains/evm/contracts/pools/LockReleaseTokenPool.sol)
 allows the owner to set a rebalancer, which can call `withdrawLiquidity` to
-remove locked tokens. A direct Safe owner therefore retains a route to remove
-backing, even if the observed rebalancer is initially zero. Before claiming
-that backing is inaccessible to the owner, the exact pool artifact and a
-restricted ownership path must be proven, or that claim must be revised.
-Rate limits alone do not close this withdrawal route. This is an unresolved
-mainnet trust boundary, not a reason to relax the Fee Quoter qualification gate.
+remove locked tokens without checking remote liabilities or transfer rate
+limits. The owner can also replace the Router, which controls OffRamp
+authorization, and change remote peers. A direct Safe owner therefore retains
+routes to remove or misdirect backing even if the observed rebalancer starts at
+zero. A generic timelock delays these powers but does not remove them. Before
+claiming that backing is inaccessible to the owner, a protocol-specific
+restricted ownership policy and its bypass tests must be accepted; otherwise
+an explicitly approved custodial pilot must disclose the actual powers. The
+fixed-configuration alternative can prevent migration and strand outstanding
+remote supply, so this proposal does not select or implement it. Any relaxation
+of [the bridge-administration invariants](../NON_NEGOTIABLES.md#treasury-vesting-и-governance)
+requires a separate ADR, threat review, and explicit owner decision.
 
-This ADR remains proposed until the Fee Quoter has an exact official
-release/build match; EVM artifacts and finalized code/configuration evidence;
-actual registry account/version evidence; both-direction compatibility; enabled
-peer configuration; and authority/backing proofs are independently reviewed.
-It authorizes no deployment, signing, repair, or broadcast.
+This ADR remains proposed. A future source-authenticated qualification can use
+an exact official Fee Quoter release/build match. A proposed vendor-trust route
+may instead retain the mismatch as an explicit limitation, provided independent
+review proves all of the following for the exact intended transfer shape:
+
+- finalized deployed program identities, code/ProgramData hashes, upgrade
+  authorities, actual Router-to-Fee-Quoter binding, account owners, PDAs and
+  layout versions;
+- enabled lanes, exact token/pool peers, directional encoding, nine-decimal
+  mapping, direct Solana Pool Signer mint authority and absent freeze authority;
+- bounded positive and malformed/unsupported-message tests against the deployed
+  Fee Quoter, including its full returned message parameters, not only quotes;
+- a tested execution-time fee spending bound, since an earlier quote or
+  simulation cannot cap a later transaction;
+- exact EVM pool artifact/runtime, ownership and Router/OffRamp capabilities,
+  rate limits, backing accounting, and both-direction settlement evidence.
+
+Unknown layouts, changed code or authorities, missing observations and failed
+tests keep the lane unqualified. The vendor-trust route does not prove source
+equivalence or eliminate Chainlink governance risk. The backing-control choice
+above and the existing legal, owner-approval and mainnet canary gates remain
+separate. This proposed ADR authorizes no deployment, signing, repair, or
+broadcast.
 
 Before that evidence exists, an explicitly unqualified preparation profile may
 perform read-only account decoding, diagnostic fee quotes, and unsigned
@@ -103,8 +131,7 @@ and assumed source revision; unknown layouts or failed decoding remain unknown.
 Unsigned instructions may be constructed solely for simulation. These results
 cannot qualify the deployed Fee Quoter, establish a fee ceiling, or be promoted
 to a production monitor or readiness claim. Signing, repair, deployment, and
-broadcast remain blocked. An exact artifact match and the other evidence above
-remain required for mainnet qualification.
+broadcast remain blocked. Neither qualification route above has been proven.
 
 ## Consequences
 

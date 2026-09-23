@@ -11,7 +11,10 @@ lane, a deployed program's semantics, or a mainnet operation.
 Solana mainnet Fee Quoter ELF does not match any examined official Chainlink
 `solana-v1.6.0` through `solana-v1.6.4` artifact. Resemblance to the v1.6.3
 source line is an inference only (medium confidence), not an artifact identity.
-Accordingly, ADR-0007 remains proposed and mainnet lane qualification is blocked.
+ADR-0007 remains proposed and mainnet lane qualification is blocked. Its
+proposed vendor-trust route would not require an exact release build match, but
+the mismatch and additional Chainlink implementation/upgrade-governance trust
+must be disclosed; the other deployment and behavior proofs are still missing.
 
 This conclusion is bounded to the released artifacts and read-only observations
 listed below. It does not identify the deployed source commit, build host, Rust
@@ -75,7 +78,7 @@ SHA-256, and their `target/deploy/fee_quoter.so` entries hashed directly:
 
 None matches the deployed ELF digest `f9fae84db2b68e104f19902fa38e55776ec0ab6daf0dc438392a57d382a23ff9`.
 This extends the inspected artifact set; it does not attribute the deployed
-program or change ADR-0007's proposed status.
+program, establish a vulnerability, or change ADR-0007's proposed status.
 
 ## Reproducibility and provenance boundary
 
@@ -126,7 +129,9 @@ This is preparation evidence, not attribution or a production fee guard. A fee
 quote does not cap the fee charged by a later transaction, and the Fee Quoter
 also contributes message parameters beyond the quoted amount. Do not promote
 these observations to a qualified lane, production monitor, mainnet-ready
-claim, or approval of ADR-0007. Signing, repair, deployment, and broadcast
+claim, or approval of ADR-0007. The proposed vendor-trust route still requires
+deployed-binary behavior, fee-bound, configuration and authority proofs, with
+the source/build mismatch disclosed. Signing, repair, deployment, and broadcast
 remain blocked by the proposed ADR's qualification and approval gates.
 
 ## Primary sources
