@@ -146,11 +146,17 @@ export async function inspectTransfer({ sourceHash, direction, recipient, destin
       events.push(event(destinationName, destinationKind, hash, destination));
     } catch { destinationError = 'Destination finality, execution identity or token effect unproven'; }
   }
-  return { sourceHash, ...projectMessage(identity, events, metadata?.readyForManualExecution === true || metadata?.status === 'FAILED'),
+  const progress = projectMessage(identity, events, metadata?.readyForManualExecution === true || metadata?.status === 'FAILED');
+  // A finalized source proves progress, but absent destination evidence cannot prove nonsettlement.
+  // Keep the delivery status while excluding this amount from proven pending accounting.
+  const accounting = progress.pendingAmount === 0n ? progress : {
+    ...progress, pendingAmount: null, reasons: [...progress.reasons, 'destination-settlement-unresolved'],
+  };
+  return { sourceHash, ...accounting,
     events, ...(discoveryOrigin ? { discoveryOrigin } : {}), discoveryStatus: metadata?.status ?? 'UNKNOWN', discoveryError, destinationError };
 }
 export function accountTransfers(transfers, snapshot, completeInventory = false) {
-  if (!completeInventory || !snapshot.coherent || transfers.some(t => t.pendingAmount === null) ||
+  if (!completeInventory || !snapshot.coherent || transfers.some(t => typeof t.pendingAmount !== 'bigint') ||
       new Set(transfers.map(t => t.identity.messageId)).size !== transfers.length ||
       transfers.some(t => t.events.some(e => (e.chain === 'solana' && e.blockHeight > BigInt(snapshot.solanaSlot)) || (e.chain === 'ethereum' && e.blockHeight > snapshot.ethereumHeight)))) {
     return { status: 'unknown', reason: 'Incomplete inventory, duplicate, unproven transfer or incoherent/stale snapshot' };

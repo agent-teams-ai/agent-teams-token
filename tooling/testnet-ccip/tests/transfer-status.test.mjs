@@ -15,6 +15,7 @@ test('unknown inventory, pending, stale snapshot and duplicate cannot be green',
   const transfer = pending('ethereum-to-solana');
   assert.equal(accountTransfers([transfer], snapshot).status, 'unknown');
   assert.equal(accountTransfers([{ ...transfer, pendingAmount: null }], snapshot, true).status, 'unknown');
+  assert.equal(accountTransfers([{ ...transfer, pendingAmount: undefined }], snapshot, true).status, 'unknown');
   assert.equal(accountTransfers([transfer, transfer], snapshot, true).status, 'unknown');
   assert.equal(accountTransfers([transfer], { ...snapshot, coherent: false }, true).status, 'unknown');
   assert.equal(accountTransfers([{ ...transfer, events: [{ chain: 'ethereum', blockHeight: 11n }] }], snapshot, true).status, 'unknown');
@@ -56,7 +57,8 @@ test('API SUCCESS and execution Success cannot settle without native destination
     receipt: { messageId, sequenceNumber: 7n, state: 2 }, log: { transactionHash: 'destination' } }) } };
   const api = { getMessageById: async () => ({ metadata: { status: 'SUCCESS', offRamp: 'offramp', receiptTransactionHash: 'destination' } }) };
   const result = await inspectTransfer({ sourceHash: hash, direction: 'ethereum-to-solana' }, chains, native, api, 2);
-  assert.equal(result.status, 'pending'); assert.equal(result.pendingAmount, FORWARD.amount);
+  assert.equal(result.status, 'pending'); assert.equal(result.pendingAmount, null);
+  assert.equal(result.identity.amount, FORWARD.amount);
   assert.match(result.destinationError, /unproven/);
   const encoded = Buffer.from('12345678event').toString('base64');
   chains.solana.getExecutionReceiptInTx = async () => ({ receipt: { messageId, sequenceNumber: 7n, state: 2 },
@@ -270,6 +272,7 @@ test('operator receipt discovery settles both chains only through native verific
       if (metadata) { f.api.getMessageById = async () => ({ metadata }); }
       const result = await f.run();
       assert.equal(result.status, 'settled'); assert.equal(result.pendingAmount, 0n);
+      assert.equal(accountTransfers([result], { ...snapshot, supplyOnSolana: 1_000_000_000n }, true).status, 'exact');
       assert.equal(result.discoveryOrigin, 'operator-receipt-hint');
       assert.equal(result.discoveryStatus, metadata?.status ?? 'UNKNOWN');
       assert.deepEqual(f.calls, ['authorize', 'sdk', 'effect']);
@@ -287,6 +290,8 @@ test('hint cannot bypass authorization, SDK identity, native finality/effects or
       else { f.execution.receipt[failure] = 'wrong'; }
       const result = await f.run();
       assert.equal(result.status, 'pending', failure); assert.equal(result.events.length, 1);
+      assert.equal(result.pendingAmount, null, failure);
+      assert.equal(accountTransfers([result], snapshot, true).status, 'unknown', failure);
       assert.match(result.destinationError, /unproven/); assert.doesNotMatch(result.destinationError, /private/);
     }
   }
@@ -299,6 +304,8 @@ test('complete API and hint conflicts fail closed; matching receipts remain veri
       f.api.getMessageById = async () => ({ metadata: { status: 'SUCCESS', receiptTransactionHash: receipt.transactionHash, offRamp: receipt.offRamp } });
       const result = await f.run();
       assert.equal(result.status, 'pending'); assert.match(result.destinationError, /conflict/); assert.deepEqual(f.calls, []);
+      assert.equal(result.pendingAmount, null);
+      assert.equal(accountTransfers([result], snapshot, true).status, 'unknown');
     }
   }
   const f = await receiptHintFixture();
@@ -307,10 +314,14 @@ test('complete API and hint conflicts fail closed; matching receipts remain veri
   assert.equal(result.discoveryOrigin, 'ccip-api'); assert.equal(result.status, 'settled');
 });
 test('API outage without hint preserves pending and malformed hints never read destination', async () => {
-  const absent = await receiptHintFixture(); delete absent.transfer.destinationReceipt;
-  const pendingResult = await absent.run();
-  assert.equal(pendingResult.status, 'pending'); assert.equal(pendingResult.discoveryStatus, 'UNKNOWN');
-  assert.equal(pendingResult.destinationError, undefined); assert.deepEqual(absent.calls, []);
+  for (const forward of [false, true]) {
+    const absent = await receiptHintFixture(forward); delete absent.transfer.destinationReceipt;
+    const pendingResult = await absent.run();
+    assert.equal(pendingResult.status, 'pending'); assert.equal(pendingResult.discoveryStatus, 'UNKNOWN');
+    assert.equal(pendingResult.pendingAmount, null);
+    assert.equal(pendingResult.destinationError, undefined); assert.deepEqual(absent.calls, []);
+    assert.equal(accountTransfers([pendingResult], snapshot, true).status, 'unknown');
+  }
   for (const forward of [false, true]) {
     const f = await receiptHintFixture(forward);
     for (const hint of [null, [], {}, 'receipt', { ...f.hint, extra: true },
@@ -318,8 +329,45 @@ test('API outage without hint preserves pending and malformed hints never read d
       f.transfer.destinationReceipt = hint;
       const result = await f.run();
       assert.equal(result.status, 'pending'); assert.match(result.destinationError, /malformed/);
+      assert.equal(result.pendingAmount, null);
       assert.deepEqual(f.calls, []);
     }
+  }
+});
+
+test('unresolved delivery stays outside accounting across fresh snapshots and pool donations', async () => {
+  const { FORWARD } = await import('../src/domain/evm-forward.mjs');
+  const before = { ...snapshot, supplyOnSolana: FORWARD.amount, observedAt: '2026-09-23T00:00:00.000Z' };
+  const after = { ...before, solanaSlot: 11, ethereumHeight: 11n,
+    observedAt: '2026-09-23T00:01:00.000Z', lockedOnEthereum: before.lockedOnEthereum + FORWARD.amount };
+  for (const forward of [false, true]) {
+    for (const metadata of [undefined, { status: 'SUCCESS' }, { status: 'PROCESSING' }, { status: 'FAILED', readyForManualExecution: true }]) {
+      const f = await receiptHintFixture(forward);
+      delete f.transfer.destinationReceipt;
+      if (metadata) { f.api.getMessageById = async () => ({ metadata }); }
+      const unresolvedBefore = await f.run();
+      const unresolvedAfter = await f.run();
+      assert.deepEqual(unresolvedAfter, unresolvedBefore);
+      assert.equal(unresolvedBefore.status, metadata?.status === 'FAILED' ? 'manual-execution' : 'pending');
+      assert.equal(unresolvedBefore.identity.messageId, f.execution.receipt.messageId);
+      assert.equal(unresolvedBefore.identity.amount, FORWARD.amount);
+      assert.equal(unresolvedBefore.events.length, 1);
+      assert.equal(unresolvedBefore.pendingAmount, null);
+      assert.ok(unresolvedBefore.reasons.includes('destination-settlement-unresolved'));
+      for (const [transfer, coherent] of [[unresolvedBefore, before], [unresolvedAfter, after]]) {
+        const accounting = accountTransfers([transfer], coherent, true);
+        assert.equal(accounting.status, 'unknown');
+        assert.equal(accounting.adjustedGlobalSupply, undefined);
+        assert.equal(accounting.backingSurplus, undefined);
+      }
+      assert.deepEqual(f.calls, []);
+    }
+    const f = await receiptHintFixture(forward);
+    const settled = await f.run();
+    assert.equal(settled.status, 'settled');
+    assert.equal(settled.pendingAmount, 0n);
+    assert.equal(accountTransfers([settled], before, true).status, 'exact');
+    assert.equal(accountTransfers([settled], after, true).status, 'surplus');
   }
 });
 
