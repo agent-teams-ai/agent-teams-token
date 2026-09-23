@@ -1,7 +1,7 @@
 # Fee Quoter mainnet attribution evidence
 
-Date: 2026-09-21; official artifact recheck: 2026-09-22. Scope: read-only
-evidence captured at repository base
+Date: 2026-09-21; official artifact recheck: 2026-09-22; Router observation:
+2026-09-23. Original read-only evidence was captured at repository base
 `6c9f23bb1e898883a446fe621b60c0d398b90b09`. This record does not qualify a
 lane, a deployed program's semantics, or a mainnet operation.
 
@@ -44,6 +44,61 @@ transport, not consensus independently.
 The canonical ELF extent uses `e_shoff=594232` plus nine 64-byte section
 headers. The remainder of the allocated 5 MiB payload is zero padding. The
 full ProgramData and ELF digests above are the identities used for comparison.
+
+### Additional Router binding observation, 2026-09-23
+
+At finalized slot `449641662`, official RPC `getAccountInfo` returned the Router
+config PDA
+`3Yrg9E4ySAeRezgQY99NNarAmFLtixapga9MZb6y2dt3`, owned by
+`Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C`. The 210-byte account
+has SHA-256 `c7db7f630777e0bd738f993231eb1888eff154025d5bb4626fc6e053e8e6d4b0`.
+Its Anchor `account:Config` discriminator matches, version is `1`, SVM chain
+selector is `"124615329519749607"`, owner is
+`GoFoFfEDgALWRTw5dSY3VZQSwbFpvBEhDv1sFAWzYpbf`, `fee_quoter` is
+`FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi`, and `rmn_remote` is
+`RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7`. A second HTTPS RPC,
+`https://solana-rpc.publicnode.com`, reported the same account owner, raw
+SHA-256 and decoded fields at finalized slot `449642530`; its reported genesis
+hash matched the mainnet value above.
+
+Both RPCs returned these same public account-data bytes (base64, line breaks
+added here); retaining them allows the field decode and SHA-256 check after the
+live account changes:
+
+```text
+mwyq4B76zIIBAefJl2H7uLoB6rjArgURWACQPO3/FCieVBlI0ChXBc5le3xg3GY+6T4AAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANmoZhgtaQLmSSx6MoEr6jZ+GpTXBrFu
+2pFEnQSGuA0BBliT7ZWrhugwWyiYp2G+HCHNv7C39ebv1T6DsoMrGlAFDUlC14STn4XZIg
+vTCI8VnN55JwY38ECyqv1LWYU5A1ihu8X0thXE87Y1i+/UeYOlY7EnXlEv6Wxc9fvOtwvU
+```
+
+The PDA was independently derived from official `seed::CONFIG = b"config"`
+and the Router program ID with `@solana/web3.js@1.99.0` (`findProgramAddressSync`,
+bump `251`). Decode follows the matching official `solana-v1.6.2` Router
+[`Config` layout](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-router/src/state.rs),
+[`config` account constraint](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-router/src/context.rs),
+and [seed definition](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-common/src/seed.rs).
+Reproduce with finalized `getAccountInfo` for that PDA and compare the raw
+base64-decoded account hash and fields above. The two RPC observations show the
+Router's configured Fee Quoter address at those slots; they do not
+attribute the Fee Quoter ELF, verify its behavior, prove consensus independently,
+or establish an AGTMAI lane. ADR-0007 remains proposed.
+
+The same official Router layout defines a `DestChain` PDA from
+`b"dest_chain_state"` and the Ethereum selector's eight little-endian bytes
+(`157b9cfc94998445`). The derived account is
+`CowGG7G1FsfedN4jx66Gw7co1xEsiKQfE1f8BXSnSK9w` (bump `255`). Both RPCs
+returned the same 40-byte, Router-owned account at finalized slots `449643549`
+and `449643661`, with raw SHA-256
+`caa8d0f6c0179a1e004ad6c2e327ec9cce243f74bf0e12a1242d4c15304e7b63`.
+Its `account:DestChain` discriminator matches; version is `1`, selector is
+`"5009297550715157269"`, sequence number is `7864`, lane code version is
+`Default` (`0`, using Router config's `V1`), and sender allowlisting is disabled.
+The exact public account data, returned identically by both RPCs, is
+`TRLxhNQ22hABFXuc/JSZhEW4HgAAAAAAAAAAAAAAAAAAAAAAAAAAAA==` (base64).
+This establishes the configured Solana-to-Ethereum destination-chain account
+at those slots. It does not establish current fee acceptance, OffRamp execution,
+AGTMAI peer registration, or a qualified bidirectional lane.
 
 ## Official-artifact mismatch matrix
 

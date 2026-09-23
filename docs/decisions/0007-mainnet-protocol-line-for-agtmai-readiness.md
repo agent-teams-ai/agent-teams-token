@@ -40,6 +40,24 @@ or authority:
 | Ethereum → Solana | `0x913814782144864e523C3FdB78E3ca25D2c2aeCa` | `offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm` | both `1.6.0` |
 | Solana → Ethereum | `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C` | `0x26d3681DfC9E4c8C79cfbf461adec8A21d5d73C5` | both `1.6.0` |
 
+Read-only observations narrow the directory claim. At finalized Ethereum block
+`26038804` (`0xccd433026b9591ef93d8a5cadfff4f779d2fa3961a1fd8fd2c2f78ab8b21155f`),
+chain ID `1`, `eth_call` to the listed Router's official
+[`getOnRamp(uint64)`](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/Router.sol)
+with Solana selector `"124615329519749607"` returned
+`0x913814782144864e523C3FdB78E3ca25D2c2aeCa` through
+`https://ethereum-rpc.publicnode.com`. The calldata was
+`0xa8d87a3b00000000000000000000000000000000000000000000000001bab8fb6197c9e7`;
+raw returndata was
+`0x000000000000000000000000913814782144864e523c3fdb78e3ca25d2c2aeca`.
+On Solana, two finalized RPC observations of the Router's derived `DestChain`
+PDA for Ethereum selector `"5009297550715157269"` agree on account bytes,
+version `1` and lane code version `Default` (using Router config's `V1`). The
+[account bytes, slots and decode](../architecture/fee-quoter-mainnet-evidence-2026-09-21.md#additional-router-binding-observation-2026-09-23)
+are retained separately. These are observed Router settings, not proof that
+either lane currently accepts an AGTMAI transfer or that its offramps, fees,
+program behavior and authorities are qualified.
+
 The supplied finalized-RPC snapshot establishes a mixed Solana component
 matrix, rather than a single Solana `1.6.3` baseline. Full ProgramData and
 matching official artifact hashes are:
