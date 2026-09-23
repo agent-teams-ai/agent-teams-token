@@ -4,6 +4,7 @@ import test from "node:test";
 import { validateDeployment, isSolanaAddress, type DeploymentConfig } from "../src/features/genesis-manifest/domain/deployment.js";
 import { calendarSchedule, acceleratedSchedule } from "../src/features/genesis-manifest/domain/grant-schedule.js";
 import { parseDeploymentSource } from "../src/features/genesis-manifest/adapters/deployment-source.js";
+import { syntheticProductionEnvelope } from "./production-fixture.js";
 
 // Fixtures are authored independently; their exact values have no product approval.
 const fixture = (mode = "local-test"): DeploymentConfig => JSON.parse(readFileSync(`tests/fixtures/deployment/${mode}.json`, "utf8"));
@@ -15,6 +16,9 @@ function changed(path: readonly string[], replacement: unknown): unknown {
   return result;
 }
 const codes = (value: unknown): readonly string[] => validateDeployment(value).diagnostics.map(d => d.code);
+const productionFixture = (): DeploymentConfig => syntheticProductionEnvelope().deployment as unknown as DeploymentConfig;
+type MutableLimits = { bridge: { ethereum: { inbound: { enabled: boolean; capacity: string; rate: string }; outbound: { enabled: boolean; capacity: string; rate: string } }; solana: { inbound: { enabled: boolean; capacity: string; rate: string }; outbound: { enabled: boolean; capacity: string; rate: string } } } };
+const limits = (config: DeploymentConfig): MutableLimits["bridge"] => (config as unknown as MutableLimits).bridge;
 
 test("two independent configurations retain supplied amounts, recipients and exact schedules", () => {
   for (const mode of ["local-test", "owned-testnet"]) {
@@ -75,6 +79,70 @@ test("production rejects test schedules and an unresolved bridge", () => {
   const production = { ...source, status: "accepted", environment: { ...source.environment, mode: "mainnet-dry-run", evmChainId: "1" }, testScenario: null };
   assert.ok(codes(production).includes("DEPLOYMENT_TEST_SCHEDULE_FORBIDDEN"));
   assert.ok(codes(production).includes("DEPLOYMENT_BRIDGE_REQUIRED"));
+});
+
+test("production accepts enabled 0/0 paused buckets and rejects disabled unlimited buckets", () => {
+  assert.deepEqual(validateDeployment(productionFixture()).diagnostics, []);
+  for (const chain of ["ethereum", "solana"] as const) {
+    for (const direction of ["inbound", "outbound"] as const) {
+      const config = productionFixture();
+      limits(config)[chain][direction] = { enabled: false, capacity: "0", rate: "0" };
+      assert.deepEqual(validateDeployment(config).diagnostics.map(({ code, pointer }) => ({ code, pointer })), [
+        { code: "DEPLOYMENT_LIMITER_DISABLED", pointer: `/bridge/${chain}/${direction}/enabled` },
+      ]);
+    }
+  }
+});
+
+test("bridge rejects outbound capacity and rate above the opposite inbound bucket", () => {
+  const config = productionFixture(), bridge = limits(config);
+  bridge.ethereum.outbound = { enabled: true, capacity: "101", rate: "11" };
+  bridge.solana.inbound = { enabled: true, capacity: "100", rate: "10" };
+  bridge.solana.outbound = { enabled: true, capacity: "51", rate: "6" };
+  bridge.ethereum.inbound = { enabled: true, capacity: "50", rate: "5" };
+  assert.deepEqual(validateDeployment(config).diagnostics.map(({ code, pointer }) => ({ code, pointer })), [
+    { code: "DEPLOYMENT_LIMITER_CAPACITY_MISMATCH", pointer: "/bridge/ethereum/outbound/capacity" },
+    { code: "DEPLOYMENT_LIMITER_RATE_MISMATCH", pointer: "/bridge/ethereum/outbound/rate" },
+    { code: "DEPLOYMENT_LIMITER_CAPACITY_MISMATCH", pointer: "/bridge/solana/outbound/capacity" },
+    { code: "DEPLOYMENT_LIMITER_RATE_MISMATCH", pointer: "/bridge/solana/outbound/rate" },
+  ]);
+});
+
+test("production rejects enabled nonzero capacity with zero rate on every bucket", () => {
+  for (const chain of ["ethereum", "solana"] as const) {
+    for (const direction of ["inbound", "outbound"] as const) {
+      const config = productionFixture();
+      limits(config)[chain][direction] = { enabled: true, capacity: "10", rate: "0" };
+      assert.deepEqual(validateDeployment(config).diagnostics.map(({ code, pointer }) => ({ code, pointer })), [
+        { code: "DEPLOYMENT_LIMITER_ZERO_RATE", pointer: `/bridge/${chain}/${direction}/rate` },
+      ]);
+    }
+  }
+});
+
+test("bridge accepts bounded asymmetric active pairs", () => {
+  const config = productionFixture(), bridge = limits(config);
+  bridge.ethereum.outbound = { enabled: true, capacity: "60", rate: "6" };
+  bridge.solana.inbound = { enabled: true, capacity: "100", rate: "10" };
+  bridge.solana.outbound = { enabled: true, capacity: "30", rate: "3" };
+  bridge.ethereum.inbound = { enabled: true, capacity: "40", rate: "4" };
+  assert.deepEqual(validateDeployment(config).diagnostics, []);
+  bridge.ethereum.outbound = { enabled: true, capacity: "0", rate: "1" };
+  assert.ok(codes(config).includes("DEPLOYMENT_LIMITER_INVALID"));
+});
+
+test("test-only bridge permits disabled 0/0 buckets", () => {
+  const config = productionFixture(), bridge = limits(config);
+  for (const chain of ["ethereum", "solana"] as const) {
+    for (const direction of ["inbound", "outbound"] as const) {
+      bridge[chain][direction] = { enabled: false, capacity: "0", rate: "0" };
+    }
+  }
+  const testOnly = { ...config, status: "test-only", environment: { ...config.environment, mode: "local-test", evmChainId: "31337" }, testScenario: { label: "test-only", transfers: [] } };
+  assert.deepEqual(validateDeployment(testOnly).diagnostics, []);
+  bridge.ethereum.outbound = { enabled: true, capacity: "5", rate: "0" };
+  bridge.solana.inbound = { enabled: true, capacity: "10", rate: "0" };
+  assert.deepEqual(validateDeployment(testOnly).diagnostics, []);
 });
 
 test("strict source rejects ambiguous or unbounded documents without printing private input", () => {
