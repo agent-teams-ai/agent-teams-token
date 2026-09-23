@@ -28,10 +28,8 @@ export async function readinessCli(args: readonly string[]): Promise<number> {
     if (command === "verify") {
       const bundle = parseJsonWithoutDuplicates(await readFile(option(args, "--bundle"))) as Record<string, unknown>;
       assertReadinessBundle(bundle, option(args, "--manifest-sha256"));
-      if (args.includes("--now")) {
-        const now = option(args, "--now");
-        if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(String(bundle.observedAt)) || BigInt(now) > BigInt(String(bundle.validUntil))) { throw new Error("READINESS_BUNDLE_STALE"); }
-      }
+      const now = option(args, "--now");
+      if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(String(bundle.observedAt)) || BigInt(now) > BigInt(String(bundle.validUntil))) { throw new Error("READINESS_BUNDLE_STALE"); }
       process.stdout.write(`${JSON.stringify({ status: "verified", broadcastAllowed: false })}\n`);
       return 0;
     }

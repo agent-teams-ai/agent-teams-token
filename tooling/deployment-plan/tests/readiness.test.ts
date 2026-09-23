@@ -153,12 +153,12 @@ test("report verification requires complete typed canonical facts and consistent
   ]) { assertReadinessBundle(evaluateReadiness(evidence), digest); }
 });
 
-test("read-only verify CLI rejects a forged partial report even without --now", async context => {
+test("read-only verify CLI requires freshness and rejects a forged partial report", async context => {
   const root = await mkdtemp(join(tmpdir(), "readiness-verify-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const bundle = join(root, "report.json"), report = evaluateReadiness(base());
   const run = () => spawnSync(process.execPath, [resolve("tooling/deployment-plan/src/composition/readiness.ts"), "verify", "--bundle", bundle,
-    "--manifest-sha256", report.manifestSha256], { encoding: "utf8" });
+    "--manifest-sha256", report.manifestSha256, "--now", report.observedAt], { encoding: "utf8" });
   const partial = JSON.stringify({ schema: report.schema, broadcastAllowed: false, manifestSha256: report.manifestSha256 });
   await writeFile(bundle, partial);
   const refused = run();
@@ -166,6 +166,10 @@ test("read-only verify CLI rejects a forged partial report even without --now", 
   assert.equal(JSON.parse(refused.stderr).reason, "READINESS_BUNDLE_INVALID");
   assert.equal(await readFile(bundle, "utf8"), partial);
   await writeFile(bundle, JSON.stringify(report));
+  const missingNow = spawnSync(process.execPath, [resolve("tooling/deployment-plan/src/composition/readiness.ts"), "verify", "--bundle", bundle,
+    "--manifest-sha256", report.manifestSha256], { encoding: "utf8" });
+  assert.equal(missingNow.status, 2, missingNow.stdout + missingNow.stderr);
+  assert.equal(JSON.parse(missingNow.stderr).reason, "READINESS_ARGUMENTS");
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.deepEqual(JSON.parse(accepted.stdout), { status: "verified", broadcastAllowed: false });
