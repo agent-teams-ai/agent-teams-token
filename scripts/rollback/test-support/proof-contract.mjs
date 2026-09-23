@@ -4,6 +4,7 @@ export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync,
 
 test("every operational package rollback strips proof recursion", () => {
   const source = readFileSync(join(repositoryRoot, "package.json"));
+  const currentScripts = JSON.parse(source.toString("utf8")).scripts;
   for (const slice of ["local-solana", "deployment-plan", "slither"]) {
     const boundary = temporaryDirectory("agtmai-rollback-package-");
     const root = join(boundary, "checkout");
@@ -22,9 +23,12 @@ test("every operational package rollback strips proof recursion", () => {
       assert.equal(transformed.scripts["rollback:prove"], undefined);
       assert.equal(transformed.scripts["check:linux"], undefined);
       assert.doesNotMatch(transformed.scripts.check, /rollback:(?:preflight|test|prove)/u);
+      assert.equal(transformed.scripts["test:testnet-ccip"], currentScripts["test:testnet-ccip"]);
+      assert.match(transformed.scripts["test:testnet-ccip"], /solana-spl-fee-cap-proof\.test\.mjs/u);
       const manifest = manifests().find(({ sliceId }) => sliceId === slice);
-      const expected = manifest.reverseEdits.find(({ path }) => path === "package.json").afterSha256;
-      assert.equal(createHash("sha256").update(transformedBytes).digest("hex"), expected);
+      const declared = manifest.reverseEdits.find(({ path }) => path === "package.json");
+      assert.equal(createHash("sha256").update(source).digest("hex"), declared.beforeSha256);
+      assert.equal(createHash("sha256").update(transformedBytes).digest("hex"), declared.afterSha256);
     } finally {
       closeRollbackWorkspaceHandle(workspaceHandle);
       rmSync(boundary, { recursive: true, force: true });
