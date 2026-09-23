@@ -371,6 +371,34 @@ the exact artifact and compiler-input hashes in the manifest. If source is not
 verified, treat the implementation as unverified even when a name and symbol
 appear correct.
 
+After deployment, verify the published source from a clean checkout at the
+manifest's `sourceRevision`, using the exact pinned Foundry profile and the
+ABI-encoded constructor arguments recorded in the manifest. For example, from
+the repository root, verify the token with [Foundry's documented
+command](https://getfoundry.sh/forge/reference/verify-contract/):
+
+```bash
+set -euo pipefail
+MANIFEST="$DEPLOYMENT/deployment-manifest.json"
+git diff --quiet HEAD
+test "$(git rev-parse HEAD)" = "$(jq -er '.sourceRevision' "$MANIFEST")"
+TOKEN_ADDRESS="$(jq -er '.token.address' "$MANIFEST")"
+TOKEN_ARGS="$(jq -er '.token.constructorArgs' "$MANIFEST")"
+.tools/bin/forge verify-contract --root contracts/evm --chain 1 --verifier sourcify \
+  --watch --constructor-args "$TOKEN_ARGS" "$TOKEN_ADDRESS" \
+  src/features/token-genesis/AGTMAICCIPToken.sol:AGTMAICCIPToken
+```
+
+Repeat for every `grants[]` record with its recorded address and constructor
+arguments and `src/features/contributor-grants/GrantVault.sol:GrantVault`.
+Reserve contracts and any pool require their own verified creation records;
+the token/grant manifest cannot establish their source identity. Compare each
+sealed artifact and compiler input with the manifest's `artifactSha256` and
+`compilerInputSha256` before submission. Compare each explorer result and
+deployed runtime with that artifact before publishing the address as verified.
+Source verification is a post-deployment public operation, never a substitute
+for the unsigned plan or owner approval to broadcast deployment transactions.
+
 ### 2. Check issuance and allocations
 
 With a trusted Ethereum RPC and the published token address, the following
