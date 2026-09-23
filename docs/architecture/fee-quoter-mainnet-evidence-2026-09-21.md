@@ -296,6 +296,35 @@ if accepted later, would require separate approval of exact transactions;
 actual runtime, configured peers and authorities, and settled transfers are
 post-deployment evidence, not preconditions for an undeployed pool.
 
+### Candidate transaction-scoped fee ceiling, not yet qualified
+
+The pinned Router `solana-v1.6.2` source calls `get_fee` inside `ccip_send` and
+passes its returned amount to `TransferChecked` for a non-native SPL fee token.
+The fee source is constrained to the caller's associated token account; the
+transfer authority is the Router's `fee_billing_signer` PDA. The instruction
+does not accept a caller-selected maximum fee. This is the
+[onramp path](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-router/src/instructions/v1/onramp.rs),
+[account constraint](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-router/src/context.rs),
+and [billing CPI](https://github.com/smartcontractkit/chainlink-ccip/blob/9546a59bd0a3cee4ddc8ae4042da533e62225b78/chains/solana/contracts/programs/ccip-router/src/instructions/v1/fees.rs).
+
+A bounded candidate is one Solana transaction containing, in order,
+`ApproveChecked` for that PDA and an owner-approved maximum amount on the exact
+fee ATA, `ccip_send` for the exact message, and `Revoke` on the same ATA. The
+[Token Program delegation contract](https://solana.com/docs/payments/advanced-payments/spend-permissions)
+limits the PDA to the approved amount. If the execution-time quote is higher,
+the fee transfer should fail and [transaction rollback](https://solana.com/docs/core/transactions/transaction-pipeline)
+should leave no CCIP token transfer or message; the ordinary Solana network fee
+can still be charged. A successful `Revoke` should leave no residual delegation.
+Native-SOL fee payment does not use this delegated-token bound.
+
+This is a source-derived design candidate, **not a tested fee ceiling**. Before
+ADR-0007 acceptance, independently verify the deployed Router binding, fee
+mint/program and ATA, exact PDA, supported fee-token configuration, instruction
+ordering and transaction size. Simulate an AGTMAI-shaped message both below and
+above the cap against the deployed programs, compare post-simulation account
+effects and message parameters, and retain the full observation. No production
+adapter, signing, or broadcast follows from this candidate.
+
 ## Primary sources
 
 - [Pinned Chainlink mainnet chains directory](https://github.com/smartcontractkit/documentation/blob/b14cf1fbd45f88a4617cc7c8dbf668121e56649c/src/config/data/ccip/v1_2_0/mainnet/chains.json)
