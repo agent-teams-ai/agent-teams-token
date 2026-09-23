@@ -132,10 +132,10 @@ these observations to a qualified lane, production monitor, mainnet-ready
 claim, or approval of ADR-0007. The proposed vendor-trust route still requires
 deployed-binary behavior, fee-bound, configuration and authority proofs, with
 the source/build mismatch disclosed. While ADR-0007 remains proposed, signing,
-repair, deployment, and broadcast remain blocked. Its staged pre-canary gate,
+repair, deployment, and broadcast remain blocked. Its staged pre-deployment gate,
 if accepted later, would require separate approval of exact transactions;
-actual runtime and settled transfers are post-deployment evidence, not
-preconditions for an undeployed pool.
+actual runtime, configured peers and authorities, and settled transfers are
+post-deployment evidence, not preconditions for an undeployed pool.
 
 ## Primary sources
 

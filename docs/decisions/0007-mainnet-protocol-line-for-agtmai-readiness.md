@@ -107,8 +107,10 @@ review proves all of the following for the exact intended transfer shape:
 - finalized deployed program identities, code/ProgramData hashes, upgrade
   authorities, actual Router-to-Fee-Quoter binding, account owners, PDAs and
   layout versions;
-- enabled lanes, exact token/pool peers, directional encoding, nine-decimal
-  mapping, direct Solana Pool Signer mint authority and absent freeze authority;
+- observed existing protocol-lane availability and an approved target
+  configuration for AGTMAI token/pool peers, directional encoding,
+  nine-decimal mapping, direct Solana Pool Signer mint authority and absent
+  freeze authority;
 - bounded positive and malformed/unsupported-message tests against the deployed
   Fee Quoter, including its full returned message parameters, not only quotes;
 - a tested execution-time fee spending bound, since an earlier quote or
@@ -124,16 +126,18 @@ above and the existing legal, owner-approval and mainnet canary gates remain
 separate. This proposed ADR authorizes no deployment, signing, repair, or
 broadcast.
 
-The items above are **pre-canary evidence**, not a claim that the undeployed
+The items above are **pre-deployment evidence**, not a claim that the undeployed
 AGTMAI pool has settled a transfer. A separately approved mainnet deployment
-and bounded canary may proceed only after this ADR and the separate
-backing-control decision are accepted, the pre-canary evidence is reviewed,
-the unsigned deployment and fee/spend bounds are checked, and the owner gives
-fresh approval for the exact transactions. Acceptance of this ADR alone does
-not approve any broadcast. After deployment, compare the actual EVM runtime,
-owners, Router/OffRamp bindings, peers, limits, and backing balance with the
-approved plan before any canary transfer. Qualify the lane only after
-separately approved small transfers settle in both directions and the
+may proceed only after this ADR and the separate backing-control decision are
+accepted, the pre-deployment evidence is reviewed, the unsigned deployment
+and fee/spend bounds are checked, and the owner gives fresh approval for each
+exact deployment transaction. Acceptance of this ADR alone does not approve
+any broadcast. After deployment and configuration, compare the
+actual EVM runtime, owners, Router/OffRamp bindings, enabled AGTMAI peers,
+limits, backing balance, Solana Pool Signer mint authority and freeze
+authority with the approved plan before any canary transfer. A bounded canary
+requires fresh approval for its exact transactions. Qualify the lane only after
+small transfers settle in both directions and the
 fixed-supply/backing reconciliation passes. A failed comparison or settlement
 halts the canary; simulation never substitutes for settled mainnet evidence.
 
