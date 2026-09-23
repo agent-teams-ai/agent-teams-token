@@ -113,8 +113,9 @@ review proves all of the following for the exact intended transfer shape:
   Fee Quoter, including its full returned message parameters, not only quotes;
 - a tested execution-time fee spending bound, since an earlier quote or
   simulation cannot cap a later transaction;
-- exact EVM pool artifact/runtime, ownership and Router/OffRamp capabilities,
-  rate limits, backing accounting, and both-direction settlement evidence.
+- pinned candidate EVM pool artifact, expected runtime hash, constructor
+  arguments, ownership and Router/OffRamp capabilities, rate limits, and
+  backing-accounting method.
 
 Unknown layouts, changed code or authorities, missing observations and failed
 tests keep the lane unqualified. The vendor-trust route does not prove source
@@ -123,6 +124,19 @@ above and the existing legal, owner-approval and mainnet canary gates remain
 separate. This proposed ADR authorizes no deployment, signing, repair, or
 broadcast.
 
+The items above are **pre-canary evidence**, not a claim that the undeployed
+AGTMAI pool has settled a transfer. A separately approved mainnet deployment
+and bounded canary may proceed only after this ADR and the separate
+backing-control decision are accepted, the pre-canary evidence is reviewed,
+the unsigned deployment and fee/spend bounds are checked, and the owner gives
+fresh approval for the exact transactions. Acceptance of this ADR alone does
+not approve any broadcast. After deployment, compare the actual EVM runtime,
+owners, Router/OffRamp bindings, peers, limits, and backing balance with the
+approved plan before any canary transfer. Qualify the lane only after
+separately approved small transfers settle in both directions and the
+fixed-supply/backing reconciliation passes. A failed comparison or settlement
+halts the canary; simulation never substitutes for settled mainnet evidence.
+
 Before that evidence exists, an explicitly unqualified preparation profile may
 perform read-only account decoding, diagnostic fee quotes, and unsigned
 simulation against pinned upstream layouts and SDK behavior. It must bind each
@@ -130,8 +144,9 @@ observation to the program ID, account owner, finalized slot, raw account hash,
 and assumed source revision; unknown layouts or failed decoding remain unknown.
 Unsigned instructions may be constructed solely for simulation. These results
 cannot qualify the deployed Fee Quoter, establish a fee ceiling, or be promoted
-to a production monitor or readiness claim. Signing, repair, deployment, and
-broadcast remain blocked. Neither qualification route above has been proven.
+to a production monitor or readiness claim. While this ADR remains proposed,
+signing, repair, deployment, and broadcast remain blocked. Neither
+qualification route above has been proven.
 
 ## Consequences
 
