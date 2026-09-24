@@ -286,6 +286,9 @@ jobs:
       - name: Build Supply workspace dependency
         shell: bash
         run: source scripts/env.sh && pnpm --filter @agent-teams/supply build
+      - name: Prepare official integrity-pinned Safe 1.4.1 artifacts
+        shell: bash
+        run: bash scripts/prepare-safe-artifacts.sh --fetch >> "$GITHUB_ENV"
       - name: Prove unsigned deployment plan against loopback Anvil
         shell: bash
         env:

@@ -25,6 +25,10 @@ const hashAbi = "getTransactionHash(address,uint256,bytes,uint8,uint256,uint256,
 
 async function setupLocalSafe(t: TestContext) {
   const root = resolvePath(".");
+  // Qualification inputs are provisioned explicitly, never fetched by a test.
+  const selected = process.env.AGTMAI_SAFE_PINS_SHA256 as Hex | undefined;
+  const directory = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY;
+  assert.ok(directory && selected, "CONTRIBUTOR_SAFE_OFFICIAL_ARTIFACTS_REQUIRED: set AGTMAI_SAFE_ARTIFACT_DIRECTORY and AGTMAI_SAFE_PINS_SHA256 before running this test");
   const temporary = await mkdtemp(join(tmpdir(), "agtmai-contributor-safe-"));
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const install = join(root, ".tools/foundry-v1.8.0-linux-x64");
@@ -51,6 +55,14 @@ async function setupLocalSafe(t: TestContext) {
     return body.result;
   };
   assert.equal(await rpc("eth_chainId"), "0x7a69");
+  // Anvil's default timestamp follows elapsed wall time. Pin every mined block
+  // to one chain second so signing or compilation delays cannot consume lead time.
+  await rpc("anvil_setBlockTimestampInterval", [1]);
+  const blockTimestamp = async () => BigInt((await rpc("eth_getBlockByNumber", ["latest", false])).timestamp);
+  const beforeSlowOperation = await blockTimestamp();
+  await delay(1_200);
+  await rpc("evm_mine");
+  assert.equal(await blockTimestamp(), beforeSlowOperation + 1n, "Anvil must advance one chain second despite elapsed wall time");
   const encode = (signature: string, args: string[]) => run(["calldata", signature, ...args]) as Promise<Hex>;
   const call = async (to: Hex, signature: string, args: string[] = []) => rpc("eth_call", [{ to, data: await encode(signature, args) }, "latest"]) as Promise<Hex>;
   const send = async (to: Hex | null, data: Hex) => {
@@ -67,22 +79,6 @@ async function setupLocalSafe(t: TestContext) {
     assert.equal(receipt.status, "0x1");
     return receipt.contractAddress as Hex;
   };
-  let selected = process.env.AGTMAI_SAFE_PINS_SHA256 as Hex | undefined;
-  let directory = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY;
-  if (!selected || !directory) {
-    // The deployment-plan CI job does not provision Safe artifacts. Use the existing
-    // pinned, checksum-verifying provisioning script for this disposable local test.
-    const provisioned = await new Promise<string>((resolve, reject) => {
-      execFile("bash", [resolvePath(root, "scripts/prepare-safe-artifacts.sh"), "--fetch"], { timeout: 180_000, maxBuffer: 2_000 },
-        (error, stdout) => error ? reject(error) : resolve(stdout));
-    });
-    directory = provisioned.match(/^AGTMAI_SAFE_ARTIFACT_DIRECTORY=(.+)$/m)?.[1];
-    selected = provisioned.match(/^AGTMAI_SAFE_PINS_SHA256=(0x[0-9a-f]{64})$/m)?.[1] as Hex | undefined;
-    assert.ok(directory && selected, "Pinned Safe provisioning returned no artifact identity");
-    const ownedDirectory = directory;
-    t.after(() => rm(ownedDirectory, { recursive: true, force: true }));
-  }
-  assert.ok(selected && directory, "Official Safe 1.4.1 artifacts and reviewed pins are required");
   const pins = JSON.parse(await readFile(join(directory, "pins.json"), "utf8")) as SafeArtifactPins;
   const bytes = { proxy: await readFile(join(directory, "SafeProxy.json")), singleton: await readFile(join(directory, "Safe.json")), buildInfo: await readFile(join(directory, "build-info.json")) };
   qualifySafeArtifacts(pins, selected, bytes, "0x0000000000000000000000000000000000000099");
@@ -149,6 +145,7 @@ test("test-only unsigned contributor intent executes through official 2-of-3 Saf
     return { receipt, success: inner[0]!.topics[0] === custodyTopic("ExecutionSuccess(bytes32,uint256)") };
   };
   const firstObservation = await snapshot();
+  assert.ok(BigInt(firstObservation.blockTimestamp) < BigInt(schedule.start), "First grant must still begin in the future");
   const first = createContributorCommitmentIntent(prepared, input(firstObservation, firstAmount, schedule.start), firstObservation, BigInt(firstObservation.observedAt));
   assert.equal(first.broadcastAllowed, false);
   assert.deepEqual(Object.keys(first.safeTransaction).toSorted(), ["data", "operation", "to", "value"]);
@@ -157,6 +154,7 @@ test("test-only unsigned contributor intent executes through official 2-of-3 Saf
   assert.equal(first.safeTransaction.operation, 0);
   const initialReserveBalance = await balance(reserve);
   const firstResult = await safeExec(first.safeTransaction.to as Hex, first.safeTransaction.data);
+  assert.equal(BigInt((await rpc("eth_getBlockByHash", [firstResult.receipt.blockHash, false])).timestamp), BigInt(firstObservation.blockTimestamp) + 1n);
   assert.equal(firstResult.success, true);
   const committed = firstResult.receipt.logs.filter((log: { address: Hex; topics: Hex[] }) => log.address.toLowerCase() === reserve && log.topics[0] === custodyTopic("GrantCommitted(address,address,uint256)"));
   assert.equal(committed.length, 1);
@@ -175,15 +173,23 @@ test("test-only unsigned contributor intent executes through official 2-of-3 Saf
   assert.equal(await counter("rollingCommitted()"), firstAmount);
   await rpc("evm_setNextBlockTimestamp", [Number(BigInt(schedule.cliff) - 10n)]);
   await rpc("evm_mine");
+  let recentBlockTimestamp = BigInt(schedule.cliff) - 10n;
+  assert.equal(BigInt((await rpc("eth_getBlockByNumber", ["latest", false])).timestamp), recentBlockTimestamp);
   // Recent grants saturate the live window before the older grant is cancelled.
   const recentSchedule = calendarSchedule((BigInt(schedule.cliff) + 1000n).toString());
   for (const value of [amount, amount, amount, firstAmount]) {
     const data = await encode("commit(address,(uint256,uint64,uint64,uint64,uint8,bytes32))", [beneficiary, `(${value},${recentSchedule.start},${recentSchedule.cliff},${recentSchedule.end},1,${policy.purpose})`]);
-    assert.equal((await safeExec(reserve, data)).success, true);
+    const result = await safeExec(reserve, data);
+    assert.equal(result.success, true);
+    recentBlockTimestamp += 1n;
+    assert.equal(BigInt((await rpc("eth_getBlockByHash", [result.receipt.blockHash, false])).timestamp), recentBlockTimestamp);
   }
   assert.equal(await counter("rollingCommitted()"), cap);
+  assert.ok(recentBlockTimestamp < BigInt(schedule.cliff) + 1n,
+    "Second calendar jump must remain ahead of all intervening transactions");
   await rpc("evm_setNextBlockTimestamp", [Number(BigInt(schedule.cliff) + 1n)]);
   await rpc("evm_mine");
+  assert.equal(BigInt((await rpc("eth_getBlockByNumber", ["latest", false])).timestamp), BigInt(schedule.cliff) + 1n);
   const beforeRefund = await balance(reserve);
   const cancelled = await safeExec(vault, custodySelector("cancel()"));
   assert.equal(cancelled.success, true);
