@@ -30,7 +30,7 @@ export interface RealProductionPackage {
 }
 
 /** Test-only producer for the authenticated package consumed by the proof. */
-export async function createRealProductionPackage(repositoryRoot: string, preparedDirectory: string, sender: Hex): Promise<RealProductionPackage> {
+export async function createRealProductionPackage(repositoryRoot: string, preparedDirectory: string, sender: Hex, controllerSafe?: { readonly address: Hex; readonly owners: readonly Hex[]; readonly proxyCodeHash: Hex; readonly singletonCodeHash: Hex; readonly singletonAddress: Hex }): Promise<RealProductionPackage> {
   const directory = dirname(preparedDirectory);
   const buildRoot = join(directory, "forge");
   const forge = resolve(repositoryRoot, ".tools/foundry-v1.8.0-linux-x64/forge");
@@ -53,6 +53,16 @@ export async function createRealProductionPackage(repositoryRoot: string, prepar
   await writeFile(pinPath, deploymentBytes({ schema: "agtmai-production-artifact-pins-v1", sourceRevision: SOURCE_REVISION, artifacts: pins }), { mode: 0o600 });
   const loaded = await readProductionArtifactPins(pinPath);
   const envelope = syntheticProductionEnvelope();
+  if (controllerSafe) {
+    const deployment = envelope.deployment as { custodySafes: { address: string; owners: string[] }[]; token: { initialCCIPAdmin: string }; roleAliases: { address: string }[] };
+    const reserve = envelope.reserveGenesis as { founder: { controller: string }; contributors: { controller: string } };
+    deployment.custodySafes[0]!.address = controllerSafe.address;
+    deployment.custodySafes[0]!.owners = [...controllerSafe.owners];
+    deployment.token.initialCCIPAdmin = controllerSafe.address;
+    deployment.roleAliases[0]!.address = controllerSafe.address;
+    reserve.founder.controller = controllerSafe.address;
+    reserve.contributors.controller = controllerSafe.address;
+  }
   const startingNonce = "7";
   const addresses = [0n, 1n, 2n].map(offset => productionCompilerPorts.createAddress(sender, (BigInt(startingNonce) + offset).toString()));
   for (const allocationSet of [(envelope.deployment as { allocations: Record<string, unknown>[] }).allocations, (envelope.reserveGenesis as { allocations: Record<string, unknown>[] }).allocations]) {
@@ -78,7 +88,7 @@ export async function createRealProductionPackage(repositoryRoot: string, prepar
   const configurationSha256 = hashValue(deployment), reserveConfigurationSha256 = hashValue(reserve);
   const canonicalArtifacts = loaded.artifacts.toSorted((left, right) => left.contract.localeCompare(right.contract));
   const artifactPinsSha256 = hashValue({ schema: "agtmai-production-artifact-pins-v1", sourceRevision: SOURCE_REVISION, artifacts: canonicalArtifacts });
-  const authority = deployment.custodySafes.map((safe, index) => ({ address: safe.address, owners: safe.owners, threshold: 2 as const, nonce: "0", proxyCodeHash: hashValue(`proxy-${index}`), singletonCodeHash: hashValue(`singleton-${index}`), singletonAddress: `0x${String(index + 4).repeat(40)}` as Hex, singletonSlot: hashValue(`slot-${index}`), modules: [], guard: null, fallbackHandler: null, setupProvenance: hashValue(`setup-${index}`) }));
+  const authority = deployment.custodySafes.map((safe, index) => ({ address: safe.address, owners: safe.owners, threshold: 2 as const, nonce: "0", proxyCodeHash: safe.id === "project-controller" && controllerSafe ? controllerSafe.proxyCodeHash : hashValue(`proxy-${index}`), singletonCodeHash: safe.id === "project-controller" && controllerSafe ? controllerSafe.singletonCodeHash : hashValue(`singleton-${index}`), singletonAddress: safe.id === "project-controller" && controllerSafe ? controllerSafe.singletonAddress : `0x${String(index + 4).repeat(40)}` as Hex, singletonSlot: hashValue(`slot-${index}`), modules: [], guard: null, fallbackHandler: null, setupProvenance: hashValue(`setup-${index}`) }));
   const expectations = { schema: "agtmai-production-expectations-v1" as const, chainId: "1" as const, sourceRevision: SOURCE_REVISION, configurationSha256, reserveConfigurationSha256, artifactPinsSha256, attemptIdentity: productionCompilerPorts.keccak256(encode.encode(canonicalJson({ domain: "AGTMAI_PRODUCTION_ATTEMPT_V1", chainId: "1", sender, startingNonce, intents } as never))), sender, deployer: sender, startingNonce, maxObservationAgeSeconds: "300", maxTotalCostWei: "100000000000000000", authority, operations: allOperations.map((operation, index) => ({ ...operation, intentHash: intents[index]! })) };
   const approval = { schema: "agtmai-production-approval-v1" as const, configurationSha256, reserveConfigurationSha256, reference: "synthetic-local-proof" };
   const preparedResult = prepareProductionDeployment(envelope, { artifactSourceRevision: SOURCE_REVISION, artifacts: loaded.artifacts, approval, expectations }, productionCompilerPorts, sha256);
