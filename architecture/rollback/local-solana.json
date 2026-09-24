@@ -61,8 +61,8 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "e6d586db4197e3ae6105e6afea971afe2e22323ca6e1836677d213590592d073",
-      "afterSha256": "7bbc11f63f769244c4e326c899b6d5ec0308473c50a1ae3845a5f1bd1da670c6"
+      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
+      "afterSha256": "803b6e6864ced096734c4999142a04875a88ce6f8a35f1236e17fa0c7035cda4"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",

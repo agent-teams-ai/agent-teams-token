@@ -44,6 +44,7 @@
     "tooling/deployment-plan/tests/artifact.test.ts",
     "tooling/deployment-plan/tests/bounded-json.test.ts",
     "tooling/deployment-plan/tests/contributor-commitment.test.ts",
+    "tooling/deployment-plan/tests/contributor-safe-execution.integration.test.ts",
     "tooling/deployment-plan/tests/domain.test.ts",
     "tooling/deployment-plan/tests/fixtures/forge-build-info-1.8.0-representative.json",
     "tooling/deployment-plan/tests/helpers/no-replace-directory-rename.ts",
@@ -75,7 +76,7 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "e6d586db4197e3ae6105e6afea971afe2e22323ca6e1836677d213590592d073",
+      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
       "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
     },
     {
