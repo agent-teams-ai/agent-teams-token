@@ -1,4 +1,20 @@
-# Contributor-grant custody implementation, 2026-09-15
+# AGTMAI release status
+
+## Ethereum-first decision, 2026-09-24
+
+The owner selected [ADR-0010](decisions/0010-ethereum-first-launch-sequence.md):
+Ethereum Mainnet token/genesis first, Solana/CCIP as a later independent release.
+Accepted policy and repository contracts are implementation evidence, not a
+deployed token. There is no recorded Ethereum Mainnet deployment or approved
+broadcast. Real Safe identities and genesis values, exact contract selection,
+production qualification, external legal review and a checked unsigned plan
+remain before a fresh owner approval can be requested. The settled Sepolia <->
+Solana Devnet proof below does not qualify a Mainnet bridge. The Solana Fee
+Quoter attribution gap is tracked in [issue #43](https://github.com/agent-teams-ai/agent-teams-token/issues/43)
+and does not block the Ethereum-only stage. Production keys stay with the owner;
+the agent only needs public addresses and unsigned transaction data.
+
+## Contributor-grant custody implementation, 2026-09-15
 
 ## Post-custody implementation in progress, 2026-09-15
 

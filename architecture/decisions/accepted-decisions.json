@@ -31,6 +31,11 @@
       "id": "ADR-0009",
       "path": "docs/decisions/0009-custody-split-and-launch-gates.md",
       "immutableDigest": "sha256:b1eedb5f6fec1ed0db95a4b1869a9d2a0a26eb308f0691cae2fb3cba63894aca"
+    },
+    {
+      "id": "ADR-0010",
+      "path": "docs/decisions/0010-ethereum-first-launch-sequence.md",
+      "immutableDigest": "sha256:b8f8886eeeeb549bb12429e08e43d06a863eb65965c92bd5b359132d9e16f758"
     }
   ]
 }

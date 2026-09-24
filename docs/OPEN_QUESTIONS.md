@@ -1,5 +1,15 @@
 # Open product decisions
 
+## Current release order, 2026-09-24
+
+[ADR-0010](decisions/0010-ethereum-first-launch-sequence.md) accepts
+Ethereum-only genesis first and a separately qualified Solana/CCIP release
+later. Fee Quoter provenance and bridge backing/authority decisions are
+Solana-stage gates, not Ethereum-only genesis gates. This does not remove the
+Ethereum deployment, legal, security, custody or explicit approval requirements
+below. Only public wallet/Safe addresses, never private keys or seed phrases,
+may be provided for configuration and unsigned planning.
+
 ## Accepted production policy
 
 This register supersedes its former `45/25/15/8/6/1` allocation, independent

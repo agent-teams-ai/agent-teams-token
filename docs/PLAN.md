@@ -1,5 +1,17 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Accepted release sequence, 2026-09-24
+
+The owner selected [Ethereum-first Mainnet genesis](decisions/0010-ethereum-first-launch-sequence.md).
+The fixed-supply token, accepted reserves and grants are the first release
+target; Solana/CCIP is a separately qualified later release. Historical
+two-chain goals and testnet proof below do not authorize a simultaneous
+Mainnet launch. No Mainnet deployment has been approved. The Ethereum stage
+still needs real Safe addresses, accepted exact genesis inputs, production
+qualification, external legal review, an independently verified unsigned plan
+and fresh owner approval for each broadcast. Private keys and seed phrases
+must never be supplied to an agent.
+
 ## Production reserve implementation, 2026-09-19
 
 The owner requested the bounded production-reserve slice from
