@@ -14,8 +14,6 @@ Quoter attribution gap is tracked in [issue #43](https://github.com/agent-teams-
 and does not block the Ethereum-only stage. Production keys stay with the owner;
 the agent only needs public addresses and unsigned transaction data.
 
-## Contributor-grant custody implementation, 2026-09-15
-
 ## Post-custody implementation in progress, 2026-09-15
 
 The four-feature extension starts from
