@@ -32,7 +32,9 @@ was a confirmed conflict with ADR-0010; it is corrected in this slice.
 Genesis has eight distinct allocation recipients: the 3% founder and 17%
 contributor addresses are derived from the selected deployer and transaction
 nonces; the other six are unique public Ethereum custody addresses selected by
-purpose (long-term, users, operations, ecosystem, financing, liquidity).
+purpose (long-term, users, operations, ecosystem, financing, liquidity). The
+reserve-genesis validator also requires every recipient to differ from the
+Project Controller and Founder Beneficiary Safe addresses.
 There are two distinct 2-of-3 Safe addresses, Project Controller and Founder
 Beneficiary. They may share the same three signer addresses if reuse is
 explicitly disclosed. The deployer public address and nonce are separate
