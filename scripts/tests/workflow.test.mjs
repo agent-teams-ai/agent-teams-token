@@ -68,11 +68,11 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
 
 test("Node 26 lane records upstream engine blockers and runs observable regression suites", () => {
   const lock = parse(readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8"));
-  const blockers = node26Policy.strictInstall.blockers.map(({ name, version }) => `${name}@${version}`).sort();
+  const blockers = node26Policy.strictInstall.blockers.map(({ name, version }) => `${name}@${version}`).toSorted();
   const lockBlockers = Object.entries(lock.packages)
     .filter(([, value]) => value.engines?.node === ">=24.18.0 <25")
     .map(([name]) => name)
-    .sort();
+    .toSorted();
   assert.deepEqual(blockers, lockBlockers);
   for (const blocker of node26Policy.strictInstall.blockers) {
     assert.equal(lock.packages[`${blocker.name}@${blocker.version}`].engines.node, blocker.nodeEngine);
