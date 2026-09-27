@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "runtimePolicy": {
+    "productionDefault": "24.20.0",
+    "productionRange": ">=24.20.0 <25",
+    "compatibilityVersion": "26.10.0",
+    "compatibilityRange": ">=26.10.0 <27",
+    "skippedMajor": 25,
+    "cutover": "Node 26 must be official LTS and the owner must authorize the production cutover"
+  },
+  "workspaceEngines": {
+    "node": ">=24.18.0 <25 || >=26.10.0 <27",
+    "pnpm": ">=11.24.0 <12"
+  },
+  "strictInstall": {
+    "command": "pnpm install --frozen-lockfile --config.engine-strict=true",
+    "status": "blocked-by-upstream-engine-ranges",
+    "blockers": [
+      {
+        "name": "@agent-teams/docs-protocol",
+        "version": "0.6.0",
+        "nodeEngine": ">=24.18.0 <25",
+        "resolution": "upstream release with a Node 26-compatible engine range"
+      },
+      {
+        "name": "@agent-teams/docs-protocol-agent-teams",
+        "version": "0.2.9",
+        "nodeEngine": ">=24.18.0 <25",
+        "resolution": "upstream release with a Node 26-compatible engine range"
+      },
+      {
+        "name": "@agent-teams/document-authoring",
+        "version": "0.3.0",
+        "nodeEngine": ">=24.18.0 <25",
+        "resolution": "upstream release with a Node 26-compatible engine range"
+      },
+      {
+        "name": "@agent-teams/engineering-foundation",
+        "version": "1.4.0",
+        "nodeEngine": ">=24.18.0 <25",
+        "resolution": "upstream release with a Node 26-compatible engine range"
+      },
+      {
+        "name": "@agent-teams/repository-mutation",
+        "version": "0.2.0",
+        "nodeEngine": ">=24.18.0 <25",
+        "resolution": "upstream release with a Node 26-compatible engine range"
+      }
+    ]
+  },
+  "focusedCompatibility": {
+    "install": "pnpm install --frozen-lockfile --config.engine-strict=false",
+    "reason": "Exercise repository and dependency behavior on Node 26 while the recorded upstream engine declarations remain unresolved",
+    "checks": [
+      "pnpm check:fast",
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm test",
+      "pnpm test:linux-parity",
+      "pnpm genesis:vector:check",
+      "pnpm rollback:test"
+    ]
+  },
+  "publishedArtifactAudit": {
+    "workspacePackagesPrivate": true,
+    "runtimeDependencies": [
+      {
+        "name": "@noble/hashes",
+        "version": "2.4.0",
+        "nodeEngine": ">= 20.19.0"
+      },
+      {
+        "name": "yaml",
+        "version": "2.9.0",
+        "nodeEngine": ">= 14.6"
+      }
+    ],
+    "runtimeDependencyBlockers": []
+  }
+}
