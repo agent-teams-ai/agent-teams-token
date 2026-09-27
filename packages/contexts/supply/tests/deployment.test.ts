@@ -74,11 +74,11 @@ test("calendar anniversaries preserve UTC time, including the 2100 non-leap cent
   assert.ok(codes(changed(["grants", "0", "schedule", "cliff"], "1831638601")).includes("DEPLOYMENT_CALENDAR_ANNIVERSARY"));
 });
 
-test("production rejects test schedules and an unresolved bridge", () => {
+test("Ethereum-only production accepts no bridge but still rejects test schedules", () => {
   const source = fixture("owned-testnet");
   const production = { ...source, status: "accepted", environment: { ...source.environment, mode: "mainnet-dry-run", evmChainId: "1" }, testScenario: null };
   assert.ok(codes(production).includes("DEPLOYMENT_TEST_SCHEDULE_FORBIDDEN"));
-  assert.ok(codes(production).includes("DEPLOYMENT_BRIDGE_REQUIRED"));
+  assert.ok(!codes(production).includes("DEPLOYMENT_BRIDGE_REQUIRED"));
 });
 
 test("production accepts enabled 0/0 paused buckets and rejects disabled unlimited buckets", () => {

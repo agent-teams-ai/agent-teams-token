@@ -15,6 +15,14 @@ test("synthetic accepted production envelope binds supply, allocations, Safe rol
   assert.ok(result.value);
 });
 
+test("Ethereum-first production envelope needs no Solana bridge configuration", () => {
+  const value = syntheticEnvelope() as { deployment: { bridge: unknown } };
+  value.deployment.bridge = null;
+  const result = validateProductionDeployment(value);
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(result.value?.deployment.bridge, null);
+});
+
 test("production envelope is versioned and never supplies unresolved values", () => {
   const result = validateProductionDeployment({ schema: "agtmai-production-deployment-v1", deployment: {}, reserveGenesis: {}, projectControllerSafeId: "", founderBeneficiarySafeId: "" });
   assert.equal(result.value, undefined);

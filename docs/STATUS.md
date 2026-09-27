@@ -14,6 +14,14 @@ Quoter attribution gap is tracked in [issue #43](https://github.com/agent-teams-
 and does not block the Ethereum-only stage. Production keys stay with the owner;
 the agent only needs public addresses and unsigned transaction data.
 
+The current unsigned preparation candidate is `AGTMAICCIPToken` plus
+`FounderGrantReserve` and `ReserveController`; exact bytecode remains a release
+gate. Ethereum-only production configuration can use `bridge: null`, and the
+token-and-reserves preflight does not count CCIP setup as a prerequisite. No
+real-address accepted configuration, live gas quote or Mainnet transaction has
+been produced. Six non-grant allocation destinations still need unique public
+custody addresses and a truthful disclosure of their spending powers.
+
 ## Post-custody implementation in progress, 2026-09-15
 
 The four-feature extension starts from

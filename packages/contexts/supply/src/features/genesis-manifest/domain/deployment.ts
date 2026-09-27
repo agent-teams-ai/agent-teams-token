@@ -273,7 +273,7 @@ function validateBridge(input: unknown, production: boolean, checks: DeploymentC
     const solanaOutbound = rate(s.outbound, "/bridge/solana/outbound", UINT64_MAX);
     compatible(evmOutbound, solanaInbound, "/bridge/ethereum/outbound");
     compatible(solanaOutbound, evmInbound, "/bridge/solana/outbound");
-  } else if (production) { fail("BRIDGE_REQUIRED", "/bridge"); }
+  }
 
 }
 function validateTestScenario(input: unknown, production: boolean, checks: DeploymentChecks): void {

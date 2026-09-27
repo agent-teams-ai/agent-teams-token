@@ -65,7 +65,6 @@ test("authenticated Anvil executes the four prepared operations and existing pre
   assert.equal(commandReport.broadcastAllowed, false);
   assert.deepEqual(commandReport.unresolvedPrerequisites, [
     "Safe deployment and live authority observation",
-    "CCIP deployment/configuration",
     "contributor commitment execution",
     "authenticated live-chain evidence",
   ]);

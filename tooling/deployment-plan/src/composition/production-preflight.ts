@@ -14,7 +14,7 @@ function options(args: readonly string[]): Map<string, string> | undefined {
   return result.size === 4 ? result : undefined;
 }
 const output = (value: unknown, code: number): void => { process.stdout.write(`${JSON.stringify(value)}\n`); process.exitCode = code; };
-const coverage = (executionEvidence = false) => ({ coverage: "token-and-reserves-only", unresolvedPrerequisites: [...(executionEvidence ? [] : ["runtime immutable values require deterministic local execution"]), "Safe deployment and live authority observation", "CCIP deployment/configuration", "contributor commitment execution", "authenticated live-chain evidence"] });
+const coverage = (executionEvidence = false) => ({ coverage: "token-and-reserves-only", unresolvedPrerequisites: [...(executionEvidence ? [] : ["runtime immutable values require deterministic local execution"]), "Safe deployment and live authority observation", "contributor commitment execution", "authenticated live-chain evidence"] });
 const main = async (): Promise<void> => {
   const opts = options(process.argv.slice(2));
   if (!opts) { output({ status: "invalid", reason: "PREFLIGHT_ARGUMENTS", broadcastAllowed: false, ...coverage() }, 2); return; }

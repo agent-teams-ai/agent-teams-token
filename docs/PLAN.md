@@ -12,6 +12,49 @@ qualification, external legal review, an independently verified unsigned plan
 and fresh owner approval for each broadcast. Private keys and seed phrases
 must never be supplied to an agent.
 
+### Ethereum-only genesis preparation, 2026-09-27
+
+The production deployment candidate is `AGTMAICCIPToken`: it has the fixed
+100,000,000 AGTMAI supply and an immutable `getCCIPAdmin()` address for a
+possible later standard CCIP registration, but grants no mint authority. The
+existing production preparer pins this contract together with
+`FounderGrantReserve` and `ReserveController`. Its four unsigned operations are
+token creation, founder reserve creation, contributor controller creation and
+founder grant funding. This candidate and its exact bytecode still need final
+release review before irreversible deployment.
+
+For this stage `deployment.bridge` is `null`. The production validator must
+accept that value and must continue strict validation whenever a bridge object
+is supplied. A token-and-reserves-only preflight must not list CCIP deployment
+as a prerequisite. The older bridge requirement in the validator and preflight
+was a confirmed conflict with ADR-0010; it is corrected in this slice.
+
+Genesis has eight distinct allocation recipients: the 3% founder and 17%
+contributor addresses are derived from the selected deployer and transaction
+nonces; the other six are unique public Ethereum custody addresses selected by
+purpose (long-term, users, operations, ecosystem, financing, liquidity).
+There are two distinct 2-of-3 Safe addresses, Project Controller and Founder
+Beneficiary. They may share the same three signer addresses if reuse is
+explicitly disclosed. The deployer public address and nonce are separate
+inputs. Public EVM addresses alone are safe to share; private keys and seeds
+never enter this repository or an agent session.
+
+Before an accepted configuration or exact gas quote, select and independently
+verify those addresses, actual Safe state, founder UTC start, contributor
+per-grant and rolling-365-day caps, purpose commitments, fee/expenditure limits
+and deployment timing. No placeholder is a production default. Gas and ETH
+costs are recomputed against pinned creation bytecode and fresh Ethereum block
+fees after the exact constructor inputs, deployer and nonce are known. The
+prepared package remains unsigned and `broadcastAllowed: false`.
+
+The six other allocation destinations are purpose-labeled at genesis but the
+current contracts do not impose immutable spending caps on those balances.
+Do not advertise them as contract-locked reserves. Selecting custody and any
+additional constraints for those buckets is an explicit release decision, not
+an excuse to add a generic treasury or prebuild the later market/bridge.
+Creating a DEX pool is a separate public-market step and requires its own
+liquidity, price-discovery, disclosure and legal review.
+
 ## Production reserve implementation, 2026-09-19
 
 The owner requested the bounded production-reserve slice from
