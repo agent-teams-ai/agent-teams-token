@@ -500,5 +500,6 @@ Both slices remain non-broadcasting and use one fixed topology. Mainnet forks,
 generic deployment platforms, generic Solana observation tooling, utility
 pricing, checkout or burn, AMM or liquidity, public sale, airdrop, DAO and legal
 model work stay outside this scope. Live Safe addresses, beneficiaries, dates
-and reserve caps remain required owner inputs and are never inferred. Bridge
-rate limits belong to the later CCIP release, not Ethereum-only genesis.
+and reserve caps remain required owner inputs and are never inferred. Only
+bridge-pool rate-limit buckets belong to the later CCIP release; Ethereum
+genesis spend and commitment limits remain required inputs.

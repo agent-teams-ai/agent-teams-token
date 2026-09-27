@@ -23,6 +23,14 @@ test("Ethereum-first production envelope needs no Solana bridge configuration", 
   assert.equal(result.value?.deployment.bridge, null);
 });
 
+test("a supplied production bridge still requires complete Solana configuration", () => {
+  const value = syntheticEnvelope() as { deployment: { bridge: { solana?: unknown } } };
+  delete value.deployment.bridge.solana;
+  const result = validateProductionDeployment(value);
+  assert.equal(result.value, undefined);
+  assert.ok(result.diagnostics.some(diagnostic => diagnostic.pointer === "/bridge/solana"));
+});
+
 test("production envelope is versioned and never supplies unresolved values", () => {
   const result = validateProductionDeployment({ schema: "agtmai-production-deployment-v1", deployment: {}, reserveGenesis: {}, projectControllerSafeId: "", founderBeneficiarySafeId: "" });
   assert.equal(result.value, undefined);
