@@ -288,7 +288,12 @@ export class EvidenceRecorder {
           // The daemon container is not a descendant of this subreaper.
           drainMs: id === "slither-real-analyzer" ? 70_000 : 5_000,
           termMs: id === "slither-real-analyzer" ? 65_000 : 1_000 });
-        if (id === "slither-real-analyzer" && result.custody === "reaped") {
+        // ECHILD settles local descendants only; an abnormal analyzer exit
+        // cannot authenticate settlement of its exact Docker container ID.
+        if (id === "slither-real-analyzer"
+          && (result.custody === "reaped"
+            || (result.custody === "completed"
+              && (result.status !== 0 || result.signal !== null || result.error !== null)))) {
           result = { ...result, custody: "uncertain",
             uncertainty: "ROLLBACK_DOCKER_EXACT_ID_SETTLEMENT_UNPROVEN" };
         }
