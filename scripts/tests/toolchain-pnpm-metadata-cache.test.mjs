@@ -96,6 +96,8 @@ export function registerPnpmMetadataCacheTests() {
 
 function registerPnpmScriptArgumentTests() {
   test("pinned pnpm keeps trusted authority options out of nested package-script arguments", (context) => {
+    const previousUmask = process.umask(0o022);
+    context.after(() => process.umask(previousUmask));
     const fixture = installedFixture(context, true);
     const project = join(fixture.root, "nested-script-project");
     const scripts = join(fixture.root, "scripts");
