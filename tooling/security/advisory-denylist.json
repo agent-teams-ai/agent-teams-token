@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "frozenAt": "2026-08-28T00:00:00Z",
-  "validThrough": "2026-09-27",
+  "frozenAt": "2026-09-28T00:00:00Z",
+  "validThrough": "2026-10-28",
   "source": "Maintainer-frozen review of public package advisories; refresh and review this file before expiry.",
   "denylist": [
     {
