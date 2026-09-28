@@ -359,6 +359,7 @@ for (const manifest of manifests()) {
     const candidatePackage = JSON.parse(readFileSync(join(checkout, packagePath), "utf8"));
     const candidateWorkflow = parse(readFileSync(join(checkout, workflowPath), "utf8"));
     const candidateSource = readFileSync(join(checkout, testPath), "utf8");
+    const candidateTestCount = [...candidateSource.matchAll(/^test\("/gmu)].length;
     const candidateImports = candidateSource.match(/^import .*;$/gmu);
     const candidateNodePolicy = candidateSource.match(workflowNodePolicyBlock);
     assert.equal(candidateNodePolicy?.length, 1);
@@ -386,7 +387,7 @@ for (const manifest of manifests()) {
     removeWorkflowJob(checkout, manifest, sharedPlan, workspaceHandle);
     editWorkflowTest(checkout, manifest, sharedPlan, workspaceHandle);
     const slitherRemoved = manifest.sliceId === "slither";
-    checkWorkflowPolicies(checkout, slitherRemoved ? ".*" : workflowPolicyPattern, slitherRemoved ? 14 : 11);
+    checkWorkflowPolicies(checkout, slitherRemoved ? ".*" : workflowPolicyPattern, slitherRemoved ? candidateTestCount - 2 : 11);
     assert.deepEqual(
       readFileSync(join(checkout, testPath), "utf8").match(workflowNodePolicyBlock),
       manifest.sliceId === "slither" ? null : candidateNodePolicy,
@@ -455,7 +456,7 @@ for (const manifest of manifests()) {
         ...restoredWorkflow.jobs, "foundation-and-typescript": { ...foundation, steps },
       } });
     }
-    context.diagnostic(`12 candidate and ${slitherRemoved ? 14 : 11} restored policy tests; 21 policy mutations rejected; Slither Node policy removed only with Slither`);
+    context.diagnostic(`12 candidate and ${slitherRemoved ? candidateTestCount - 2 : 11} restored policy tests; 21 policy mutations rejected; Slither Node policy removed only with Slither`);
   });
 
   test(`workflow rollback ${manifest.sliceId} rejects missing or duplicated slice-only tests and assertions without writing`, (context) => {

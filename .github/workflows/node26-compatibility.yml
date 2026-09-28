@@ -92,16 +92,26 @@ jobs:
         run: |
           test "$(node --version)" = "v26.10.0"
           test "$(pnpm --version)" = "11.24.0"
+      - name: Fetch, install and verify pinned repository tools
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          ./dev bootstrap verify --offline
+          test "$(node --version)" = "v26.10.0"
+          test "$(.tools/bin/node --version)" = "v24.20.0"
       - name: Install frozen workspace with recorded upstream engine exceptions
         shell: bash
         run: pnpm install --frozen-lockfile --config.engine-strict=false
       - name: Run focused Node 26 compatibility checks
         shell: bash
         run: |
+          test "$(node --version)" = "v26.10.0"
           pnpm check:fast
           pnpm lint
           pnpm typecheck
           pnpm test
+          node --test scripts/tests/node26-compatibility.test.mjs
           pnpm test:linux-parity
           pnpm genesis:vector:check
           pnpm rollback:test

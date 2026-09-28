@@ -56,6 +56,7 @@
       "pnpm lint",
       "pnpm typecheck",
       "pnpm test",
+      "node --test scripts/tests/node26-compatibility.test.mjs",
       "pnpm test:linux-parity",
       "pnpm genesis:vector:check",
       "pnpm rollback:test"
