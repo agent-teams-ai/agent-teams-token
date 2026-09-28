@@ -33,6 +33,7 @@ import {
   inspectInstallation,
   installPreparedArtifact,
 } from "./toolchain-installation.mjs";
+import { validateSafeArtifactEnvironment } from "./toolchain-safe-artifact-environment.mjs";
 
 export {
   canonicalizeTrustedPath,
@@ -418,29 +419,6 @@ export function runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironme
     );
   }
   return result;
-}
-
-function validateSafeArtifactEnvironment(value) {
-  if (value === undefined) {return undefined;}
-  const invalid = () => {throw new Error("TOOLCHAIN_SAFE_ARTIFACT_ENV_INVALID");};
-  if (value === null || typeof value !== "object"
-    || JSON.stringify(Object.keys(value).toSorted()) !== JSON.stringify(["directory", "pinsSha256"])) {
-    invalid();
-  }
-  const { directory, pinsSha256 } = value;
-  if (typeof directory !== "string" || !isAbsolute(directory)
-    || [...directory].some((character) => character.codePointAt(0) < 0x20 || character.codePointAt(0) === 0x7f)
-    || typeof pinsSha256 !== "string" || !/^0x[a-f0-9]{64}$/u.test(pinsSha256)) {
-    invalid();
-  }
-  let stat;
-  try {stat = lstatSync(directory);}
-  catch {invalid();}
-  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid()
-    || (stat.mode & 0o022) !== 0) {
-    invalid();
-  }
-  return { directory, pinsSha256 };
 }
 
 function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, lock }) {
