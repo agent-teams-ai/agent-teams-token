@@ -58,8 +58,8 @@ const PRIVATE_ENVIRONMENT_KEYS = Object.freeze([
   "XDG_RUNTIME_DIR",
 ]);
 
-// Only the exact object returned for a validated gate carries private-path
-// authority through the second allowlist pass at the process boundary.
+// Only factory-created objects carry private-path authority. Ordinary copies
+// and ambient environments cannot transfer it.
 const privateGateEnvironments = new WeakMap();
 
 const CANONICAL_NPM_ENVIRONMENT = Object.freeze({
@@ -127,14 +127,87 @@ export function privateGateChildEnvironment(source, overrides, temporaryDirector
     XDG_RUNTIME_DIR: join(temporaryDirectory, "xdg-runtime"),
   };
   for (const [key, path] of Object.entries(expected)) {
-    const entry = lstatSync(path);
-    if (overrides[key] !== path || !entry.isDirectory() || entry.isSymbolicLink()
-      || (entry.mode & 0o777) !== 0o700) {
+    if (overrides[key] !== path) {
       throw new Error(`TOOLCHAIN_PRIVATE_GATE_PATH_INVALID key=${key}`);
     }
   }
+  const custody = capturePrivateGateCustody(expected);
   const environment = allowlistedChildEnvironment(source, overrides);
-  privateGateEnvironments.set(environment, Object.freeze(expected));
+  privateGateEnvironments.set(environment, custody);
+  return environment;
+}
+
+// The private tree is owned by this process. Record every ancestor so a
+// symlinked or replaced parent cannot silently redirect a validated child.
+function privatePathAncestors(path) {
+  const ancestors = [];
+  for (let current = path; ; current = dirname(current)) {
+    ancestors.push(current);
+    if (current === parse(current).root) { return ancestors.reverse(); }
+  }
+}
+
+function privateDirectoryIdentity(path, key, privateDirectory) {
+  const entry = lstatSync(path, { throwIfNoEntry: false });
+  if (entry === undefined || !entry.isDirectory() || entry.isSymbolicLink()
+    || realpathSync(path) !== path
+    || (privateDirectory && (entry.uid !== process.getuid() || (entry.mode & 0o777) !== 0o700))) {
+    throw new Error(`TOOLCHAIN_PRIVATE_GATE_PATH_INVALID key=${key}`);
+  }
+  return Object.freeze({ dev: entry.dev, ino: entry.ino, uid: entry.uid, gid: entry.gid, mode: entry.mode });
+}
+
+function capturePrivateGateCustody(paths) {
+  const identities = new Map();
+  for (const [key, path] of Object.entries(paths)) {
+    for (const ancestor of privatePathAncestors(path)) {
+      const privateDirectory = ancestor === paths.TMPDIR || ancestor === path;
+      const identity = privateDirectoryIdentity(ancestor, key, privateDirectory);
+      const previous = identities.get(ancestor);
+      if (previous !== undefined && !samePrivateDirectoryIdentity(previous, identity)) {
+        throw new Error(`TOOLCHAIN_PRIVATE_GATE_PATH_SUBSTITUTED key=${key}`);
+      }
+      identities.set(ancestor, identity);
+    }
+  }
+  return Object.freeze({ paths: Object.freeze({ ...paths }), identities });
+}
+
+function samePrivateDirectoryIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid
+    && left.gid === right.gid && left.mode === right.mode;
+}
+
+function assertPrivateGateCustody(custody) {
+  for (const [key, path] of Object.entries(custody.paths)) {
+    for (const ancestor of privatePathAncestors(path)) {
+      const identity = privateDirectoryIdentity(
+        ancestor, key, ancestor === custody.paths.TMPDIR || ancestor === path,
+      );
+      if (!samePrivateDirectoryIdentity(custody.identities.get(ancestor), identity)) {
+        throw new Error(`TOOLCHAIN_PRIVATE_GATE_PATH_SUBSTITUTED key=${key}`);
+      }
+    }
+  }
+}
+
+export function derivePrivateGateChildEnvironment(source, overrides) {
+  const custody = privateGateEnvironments.get(source);
+  // Some recorder-only fixtures intentionally supply no environment. They
+  // receive ordinary allowlisted defaults and no private-path authority.
+  if (custody === undefined && Object.keys(source).length !== 0) {
+    throw new Error("TOOLCHAIN_PRIVATE_GATE_DERIVATION_UNTRUSTED");
+  }
+  for (const key of Object.keys(overrides)) {
+    if (!trustedNodeEnvironmentKeys.includes(key) || [
+      "ALLOW_MAINNET_BROADCAST", "ALLOW_PUBLIC_NETWORK", "ENABLE_PUBLIC_RPC", "MAINNET_ENABLED",
+    ].includes(key)) {
+      throw new Error(`TOOLCHAIN_PRIVATE_GATE_DERIVATION_OVERRIDE_FORBIDDEN key=${key}`);
+    }
+  }
+  if (custody !== undefined) { assertPrivateGateCustody(custody); }
+  const environment = allowlistedChildEnvironment(source, { ...overrides, ...custody?.paths });
+  if (custody !== undefined) { privateGateEnvironments.set(environment, custody); }
   return environment;
 }
 
@@ -164,7 +237,9 @@ export function trustedChildInvocation(
   source = process.env,
   { workingDirectory } = {},
 ) {
-  const privateOverrides = privateGateEnvironments.get(source) ?? {};
+  const custody = privateGateEnvironments.get(source);
+  if (custody !== undefined) { assertPrivateGateCustody(custody); }
+  const privateOverrides = custody?.paths ?? {};
   if (command === "/usr/bin/git") {
     if (typeof workingDirectory !== "string" || !isAbsolute(workingDirectory)) {
       throw new Error("TOOLCHAIN_GIT_WORKING_DIRECTORY_INVALID");

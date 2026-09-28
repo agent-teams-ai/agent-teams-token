@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import { EvidenceRecorder } from "../rollback/runtime/evidence.mjs";
 import { gateEnvironment } from "../rollback/slices/gate-contract.mjs";
-import { trustedChildInvocation } from "../toolchain-environment.mjs";
+import { runCommonGates, runSurvivorGate } from "../rollback/slices/gate-execution.mjs";
+import { derivePrivateGateChildEnvironment, trustedChildInvocation } from "../toolchain-environment.mjs";
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 const privateKeys = [
@@ -67,6 +69,14 @@ test("rollback gate recorder passes its private environment to the actual child 
   });
   assert.equal(JSON.parse(copied.stdout).HOME, "/nonexistent");
   assert.equal(JSON.parse(copied.stdout).TMPDIR, "/tmp");
+  assert.throws(
+    () => derivePrivateGateChildEnvironment({ ...environment }, { FOUNDRY_PROFILE: "ci" }),
+    /TOOLCHAIN_PRIVATE_GATE_DERIVATION_UNTRUSTED/u,
+  );
+  assert.throws(
+    () => derivePrivateGateChildEnvironment(environment, { ALLOW_PUBLIC_NETWORK: "true" }),
+    /TOOLCHAIN_PRIVATE_GATE_DERIVATION_OVERRIDE_FORBIDDEN/u,
+  );
 
   const ambient = recorder.run("gate", "ambient-paths", process.execPath, ["-e", probe], {
     cwd: root,
@@ -79,3 +89,103 @@ test("rollback gate recorder passes its private environment to the actual child 
     assert.equal(ambientValues[key], "/nonexistent");
   }
 });
+
+test("six gate-specific dispatches preserve validated private paths in real children", (context) => {
+  const local = join(repositoryRoot, ".local");
+  mkdirSync(local, { recursive: true });
+  const root = mkdtempSync(join(local, "token-private-dispatch-test-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const temporaryDirectory = join(root, "gate-tmp");
+  mkdirSync(temporaryDirectory, { mode: 0o700 });
+  const tools = { node: process.execPath, pnpm: "/usr/bin/true", forge: "/usr/bin/true", solc: "/usr/bin/true", anvil: "/usr/bin/true", docker: "/usr/bin/true" };
+  const environment = gateEnvironment(root, temporaryDirectory, tools);
+  const expected = new Set([
+    "forge-unit-fuzz", "forge-invariants", "solana-unit-and-strict-real",
+    "solana-real-fixture", "slither-real-analyzer", "slither-evidence-validate",
+  ]);
+  const seen = new Set();
+  const recorder = {
+    prepareSurvivorDirectory: () => join(root, "evidence"),
+    run(_group, id, _command, _arguments, options) {
+      if (expected.has(id)) {
+        const invocation = trustedChildInvocation(process.execPath, ["-e", probe], options.env, { workingDirectory: root });
+        const child = requireChild(invocation);
+        assert.equal(child.status, 0, child.stderr);
+        const values = JSON.parse(child.stdout);
+        for (const key of privateKeys) { assert.equal(values[key], environment[key], `${id}: ${key}`); }
+        for (const key of guardKeys) { assert.equal(values[key], "false", `${id}: ${key}`); }
+        assert.equal(values.NODE_OPTIONS, null);
+        seen.add(id);
+      }
+      return { stdout: "", entry: {} };
+    },
+  };
+  runCommonGates(root, recorder, "gate", tools, environment);
+  for (const survivor of ["local-solana", "slither"]) {
+    runSurvivorGate({ survivor, root, rollbackSha: "a".repeat(40), recorder, group: "gate", tools, environment });
+  }
+  assert.deepEqual(seen, expected);
+});
+
+test("renamed private HOME replaced by a symlink is rejected before child launch", (context) => {
+  const local = join(repositoryRoot, ".local");
+  mkdirSync(local, { recursive: true });
+  const root = mkdtempSync(join(local, "token-private-substitution-test-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const temporaryDirectory = join(root, "gate-tmp");
+  const evidenceDirectory = join(root, "evidence");
+  const foreign = join(root, "foreign");
+  mkdirSync(temporaryDirectory, { mode: 0o700 });
+  mkdirSync(evidenceDirectory, { mode: 0o700 });
+  mkdirSync(foreign, { mode: 0o700 });
+  const tools = { node: process.execPath, pnpm: "/usr/bin/true", forge: "/usr/bin/true", solc: "/usr/bin/true", anvil: "/usr/bin/true" };
+  const environment = gateEnvironment(root, temporaryDirectory, tools);
+  renameSync(environment.HOME, join(root, "held-home"));
+  symlinkSync(foreign, environment.HOME);
+  const marker = join(foreign, "child-ran");
+  const recorder = new EvidenceRecorder(evidenceDirectory, {});
+  assert.throws(() => recorder.run("gate", "substitution", process.execPath,
+    ["-e", "require('node:fs').writeFileSync(process.env.HOME + '/child-ran', 'bad')"],
+    { cwd: root, env: environment }), /TOOLCHAIN_PRIVATE_GATE_PATH_/u);
+  assert.equal(exists(marker), false);
+});
+
+test("XDG child and private root replacements fail at invocation", (context) => {
+  const local = join(repositoryRoot, ".local");
+  mkdirSync(local, { recursive: true });
+  const root = mkdtempSync(join(local, "token-private-replacement-test-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const temporaryDirectory = join(root, "gate-tmp");
+  mkdirSync(temporaryDirectory, { mode: 0o700 });
+  const tools = { node: process.execPath, pnpm: "/usr/bin/true", forge: "/usr/bin/true", solc: "/usr/bin/true", anvil: "/usr/bin/true" };
+  const environment = gateEnvironment(root, temporaryDirectory, tools);
+  const derived = derivePrivateGateChildEnvironment(environment, { FOUNDRY_PROFILE: "ci" });
+  renameSync(environment.XDG_CACHE_HOME, join(root, "held-cache"));
+  mkdirSync(environment.XDG_CACHE_HOME, { mode: 0o700 });
+  assert.throws(
+    () => trustedChildInvocation(process.execPath, ["-e", probe], derived),
+    /TOOLCHAIN_PRIVATE_GATE_PATH_SUBSTITUTED/u,
+  );
+  rmSync(environment.XDG_CACHE_HOME, { recursive: true });
+  renameSync(join(root, "held-cache"), environment.XDG_CACHE_HOME);
+  chmodSync(environment.XDG_DATA_HOME, 0o755);
+  assert.throws(
+    () => trustedChildInvocation(process.execPath, ["-e", probe], derived),
+    /TOOLCHAIN_PRIVATE_GATE_PATH_INVALID/u,
+  );
+  chmodSync(environment.XDG_DATA_HOME, 0o700);
+  renameSync(temporaryDirectory, join(root, "held-gate-tmp"));
+  mkdirSync(temporaryDirectory, { mode: 0o700 });
+  assert.throws(
+    () => trustedChildInvocation(process.execPath, ["-e", probe], environment),
+    /TOOLCHAIN_PRIVATE_GATE_PATH_SUBSTITUTED/u,
+  );
+});
+
+function requireChild(invocation) {
+  return spawnSync(process.execPath, invocation.arguments, { env: invocation.environment, encoding: "utf8" });
+}
+
+function exists(path) {
+  try { return lstatSync(path) !== undefined; } catch { return false; }
+}
