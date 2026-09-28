@@ -185,13 +185,13 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   }
 }
 
-async function prepareRunRoots(root: string, requestedReportsRoot?: string): Promise<{
+export async function prepareRunRoots(root: string, requestedReportsRoot?: string, trustedTemporaryRoot = systemTemporaryRoot()): Promise<{
   readonly privateRoot: string;
   readonly reportsRoot: string;
 }> {
-  const privateRoot = privateRunRoot(root);
+  const privateRoot = privateRunRoot(root, trustedTemporaryRoot);
   const reportsRoot = resolvePath(requestedReportsRoot ?? join(root, ".local", "local-evm", "reports"));
-  await ensurePrivateDirectoryPath(systemTemporaryRoot(), privateRoot);
+  await ensurePrivateDirectoryPath(trustedTemporaryRoot, privateRoot);
   await reclaimStaleRuns(privateRoot);
   await ensurePrivateDirectoryPath(root, reportsRoot);
   return {privateRoot, reportsRoot};
@@ -260,15 +260,16 @@ async function faultPause(point: string, details: Record<string, unknown> = {}):
   await new Promise<void>((resolve) => {setTimeout(resolve, 2_147_483_647);});
 }
 
-export function privateRunRoot(repositoryRoot: string): string {
+export function privateRunRoot(repositoryRoot: string, trustedTemporaryRoot = systemTemporaryRoot()): string {
   const repositoryIdentity = strip0x(sha256(resolvePath(repositoryRoot))).slice(0, 32);
-  return join(systemTemporaryRoot(), "agtmai-local-evm", repositoryIdentity);
+  // A single owned leaf directly under the canonical system temporary root
+  // avoids the shared /tmp/agtmai-local-evm parent. Its stable identity lets
+  // later processes reclaim interrupted runs without filling the Node
+  // wrapper's invocation-private TMPDIR. Ambient TMPDIR is never consulted.
+  return join(trustedTemporaryRoot, `agtmai-local-evm-${repositoryIdentity}`);
 }
 
 function systemTemporaryRoot(): string {
-  // Use the canonical OS scratch boundary rather than ambient TMPDIR. The
-  // hardened Node wrapper owns and requires its TMPDIR to remain empty, while
-  // local-EVM runs have their own validated mode-0700 namespace and leases.
   return realpathSync("/tmp");
 }
 
