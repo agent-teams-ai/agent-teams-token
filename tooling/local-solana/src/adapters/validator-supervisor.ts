@@ -20,7 +20,7 @@ let starting: Promise<void> | undefined;
 let closing = false;
 let validator: ChildProcess | undefined;
 let acknowledged = false;
-let stopping: Promise<boolean> | undefined;
+let stopping: Promise<{ readonly childStopped: boolean; readonly custodySettled: boolean }> | undefined;
 let validatorIdentity: Promise<ValidatorIdentity | null> | undefined;
 let capturedValidatorIdentity: ValidatorIdentity | null | undefined;
 let validatorStartIdentity: Promise<string | null> | undefined;
@@ -67,9 +67,9 @@ process.on("message", (message: ControlMessage) => {
       validator.stdout?.on("data", classify);
       validator.stderr?.on("data", classify);
       void validatorIdentity.then(async (identity) => {
+        capturedValidatorIdentity = identity;
         try { await starting; } catch { return; }
         if (closing || failing) { return; }
-        capturedValidatorIdentity = identity;
         if (identity === null) { void failStartup("spawned", { code: "SOLANA_VALIDATOR_IDENTITY" }); }
         else { void advance("identity-captured").then(() => { send({ type: "spawned", pid: validator?.pid, identity }); }, (cause) => { void failStartup("identity-captured", cause); }); }
         return null;
@@ -77,7 +77,7 @@ process.on("message", (message: ControlMessage) => {
       validator.once("error", (cause) => { void failStartup("spawned", cause); });
       validator.once("exit", (code, signal) => { send({ type: "exit", code, signal }); });
       await advance("spawned");
-      acknowledgementTimer = setTimeout(() => { void terminateAndExit(); }, 15_000);
+      if (!closing) { acknowledgementTimer = setTimeout(() => { void terminateAndExit(); }, 15_000); }
     })();
     void starting.catch((cause) => { void failStartup(stage, cause); });
     return;
@@ -115,32 +115,39 @@ async function terminateAndExit(): Promise<void> {
   closing = true;
   clearAcknowledgementTimer();
   const result = stopping ??= (async () => {
-    if (starting !== undefined && !await within(starting, 1_500)) { return false; }
-    if (custody !== undefined && stage !== "reserved") { await advance("stopping"); }
-    if (!await stopValidator()) { return false; }
-    if (custody !== undefined) { await updateStartupCustody(custody, true); }
-    return true;
+    if (starting !== undefined) { await within(starting, 1_500); }
+    const stoppingRecorded = custody === undefined || stage === "reserved" || await within(advance("stopping"), 1_500);
+    // Marker I/O cannot prevent termination of an already spawned, authenticated child.
+    const childStopped = await stopValidator();
+    if (!childStopped) { return { childStopped: false, custodySettled: false }; }
+    const custodySettled = stoppingRecorded && (custody === undefined || await within(updateStartupCustody(custody, true), 1_500));
+    return { childStopped: true, custodySettled };
   })();
-  if (await result.catch(() => false)) {
+  const outcome = await result.catch(() => ({ childStopped: false, custodySettled: false }));
+  if (outcome.custodySettled) {
     send({ type: "stopped" });
     process.exit(acknowledged ? 0 : 1);
   }
   send({ type: "stopFailed", stage });
-  if (validator === undefined) { process.exitCode = 1; process.disconnect?.(); }
+  if (outcome.childStopped) { process.exitCode = 1; if (process.connected) { process.disconnect?.(); } }
 }
 
 async function stopValidator(): Promise<boolean> {
   const child = validator;
   if (child === undefined || child.exitCode !== null || child.signalCode !== null) { return true; }
   const closed = new Promise<void>((resolve) => { child.once("close", () => { resolve(); }); });
-  const startIdentity = await Promise.race([validatorStartIdentity ?? Promise.resolve(null), new Promise<null>((resolve) => { setTimeout(() => resolve(null), 1_500); })]);
-  if (startIdentity === null) { return false; }
-  const identity = capturedValidatorIdentity;
-  if (identity !== undefined && identity !== null && (leaseToken === undefined || !await authenticateValidatorIdentity(identity, leaseToken))) { return false; }
-  if (!await stillExactChild(child, startIdentity)) { return child.exitCode !== null || child.signalCode !== null; }
+  let startIdentity = await withinValue(validatorStartIdentity ?? Promise.resolve(null), 1_500);
+  let identity = capturedValidatorIdentity;
+  if (startIdentity === null) {
+    identity ??= await withinValue(validatorIdentity ?? Promise.resolve(null), 1_500);
+    if (identity === null || identity === undefined) { return false; }
+    startIdentity = identity.startTime;
+  }
+  if (identity !== undefined && identity !== null && (leaseToken === undefined || await withinValue(authenticateValidatorIdentity(identity, leaseToken), 1_500) !== true)) { return false; }
+  if (await withinValue(stillExactChild(child, startIdentity), 1_500) !== true) { return child.exitCode !== null || child.signalCode !== null; }
   child.kill("SIGTERM");
   if (!await within(closed, 5_000)) {
-    if (!await stillExactChild(child, startIdentity)) { return child.exitCode !== null || child.signalCode !== null; }
+    if (await withinValue(stillExactChild(child, startIdentity), 1_500) !== true) { return child.exitCode !== null || child.signalCode !== null; }
     child.kill("SIGKILL");
     return await within(closed, 5_000);
   }
@@ -162,6 +169,18 @@ async function within(promise: Promise<void>, timeoutMs: number): Promise<boolea
     return await Promise.race([
       promise.then(() => true, () => false),
       new Promise<boolean>((resolve) => { timer = setTimeout(() => { resolve(false); }, timeoutMs); }),
+    ]);
+  } finally {
+    if (timer !== undefined) { clearTimeout(timer); }
+  }
+}
+
+async function withinValue<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise.then((value) => value, () => null),
+      new Promise<null>((resolve) => { timer = setTimeout(() => { resolve(null); }, timeoutMs); }),
     ]);
   } finally {
     if (timer !== undefined) { clearTimeout(timer); }

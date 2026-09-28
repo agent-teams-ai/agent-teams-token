@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { lstat, open, realpath, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { FileIdentity } from "../application/ports.ts";
 import { LocalSolanaError } from "../domain/model.ts";
@@ -7,6 +7,23 @@ import { processStartIdentity } from "./process-identity.ts";
 import { readBoundedMarker } from "./lease-marker.ts";
 
 const MARKER = ".agtmai-validator-startup.json";
+const PENDING = ".agtmai-validator-startup-pending.json";
+// Reservation finishes before forking; the acquired supervisor is the sole later writer.
+// Serialize its overlapping stage, failure and settlement callbacks on that inode.
+const markerWrites = new Map<string, Promise<void>>();
+async function serializeMarkerWrite<T>(directory: string, action: () => Promise<T>): Promise<T> {
+  const previous = markerWrites.get(directory);
+  let release: (() => void) | undefined;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  markerWrites.set(directory, current);
+  try {
+    if (previous !== undefined) { await previous; }
+    return await action();
+  } finally {
+    if (markerWrites.get(directory) === current) { markerWrites.delete(directory); }
+    release?.();
+  }
+}
 export interface StartupCustody {
   readonly directory: string;
   readonly directoryIdentity: FileIdentity;
@@ -47,56 +64,112 @@ export async function initializeStartupCustody(directory: string, token: string)
 /** Reserve durable uncertainty while the owner is alive, before even forking. */
 export async function reserveStartupCustody(ledger: string, token: string): Promise<StartupCustody> {
   const directory = await realpath(dirname(ledger)); const directoryIdentity = await privateDirectory(directory);
-  let fresh = true;
-  const handle = await open(join(directory, MARKER), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600).catch(async (cause) => {
-    if ((cause as NodeJS.ErrnoException).code !== "EEXIST") { throw cause; }
-    fresh = false;
-    return await open(join(directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
+  return await serializeMarkerWrite(directory, async () => {
+    let fresh = true;
+    const handle = await open(join(directory, MARKER), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600).catch(async (cause) => {
+      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") { throw cause; }
+      fresh = false;
+      return await open(join(directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
+    });
+    try {
+      if (!fresh && !(await readRecord(handle, directory, token)).settled) { invalid(); }
+      const entry = await handle.stat({ bigint: true });
+      const custody = { directory, directoryIdentity, markerIdentity: identity(entry), token };
+      // This durable guard precedes every possible child spawn. A failed settlement
+      // sync must not make a visible `settled: true` marker sufficient for cleanup.
+      await createPending(custody);
+      const bytes = Buffer.from(JSON.stringify({ ...custody, supervisor: null, settled: false, diagnostic: { stage: "reserved", at: new Date().toISOString() } }));
+      await publishRecord(handle, bytes);
+      await syncDirectory(directory);
+      await assertDirectory(custody);
+      return custody;
+    } finally { await handle.close(); }
   });
-  try {
-    if (!fresh && !(await readRecord(handle, directory, token)).settled) { invalid(); }
-    const entry = await handle.stat({ bigint: true });
-    const custody = { directory, directoryIdentity, markerIdentity: identity(entry), token };
-    const bytes = Buffer.from(JSON.stringify({ ...custody, supervisor: null, settled: false, diagnostic: { stage: "reserved", at: new Date().toISOString() } }));
-    await handle.truncate(0); await handle.write(bytes, 0, bytes.length, 0); await handle.sync();
-    const parent = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try { await parent.sync(); } finally { await parent.close(); }
-    await assertDirectory(custody);
-    return custody;
-  } finally { await handle.close(); }
 }
 
 /** Only the supervisor that acquired this record may settle it after child close. */
 export async function updateStartupCustody(custody: StartupCustody, settled: boolean): Promise<void> {
-  await assertDirectory(custody);
-  const handle = await open(join(custody.directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
-  try {
-    const record = await readRecord(handle, custody.directory, custody.token);
-    const current = { pid: process.pid, start: await processStartIdentity(process.pid) };
-    if (!same(record.markerIdentity, custody.markerIdentity) || record.settled || (settled
-      ? record.supervisor?.pid !== current.pid || record.supervisor.start !== current.start
-      : record.supervisor !== null)) { invalid(); }
-    const bytes = Buffer.from(JSON.stringify({ ...record, supervisor: current, settled, diagnostic: { ...record.diagnostic, stage: settled ? "settled" : "supervisor-acquired", at: new Date().toISOString() } }));
-    await handle.truncate(0); await handle.write(bytes, 0, bytes.length, 0); await handle.sync();
+  await serializeMarkerWrite(custody.directory, async () => {
     await assertDirectory(custody);
-  } finally { await handle.close(); }
+    const handle = await open(join(custody.directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
+    try {
+      const record = await readRecord(handle, custody.directory, custody.token);
+      const current = { pid: process.pid, start: await processStartIdentity(process.pid) };
+      if (!same(record.markerIdentity, custody.markerIdentity) || record.settled || (settled
+        ? record.supervisor?.pid !== current.pid || record.supervisor.start !== current.start
+        : record.supervisor !== null)) { invalid(); }
+      if (settled) { await assertPending(custody); }
+      const bytes = Buffer.from(JSON.stringify({ ...record, supervisor: current, settled, diagnostic: { ...record.diagnostic, stage: settled ? "settled" : "supervisor-acquired", at: new Date().toISOString() } }));
+      await publishRecord(handle, bytes);
+      await assertDirectory(custody);
+      if (settled) { await clearPending(custody); }
+    } finally { await handle.close(); }
+  });
 }
 
 /** Durable, bounded, allowlisted diagnosis; exception text and child output never enter the marker. */
 export async function recordStartupStage(custody: StartupCustody, stage: StartupStage, failure?: { readonly phase: StartupStage; readonly cause: unknown }): Promise<void> {
-  await assertDirectory(custody);
-  const handle = await open(join(custody.directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
-  try {
-    const record = await readRecord(handle, custody.directory, custody.token);
-    const preAcquireFailure = record.supervisor === null && stage === "failed" && failure?.phase === "reserved";
-    const currentStart = preAcquireFailure ? null : await processStartIdentity(process.pid);
-    if (!same(record.markerIdentity, custody.markerIdentity) || record.settled || (!preAcquireFailure && (record.supervisor?.pid !== process.pid || record.supervisor.start !== currentStart))) { invalid(); }
-    const failureEvidence = failure === undefined ? record.diagnostic?.failure : { phase: failure.phase, code: safeCode(failure.cause) };
-    const diagnostic: StartupDiagnostic = { stage, at: new Date().toISOString(), ...(failureEvidence === undefined ? {} : { failure: failureEvidence }) };
-    const bytes = Buffer.from(JSON.stringify({ ...record, diagnostic }));
-    await handle.truncate(0); await handle.write(bytes, 0, bytes.length, 0); await handle.sync();
+  await serializeMarkerWrite(custody.directory, async () => {
     await assertDirectory(custody);
+    const handle = await open(join(custody.directory, MARKER), constants.O_RDWR | constants.O_NOFOLLOW);
+    try {
+      const record = await readRecord(handle, custody.directory, custody.token);
+      const preAcquireFailure = record.supervisor === null && stage === "failed" && failure?.phase === "reserved";
+      const currentStart = preAcquireFailure ? null : await processStartIdentity(process.pid);
+      if (!same(record.markerIdentity, custody.markerIdentity) || record.settled || (record.diagnostic?.stage === "stopping" && stage !== "failed")
+        || (record.diagnostic?.stage === "failed" && stage !== "stopping" && stage !== "failed")
+        || (!preAcquireFailure && (record.supervisor?.pid !== process.pid || record.supervisor.start !== currentStart))) { invalid(); }
+      const failureEvidence = failure === undefined ? record.diagnostic?.failure : { phase: failure.phase, code: safeCode(failure.cause) };
+      const diagnostic: StartupDiagnostic = { stage, at: new Date().toISOString(), ...(failureEvidence === undefined ? {} : { failure: failureEvidence }) };
+      const bytes = Buffer.from(JSON.stringify({ ...record, diagnostic }));
+      await publishRecord(handle, bytes);
+      await assertDirectory(custody);
+    } finally { await handle.close(); }
+  });
+}
+
+async function publishRecord(handle: import("node:fs/promises").FileHandle, bytes: Buffer): Promise<void> {
+  // Keep the inode bound to custody. A short or failed write remains uncertain.
+  let written = 0;
+  while (written < bytes.length) {
+    const result = await handle.write(bytes, written, bytes.length - written, written);
+    if (result.bytesWritten < 1) { invalid(); }
+    written += result.bytesWritten;
+  }
+  await handle.truncate(bytes.length);
+  await handle.sync();
+}
+
+async function createPending(custody: StartupCustody): Promise<void> {
+  const handle = await open(join(custody.directory, PENDING), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+  try { await handle.writeFile(JSON.stringify(custody)); await handle.sync(); }
+  finally { await handle.close(); }
+  await syncDirectory(custody.directory);
+}
+
+async function assertPending(custody: StartupCustody): Promise<void> {
+  await assertDirectory(custody);
+  const handle = await open(join(custody.directory, PENDING), constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const entry = await handle.stat({ bigint: true });
+    if (!entry.isFile() || entry.nlink !== 1n || (entry.mode & 0o777n) !== 0o600n || (process.getuid !== undefined && entry.uid !== BigInt(process.getuid()))) { invalid(); }
+    const record = JSON.parse(await readBoundedMarker(handle)) as StartupCustody;
+    if (record === null || typeof record !== "object" || Object.keys(record).toSorted().join(",") !== "directory,directoryIdentity,markerIdentity,token"
+      || record.directory !== custody.directory || record.token !== custody.token || !same(record.directoryIdentity, custody.directoryIdentity)
+      || !same(record.markerIdentity, custody.markerIdentity)) { invalid(); }
   } finally { await handle.close(); }
+  await assertDirectory(custody);
+}
+
+async function clearPending(custody: StartupCustody): Promise<void> {
+  await assertPending(custody);
+  await unlink(join(custody.directory, PENDING));
+  await syncDirectory(custody.directory);
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { await handle.sync(); } finally { await handle.close(); }
 }
 
 export async function readStartupDiagnostic(directory: string, token: string): Promise<StartupDiagnostic> {
@@ -109,9 +182,22 @@ export async function startupCustodySettled(directory: string, token: string, le
   const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW).catch((cause) => {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return null; } throw cause;
   });
-  if (handle === null) { return legacyRegistered; }
-  try { return (await readRecord(handle, directory, token)).settled; }
+  if (handle === null) { return legacyRegistered && !await pendingExists(directory); }
+  try {
+    const record = await readRecord(handle, directory, token);
+    if (!record.settled) { return false; }
+    const pending = await pendingExists(directory);
+    if (!same(record.directoryIdentity, await privateDirectory(directory))) { invalid(); }
+    return !pending;
+  }
   finally { await handle.close(); }
+}
+
+async function pendingExists(directory: string): Promise<boolean> {
+  return await lstat(join(directory, PENDING)).then(() => true, (cause) => {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return false; }
+    throw cause;
+  });
 }
 
 async function readRecord(handle: import("node:fs/promises").FileHandle, directory: string, token: string): Promise<CustodyRecord> {
