@@ -116,9 +116,7 @@ export async function recordStartupStage(custody: StartupCustody, stage: Startup
       const record = await readRecord(handle, custody.directory, custody.token);
       const preAcquireFailure = record.supervisor === null && stage === "failed" && failure?.phase === "reserved";
       const currentStart = preAcquireFailure ? null : await processStartIdentity(process.pid);
-      if (!same(record.markerIdentity, custody.markerIdentity) || record.settled || (record.diagnostic?.stage === "stopping" && stage !== "failed")
-        || (record.diagnostic?.stage === "failed" && stage !== "stopping" && stage !== "failed")
-        || (!preAcquireFailure && (record.supervisor?.pid !== process.pid || record.supervisor.start !== currentStart))) { invalid(); }
+      assertStageWriter(record, custody, stage, currentStart);
       const failureEvidence = failure === undefined ? record.diagnostic?.failure : { phase: failure.phase, code: safeCode(failure.cause) };
       const diagnostic: StartupDiagnostic = { stage, at: new Date().toISOString(), ...(failureEvidence === undefined ? {} : { failure: failureEvidence }) };
       const bytes = Buffer.from(JSON.stringify({ ...record, diagnostic }));
@@ -126,6 +124,12 @@ export async function recordStartupStage(custody: StartupCustody, stage: Startup
       await assertDirectory(custody);
     } finally { await handle.close(); }
   });
+}
+
+function assertStageWriter(record: CustodyRecord, custody: StartupCustody, stage: StartupStage, currentStart: string | null): void {
+  if (!same(record.markerIdentity, custody.markerIdentity) || record.settled || (record.diagnostic?.stage === "stopping" && stage !== "failed")
+    || (record.diagnostic?.stage === "failed" && stage !== "stopping" && stage !== "failed")
+    || (currentStart !== null && (record.supervisor?.pid !== process.pid || record.supervisor.start !== currentStart))) { invalid(); }
 }
 
 async function publishRecord(handle: import("node:fs/promises").FileHandle, bytes: Buffer): Promise<void> {
@@ -202,19 +206,29 @@ async function pendingExists(directory: string): Promise<boolean> {
 
 async function readRecord(handle: import("node:fs/promises").FileHandle, directory: string, token: string): Promise<CustodyRecord> {
   const entry = await handle.stat({ bigint: true });
-  if (!entry.isFile() || entry.nlink !== 1n || (entry.mode & 0o777n) !== 0o600n || (process.getuid !== undefined && entry.uid !== BigInt(process.getuid()))) { invalid(); }
+  assertPrivateMarker(entry);
   const record = JSON.parse(await readBoundedMarker(handle)) as CustodyRecord;
-  if (record === null || typeof record !== "object" || !["directory,directoryIdentity,markerIdentity,settled,supervisor,token", "diagnostic,directory,directoryIdentity,markerIdentity,settled,supervisor,token"].includes(Object.keys(record).toSorted().join(","))
-    || record.directory !== directory || record.token !== token || typeof record.settled !== "boolean"
-    || !same(record.markerIdentity, identity(entry)) || !same(record.directoryIdentity, await privateDirectory(directory))) { invalid(); }
+  assertRecordShape(record, entry, directory, token);
+  if (!same(record.directoryIdentity, await privateDirectory(directory))) { invalid(); }
   assertSupervisor(record.supervisor);
-  if (record.diagnostic !== undefined && (record.diagnostic === null || typeof record.diagnostic !== "object" || !STAGES.includes(record.diagnostic.stage) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u.test(record.diagnostic.at)
-    || !["at,stage", "at,failure,stage"].includes(Object.keys(record.diagnostic).toSorted().join(","))
-    || (record.diagnostic.failure !== undefined && (record.diagnostic.failure === null || typeof record.diagnostic.failure !== "object" || !STAGES.includes(record.diagnostic.failure.phase) || !isStartupFailureCode(record.diagnostic.failure.code)
-      || Object.keys(record.diagnostic.failure).toSorted().join(",") !== "code,phase")))) { invalid(); }
+  assertDiagnostic(record.diagnostic);
   const after = await handle.stat({ bigint: true });
   if (after.nlink !== 1n || after.mode !== entry.mode || after.uid !== entry.uid || !same(identity(after), identity(entry))) { invalid(); }
   return record;
+}
+function assertPrivateMarker(entry: import("node:fs").BigIntStats): void {
+  if (!entry.isFile() || entry.nlink !== 1n || (entry.mode & 0o777n) !== 0o600n || (process.getuid !== undefined && entry.uid !== BigInt(process.getuid()))) { invalid(); }
+}
+function assertRecordShape(record: CustodyRecord, entry: import("node:fs").BigIntStats, directory: string, token: string): void {
+  if (record === null || typeof record !== "object" || !["directory,directoryIdentity,markerIdentity,settled,supervisor,token", "diagnostic,directory,directoryIdentity,markerIdentity,settled,supervisor,token"].includes(Object.keys(record).toSorted().join(","))
+    || record.directory !== directory || record.token !== token || typeof record.settled !== "boolean"
+    || !same(record.markerIdentity, identity(entry))) { invalid(); }
+}
+function assertDiagnostic(diagnostic: StartupDiagnostic | undefined): void {
+  if (diagnostic !== undefined && (diagnostic === null || typeof diagnostic !== "object" || !STAGES.includes(diagnostic.stage) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u.test(diagnostic.at)
+    || !["at,stage", "at,failure,stage"].includes(Object.keys(diagnostic).toSorted().join(","))
+    || (diagnostic.failure !== undefined && (diagnostic.failure === null || typeof diagnostic.failure !== "object" || !STAGES.includes(diagnostic.failure.phase) || !isStartupFailureCode(diagnostic.failure.code)
+      || Object.keys(diagnostic.failure).toSorted().join(",") !== "code,phase")))) { invalid(); }
 }
 function assertSupervisor(supervisor: CustodyRecord["supervisor"]): void {
   if (supervisor !== null && (typeof supervisor !== "object" || !Number.isSafeInteger(supervisor.pid) || supervisor.pid < 1
