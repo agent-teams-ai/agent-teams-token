@@ -143,7 +143,7 @@ function privatePathAncestors(path) {
   const ancestors = [];
   for (let current = path; ; current = dirname(current)) {
     ancestors.push(current);
-    if (current === parse(current).root) { return ancestors.reverse(); }
+    if (current === parse(current).root) { return ancestors.toReversed(); }
   }
 }
 
