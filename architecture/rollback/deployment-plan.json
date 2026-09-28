@@ -187,7 +187,7 @@
     },
     {
       "path": "scripts/tests/node26-compatibility.test.mjs",
-      "sha256": "c451421f06ed4959f161c0bb1f3411b8f14e9033018ed5cab787341e706f8c5a",
+      "sha256": "6afc3830b87159ac37d0d06d1a60862564a9495f6326846bc395c4a363e40573",
       "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {

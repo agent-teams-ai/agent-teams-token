@@ -26,8 +26,24 @@ function pinnedPnpmCli() {
   return cli;
 }
 
-function runPinnedPnpm(cli, cwd, args) {
-  const result = spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8", timeout: 30_000 });
+function runPinnedPnpm(cli, cwd, args, fixture) {
+  const environment = fixture ? {
+    ...process.env,
+    HOME: join(fixture, "home"),
+    TMPDIR: join(fixture, "tmp"),
+    XDG_CACHE_HOME: join(fixture, "xdg-cache"),
+    XDG_CONFIG_HOME: join(fixture, "xdg-config"),
+    XDG_DATA_HOME: join(fixture, "xdg-data"),
+    XDG_RUNTIME_DIR: join(fixture, "xdg-runtime"),
+    PNPM_HOME: join(fixture, "pnpm-home"),
+    npm_config_cache: join(fixture, "npm-cache"),
+    npm_config_store_dir: join(fixture, "pnpm-store"),
+    npm_config_engine_strict: "true",
+    npm_config_strict_peer_dependencies: "true",
+  } : process.env;
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd, env: environment, encoding: "utf8", timeout: 30_000,
+  });
   assert.equal(result.error, undefined);
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
@@ -134,12 +150,14 @@ test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen in
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
   assert.equal(packageJson.packageManager, "pnpm@11.24.0");
   const cli = pinnedPnpmCli();
-  assert.deepEqual(runPinnedPnpm(cli, repositoryRoot, ["--version"]), {
-    status: 0, output: "11.24.0\n",
-  });
-
   const fixture = mkdtempSync(join(tmpdir(), "agtmai-node26-peers-"));
   try {
+    for (const name of ["home", "tmp", "xdg-cache", "xdg-config", "xdg-data", "xdg-runtime", "pnpm-home", "npm-cache", "pnpm-store"]) {
+      mkdirSync(join(fixture, name));
+    }
+    assert.deepEqual(runPinnedPnpm(cli, fixture, ["--version"], fixture), {
+      status: 0, output: "11.24.0\n",
+    });
     // The fixture owns its workspace before any pnpm command can search parents.
     writeFileSync(join(fixture, "pnpm-workspace.yaml"), "packages: []\nautoInstallPeers: false\n");
     writeFileSync(join(fixture, ".npmrc"), "engine-strict=true\nstrict-peer-dependencies=true\n");
@@ -155,20 +173,21 @@ test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen in
       const directory = join(fixture, name);
       mkdirSync(directory);
       writeFileSync(join(directory, "package.json"), JSON.stringify(manifest));
-      const packed = runPinnedPnpm(cli, directory, ["pack", "--pack-destination", fixture]);
+      const packed = runPinnedPnpm(cli, directory, ["pack", "--pack-destination", fixture], fixture);
       assert.equal(packed.status, 0, packed.output);
     }
 
-    const fresh = runPinnedPnpm(cli, fixture, ["install", "--offline", "--config.strict-peer-dependencies=true"]);
+    const fresh = runPinnedPnpm(cli, fixture, ["install", "--offline", "--config.strict-peer-dependencies=true"], fixture);
     assert.equal(fresh.status, 1, fresh.output);
     assert.match(fresh.output, /ERR_PNPM_PEER_DEP_ISSUES/u);
     assert.match(fresh.output, /provider[\s\S]*\^2\.0\.0/u);
-    const frozen = runPinnedPnpm(cli, fixture, ["install", "--frozen-lockfile", "--offline", "--config.strict-peer-dependencies=true"]);
+    const frozen = runPinnedPnpm(cli, fixture, ["install", "--frozen-lockfile", "--offline", "--config.strict-peer-dependencies=true"], fixture);
     assert.equal(frozen.status, 0, frozen.output);
-    const checked = runPinnedPnpm(cli, fixture, ["peers", "check", "--lockfile-only"]);
+    const checked = runPinnedPnpm(cli, fixture, ["peers", "check", "--lockfile-only"], fixture);
     assert.equal(checked.status, 1, checked.output);
     assert.match(checked.output, /Issues with peer dependencies found/u);
     assert.match(checked.output, /provider[\s\S]*\^2\.0\.0/u);
+    assert.ok(existsSync(join(fixture, "xdg-cache/pnpm")), "pnpm cache belongs to the peer fixture");
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
