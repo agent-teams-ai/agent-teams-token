@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
 import { closeCommandLogDescriptors, selectedEnvironment } from "./evidence-command.mjs";
@@ -279,15 +280,31 @@ export class EvidenceRecorder {
         workingDirectory: options.cwd,
       });
       try {
-        result = spawnSync(command, invocation.arguments, {
+        const timeout = options.timeout ?? 600_000;
+        const supervisor = spawnSync(process.execPath, [
+          fileURLToPath(new URL("./process-supervisor.mjs", import.meta.url)),
+        ], {
           cwd: options.cwd,
           env: invocation.environment,
-          input: options.input,
-          stdio: [options.input === undefined ? "ignore" : "pipe", stdoutDescriptor, stderrDescriptor],
-          timeout: options.timeout ?? 600_000,
+          input: JSON.stringify({ command, arguments: invocation.arguments,
+            cwd: options.cwd, environment: invocation.environment,
+            input: options.input === undefined ? undefined : Buffer.from(options.input).toString("base64"),
+            timeout }),
+          encoding: "utf8",
+          maxBuffer: 1024 * 1024,
+          stdio: ["pipe", "pipe", stderrDescriptor, stdoutDescriptor, stderrDescriptor],
+          timeout: timeout + 10_000,
         });
+        if (supervisor.error || supervisor.status !== 0) {
+          result = { status: null, signal: supervisor.signal,
+            error: supervisor.error ?? { code: "ESUPERVISOR" }, custody: "uncertain",
+            uncertainty: "ROLLBACK_PROCESS_SUPERVISOR_UNCONFIRMED" };
+        } else {
+          result = JSON.parse(supervisor.stdout);
+        }
       } catch (error) {
-        result = { error, status: null, signal: null };
+        result = { error, status: null, signal: null, custody: "uncertain",
+          uncertainty: "ROLLBACK_PROCESS_SUPERVISOR_UNCONFIRMED" };
       }
     } catch (error) {
       primaryFailure = error;
@@ -301,11 +318,13 @@ export class EvidenceRecorder {
     if (primaryFailure !== undefined) {
       throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
     }
-    const commandPassed = !result.error && result.status === 0;
+    const commandPassed = !result.error && result.status === 0 && result.custody === "completed";
     if (!commandPassed) {
       primaryFailure = new Error(
         "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
-        + " status=" + String(result.status) + " signal=" + String(result.signal),
+        + " status=" + String(result.status) + " signal=" + String(result.signal)
+        + " custody=" + String(result.custody)
+        + (result.uncertainty === undefined ? "" : " uncertainty=" + result.uncertainty),
         { cause: result.error },
       );
     }
@@ -332,6 +351,10 @@ export class EvidenceRecorder {
         signal: result.signal,
         timedOut: result.error?.code === "ETIMEDOUT",
         spawnError: result.error?.code ?? null,
+        processCustody: result.custody,
+        processUncertainty: result.uncertainty ?? null,
+        ownedPids: result.ownedPids ?? [],
+        signalledPids: result.signalledPids ?? [],
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
         stdout: {
           path: stdoutRelative,
