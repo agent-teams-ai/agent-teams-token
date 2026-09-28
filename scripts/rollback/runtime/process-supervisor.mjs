@@ -1,168 +1,73 @@
-import { spawn } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const POLL_MS = 50;
-const REAP_MS = 5_000;
+const source = fileURLToPath(new URL("./subreaper.c", import.meta.url));
+const compiler = "/usr/bin/x86_64-linux-gnu-gcc-13";
+// The exact source, compiler and resulting ELF are reviewed as one build tuple.
+const pins = {
+  source: "7956cad529929cbdb14f0831c872449fa0f94088bdcd178f29fe96aa00ab16c0",
+  compiler: "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+  executable: "032c6386f941f677b054e4fcc2c296881d0dcff127928e1971d64af61f449deb",
+};
+const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-function linuxProcesses() {
-  const rows = [];
-  for (const name of readdirSync("/proc")) {
-    if (!/^\d+$/u.test(name)) {continue;}
-    try {
-      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
-      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      rows.push({ pid: Number(name), state: fields[0], ppid: Number(fields[1]),
-        group: Number(fields[2]), session: Number(fields[3]), identity: fields[19] });
-    } catch (error) {
-      if (error.code !== "ENOENT" && error.code !== "ESRCH") {throw error;}
-    }
+function buildHelper() {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    throw new Error("ROLLBACK_PROCESS_PLATFORM_UNSUPPORTED");
   }
-  return rows;
-}
-
-function pause(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// The private session is used for discovery only. Signals always name a PID
-// whose kernel start time was observed, never a process group or a guessed PID.
-export async function superviseCommand(config, adapter = {}) {
-  const list = adapter.list ?? linuxProcesses;
-  const launch = adapter.spawn ?? spawn;
-  const signal = adapter.kill ?? process.kill.bind(process);
-  const now = adapter.now ?? Date.now;
-  const wait = adapter.wait ?? pause;
-  const supported = adapter.supported ?? process.platform === "linux";
-  const child = launch(config.command, config.arguments, {
-    cwd: config.cwd, env: config.environment,
-    detached: process.platform !== "win32",
-    stdio: [config.input === undefined ? "ignore" : "pipe", 3, 4],
-  });
-  if (config.input !== undefined) {child.stdin.end(Buffer.from(config.input, "base64"));}
-  const owned = new Map();
-  let rootIdentity;
-  let rootSession;
-  let observationError;
-  let exited = false;
-  let exitCode = null;
-  let exitSignal = null;
-  let spawnError;
-  child.on("error", (error) => {spawnError = { code: error.code, message: error.message }; exited = true;});
-  child.on("exit", (code, sig) => {exited = true; exitCode = code; exitSignal = sig;});
-  const started = now();
-  function observe() {
-    if (!supported) {return;}
-    try {
-      const rows = list();
-      const byPid = new Map(rows.map((row) => [row.pid, row]));
-      const root = byPid.get(child.pid);
-      if (rootIdentity === undefined && root !== undefined) {
-        rootIdentity = root.identity;
-        rootSession = root.session;
-        owned.set(root.pid, root.identity);
-      }
-      if (root !== undefined && rootIdentity !== root.identity) {
-        throw new Error("ROLLBACK_PROCESS_ROOT_IDENTITY_CHANGED");
-      }
-      // Walk both parent links and the private session. The latter retains
-      // ordinary wrapper descendants after their immediate parent exits.
-      let changed;
-      do {
-        changed = false;
-        for (const row of rows) {
-          if (owned.has(row.pid)) {continue;}
-          if ((rootIdentity !== undefined && row.group === child.pid && row.session === rootSession)
-            || (owned.has(row.ppid) && owned.get(row.ppid) === byPid.get(row.ppid)?.identity)) {
-            owned.set(row.pid, row.identity);
-            changed = true;
-          }
-        }
-      } while (changed);
-      return rows;
-    } catch (error) {
-      observationError = error.message;
-      return undefined;
-    }
+  const sourceBytes = readFileSync(source);
+  if (digest(sourceBytes) !== pins.source || digest(readFileSync(compiler)) !== pins.compiler) {
+    throw new Error("ROLLBACK_PROCESS_BUILD_PREREQUISITE_MISMATCH");
   }
-  // A normal exit has no reason to send a signal; close confirms that direct
-  // stdio writers have finished before the parent hashes the logs.
-  let closed = false;
-  child.on("close", () => {closed = true;});
-  while (!closed && now() - started < config.timeout) {
-    observe();
-    await wait(POLL_MS);
-  }
-  const completionRows = observe();
-  const liveAtClose = completionRows?.some((row) =>
-    owned.get(row.pid) === row.identity && row.state !== "Z");
-  if (closed && !liveAtClose) {
-    return { status: exitCode, signal: exitSignal, error: spawnError,
-      custody: observationError === undefined ? "completed" : "uncertain",
-      uncertainty: observationError, ownedPids: [...owned.keys()] };
-  }
-  const deadline = now() + REAP_MS;
-  const signalled = new Set();
-  let escalation = false;
-  while (now() < deadline) {
-    const rows = observe();
-    const byPid = new Map((rows ?? []).map((row) => [row.pid, row]));
-    const live = [...owned].filter(([pid, identity]) => {
-      const row = byPid.get(pid);
-      return row !== undefined && row.identity === identity && row.state !== "Z";
-    });
-    // The direct child is held by a ChildProcess handle even if /proc could
-    // not be read. Do not infer authority over any other PID in that case.
-    if (!supported || rows === undefined || rootIdentity === undefined) {
-      if (!exited) {child.kill(escalation ? "SIGKILL" : "SIGTERM");}
-      observationError ??= supported ? "ROLLBACK_PROCESS_ROOT_UNOBSERVED" : "ROLLBACK_PROCESS_PLATFORM_UNSUPPORTED";
-    } else {
-      for (const [pid, identity] of live.toReversed()) {
-        try {
-          // A stale PID is never authority. Recheck immediately before each
-          // signal, including after a previous signal could have exited a peer.
-          const current = list().find((row) => row.pid === pid);
-          if (current === undefined || current.state === "Z") {continue;}
-          if (current.identity !== identity) {
-            observationError = "ROLLBACK_PROCESS_IDENTITY_CHANGED";
-            continue;
-          }
-          signal(pid, escalation ? "SIGKILL" : "SIGTERM");
-          signalled.add(pid);
-        } catch (error) {
-          if (error.code !== "ESRCH") {observationError = error.message;}
-        }
-      }
-    }
-    if (exited && live.length === 0 && rows !== undefined) {
-      // One last observation catches children spawned during termination.
-      await wait(POLL_MS);
-      const finalRows = observe();
-      const remaining = finalRows?.some((row) => owned.get(row.pid) === row.identity && row.state !== "Z");
-      if (finalRows !== undefined && !remaining) {
-        return { status: exitCode, signal: exitSignal, error: { code: "ETIMEDOUT" },
-          custody: observationError === undefined ? "reaped" : "uncertain",
-          uncertainty: observationError, ownedPids: [...owned.keys()], signalledPids: [...signalled] };
-      }
-    }
-    escalation = now() > deadline - REAP_MS / 2;
-    await wait(POLL_MS);
-  }
-  // No success claim if observation or termination could not be confirmed.
-  return { status: exitCode, signal: exitSignal, error: { code: "ETIMEDOUT" },
-    custody: "uncertain", uncertainty: observationError ?? "ROLLBACK_PROCESS_REAP_UNCONFIRMED",
-    ownedPids: [...owned.keys()], signalledPids: [...signalled] };
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  let body = "";
-  for await (const chunk of process.stdin) {body += chunk;}
+  const directory = mkdtempSync(join(tmpdir(), "rollback-subreaper-"));
+  const executable = join(directory, "subreaper");
   try {
-    const result = await superviseCommand(JSON.parse(body));
-    process.stdout.write(JSON.stringify(result));
+    const snapshot = join(directory, "subreaper.c");
+    writeFileSync(snapshot, sourceBytes, { flag: "wx", mode: 0o600 });
+    const built = spawnSync(compiler, ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+      "-fno-ident", "-o", executable, snapshot], { encoding: "utf8", timeout: 30_000 });
+    if (built.error || built.status !== 0 || digest(readFileSync(executable)) !== pins.executable) {
+      throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED " + (built.stderr ?? built.error?.message ?? ""));
+    }
+    chmodSync(executable, 0o700);
+    return { directory, executable };
   } catch (error) {
-    process.stdout.write(JSON.stringify({ status: null, signal: null,
-      error: { code: error.code ?? "ESUPERVISOR", message: error.message },
-      custody: "uncertain", uncertainty: error.message }));
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+// Synchronous callers keep evidence descriptors open until native custody
+// proves ECHILD or reports uncertainty. There is no outer timeout.
+export function superviseCommand(config) {
+  let helper;
+  try {
+    helper = buildHelper();
+    const result = spawnSync(helper.executable,
+      [String(config.timeout), String(config.drainMs ?? 5000),
+        String(config.termMs ?? 1000), config.command, ...config.arguments], {
+        cwd: config.cwd, env: config.environment,
+        input: config.input === undefined ? undefined : Buffer.from(config.input, "base64"),
+        encoding: "utf8", maxBuffer: 1024 * 1024,
+        stdio: [config.input === undefined ? "ignore" : "pipe", "pipe", "pipe",
+          config.stdoutDescriptor, config.stderrDescriptor],
+      });
+    if (result.error || result.status !== 0) {
+      throw new Error("ROLLBACK_PROCESS_HELPER_UNCONFIRMED " + (result.error?.message ?? result.stderr ?? ""));
+    }
+    const report = JSON.parse(result.stdout);
+    if (!["completed", "reaped", "uncertain"].includes(report.custody)) {
+      throw new Error("ROLLBACK_PROCESS_REPORT_INVALID");
+    }
+    return report;
+  } catch (error) {
+    return { status: null, signal: null, error: { code: "ESUPERVISOR", message: error.message },
+      custody: "uncertain", uncertainty: error.message };
+  } finally {
+    if (helper) {rmSync(helper.directory, { recursive: true, force: true });}
   }
 }

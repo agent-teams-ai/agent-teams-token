@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   constants,
   existsSync,
@@ -12,9 +11,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
+import { superviseCommand } from "./process-supervisor.mjs";
 import { closeCommandLogDescriptors, selectedEnvironment } from "./evidence-command.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
@@ -281,26 +280,17 @@ export class EvidenceRecorder {
       });
       try {
         const timeout = options.timeout ?? 600_000;
-        const supervisor = spawnSync(process.execPath, [
-          fileURLToPath(new URL("./process-supervisor.mjs", import.meta.url)),
-        ], {
-          cwd: options.cwd,
-          env: invocation.environment,
-          input: JSON.stringify({ command, arguments: invocation.arguments,
-            cwd: options.cwd, environment: invocation.environment,
-            input: options.input === undefined ? undefined : Buffer.from(options.input).toString("base64"),
-            timeout }),
-          encoding: "utf8",
-          maxBuffer: 1024 * 1024,
-          stdio: ["pipe", "pipe", stderrDescriptor, stdoutDescriptor, stderrDescriptor],
-          timeout: timeout + 10_000,
-        });
-        if (supervisor.error || supervisor.status !== 0) {
-          result = { status: null, signal: supervisor.signal,
-            error: supervisor.error ?? { code: "ESUPERVISOR" }, custody: "uncertain",
-            uncertainty: "ROLLBACK_PROCESS_SUPERVISOR_UNCONFIRMED" };
-        } else {
-          result = JSON.parse(supervisor.stdout);
+        result = superviseCommand({ command, arguments: invocation.arguments,
+          cwd: options.cwd, environment: invocation.environment,
+          input: options.input === undefined ? undefined : Buffer.from(options.input).toString("base64"),
+          stdoutDescriptor, stderrDescriptor, timeout,
+          // Slither's exact-ID Docker cleanup reserves 60 seconds after abort.
+          // The daemon container is not a descendant of this subreaper.
+          drainMs: id === "slither-real-analyzer" ? 70_000 : 5_000,
+          termMs: id === "slither-real-analyzer" ? 65_000 : 1_000 });
+        if (id === "slither-real-analyzer" && result.custody === "reaped") {
+          result = { ...result, custody: "uncertain",
+            uncertainty: "ROLLBACK_DOCKER_EXACT_ID_SETTLEMENT_UNPROVEN" };
         }
       } catch (error) {
         result = { error, status: null, signal: null, custody: "uncertain",
@@ -353,8 +343,7 @@ export class EvidenceRecorder {
         spawnError: result.error?.code ?? null,
         processCustody: result.custody,
         processUncertainty: result.uncertainty ?? null,
-        ownedPids: result.ownedPids ?? [],
-        signalledPids: result.signalledPids ?? [],
+        signalledCount: result.signalledCount ?? 0,
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
         stdout: {
           path: stdoutRelative,
