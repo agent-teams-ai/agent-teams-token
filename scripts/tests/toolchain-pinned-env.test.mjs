@@ -63,4 +63,3 @@ test("run-pnpm rejects ambient Foundry and solc path overrides", () => {
   assert.deepEqual(values.slice(0, 3), expected);
   assert.equal(values.some((value) => value.startsWith(malicious)), false);
 });
-
