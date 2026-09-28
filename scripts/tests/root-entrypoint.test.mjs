@@ -39,6 +39,7 @@ function createRootFixture(context, { realBootstrap = false } = {}) {
     for (const name of [
       "cleanup.mjs",
       "cleanup-evidence.mjs",
+      "cleanup-file-content.mjs",
       "cleanup-tree.mjs",
       "custody.mjs",
       "descriptor-close.mjs",
