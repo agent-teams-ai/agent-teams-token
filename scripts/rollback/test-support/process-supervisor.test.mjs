@@ -27,7 +27,7 @@ function compileNative(source, output, root, strict = true) {
     cwd: root, env: {PATH: "/usr/bin:/bin", LC_ALL: "C", TZ: "UTC", TMPDIR: root},
     encoding: "utf8", timeout: 30_000,
   });
-  assert.equal(built.error, undefined, built.error?.message);
+  assert.ok(built.error === undefined, built.error?.message);
   assert.equal(built.status, 0, built.stderr);
 }
 
@@ -75,17 +75,29 @@ int main(int argc, char **argv) {
 }
 function live(root, role) {
   const path = join(root, role + ".pid");
-  if (!existsSync(path)) return false;
+  if (!existsSync(path)) {return false;}
   const pid = Number(readFileSync(path, "utf8"));
   try { return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1][0] !== "Z"
     && readlinkSync(`/proc/${pid}/exe`) === join(root, "fork"); }
-  catch (error) { if (error.code === "ENOENT" || error.code === "ESRCH") return false; throw error; }
+  catch (error) { if (error.code === "ENOENT" || error.code === "ESRCH") {return false;} throw error; }
 }
 function cleanup(root) {
   for (const role of ["root", "middle", "leaf"]) {
-    if (live(root, role)) process.kill(Number(readFileSync(join(root, role + ".pid"), "utf8")), "SIGKILL");
+    if (live(root, role)) {process.kill(Number(readFileSync(join(root, role + ".pid"), "utf8")), "SIGKILL");}
   }
   rmSync(root, {recursive: true, force: true});
+}
+
+function killIfPresent(pid) {
+  try {process.kill(pid, "SIGKILL");}
+  catch (error) {if (error.code !== "ESRCH") {throw error;}}
+}
+function killPinnedProcess(pid, executable) {
+  try {
+    if (readlinkSync(`/proc/${pid}/exe`) === executable) {process.kill(pid, "SIGKILL");}
+  } catch (error) {
+    if (error.code !== "ESRCH" && error.code !== "ENOENT") {throw error;}
+  }
 }
 
 // Adversarial NEW TEST: an orphan escapes both the root session and the 50 ms
@@ -156,7 +168,7 @@ test("ambient compiler proxy cannot create an unrecorded detached descendant", {
   } finally {
     if (existsSync(childPid)) {
       const pid = Number(readFileSync(childPid, "utf8"));
-      try {process.kill(pid, "SIGKILL");} catch (error) {if (error.code !== "ESRCH") throw error;}
+      killIfPresent(pid);
     }
     rmSync(root, {recursive: true, force: true});
   }
@@ -171,17 +183,17 @@ test("native ECHILD after command cancellation cannot report completion", {skip:
     const helper = spawn(output, ["2000", "5000", "1000", "/bin/sh", "-c", "kill -STOP $PPID; exit 0"],
       {stdio: ["ignore", "pipe", "pipe", logs, logs]});
     const chunks = [];
-    helper.stdout.on("data", (chunk) => chunks.push(chunk));
+    helper.stdout.on("data", (chunk) => {chunks.push(chunk);});
     try {
       const deadline = Date.now() + 2000;
       while (Date.now() < deadline && !/^State:\s+T/mu.test(readFileSync(`/proc/${helper.pid}/status`, "utf8"))) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => {setTimeout(resolve, 5);});
       }
       assert.match(readFileSync(`/proc/${helper.pid}/status`, "utf8"), /^State:\s+T/mu);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await new Promise((resolve) => {setTimeout(resolve, 30);});
       helper.kill("SIGTERM");
       helper.kill("SIGCONT");
-      const [exitCode] = await new Promise((resolve) => helper.once("close", (...args) => resolve(args)));
+      const [exitCode] = await new Promise((resolve) => {helper.once("close", (...args) => {resolve(args);});});
       const reportText = Buffer.concat(chunks).toString("utf8");
       assert.equal(exitCode, 0, reportText);
       const report = JSON.parse(reportText);
@@ -200,16 +212,16 @@ test("native ECHILD after deadline cannot report completion", {skip: process.pla
     const helper = spawn(output, ["1000", "5000", "1000", "/bin/sh", "-c", "kill -STOP $PPID; exit 0"],
       {stdio: ["ignore", "pipe", "pipe", logs, logs]});
     const chunks = [];
-    helper.stdout.on("data", (chunk) => chunks.push(chunk));
+    helper.stdout.on("data", (chunk) => {chunks.push(chunk);});
     try {
       const deadline = Date.now() + 2000;
       while (Date.now() < deadline && !/^State:\s+T/mu.test(readFileSync(`/proc/${helper.pid}/status`, "utf8"))) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => {setTimeout(resolve, 5);});
       }
       assert.match(readFileSync(`/proc/${helper.pid}/status`, "utf8"), /^State:\s+T/mu);
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => {setTimeout(resolve, 1200);});
       helper.kill("SIGCONT");
-      const [exitCode] = await new Promise((resolve) => helper.once("close", (...args) => resolve(args)));
+      const [exitCode] = await new Promise((resolve) => {helper.once("close", (...args) => {resolve(args);});});
       const reportText = Buffer.concat(chunks).toString("utf8");
       assert.equal(exitCode, 0, reportText);
       const report = JSON.parse(reportText);
@@ -241,22 +253,21 @@ test("native ECHILD after parent death cannot report completion", {skip: process
         } else if (Date.now()>deadline) process.exit(2);
       },5);`;
     const launcher = spawn(process.execPath, ["-e", code, output, root, reportPath, helperPidPath], {stdio: "ignore"});
-    const [launcherCode] = await new Promise((resolve) => launcher.once("close", (...args) => resolve(args)));
+    const [launcherCode] = await new Promise((resolve) => {launcher.once("close", (...args) => {resolve(args);});});
     assert.equal(launcherCode, 0);
     const helperPid = Number(readFileSync(helperPidPath, "utf8"));
     try {
       process.kill(helperPid, "SIGCONT");
       const deadline = Date.now() + 2000;
       while (readFileSync(reportPath, "utf8") === "" && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => {setTimeout(resolve, 5);});
       }
       const reportText = readFileSync(reportPath, "utf8");
       const report = JSON.parse(reportText);
       assert.notEqual(report.custody, "completed", reportText);
       assert.equal(report.error.code, "ECANCELLED");
     } finally {
-      try {if (readlinkSync(`/proc/${helperPid}/exe`) === output) process.kill(helperPid, "SIGKILL");}
-      catch (error) {if (error.code !== "ESRCH" && error.code !== "ENOENT") throw error;}
+      killPinnedProcess(helperPid, output);
     }
   } finally {rmSync(root, {recursive: true, force: true});}
 });
@@ -313,11 +324,11 @@ const timer = setInterval(() => {
 `;
   const launcher = spawn(process.execPath, ["-e", launcherCode, output, script, root, reportPath], {stdio: "ignore"});
   try {
-    await new Promise((resolve) => launcher.once("close", resolve));
+    await new Promise((resolve) => {launcher.once("close", resolve);});
     assert.equal(existsSync(join(root, "leaf.pid")), true);
     const deadline = Date.now() + 3000;
     while ((!existsSync(reportPath) || readFileSync(reportPath, "utf8") === "") && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => {setTimeout(resolve, 10);});
     }
     const report = JSON.parse(readFileSync(reportPath, "utf8"));
     assert.equal(report.custody, "reaped");
@@ -326,8 +337,7 @@ const timer = setInterval(() => {
   } finally {
     if (existsSync(join(root, "helper.pid"))) {
       const pid = Number(readFileSync(join(root, "helper.pid"), "utf8"));
-      try {if (readlinkSync(`/proc/${pid}/exe`) === output) process.kill(pid, "SIGKILL");}
-      catch (error) {if (error.code !== "ESRCH" && error.code !== "ENOENT") throw error;}
+      killPinnedProcess(pid, output);
     }
     cleanup(root);
   }
@@ -346,14 +356,14 @@ for (const parentSignal of ["SIGINT", "SIGTERM"]) {
     try {
       const deadline = Date.now() + 2000;
       while (!live(root, "leaf") && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => {setTimeout(resolve, 10);});
       }
       assert.equal(live(root, "leaf"), true);
       parent.kill(parentSignal);
-      await new Promise((resolve) => parent.once("close", resolve));
+      await new Promise((resolve) => {parent.once("close", resolve);});
       const drainDeadline = Date.now() + 2500;
       while (live(root, "leaf") && Date.now() < drainDeadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => {setTimeout(resolve, 10);});
       }
       assert.equal(live(root, "leaf"), false);
     } finally {parent.kill("SIGKILL"); cleanup(root);}
@@ -373,14 +383,14 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     closeSync(stderr);
     try {
       const chunks = [];
-      helper.stdout.on("data", (chunk) => chunks.push(chunk));
+      helper.stdout.on("data", (chunk) => {chunks.push(chunk);});
       const deadline = Date.now() + 2000;
       while (!live(root, "leaf") && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => {setTimeout(resolve, 10);});
       }
       assert.equal(live(root, "leaf"), true);
       helper.kill(signal);
-      await new Promise((resolve) => helper.once("close", resolve));
+      await new Promise((resolve) => {helper.once("close", resolve);});
       const report = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       assert.equal(report.custody, "reaped");
       assert.equal(report.error.code, "ECANCELLED");

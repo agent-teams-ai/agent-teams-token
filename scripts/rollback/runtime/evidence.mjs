@@ -98,6 +98,48 @@ function annotateEvidenceFailure(error, path) {
   return error;
 }
 
+function executeEvidenceCommand({ command, arguments_, options, id, stdoutDescriptor, stderrDescriptor }) {
+  const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
+    workingDirectory: options.cwd,
+  });
+  let result;
+  try {
+    result = superviseCommand({
+      command, arguments: invocation.arguments, cwd: options.cwd,
+      environment: invocation.environment,
+      input: options.input === undefined ? undefined : Buffer.from(options.input).toString("base64"),
+      stdoutDescriptor, stderrDescriptor, timeout: options.timeout ?? 600_000,
+      // Slither's exact-ID Docker cleanup reserves 60 seconds after abort.
+      // The daemon container is not a descendant of this subreaper.
+      drainMs: id === "slither-real-analyzer" ? 70_000 : 5_000,
+      termMs: id === "slither-real-analyzer" ? 65_000 : 1_000,
+    });
+    // ECHILD settles local descendants only; an abnormal analyzer exit
+    // cannot authenticate settlement of its exact Docker container ID.
+    if (id === "slither-real-analyzer"
+      && (result.custody === "reaped"
+        || (result.custody === "completed"
+          && (result.status !== 0 || result.signal !== null || result.error !== null)))) {
+      result = { ...result, custody: "uncertain",
+        uncertainty: "ROLLBACK_DOCKER_EXACT_ID_SETTLEMENT_UNPROVEN" };
+    }
+  } catch (error) {
+    result = { error, status: null, signal: null, custody: "uncertain",
+      uncertainty: "ROLLBACK_PROCESS_SUPERVISOR_UNCONFIRMED" };
+  }
+  return { invocation, result };
+}
+
+function commandFailure(group, id, result) {
+  return new Error(
+    "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
+    + " status=" + String(result.status) + " signal=" + String(result.signal)
+    + " custody=" + String(result.custody)
+    + (result.uncertainty === undefined ? "" : " uncertainty=" + result.uncertainty),
+    { cause: result.error },
+  );
+}
+
 // Stage lifecycle-owned READY until validation and every custody close succeed.
 // Failed bundles retain only READY.pending, which is never independent proof.
 const evidencePublications = new Map();
@@ -183,13 +225,9 @@ export class EvidenceRecorder {
     this.target = evidenceTarget(directory);
     this.directory = this.target.path;
     this.document = {
-      schemaVersion: 1,
-      kind: "agtmai-slice-rollback-proof",
-      status: "running",
-      startedAt: new Date().toISOString(),
-      commands: [],
-      stages: [],
-      slices: [],
+      schemaVersion: 1, kind: "agtmai-slice-rollback-proof",
+      status: "running", startedAt: new Date().toISOString(),
+      commands: [], stages: [], slices: [],
       ...initial,
     };
     this.sequence = 0;
@@ -241,9 +279,7 @@ export class EvidenceRecorder {
       writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
     });
     return {
-      path: relativePath,
-      byteLength: bytes.length,
-      sha256: sha256(bytes),
+      path: relativePath, byteLength: bytes.length, sha256: sha256(bytes),
     };
   }
 
@@ -275,32 +311,9 @@ export class EvidenceRecorder {
         "ROLLBACK_EVIDENCE_COMMAND_STDERR_CREATE_FAILED",
         () => openSync(stderrPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600),
       );
-      invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
-        workingDirectory: options.cwd,
-      });
-      try {
-        const timeout = options.timeout ?? 600_000;
-        result = superviseCommand({ command, arguments: invocation.arguments,
-          cwd: options.cwd, environment: invocation.environment,
-          input: options.input === undefined ? undefined : Buffer.from(options.input).toString("base64"),
-          stdoutDescriptor, stderrDescriptor, timeout,
-          // Slither's exact-ID Docker cleanup reserves 60 seconds after abort.
-          // The daemon container is not a descendant of this subreaper.
-          drainMs: id === "slither-real-analyzer" ? 70_000 : 5_000,
-          termMs: id === "slither-real-analyzer" ? 65_000 : 1_000 });
-        // ECHILD settles local descendants only; an abnormal analyzer exit
-        // cannot authenticate settlement of its exact Docker container ID.
-        if (id === "slither-real-analyzer"
-          && (result.custody === "reaped"
-            || (result.custody === "completed"
-              && (result.status !== 0 || result.signal !== null || result.error !== null)))) {
-          result = { ...result, custody: "uncertain",
-            uncertainty: "ROLLBACK_DOCKER_EXACT_ID_SETTLEMENT_UNPROVEN" };
-        }
-      } catch (error) {
-        result = { error, status: null, signal: null, custody: "uncertain",
-          uncertainty: "ROLLBACK_PROCESS_SUPERVISOR_UNCONFIRMED" };
-      }
+      ({ invocation, result } = executeEvidenceCommand({
+        command, arguments_, options, id, stdoutDescriptor, stderrDescriptor,
+      }));
     } catch (error) {
       primaryFailure = error;
     }
@@ -315,13 +328,7 @@ export class EvidenceRecorder {
     }
     const commandPassed = !result.error && result.status === 0 && result.custody === "completed";
     if (!commandPassed) {
-      primaryFailure = new Error(
-        "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
-        + " status=" + String(result.status) + " signal=" + String(result.signal)
-        + " custody=" + String(result.custody)
-        + (result.uncertainty === undefined ? "" : " uncertainty=" + result.uncertainty),
-        { cause: result.error },
-      );
+      primaryFailure = commandFailure(group, id, result);
     }
     let recorded;
     try {
@@ -332,33 +339,21 @@ export class EvidenceRecorder {
         primaryFailure.message += "\n" + tail(stdout.toString("utf8") + "\n" + stderr.toString("utf8"), 80);
       }
       const entry = {
-        sequence: this.sequence,
-        group,
-        id,
-        phase: options.phase ?? "preparation",
-        command,
-        arguments: invocation.arguments,
-        cwd: options.cwd,
+        sequence: this.sequence, group, id,
+        phase: options.phase ?? "preparation", command,
+        arguments: invocation.arguments, cwd: options.cwd,
         environment: selectedEnvironment(invocation.environment),
-        startedAt: startedAt.toISOString(),
-        durationMs: Date.now() - started,
-        exitCode: result.status,
-        signal: result.signal,
-        timedOut: result.error?.code === "ETIMEDOUT",
-        spawnError: result.error?.code ?? null,
-        processCustody: result.custody,
-        processUncertainty: result.uncertainty ?? null,
+        startedAt: startedAt.toISOString(), durationMs: Date.now() - started,
+        exitCode: result.status, signal: result.signal,
+        timedOut: result.error?.code === "ETIMEDOUT", spawnError: result.error?.code ?? null,
+        processCustody: result.custody, processUncertainty: result.uncertainty ?? null,
         signalledCount: result.signalledCount ?? 0,
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
         stdout: {
-          path: stdoutRelative,
-          byteLength: stdout.length,
-          sha256: sha256(stdout),
+          path: stdoutRelative, byteLength: stdout.length, sha256: sha256(stdout),
         },
         stderr: {
-          path: stderrRelative,
-          byteLength: stderr.length,
-          sha256: sha256(stderr),
+          path: stderrRelative, byteLength: stderr.length, sha256: sha256(stderr),
         },
       };
       this.document.commands.push(entry);
@@ -466,18 +461,14 @@ export function publishEvidenceSeal(directory, statement, schemaPath) {
   });
   const schemaBytes = readFileSync(schemaPath);
   const seal = {
-    schemaVersion: 1,
-    kind: "agtmai-recovery-proof-seal",
+    schemaVersion: 1, kind: "agtmai-recovery-proof-seal",
     candidateSha: statement.candidate.sha,
     schema: {
       path: "architecture/rollback/recovery-evidence.schema.json",
-      byteLength: schemaBytes.length,
-      sha256: sha256(schemaBytes),
+      byteLength: schemaBytes.length, sha256: sha256(schemaBytes),
     },
     statement: {
-      path: "statement.json",
-      byteLength: statementBytes.length,
-      sha256: sha256(statementBytes),
+      path: "statement.json", byteLength: statementBytes.length, sha256: sha256(statementBytes),
       canonicalSha256: sha256(statementCanonical),
     },
   };
@@ -492,10 +483,8 @@ export function publishReadyMarker(directory, publication) {
   const target = evidenceTarget(directory);
   const lifecycle = evidencePublications.get(target.path);
   const ready = {
-    schemaVersion: 1,
-    kind: "agtmai-recovery-proof-ready",
-    candidateSha: publication.statement.candidate.sha,
-    sealSha256: publication.sealSha256,
+    schemaVersion: 1, kind: "agtmai-recovery-proof-ready",
+    candidateSha: publication.statement.candidate.sha, sealSha256: publication.sealSha256,
     proofDigestSha256: publication.seal.statement.canonicalSha256,
   };
   mutateEvidenceDirectory(target, "ROLLBACK_EVIDENCE_READY_WRITE_FAILED", () => {

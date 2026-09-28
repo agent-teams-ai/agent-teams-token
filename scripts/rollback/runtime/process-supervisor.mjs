@@ -104,12 +104,12 @@ function buildHelper() {
     throw new Error("ROLLBACK_PROCESS_BUILD_PREREQUISITE_MISMATCH");
   }
   const bytes = gunzipSync(Buffer.from(helperImage, "base64"));
-  if (digest(bytes) !== pins.executable) throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED");
+  if (digest(bytes) !== pins.executable) {throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED");}
   const directory = mkdtempSync(join(tmpdir(), "rollback-subreaper-"));
   const executable = join(directory, "subreaper");
   try {
     writeFileSync(executable, bytes, {flag: "wx", mode: 0o700});
-    if (digest(readFileSync(executable)) !== pins.executable) throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED");
+    if (digest(readFileSync(executable)) !== pins.executable) {throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED");}
     chmodSync(executable, 0o700);
     return { directory, executable };
   } catch (error) {
