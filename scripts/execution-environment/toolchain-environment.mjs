@@ -58,6 +58,10 @@ const PRIVATE_ENVIRONMENT_KEYS = Object.freeze([
   "XDG_RUNTIME_DIR",
 ]);
 
+// Only the exact object returned for a validated gate carries private-path
+// authority through the second allowlist pass at the process boundary.
+const privateGateEnvironments = new WeakMap();
+
 const CANONICAL_NPM_ENVIRONMENT = Object.freeze({
   NPM_CONFIG_GLOBALCONFIG: "/dev/null",
   NPM_CONFIG_USERCONFIG: "/dev/null",
@@ -109,8 +113,33 @@ export function allowlistedChildEnvironment(source = process.env, overrides = {}
   return environment;
 }
 
-export function canonicalGitEnvironment(source = process.env) {
-  const environment = allowlistedChildEnvironment(source);
+export function privateGateChildEnvironment(source, overrides, temporaryDirectory) {
+  if (typeof temporaryDirectory !== "string" || !isAbsolute(temporaryDirectory)
+    || resolve(temporaryDirectory) !== temporaryDirectory) {
+    throw new Error("TOOLCHAIN_PRIVATE_GATE_DIRECTORY_INVALID");
+  }
+  const expected = {
+    HOME: join(temporaryDirectory, "home"),
+    TMPDIR: temporaryDirectory,
+    XDG_CACHE_HOME: join(temporaryDirectory, "xdg-cache"),
+    XDG_CONFIG_HOME: join(temporaryDirectory, "xdg-config"),
+    XDG_DATA_HOME: join(temporaryDirectory, "xdg-data"),
+    XDG_RUNTIME_DIR: join(temporaryDirectory, "xdg-runtime"),
+  };
+  for (const [key, path] of Object.entries(expected)) {
+    const entry = lstatSync(path);
+    if (overrides[key] !== path || !entry.isDirectory() || entry.isSymbolicLink()
+      || (entry.mode & 0o777) !== 0o700) {
+      throw new Error(`TOOLCHAIN_PRIVATE_GATE_PATH_INVALID key=${key}`);
+    }
+  }
+  const environment = allowlistedChildEnvironment(source, overrides);
+  privateGateEnvironments.set(environment, Object.freeze(expected));
+  return environment;
+}
+
+export function canonicalGitEnvironment(source = process.env, privateOverrides = {}) {
+  const environment = allowlistedChildEnvironment(source, privateOverrides);
   for (const key of GIT_IDENTITY_KEYS) {
     if (source[key] !== undefined) {environment[key] = String(source[key]);}
   }
@@ -135,6 +164,7 @@ export function trustedChildInvocation(
   source = process.env,
   { workingDirectory } = {},
 ) {
+  const privateOverrides = privateGateEnvironments.get(source) ?? {};
   if (command === "/usr/bin/git") {
     if (typeof workingDirectory !== "string" || !isAbsolute(workingDirectory)) {
       throw new Error("TOOLCHAIN_GIT_WORKING_DIRECTORY_INVALID");
@@ -147,12 +177,12 @@ export function trustedChildInvocation(
         "-c", `safe.directory=${safeDirectory}`,
         ...arguments_,
       ],
-      environment: canonicalGitEnvironment(source),
+      environment: canonicalGitEnvironment(source, privateOverrides),
     };
   }
   return {
     arguments: [...arguments_],
-    environment: allowlistedChildEnvironment(source),
+    environment: allowlistedChildEnvironment(source, privateOverrides),
   };
 }
 
