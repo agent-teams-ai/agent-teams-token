@@ -1,6 +1,6 @@
 import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies } from "./proof-workflow.mjs";
 import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
-import { editWorkflowTest, removeWorkflowJob } from "../slices/transforms.mjs";
+import { editWorkflowTest, removeNode26RollbackTest, removeWorkflowJob } from "../slices/transforms.mjs";
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
@@ -355,6 +355,7 @@ for (const manifest of manifests()) {
     const { checkout, workspaceHandle, parse } = workflowPolicyFixture(context, manifest);
     const packagePath = "package.json";
     const workflowPath = ".github/workflows/ci.yml";
+    const node26WorkflowPath = ".github/workflows/node26-compatibility.yml";
     const testPath = "scripts/tests/workflow.test.mjs";
     const candidatePackage = JSON.parse(readFileSync(join(checkout, packagePath), "utf8"));
     const candidateWorkflow = parse(readFileSync(join(checkout, workflowPath), "utf8"));
@@ -382,10 +383,17 @@ for (const manifest of manifests()) {
         step.id === "run-root-check-with-exact-rollback-proof" ? { ...step, run: "pnpm check" } : step) },
     } });
 
-    const sharedPlan = snapshotRollbackSharedPaths(checkout, [packagePath, workflowPath, testPath], workspaceHandle);
+    const sharedPlan = snapshotRollbackSharedPaths(checkout, [packagePath, workflowPath, node26WorkflowPath, testPath], workspaceHandle);
     editPackage(checkout, manifest.sliceId, { sharedPlan, workspaceHandle });
     removeWorkflowJob(checkout, manifest, sharedPlan, workspaceHandle);
+    removeNode26RollbackTest(checkout, sharedPlan, workspaceHandle);
     editWorkflowTest(checkout, manifest, sharedPlan, workspaceHandle);
+    const node26Workflow = readFileSync(join(checkout, node26WorkflowPath), "utf8");
+    assert.doesNotMatch(node26Workflow, /pnpm rollback:test/u);
+    const node26Check = spawnSync(process.execPath, ["--test", "scripts/tests/node26-compatibility.test.mjs"], {
+      cwd: checkout, encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024,
+    });
+    assert.equal(node26Check.status, 0, node26Check.stdout + node26Check.stderr);
     const slitherRemoved = manifest.sliceId === "slither";
     checkWorkflowPolicies(checkout, slitherRemoved ? ".*" : workflowPolicyPattern, slitherRemoved ? candidateTestCount - 2 : 11);
     assert.deepEqual(

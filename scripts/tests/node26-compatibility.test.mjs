@@ -43,6 +43,12 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
   }
   assert.equal(node26Workflow.jobs["node26-strict-install"]["continue-on-error"], true);
   assert.equal(node26Workflow.jobs["node26-focused-checks"]["continue-on-error"], undefined);
+  for (const [name, job] of Object.entries(node26Workflow.jobs)) {
+    const checkout = job.steps.find((step) => step.name === "Checkout exact head");
+    assert.equal(checkout.with.ref, "${{ github.sha }}", name);
+    assert.equal(checkout.with["persist-credentials"], false, name);
+    assert.equal(checkout.with["fetch-depth"], name === "node26-focused-checks" ? 0 : undefined, name);
+  }
 
   const setupActions = Object.values(node26Workflow.jobs).map((job) => job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")));
   for (const action of setupActions) {
@@ -90,10 +96,12 @@ test("Node 26 lane records upstream engine blockers and runs observable regressi
   const strictInstall = node26Workflow.jobs["node26-strict-install"].steps.find((step) => step.name === "Attempt frozen strict install").run;
   const focusedChecks = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Run focused Node 26 compatibility checks").run;
   const focusedInstall = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Install frozen workspace with recorded upstream engine exceptions").run;
+  const packageScripts = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")).scripts;
   assert.ok(strictInstall.includes(node26Policy.strictInstall.command + ' 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"'));
   assert.equal(focusedInstall, node26Policy.focusedCompatibility.install);
   for (const command of node26Policy.focusedCompatibility.checks) {
-    assert.ok(focusedChecks.split("\n").includes(command), command);
+    const present = focusedChecks.split("\n").includes(command);
+    assert.equal(present, command === "pnpm rollback:test" ? "rollback:test" in packageScripts : true, command);
   }
   assert.doesNotMatch(node26WorkflowText, /agent commands|launch|provisioning|terminal runtime|task assignment|smoke flows|mainnet|seed phrase|private key/iu);
 });

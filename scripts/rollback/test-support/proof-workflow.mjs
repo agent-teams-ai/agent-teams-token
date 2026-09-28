@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import {
-  assert, spawnSync, join, dirname, mkdirSync, symlinkSync, rmSync,
+  assert, spawnSync, join, dirname, mkdirSync, symlinkSync, rmSync, copyFileSync,
   temporaryDirectory, repositoryRoot, cloneRepository, copyCurrentRollbackSharedState,
   createRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, parseStrictTap,
 } from "./proof-fixture.mjs";
@@ -18,6 +18,10 @@ export function workflowPolicyFixture(context, manifest) {
   });
   cloneRepository(repositoryRoot, checkout, boundary);
   copyCurrentRollbackSharedState(checkout, manifest);
+  copyFileSync(
+    join(repositoryRoot, "scripts/tests/node26-compatibility.test.mjs"),
+    join(checkout, "scripts/tests/node26-compatibility.test.mjs"),
+  );
   const requireFromSupply = createRequire(join(repositoryRoot, "packages/contexts/supply/package.json"));
   mkdirSync(join(checkout, "node_modules"));
   symlinkSync(dirname(requireFromSupply.resolve("yaml/package.json")), join(checkout, "node_modules/yaml"), "dir");

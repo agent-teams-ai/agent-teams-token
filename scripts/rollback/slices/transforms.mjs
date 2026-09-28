@@ -182,6 +182,16 @@ export function removeWorkflowJob(root, manifest, sharedPlan, workspaceHandle) {
   });
 }
 
+export function removeNode26RollbackTest(root, sharedPlan, workspaceHandle) {
+  const path = ".github/workflows/node26-compatibility.yml";
+  editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) => replaceExactly(
+    source,
+    "          pnpm rollback:test\n",
+    "",
+    "node26:removed-rollback-test",
+  ));
+}
+
 function removeTestBlock(source, titlePrefix) {
   const start = source.indexOf(`test("${titlePrefix}`);
   if (start < 0) {throw new Error(`ROLLBACK_WORKFLOW_TEST_MISSING title=${titlePrefix}`);}

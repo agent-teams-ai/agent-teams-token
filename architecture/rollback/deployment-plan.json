@@ -80,6 +80,11 @@
       "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
     },
     {
+      "path": ".github/workflows/node26-compatibility.yml",
+      "beforeSha256": "4a9574ab8017b08558d130c63af9f6c91616718017b2fc3762b9d2c720b22f58",
+      "afterSha256": "77193c9a066292fae54b2c9713fc21b1721ce4371cf72e6455ededf0c1a7f958"
+    },
+    {
       "path": "architecture/foundation/source-dependencies.yaml",
       "beforeSha256": "5d3b4fcb95c171e84e7f6ed57f98ff0e30830742908f826cfc299faf023e5c42",
       "afterSha256": "bc7ab156085048061efd75a21ee426cfbffaea8dbcc25023ab23a11c13902a72"
@@ -157,6 +162,7 @@
   ],
   "sharedPaths": [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
@@ -178,6 +184,11 @@
       "path": "architecture/foundation/repository-agent-workflow.yaml",
       "sha256": "8413d3e29613ccea223fc35588c380ccce334fb6d4b95287897b6586eb25113a",
       "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub; current-main Docs Protocol authoring paths retain full-scan enforcement"
+    },
+    {
+      "path": "scripts/tests/node26-compatibility.test.mjs",
+      "sha256": "4ee63f782b24df2d132882e387c30f861fa9284761df5ec5bafd92db8d6dd0a4",
+      "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",

@@ -220,6 +220,7 @@
     ],
     "rollbackTransforms": [
       "because every operational slice removal strips rollback:test and rollback:prove from package.json, restore the foundation checkout to its pre-proof form, remove the complete-history assertion, proof-only timeout/environment, Solana cache/preload and non-pulling preflight additions, proof validation, verified-proof upload and diagnostic upload in every removed-slice workflow output",
+      "for every removal, remove the exact pnpm rollback:test command from the surviving Node 26 compatibility workflow and verify its shared before/after digests; retain the Node 26 policy test with an exact fingerprint and require the command whenever the package script survives",
       "for every removal, editWorkflowTest must reverse the matching proof-only foundation assertions: no explicit github.sha/fetch-depth checkout or complete-history step, timeout 120 back to 15, and no rollback environment, Solana-cache, Slither-preload, rollback --preflight-only, proof-validation, proof-upload or rollback-diagnostics expectation",
       "for local-solana and deployment-plan removal, rewrite the workflow-test upload count from three to one because the surviving solidity-security upload remains",
       "for Slither removal, rewrite the workflow-test upload count from three to zero because the removed solidity-security upload and both proof-only foundation uploads are absent",
@@ -232,6 +233,7 @@
       "refreshInThisSlice": true,
       "paths": [
         ".github/workflows/ci.yml",
+        ".github/workflows/node26-compatibility.yml",
         "architecture/foundation/source-dependencies.yaml",
         "package.json",
         "scripts/tests/workflow.test.mjs",
@@ -253,7 +255,7 @@
       "knownStaleTransitions": [],
       "recomputeAfterFinalBytes": [
         "each manifest ownedPaths list against its final worker-owned root",
-        "every reverseEdits beforeSha256 and afterSha256 transition for .github/workflows/ci.yml, architecture/foundation/source-dependencies.yaml, package.json, scripts/tests/workflow.test.mjs, tooling/toolchain.lock.json and each slice-specific root entrypoint or restored stub declared by that manifest",
+        "every reverseEdits beforeSha256 and afterSha256 transition for .github/workflows/ci.yml, .github/workflows/node26-compatibility.yml, architecture/foundation/source-dependencies.yaml, package.json, scripts/tests/workflow.test.mjs, tooling/toolchain.lock.json and each slice-specific root entrypoint or restored stub declared by that manifest",
         "every retainedSharedPaths digest and reason",
         "the exact unique two-slice survivingGates complement and shared-path coverage"
       ],

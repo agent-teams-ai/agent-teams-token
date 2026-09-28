@@ -35,6 +35,55 @@ test("every production manifest verifies declared hashes through the default app
   }
 });
 
+test("Node 26 workflow drift is rejected before any slice rollback writes", () => {
+  for (const manifest of manifests()) {
+    const boundary = temporaryDirectory(`agtmai-rollback-node26-drift-${manifest.sliceId}-`);
+    const checkout = join(boundary, "checkout");
+    const quarantineRoot = join(boundary, "gate-tmp");
+    let workspaceHandle;
+    try {
+      cloneRepository(repositoryRoot, checkout, boundary);
+      copyCurrentRollbackSharedState(checkout, manifest);
+      mkdirSync(quarantineRoot, { mode: 0o700 });
+      workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+      const workflowPath = join(checkout, ".github/workflows/node26-compatibility.yml");
+      const packagePath = join(checkout, "package.json");
+      const packageBefore = readFileSync(packagePath);
+      const changedWorkflow = readFileSync(workflowPath, "utf8").replace(
+        "          pnpm rollback:test\n",
+        "          pnpm rollback:test --if-present\n",
+      );
+      writeFileSync(workflowPath, changedWorkflow);
+      assert.throws(
+        () => applyManifest(checkout, manifest, { workspaceHandle }),
+        /ROLLBACK_SHARED_EDIT_SOURCE_DRIFT.*node26-compatibility\.yml/u,
+        manifest.sliceId,
+      );
+      assert.deepEqual(readFileSync(packagePath), packageBefore);
+      assert.equal(readFileSync(workflowPath, "utf8"), changedWorkflow);
+    } finally {
+      closeRollbackWorkspaceHandle(workspaceHandle);
+      rmSync(boundary, { recursive: true, force: true });
+    }
+  }
+});
+
+test("Node 26 policy test remains exact retained authority in every slice", () => {
+  for (const [index, manifest] of manifests().entries()) {
+    const forged = structuredClone(manifests());
+    const retained = forged[index].retainedSharedPaths.find(
+      ({ path }) => path === "scripts/tests/node26-compatibility.test.mjs",
+    );
+    assert.ok(retained, manifest.sliceId);
+    retained.sha256 = "0".repeat(64);
+    assert.throws(
+      () => validateManifestSet(forged),
+      /ROLLBACK_RETAINED_SHARED_PATH_DRIFT.*node26-compatibility\.test\.mjs/u,
+      manifest.sliceId,
+    );
+  }
+});
+
 test("held shared ancestor descriptors reject an equal-shape replacement", {
   skip: process.platform !== "linux",
 }, () => {
