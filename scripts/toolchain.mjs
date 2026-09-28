@@ -339,6 +339,17 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     const nodeArtifact = nodeTool.platforms[platform];
     const nodeAuthority = authorities.get("node");
     const pnpmAuthority = authorities.get("pnpm");
+    const authenticatedBinaryPath = (name, leaf) => {
+      const authority = authorities.get(name);
+      const entry = authority?.inventory[leaf];
+      if (entry?.type !== "file" || authority.files[leaf] !== entry.sha256) {
+        throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=entry-missing:${leaf}`);
+      }
+      return containedPath(
+        containedPath(toolsRoot, lock.tools[name].platforms[platform].installDirectory),
+        leaf,
+      );
+    };
     const pnpmEntrypoint = "dist/pnpm.mjs";
     const pnpmEntrypointAuthority = pnpmAuthority.inventory[pnpmEntrypoint];
     if (pnpmEntrypointAuthority?.type !== "file") {
@@ -376,6 +387,13 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
       ],
       stdio: "inherit",
       subprocessPath: [...new Set(authenticatedPath)],
+      // These paths come from the installations inspected above, never from
+      // the caller's environment. The EVM tests require the exact pin names.
+      authenticatedToolBinaries: {
+        anvil: authenticatedBinaryPath("foundry", "anvil"),
+        forge: authenticatedBinaryPath("foundry", "forge"),
+        solc: authenticatedBinaryPath("solc", "solc"),
+      },
     });
   } catch (error) {
     primaryFailure = error;

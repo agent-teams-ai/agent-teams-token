@@ -587,7 +587,7 @@ export function executeVerifiedFile({ path, expectedSha256, args = [], beforeSpa
   }
 }
 
-export function executeOpenedNode({ node, script, args, stdio = "pipe", platform = process.platform, subprocessPath = [], timeoutMs }) {
+export function executeOpenedNode({ node, script, args, stdio = "pipe", platform = process.platform, subprocessPath = [], authenticatedToolBinaries, timeoutMs }) {
   const openedNode = openExpectedFile(node.path, node.sha256);
   let openedScript;
   try {
@@ -601,7 +601,16 @@ export function executeOpenedNode({ node, script, args, stdio = "pipe", platform
     ], platform, ({ invocation, targets }) => supervisedSpawn({
       args: [targets[1], ...args],
       command: targets[0],
-      env: minimalSubprocessEnv(invocation, [dirname(targets[0]), dirname(node.path), ...subprocessPath]),
+      // Keep the generic private environment fixed. Only runPnpm supplies
+      // authenticated binary paths through this explicit invocation option.
+      env: {
+        ...minimalSubprocessEnv(invocation, [dirname(targets[0]), dirname(node.path), ...subprocessPath]),
+        ...(authenticatedToolBinaries === undefined ? {} : {
+          AGTMAI_ANVIL_BINARY: authenticatedToolBinaries.anvil,
+          AGTMAI_FORGE_BINARY: authenticatedToolBinaries.forge,
+          AGTMAI_SOLC_BINARY: authenticatedToolBinaries.solc,
+        }),
+      },
       invocation,
       stdio: inherited,
       targetFds: platform === "linux" ? [openedNode.fd, openedScript.fd] : [],
