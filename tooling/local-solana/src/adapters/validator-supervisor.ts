@@ -71,7 +71,7 @@ process.on("message", (message: ControlMessage) => {
         try { await starting; } catch { return; }
         if (closing || failing) { return; }
         if (identity === null) { void failStartup("spawned", { code: "SOLANA_VALIDATOR_IDENTITY" }); }
-        else { void advance("identity-captured").then(() => { send({ type: "spawned", pid: validator?.pid, identity }); }, (cause) => { void failStartup("identity-captured", cause); }); }
+        else { void advance("identity-captured").then(() => send({ type: "spawned", pid: validator?.pid, identity }), (cause) => { void failStartup("identity-captured", cause); }); }
         return null;
       });
       validator.once("error", (cause) => { void failStartup("spawned", cause); });
@@ -85,7 +85,7 @@ process.on("message", (message: ControlMessage) => {
   if (message.type === "acknowledge" && validator !== undefined && !closing && !failing) {
     acknowledged = true;
     clearAcknowledgementTimer();
-    void advance("registered").then(() => { send({ type: "acknowledged" }); }, (cause) => { void failStartup("registered", cause); });
+    void advance("registered").then(() => send({ type: "acknowledged" }), (cause) => { void failStartup("registered", cause); });
     return;
   }
   if (message.type === "stop") { void terminateAndExit(); }

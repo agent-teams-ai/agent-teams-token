@@ -86,8 +86,8 @@ test("timed out spawned stage still stops its authenticated child", { skip: proc
     const script = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
     supervisor.send({ type: "start", executable: process.execPath, args: ["-e", script, "--", pidFile, "--ledger", paths.ledger, "--bind-address", "127.0.0.1", "--rpc-port", "30000"], env: {}, custody, leaseToken: paths.leaseToken });
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      childPid = await readFile(pidFile, "utf8").then(Number, () => undefined);
-      if (childPid !== undefined) { break; }
+      const observedPid = await readFile(pidFile, "utf8").then(Number, () => null);
+      if (observedPid !== null) { childPid = observedPid; break; }
       await new Promise((resolve) => { setTimeout(resolve, 10); });
     }
     assert.ok(childPid, "fixture child must be live before stop");
