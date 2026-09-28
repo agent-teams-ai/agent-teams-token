@@ -381,7 +381,7 @@ export function runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironme
         sha256: pnpmEntrypointAuthority.sha256,
       },
       args: [
-        ...args,
+        // Pnpm forwards options after a script name to that package script.
         `--config.store-dir=${store}`,
         `--config.cache-dir=${cache}`,
         "--config.ignore-pnpmfile=true",
@@ -389,6 +389,7 @@ export function runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironme
         "--config.globalconfig=/dev/null",
         "--config.auto-install-peers=false",
         "--config.verify-deps-before-run=false",
+        ...args,
       ],
       stdio: "inherit",
       subprocessPath: [...new Set(authenticatedPath)],
