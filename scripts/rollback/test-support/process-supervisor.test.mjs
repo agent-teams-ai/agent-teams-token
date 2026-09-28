@@ -5,10 +5,11 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readlinkSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { EvidenceRecorder } from "../runtime/evidence.mjs";
 
-const nativeSource = new URL("../runtime/subreaper.c", import.meta.url).pathname;
+const nativeSource = fileURLToPath(new URL("../runtime/subreaper.c", import.meta.url));
 const compiler = "/usr/bin/x86_64-linux-gnu-gcc-13";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const expected = {
@@ -176,7 +177,7 @@ const timer = setInterval(() => {
   try {
     await new Promise((resolve) => launcher.once("close", resolve));
     assert.equal(existsSync(join(root, "leaf.pid")), true);
-    let deadline = Date.now() + 3000;
+    const deadline = Date.now() + 3000;
     while ((!existsSync(reportPath) || readFileSync(reportPath, "utf8") === "") && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -237,7 +238,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     try {
       const chunks = [];
       helper.stdout.on("data", (chunk) => chunks.push(chunk));
-      let deadline = Date.now() + 2000;
+      const deadline = Date.now() + 2000;
       while (!live(root, "leaf") && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }

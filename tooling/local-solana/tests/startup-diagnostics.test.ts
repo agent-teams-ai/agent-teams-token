@@ -61,8 +61,7 @@ test("stalled pre-spawn supervisor yields bounded explicit uncertainty and prese
 
 test("supervisor startup failure retains sanitized code and does not claim a settled stop", async () => {
   const { root, paths } = await privateRun();
-  let fake: FakeSupervisor;
-  fake = new FakeSupervisor(() => queueMicrotask(() => fake.emit("message", { type: "startupFailure", phase: "reserved", code: "EACCES" })));
+  const fake = new FakeSupervisor(() => queueMicrotask(() => fake.emit("message", { type: "startupFailure", phase: "reserved", code: "EACCES" })));
   const adapter = new OwnedValidatorAdapter((() => fake as unknown as ChildProcess) as typeof import("node:child_process").fork);
   try {
     await assert.rejects(adapter.start(request(paths, new AbortController().signal)), /SOLANA_CHILD_STOP_TIMEOUT.*failure=EACCES/u);
