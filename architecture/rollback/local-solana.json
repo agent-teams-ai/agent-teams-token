@@ -66,8 +66,8 @@
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
-      "beforeSha256": "4a9574ab8017b08558d130c63af9f6c91616718017b2fc3762b9d2c720b22f58",
-      "afterSha256": "77193c9a066292fae54b2c9713fc21b1721ce4371cf72e6455ededf0c1a7f958"
+      "beforeSha256": "a73bf7e0f1a672af95e590f9b001794f77fb776f6010e87679924988fd7b798f",
+      "afterSha256": "aeff33f97b71a252ba465a8515c0db9dd9821ac3c344e06027497b458bfda826"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
@@ -118,7 +118,7 @@
     },
     {
       "path": "scripts/tests/node26-compatibility.test.mjs",
-      "sha256": "4ee63f782b24df2d132882e387c30f861fa9284761df5ec5bafd92db8d6dd0a4",
+      "sha256": "c451421f06ed4959f161c0bb1f3411b8f14e9033018ed5cab787341e706f8c5a",
       "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {
