@@ -14,6 +14,8 @@ import {
 } from "node:fs";
 import { basename } from "node:path";
 
+import { cleanupFileContentSha256 } from "./cleanup-file-content.mjs";
+
 import {
   assertCustodyDescriptor,
   closeCustodyDescriptors,
@@ -451,6 +453,11 @@ export function cleanupStrictIdentityFingerprint(identity, kind, path) {
   } else {
     fingerprint.linkTargetBase64 = null;
   }
+  if (kind === "file") {
+    fingerprint.fileContentSha256 = cleanupFileContentSha256(
+      identity, path, CLEANUP_STRICT_IDENTITY_FIELDS,
+    );
+  }
   return Object.freeze(fingerprint);
 }
 
@@ -460,6 +467,11 @@ export function assertCleanupStrictFingerprint(expected, path, logicalPath, mess
   try {
     actualIdentity = lstatSync(path, { bigint: true });
     const kind = cleanupEntryKind(actualIdentity, logicalPath);
+    if (kind !== expected.kind || CLEANUP_STRICT_IDENTITY_FIELDS.some(
+      (field) => String(actualIdentity[field]) !== expected[field],
+    )) {
+      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
+    }
     actual = cleanupStrictIdentityFingerprint(actualIdentity, kind, path);
   } catch (error) {
     throw new Error(
@@ -467,7 +479,7 @@ export function assertCleanupStrictFingerprint(expected, path, logicalPath, mess
       { cause: error },
     );
   }
-  const fields = ["kind", ...CLEANUP_STRICT_IDENTITY_FIELDS, "linkTargetBase64"];
+  const fields = ["kind", ...CLEANUP_STRICT_IDENTITY_FIELDS, "linkTargetBase64", "fileContentSha256"];
   if (fields.some((field) => actual[field] !== expected[field])) {
     throw new Error(message ?? "ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
   }

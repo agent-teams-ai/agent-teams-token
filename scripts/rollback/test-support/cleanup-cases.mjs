@@ -1,4 +1,11 @@
+import { createHash } from "node:crypto";
+import { closeSync } from "node:fs";
 import * as fixtureSupport from "./cleanup-fixture.mjs";
+import {
+  assertCleanupStrictFingerprint,
+  cleanupStrictIdentityFingerprint,
+} from "../runtime/cleanup-tree.mjs";
+import { setDescriptorCloseImplementationForTest } from "../runtime/descriptor-close.mjs";
 const { assert, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, test, captureCleanupTreeSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, targetPrefix, cleanupIdentityBoundDirectory, fixture, checkout, caught, preservedQuarantine } = fixtureSupport;
 export { assert, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, test, captureCleanupTreeSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, targetPrefix, cleanupIdentityBoundDirectory, fixture, checkout, caught, preservedQuarantine };
 
@@ -250,6 +257,72 @@ test("strict cleanup fingerprints reject same-inode content mutation", () => {
       readFileSync(join(quarantine, "tree", "checkout", "owned"), "utf8"),
       "foreign-now!\n",
     );
+  } finally {
+    rmSync(current.boundary, { recursive: true, force: true });
+  }
+});
+
+test("regular-file content remains bound when every strict metadata field matches", () => {
+  const current = fixture();
+  try {
+    const root = checkout(current.target);
+    const victim = join(root, "owned");
+    writeFileSync(victim, Buffer.alloc(128 * 1024 + 17, 0x41));
+    const owned = cleanupStrictIdentityFingerprint(lstatSync(victim, { bigint: true }), "file", victim);
+    writeFileSync(victim, Buffer.alloc(128 * 1024 + 17, 0x42));
+    const foreign = lstatSync(victim, { bigint: true });
+    assert.equal(readFileSync(victim)[0], 0x42);
+    assert.equal(owned.size, String(foreign.size));
+    assert.equal(owned.ino, String(foreign.ino));
+    const sameMetadata = Object.freeze({
+      ...Object.fromEntries(Object.keys(owned).filter((field) => field !== "fileContentSha256")
+        .map((field) => [field, field === "kind" || field === "linkTargetBase64"
+          ? owned[field] : String(foreign[field])])),
+      fileContentSha256: owned.fileContentSha256,
+    });
+    const observed = cleanupStrictIdentityFingerprint(foreign, "file", victim);
+    for (const field of Object.keys(sameMetadata)) {
+      if (field !== "fileContentSha256") {
+        assert.equal(sameMetadata[field], observed[field], field);
+      }
+    }
+    assert.throws(
+      () => assertCleanupStrictFingerprint(sameMetadata, victim, "checkout/owned"),
+      /ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=checkout\/owned/u,
+    );
+    assert.notEqual(sameMetadata.fileContentSha256, observed.fileContentSha256);
+    assert.equal(
+      owned.fileContentSha256,
+      createHash("sha256").update(Buffer.alloc(128 * 1024 + 17, 0x41)).digest("hex"),
+    );
+    assert.equal(
+      observed.fileContentSha256,
+      createHash("sha256").update(readFileSync(victim)).digest("hex"),
+    );
+  } finally {
+    rmSync(current.boundary, { recursive: true, force: true });
+  }
+});
+
+test("regular-file fingerprint fails closed when its descriptor close reports failure", () => {
+  const current = fixture();
+  try {
+    const victim = join(checkout(current.target), "owned");
+    writeFileSync(victim, "owned\n");
+    const identity = lstatSync(victim, { bigint: true });
+    const restore = setDescriptorCloseImplementationForTest((descriptor) => {
+      closeSync(descriptor);
+      throw new Error("injected close failure");
+    });
+    try {
+      assert.throws(
+        () => cleanupStrictIdentityFingerprint(identity, "file", victim),
+        /ROLLBACK_CLEANUP_FILE_CLOSE_FAILED/u,
+      );
+    } finally {
+      restore();
+    }
+    assert.equal(readFileSync(victim, "utf8"), "owned\n");
   } finally {
     rmSync(current.boundary, { recursive: true, force: true });
   }
