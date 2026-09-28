@@ -46,20 +46,22 @@ function probeRunPnpmBinaryEnvironment(overrides = {}) {
   }
 }
 
-test("run-pnpm gives its child the exact authenticated Foundry and solc paths", () => {
-  const { values, expected } = probeRunPnpmBinaryEnvironment();
-  assert.deepEqual(values.slice(0, 3), expected);
-  assert.match(values[3], /\/agtmai-toolchain-exec-[^/]+\/home$/u);
-  assert.deepEqual(values.slice(4), ["0", "0"]);
-});
-
-test("run-pnpm rejects ambient Foundry and solc path overrides", () => {
-  const malicious = "/attacker/unauthenticated";
-  const { values, expected } = probeRunPnpmBinaryEnvironment({
-    AGTMAI_ANVIL_BINARY: `${malicious}/anvil`,
-    AGTMAI_FORGE_BINARY: `${malicious}/forge`,
-    AGTMAI_SOLC_BINARY: `${malicious}/solc`,
+export function registerPinnedEnvTests() {
+  test("run-pnpm gives its child the exact authenticated Foundry and solc paths", () => {
+    const { values, expected } = probeRunPnpmBinaryEnvironment();
+    assert.deepEqual(values.slice(0, 3), expected);
+    assert.match(values[3], /\/agtmai-toolchain-exec-[^/]+\/home$/u);
+    assert.deepEqual(values.slice(4), ["0", "0"]);
   });
-  assert.deepEqual(values.slice(0, 3), expected);
-  assert.equal(values.some((value) => value.startsWith(malicious)), false);
-});
+
+  test("run-pnpm rejects ambient Foundry and solc path overrides", () => {
+    const malicious = "/attacker/unauthenticated";
+    const { values, expected } = probeRunPnpmBinaryEnvironment({
+      AGTMAI_ANVIL_BINARY: `${malicious}/anvil`,
+      AGTMAI_FORGE_BINARY: `${malicious}/forge`,
+      AGTMAI_SOLC_BINARY: `${malicious}/solc`,
+    });
+    assert.deepEqual(values.slice(0, 3), expected);
+    assert.equal(values.some((value) => value.startsWith(malicious)), false);
+  });
+}
