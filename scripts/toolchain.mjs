@@ -279,11 +279,12 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
   }
 }
 
-export function runPnpm({ lock, platform, toolsRoot, args }) {
+export function runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironment }) {
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot);
   assertOwnedDirectoryChain(toolsRoot);
   assertPnpmArguments(args);
+  const safeArtifacts = validateSafeArtifactEnvironment(safeArtifactEnvironment);
 
   const preparedAuthorities = [];
   let primaryFailure;
@@ -397,6 +398,7 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
         forge: authenticatedBinaryPath("foundry", "forge"),
         solc: authenticatedBinaryPath("solc", "solc"),
       },
+      safeArtifactEnvironment: safeArtifacts,
     });
   } catch (error) {
     primaryFailure = error;
@@ -416,6 +418,29 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     );
   }
   return result;
+}
+
+function validateSafeArtifactEnvironment(value) {
+  if (value === undefined) {return undefined;}
+  const invalid = () => {throw new Error("TOOLCHAIN_SAFE_ARTIFACT_ENV_INVALID");};
+  if (value === null || typeof value !== "object"
+    || JSON.stringify(Object.keys(value).toSorted()) !== JSON.stringify(["directory", "pinsSha256"])) {
+    invalid();
+  }
+  const { directory, pinsSha256 } = value;
+  if (typeof directory !== "string" || !isAbsolute(directory)
+    || [...directory].some((character) => character.codePointAt(0) < 0x20 || character.codePointAt(0) === 0x7f)
+    || typeof pinsSha256 !== "string" || !/^0x[a-f0-9]{64}$/u.test(pinsSha256)) {
+    invalid();
+  }
+  let stat;
+  try {stat = lstatSync(directory);}
+  catch {invalid();}
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid()
+    || (stat.mode & 0o022) !== 0) {
+    invalid();
+  }
+  return { directory, pinsSha256 };
 }
 
 function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, lock }) {
@@ -500,7 +525,17 @@ function cli() {
   if (command === "fetch") {return fetchArtifacts({ lock, platform, toolsRoot, scope });}
   if (command === "install") {return installArtifacts({ lock, platform, toolsRoot, offline, scope });}
   if (command === "verify") {return verifyCache({ lock, platform, toolsRoot, offline, scope });}
-  if (command === "run-pnpm") { process.exitCode = runPnpm({ lock, platform, toolsRoot, args }); return; }
+  if (command === "run-pnpm") {
+    const safeArtifactEnvironment = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY !== undefined
+      || process.env.AGTMAI_SAFE_PINS_SHA256 !== undefined
+      ? {
+        directory: process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY,
+        pinsSha256: process.env.AGTMAI_SAFE_PINS_SHA256,
+      }
+      : undefined;
+    process.exitCode = runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironment });
+    return;
+  }
   throw new Error(
     "Usage: ./dev bootstrap fetch [--scope=solana] | install --offline [--scope=solana]"
     + " | verify --offline [--scope=solana] | run-pnpm [args...]",

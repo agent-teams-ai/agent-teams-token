@@ -587,7 +587,7 @@ export function executeVerifiedFile({ path, expectedSha256, args = [], beforeSpa
   }
 }
 
-export function executeOpenedNode({ node, script, args, stdio = "pipe", platform = process.platform, subprocessPath = [], authenticatedToolBinaries, timeoutMs }) {
+export function executeOpenedNode({ node, script, args, stdio = "pipe", platform = process.platform, subprocessPath = [], authenticatedToolBinaries, safeArtifactEnvironment, timeoutMs }) {
   const openedNode = openExpectedFile(node.path, node.sha256);
   let openedScript;
   try {
@@ -601,14 +601,18 @@ export function executeOpenedNode({ node, script, args, stdio = "pipe", platform
     ], platform, ({ invocation, targets }) => supervisedSpawn({
       args: [targets[1], ...args],
       command: targets[0],
-      // Keep the generic private environment fixed. Only runPnpm supplies
-      // authenticated binary paths through this explicit invocation option.
+      // Keep the generic private environment fixed. runPnpm supplies only
+      // validated Safe inputs and authenticated binary paths explicitly.
       env: {
         ...minimalSubprocessEnv(invocation, [dirname(targets[0]), dirname(node.path), ...subprocessPath]),
         ...(authenticatedToolBinaries === undefined ? {} : {
           AGTMAI_ANVIL_BINARY: authenticatedToolBinaries.anvil,
           AGTMAI_FORGE_BINARY: authenticatedToolBinaries.forge,
           AGTMAI_SOLC_BINARY: authenticatedToolBinaries.solc,
+        }),
+        ...(safeArtifactEnvironment === undefined ? {} : {
+          AGTMAI_SAFE_ARTIFACT_DIRECTORY: safeArtifactEnvironment.directory,
+          AGTMAI_SAFE_PINS_SHA256: safeArtifactEnvironment.pinsSha256,
         }),
       },
       invocation,
