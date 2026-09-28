@@ -206,19 +206,27 @@ int main(int argc, char **argv) {
       if (reaped == root) { root_status = status; have_root = 1; }
     } while (reaped > 0);
     if (reaped < 0 && errno != ECHILD && errno != EINTR) uncertainty = "ROLLBACK_PROCESS_WAIT_FAILED";
+    /* A final wait can return ECHILD after a signal or deadline passed. Latch
+     * those facts before the only path that can report completed custody. */
+    if (!reason && (cancelled || getppid() != parent)) reason = "ECANCELLED";
+    long long now = clock_ms();
+    if (now < 0) uncertainty = "ROLLBACK_PROCESS_CLOCK_FAILED";
+    else if (!reason && now - started >= timeout) reason = "ETIMEDOUT";
     if (reaped < 0 && errno == ECHILD && have_root) {
       int launch_errno = 0;
       ssize_t launch_bytes = read(exec_error[0], &launch_errno, sizeof(launch_errno));
       close(exec_error[0]);
       if (launch_bytes != 0 && launch_bytes != sizeof(launch_errno)) uncertainty = "ROLLBACK_PROCESS_EXEC_REPORT_INVALID";
       const char *launch_error = launch_bytes == sizeof(launch_errno) ? strerrorname_np(launch_errno) : NULL;
+      if (!reason && (cancelled || getppid() != parent)) reason = "ECANCELLED";
+      long long settled = clock_ms();
+      if (settled < 0) uncertainty = "ROLLBACK_PROCESS_CLOCK_FAILED";
+      else if (!reason && settled - started >= timeout) reason = "ETIMEDOUT";
       report(uncertainty ? "uncertain" : reason ? "reaped" : "completed",
         reason ? reason : launch_error, uncertainty, root_status, have_root, signalled);
       return 0;
     }
-    long long now = clock_ms();
     if (now < 0) {
-      uncertainty = "ROLLBACK_PROCESS_CLOCK_FAILED";
       now = drain_start < 0 ? started + timeout : drain_start;
       if (++clock_failures > 7000) {
         report("uncertain", reason ? reason : "ESUPERVISOR", uncertainty,
@@ -226,8 +234,6 @@ int main(int argc, char **argv) {
         return 0;
       }
     }
-    if (!reason && (cancelled || getppid() != parent)) reason = "ECANCELLED";
-    if (!reason && now - started >= timeout) reason = "ETIMEDOUT";
     if (!reason && have_root) reason = "ELEAK";
     if (reason && drain_start < 0) drain_start = now;
     if (reason) {
