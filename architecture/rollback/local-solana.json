@@ -34,6 +34,7 @@
     "tooling/local-solana/tests/helpers/agave-recovery.ts",
     "tooling/local-solana/tests/helpers/captured-validator.ts",
     "tooling/local-solana/tests/helpers/cli-boundary.ts",
+    "tooling/local-solana/tests/helpers/fail-stopping-write.ts",
     "tooling/local-solana/tests/helpers/hold-port-lease.ts",
     "tooling/local-solana/tests/helpers/observations.ts",
     "tooling/local-solana/tests/helpers/start-owned-validator.ts",
@@ -49,9 +50,12 @@
     "tooling/local-solana/tests/recovery-remediation.test.ts",
     "tooling/local-solana/tests/rpc.test.ts",
     "tooling/local-solana/tests/runner.test.ts",
+    "tooling/local-solana/tests/startup-custody-concurrency.test.ts",
+    "tooling/local-solana/tests/startup-diagnostics.test.ts",
     "tooling/local-solana/tests/tool-snapshots.test.ts",
     "tooling/local-solana/tests/toolchain.test.ts",
     "tooling/local-solana/tests/transaction.test.ts",
+    "tooling/local-solana/tests/validator-supervisor-stop.test.ts",
     "tooling/local-solana/tests/verifier.test.ts",
     "tooling/local-solana/tsconfig.json"
   ],
@@ -76,7 +80,7 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "c4761e33db6889e406a07170129545ed15eb2b88e6a3ce4fc52fd4e2a814cfce",
+      "beforeSha256": "27eddcd913ae480acf21ada1b56952d3bbccf85d71fd9123f8c3b4e99c56b367",
       "afterSha256": "09ac62d20689da13cfe0e1cf2de9a038c6c64e80f1c0c5d56fc054a40c23abab"
     },
     {
