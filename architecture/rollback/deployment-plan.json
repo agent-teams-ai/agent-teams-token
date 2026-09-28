@@ -92,7 +92,7 @@
     {
       "path": "package.json",
       "beforeSha256": "27eddcd913ae480acf21ada1b56952d3bbccf85d71fd9123f8c3b4e99c56b367",
-      "afterSha256": "a6acb242065a287baaee0d4f948fc516c1cef618b0394cff59e4e8c042c2f30f"
+      "afterSha256": "cb0a18151a30082fbd55f1d778826ef0cf588868bbbf6e1825bdc94d9573d91d"
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
