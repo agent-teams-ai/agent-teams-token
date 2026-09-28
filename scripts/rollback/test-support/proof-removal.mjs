@@ -1,4 +1,4 @@
-import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies } from "./proof-workflow.mjs";
+import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies, checkNode26Policies, rejectNode26PolicyMutation } from "./proof-workflow.mjs";
 import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
 import { editWorkflowTest, removeNode26RollbackTest, removeWorkflowJob } from "../slices/transforms.mjs";
 import * as proofSupport from "./proof-fixture.mjs";
@@ -390,10 +390,8 @@ for (const manifest of manifests()) {
     editWorkflowTest(checkout, manifest, sharedPlan, workspaceHandle);
     const node26Workflow = readFileSync(join(checkout, node26WorkflowPath), "utf8");
     assert.doesNotMatch(node26Workflow, /pnpm rollback:test/u);
-    const node26Check = spawnSync(process.execPath, ["--test", "scripts/tests/node26-compatibility.test.mjs"], {
-      cwd: checkout, encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024,
-    });
-    assert.equal(node26Check.status, 0, node26Check.stdout + node26Check.stderr);
+    checkNode26Policies(checkout);
+    rejectNode26PolicyMutation(checkout);
     const slitherRemoved = manifest.sliceId === "slither";
     checkWorkflowPolicies(checkout, slitherRemoved ? ".*" : workflowPolicyPattern, slitherRemoved ? candidateTestCount - 2 : 11);
     assert.deepEqual(
@@ -464,7 +462,7 @@ for (const manifest of manifests()) {
         ...restoredWorkflow.jobs, "foundation-and-typescript": { ...foundation, steps },
       } });
     }
-    context.diagnostic(`12 candidate and ${slitherRemoved ? candidateTestCount - 2 : 11} restored policy tests; 21 policy mutations rejected; Slither Node policy removed only with Slither`);
+    context.diagnostic(`12 candidate and ${slitherRemoved ? candidateTestCount - 2 : 11} restored policy tests; 5 Node 26 tests execute and an injected failure propagates; 21 policy mutations rejected; Slither Node policy removed only with Slither`);
   });
 
   test(`workflow rollback ${manifest.sliceId} rejects missing or duplicated slice-only tests and assertions without writing`, (context) => {
