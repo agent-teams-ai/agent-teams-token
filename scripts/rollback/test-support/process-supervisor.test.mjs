@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -346,19 +346,26 @@ const timer = setInterval(() => {
 for (const parentSignal of ["SIGINT", "SIGTERM"]) {
   test(`${parentSignal} of synchronous evidence parent still drains its detached descendants`, {skip: process.platform !== "linux"}, async () => {
     const {root, script} = fixture();
+    const helperTmp = join(root, "parent-tmp");
+    mkdirSync(helperTmp, {mode: 0o700});
+    assert.equal(statSync(helperTmp).mode & 0o777, 0o700);
     const evidenceModule = new URL("../runtime/evidence.mjs", import.meta.url).href;
     const code = `import {EvidenceRecorder} from ${JSON.stringify(evidenceModule)};
     const recorder = new EvidenceRecorder(process.argv[1], {});
     recorder.run('test', 'parent-signal', process.argv[2], ['hold-ignore', process.argv[1]],
       {cwd: process.argv[1], timeout: 4000});`;
     const parent = spawn(process.execPath, ["--input-type=module", "-e", code, root, script],
-      {stdio: "ignore"});
+      {stdio: "ignore", env: {...process.env, TMPDIR: helperTmp}});
     try {
       const deadline = Date.now() + 2000;
       while (!live(root, "leaf") && Date.now() < deadline) {
         await new Promise((resolve) => {setTimeout(resolve, 10);});
       }
       assert.equal(live(root, "leaf"), true);
+      const helperDirectories = readdirSync(helperTmp);
+      assert.equal(helperDirectories.length, 1, "synchronous parent built one helper in its private TMPDIR");
+      assert.match(helperDirectories[0], /^rollback-subreaper-/u);
+      assert.equal(existsSync(join(helperTmp, helperDirectories[0], "subreaper")), true);
       parent.kill(parentSignal);
       await new Promise((resolve) => {parent.once("close", resolve);});
       const drainDeadline = Date.now() + 2500;
@@ -366,7 +373,11 @@ for (const parentSignal of ["SIGINT", "SIGTERM"]) {
         await new Promise((resolve) => {setTimeout(resolve, 10);});
       }
       assert.equal(live(root, "leaf"), false);
-    } finally {parent.kill("SIGKILL"); cleanup(root);}
+    } finally {
+      parent.kill("SIGKILL");
+      cleanup(root);
+      assert.equal(existsSync(helperTmp), false, "owned helper temp was removed with the fixture");
+    }
   });
 }
 
