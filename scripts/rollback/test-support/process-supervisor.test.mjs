@@ -281,8 +281,10 @@ test("timeout escalates TERM to KILL and proves ECHILD", {skip: process.platform
       ["hold-ignore", root], {cwd: root, timeout: 100}), /ROLLBACK_COMMAND_FAILED/u);
     const command = JSON.parse(readFileSync(join(root, "diagnostics.json"), "utf8")).commands[0];
     assert.equal(command.processCustody, "reaped");
+    assert.equal(command.processUncertainty, null);
     assert.equal(command.spawnError, "ETIMEDOUT");
     assert.equal(command.signal, "SIGKILL");
+    assert.equal(command.exitCode, null);
     assert.equal(command.timedOut, true);
     assert.equal(live(root, "root"), false);
     assert.equal(live(root, "leaf"), false);

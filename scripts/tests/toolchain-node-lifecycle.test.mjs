@@ -310,7 +310,7 @@ test("structural command timeout remains failed with complete logs and no READY"
   assert.throws(() => runEvidenceLifecycle(evidence,
     () => new EvidenceRecorder(evidence, { mode: "test" }),
     (recorder) => recorder.run("test", "owned-child-timeout", value.wrapper,
-      ["--eval", childSource, "ignore"], { cwd: value.root, env: {}, timeout: 1_000 }),
+      ["--eval", childSource, "exit-zero"], { cwd: value.root, env: {}, timeout: 1_000 }),
   ), (error) => {
     commandError = error;
     assert.match(error.message, /ROLLBACK_COMMAND_FAILED/u);
@@ -326,6 +326,8 @@ test("structural command timeout remains failed with complete logs and no READY"
   assert.equal(entry.status, "failed");
   assert.equal(entry.timedOut, true);
   assert.equal(entry.spawnError, "ETIMEDOUT");
+  assert.equal(entry.processCustody, "reaped");
+  assert.equal(entry.processUncertainty, null);
   assert.equal(entry.exitCode, 143);
   assert.equal(entry.signal, null);
   assert.ok(entry.durationMs < 4_000);
