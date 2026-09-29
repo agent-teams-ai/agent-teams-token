@@ -384,32 +384,35 @@ function trustedNodeChildMain(require) {
     }
   }
 
+  function removePrivateDirectories() {
+    let diagnostic;
+    // Check the root before each exact rmdir; never traverse retained output.
+    for (const index of [1, 2, 3, 4, 5, 6, 0]) {
+      // A failed child-directory check must never turn into root deletion.
+      if (index === 0 && diagnostic) { break; }
+      let operation = "verify";
+      let role = "root";
+      try {
+        verify(0);
+        role = roles[index];
+        verify(index);
+        operation = "rmdir";
+        fs.rmdirSync(paths[index]);
+      } catch (error) {
+        diagnostic ??= { role, operation, code: errorCode(error) };
+      }
+    }
+    return diagnostic;
+  }
+
   function finish(status, signal = null, reaped = true) {
     if (finished) { return; }
     finished = true;
     clearTimeout(graceTimer);
     clearTimeout(reapTimer);
-    let cleanupFailed = !reaped;
-    let diagnostic = reaped ? undefined : { role: "root", operation: "verify", code: "ECHILD_UNREAPED" };
-    if (reaped) {
-      // Check the root before each exact rmdir; never traverse retained output.
-      for (const index of [1, 2, 3, 4, 5, 6, 0]) {
-        // A failed child-directory check must never turn into root deletion.
-        if (index === 0 && cleanupFailed) { break; }
-        let operation = "verify";
-        let role = "root";
-        try {
-          verify(0);
-          role = roles[index];
-          verify(index);
-          operation = "rmdir";
-          fs.rmdirSync(paths[index]);
-        } catch (error) {
-          cleanupFailed = true;
-          diagnostic ??= { role, operation, code: errorCode(error) };
-        }
-      }
-    }
+    const diagnostic = reaped ? removePrivateDirectories()
+      : { role: "root", operation: "verify", code: "ECHILD_UNREAPED" };
+    const cleanupFailed = diagnostic !== undefined;
     if (cleanupFailed) {
       const childStatus = Number.isInteger(status) && status >= 0 && status <= 255 ? status : "unknown";
       const childSignal = signal !== null && Object.hasOwn(constants.signals, signal) ? signal : "none";

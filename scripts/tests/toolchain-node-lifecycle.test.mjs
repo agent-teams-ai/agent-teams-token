@@ -190,6 +190,11 @@ function assertChildReaped(events) {
   return started;
 }
 
+function assertFinalizationDiagnostic(result, root, childOutcome, reason) {
+  assert.equal(result.stderr, "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED " + childOutcome
+    + " " + reason + "\nTOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + root + "\n");
+}
+
 function runFiles(value, mode, options = {}) {
   const stdoutPath = join(value.root, mode + ".stdout");
   const stderrPath = join(value.root, mode + ".stderr");
@@ -226,9 +231,7 @@ for (const mode of ["success", "nonzero", "retained", "substituted"]) {
       const reason = mode === "retained"
         ? "role=home operation=rmdir code=ENOTEMPTY"
         : "role=home operation=verify code=EIDENTITY";
-      assert.equal(result.stderr,
-        "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=0 child_signal=none "
-        + reason + "\nTOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root + "\n");
+      assertFinalizationDiagnostic(result, started.root, "child_status=0 child_signal=none", reason);
       assert.doesNotMatch(result.stderr, /retain-child-output|literal stdin/u);
       assert.equal(fs.existsSync(started.root), true);
       if (mode === "retained") {
@@ -254,10 +257,8 @@ test("generated Node wrapper preserves its root when a child removes a private d
   assertSequence(result.events);
   const started = assertChildReaped(result.events);
   assert.equal(result.status, 1);
-  assert.equal(result.stderr,
-    "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=0 child_signal=none "
-    + "role=home operation=verify code=ENOENT\n"
-    + "TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root + "\n");
+  assertFinalizationDiagnostic(result, started.root, "child_status=0 child_signal=none",
+    "role=home operation=verify code=ENOENT");
   assert.equal(fs.existsSync(started.root), true);
   assert.equal(fs.existsSync(join(started.root, "home")), false);
   fs.rmdirSync(started.root);
@@ -292,10 +293,8 @@ test("generated Node wrapper reports a retained directory after interrupted chil
   const started = assertChildReaped(result.events);
   assert.equal(result.error?.code, "ETIMEDOUT");
   assert.equal(result.status, 1);
-  assert.equal(result.stderr,
-    "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=unknown child_signal=SIGKILL "
-    + "role=home operation=rmdir code=ENOTEMPTY\n"
-    + "TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root + "\n");
+  assertFinalizationDiagnostic(result, started.root, "child_status=unknown child_signal=SIGKILL",
+    "role=home operation=rmdir code=ENOTEMPTY");
   assert.equal(fs.readFileSync(join(started.root, "home/output"), "utf8"), "retain-child-output");
   fs.unlinkSync(join(started.root, "home/output"));
   fs.rmdirSync(join(started.root, "home"));
@@ -352,24 +351,19 @@ test("structural gate budgets the complete suite and propagates command failure 
   const recorder = {
     run(group, id, command, args, options) {
       calls += 1;
-      assert.equal(group, "local-solana");
-      assert.equal(id, "rollback-structural-candidate");
-      assert.equal(command, "/owned/.tools/bin/node");
-      assert.deepEqual(args, ["--test", "scripts/tests/rollback-proof.test.mjs"]);
-      assert.equal(options.cwd, "/owned");
-      assert.equal(options.phase, "candidate-validation");
-      assert.equal(options.timeout, 900_000);
+      assert.deepEqual([group, id, command, args, options.cwd, options.phase, options.timeout], [
+        "local-solana", "rollback-structural-candidate", "/owned/.tools/bin/node",
+        ["--test", "scripts/tests/rollback-proof.test.mjs"], "/owned", "candidate-validation", 900_000,
+      ]);
       throw commandFailure;
     },
     stage() { assert.fail("command failure must stop candidate acceptance"); },
   };
-  assert.throws(() => validateCandidateStructure({
-    candidateSha: "a".repeat(40), checkout: "/owned", group: "local-solana", recorder,
-  }, { tools: {
-    node: "/owned/.tools/bin/node", pnpm: "/owned/.tools/bin/pnpm",
-    forge: "/owned/.tools/foundry/forge", solc: "/owned/.tools/solc/solc",
-  } }),
-  (error) => error === commandFailure);
+  assert.throws(() => validateCandidateStructure(
+    { candidateSha: "a".repeat(40), checkout: "/owned", group: "local-solana", recorder },
+    { tools: { node: "/owned/.tools/bin/node", pnpm: "/owned/.tools/bin/pnpm",
+      forge: "/owned/.tools/foundry/forge", solc: "/owned/.tools/solc/solc" } },
+  ), (error) => error === commandFailure);
   assert.equal(calls, 1);
 });
 
