@@ -153,7 +153,7 @@ const { dirname, join } = require("node:path");
 const mode = process.argv[1];
 const root = dirname(process.env.HOME);
 const event = (${createEventWriter.toString()})(fs.writeSync);
-if (mode === "ignore" || mode === "exit-zero") {
+if (mode === "ignore" || mode === "exit-zero" || mode === "retained-ignore") {
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
       event("signal", { signal, privateExists: fs.existsSync(process.env.HOME) });
@@ -167,12 +167,15 @@ event("started", {
   modes: [root, ...["HOME", "TMPDIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"].map(key => process.env[key])].map(path => fs.statSync(path).mode & 0o777),
   hostile: [process.env.HTTPS_PROXY, process.env.NODE_OPTIONS],
 });
-if (mode === "retained") { fs.writeFileSync(join(process.env.HOME, "output"), "retain-child-output"); }
+if (mode === "retained" || mode === "retained-ignore") {
+  fs.writeFileSync(join(process.env.HOME, "output"), "retain-child-output");
+}
 if (mode === "substituted") {
   fs.renameSync(process.env.HOME, process.env.HOME + ".held");
   fs.mkdirSync(process.env.HOME, { mode: 0o700 });
 }
-if (mode === "ignore" || mode === "exit-zero") {
+if (mode === "missing") { fs.rmdirSync(process.env.HOME); }
+if (mode === "ignore" || mode === "exit-zero" || mode === "retained-ignore") {
   setTimeout(() => event("completed"), 8_000);
 } else {
   event("completed", { input: fs.readFileSync(0, "utf8") });
@@ -220,7 +223,13 @@ for (const mode of ["success", "nonzero", "retained", "substituted"]) {
     assert.deepEqual(started.hostile, [null, null]);
     assert.equal(result.events.at(-1).input, "literal stdin\n");
     if (mode === "retained" || mode === "substituted") {
-      assert.equal(result.stderr.trim(), "TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root);
+      const reason = mode === "retained"
+        ? "role=home operation=rmdir code=ENOTEMPTY"
+        : "role=home operation=verify code=EIDENTITY";
+      assert.equal(result.stderr,
+        "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=0 child_signal=none "
+        + reason + "\nTOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root + "\n");
+      assert.doesNotMatch(result.stderr, /retain-child-output|literal stdin/u);
       assert.equal(fs.existsSync(started.root), true);
       if (mode === "retained") {
         assert.equal(fs.readFileSync(join(started.root, "home/output"), "utf8"), "retain-child-output");
@@ -238,6 +247,21 @@ for (const mode of ["success", "nonzero", "retained", "substituted"]) {
     }
   });
 }
+
+test("generated Node wrapper preserves its root when a child removes a private directory", (context) => {
+  const value = fixture(context);
+  const result = runFiles(value, "missing");
+  assertSequence(result.events);
+  const started = assertChildReaped(result.events);
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr,
+    "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=0 child_signal=none "
+    + "role=home operation=verify code=ENOENT\n"
+    + "TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root + "\n");
+  assert.equal(fs.existsSync(started.root), true);
+  assert.equal(fs.existsSync(join(started.root, "home")), false);
+  fs.rmdirSync(started.root);
+});
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   for (const mode of ["ignore", "exit-zero"]) {
@@ -260,6 +284,23 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
     });
   }
 }
+
+test("generated Node wrapper reports a retained directory after interrupted child reaping", (context) => {
+  const value = fixture(context);
+  const result = runFiles(value, "retained-ignore", { timeout: 1_000, killSignal: "SIGTERM" });
+  assertSequence(result.events, "SIGTERM");
+  const started = assertChildReaped(result.events);
+  assert.equal(result.error?.code, "ETIMEDOUT");
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr,
+    "TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=unknown child_signal=SIGKILL "
+    + "role=home operation=rmdir code=ENOTEMPTY\n"
+    + "TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + started.root + "\n");
+  assert.equal(fs.readFileSync(join(started.root, "home/output"), "utf8"), "retain-child-output");
+  fs.unlinkSync(join(started.root, "home/output"));
+  fs.rmdirSync(join(started.root, "home"));
+  fs.rmdirSync(started.root);
+});
 
 test("structural command timeout remains failed with complete logs and no READY", (context) => {
   const value = fixture(context);
