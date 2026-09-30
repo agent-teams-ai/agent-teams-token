@@ -110,8 +110,14 @@ export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
     const signatures = await Promise.all(selectedSafe.keys.slice(0, signatureCount).map(async key => ({ owner: key.owner, signature: await run(["wallet", "sign", "--no-hash", hash, "--keystore", key.path, "--password", "local-test-only"]) })));
     const packed = `0x${signatures.toSorted((a, b) => a.owner < b.owner ? -1 : 1).map(value => value.signature.slice(2)).join("")}` as Hex;
     if (signatureCount < 2) {
-      await assert.rejects(call(selectedSafe.safe, execAbi, [...fields, packed]));
+      const safeState = async () => ({ owners: await call(selectedSafe.safe, "getOwners()"), threshold: await call(selectedSafe.safe, "getThreshold()") });
+      const before = await safeState();
+      // Safe 1.4.1 requires threshold * 65 bytes: transport failures are not denial evidence.
+      const signatureLengthRevert = await encode("Error(string)", ["GS020"]);
+      await assert.rejects(call(selectedSafe.safe, execAbi, [...fields, packed]), (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === 3 && "data" in error && error.data === signatureLengthRevert);
       assert.equal(BigInt(await call(selectedSafe.safe, "nonce()")), nonce);
+      assert.deepEqual(await safeState(), before, "signature denial leaves Safe ownership and threshold unchanged");
       return { success: false, receipt: null };
     }
     const receipt = await send(selectedSafe.safe, await encode(execAbi, [...fields, packed]));

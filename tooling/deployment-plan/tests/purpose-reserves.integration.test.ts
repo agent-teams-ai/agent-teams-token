@@ -124,6 +124,39 @@ async function assertGenesis(local: Awaited<ReturnType<typeof setupLocalSafes>>,
   return { token, controller, nested, vaults, balance };
 }
 
+async function assertFounderIrrevocable(local: Awaited<ReturnType<typeof setupLocalSafes>>, token: Hex, vault: Hex, reserve: Hex) {
+  const { call, safes, safeExec, encode } = local;
+  const founderState = async () => ({
+    grant: await call(vault, "grant()"), funded: await call(vault, "funded()"),
+    balances: await Promise.all([vault, reserve, ...safes.map(safe => safe.safe)].map(address => call(token, "balanceOf(address)", [address]))),
+    totalSupply: await call(token, "totalSupply()"),
+  });
+  const before = await founderState();
+  const cancelled = await safeExec(safes[0]!, vault, await encode("cancel()", []));
+  assert.equal(cancelled.success, false, "funded founder grant cannot be cancelled by its actual controller Safe");
+  assert.equal(cancelled.receipt.logs.filter((log: { address: Hex }) => [vault, token].includes(log.address.toLowerCase() as Hex)).length, 0, "denied founder cancellation emits no grant or token event");
+  assert.deepEqual(await founderState(), before, "denied founder cancellation preserves the full grant and balances");
+  return cancelled;
+}
+
+async function assertOpeningBoundary(local: Awaited<ReturnType<typeof setupLocalSafes>>, vault: Hex, opensAt: bigint, outflow: (vault: Hex, value: bigint) => ReturnType<typeof local.safeExec>) {
+  const { rpc, call } = local;
+  await rpc("evm_setNextBlockTimestamp", [Number(opensAt - 1n)]);
+  const beforeOpening = await outflow(vault, 1n);
+  assert.equal(beforeOpening.success, false, "one second before opening denies the controller Safe");
+  assert.equal(BigInt((await rpc("eth_getBlockByHash", [beforeOpening.receipt.blockHash, false])).timestamp), opensAt - 1n);
+  assert.equal(BigInt(await call(vault, "grossOutflow()")), 0n);
+  assert.equal(BigInt(await call(vault, "rollingOutflow()")), 0n);
+  await rpc("evm_setNextBlockTimestamp", [Number(opensAt)]);
+  // One base unit of early headroom cannot mask a late expiry of the saturation checkpoint.
+  const atOpening = await outflow(vault, 1n);
+  assert.equal(atOpening.success, true, "exact opening permits the controller Safe");
+  assert.equal(BigInt((await rpc("eth_getBlockByHash", [atOpening.receipt.blockHash, false])).timestamp), opensAt);
+  assert.equal(BigInt(await call(vault, "grossOutflow()")), 1n);
+  assert.equal(BigInt(await call(vault, "rollingOutflow()")), 1n);
+  return atOpening;
+}
+
 test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 300_000 }, async t => {
   const local = await setupLocalSafes(t, 2);
   const { root, temporary, executor, rpc, call, send, safes, safeExec, encode } = local;
@@ -181,6 +214,7 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
     }
     return result;
   };
+  await recordSafe("founder-cancel-denied", await assertFounderIrrevocable(local, token, nested, predicted[1]!));
   const outflow = async (vault: Hex, value: bigint) => {
     const beforeVault = await balance(vault), beforeRecipient = await balance(recipient);
     const result = await recordSafe(`outflow:${vault}:${value}`, await safeExec(safes[0]!, vault, await encode("transferOut(address,uint256)", [recipient, value.toString()])));
@@ -188,16 +222,18 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
     assert.equal(await balance(recipient), beforeRecipient + (result.success ? value : 0n), "exact recipient credit");
     return result;
   };
-  assert.equal((await safeExec(safes[0]!, vaults[0]!, await encode("transferOut(address,uint256)", [recipient, "1"]), 1)).success, false);
-  assert.equal((await outflow(vaults[0]!, unit)).success, false, "pre-opening Safe inner failure");
+  const first = vaults[0]!;
+  const atOpening = await assertOpeningBoundary(local, first, BigInt(config.purposeVaults[0]!.opensAt), outflow);
   await rpc("evm_setNextBlockTimestamp", [1800000160]);
   await rpc("evm_mine");
-  const first = vaults[0]!;
   assert.notEqual(executor.owner, safes[0]!.safe);
   assert.ok(BigInt((await rpc("eth_getBlockByNumber", ["latest", false])).timestamp) >= BigInt(config.purposeVaults[0]!.opensAt));
   assert.ok(await balance(first) >= unit);
   assert.ok(BigInt(await call(first, "availableOutflow()")) >= unit);
   const unauthorizedState = async () => ({ vaultBalance: await balance(first), recipientBalance: await balance(recipient), gross: await call(first, "grossOutflow()"), rolling: await call(first, "rollingOutflow()"), available: await call(first, "availableOutflow()") });
+  const beforeOneSignature = await unauthorizedState();
+  assert.equal((await safeExec(safes[0]!, first, await encode("transferOut(address,uint256)", [recipient, "1"]), 1)).success, false);
+  assert.deepEqual(await unauthorizedState(), beforeOneSignature, "one-signature denial leaves vault balances and accounting unchanged");
   const beforeUnauthorized = await unauthorizedState();
   await assert.rejects(call(first, "transferOut(address,uint256)", [recipient, unit.toString()], { from: executor.owner }), (error: unknown) => error instanceof Error && "data" in error && error.data === custodySelector("Unauthorized()"));
   const unauthorizedReceipt = await send(first, await encode("transferOut(address,uint256)", [recipient, unit.toString()]));
@@ -205,9 +241,8 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   assert.equal(unauthorizedReceipt.logs.length, 0, "unauthorized transaction emits no outflow or token transfer");
   assert.deepEqual(await unauthorizedState(), beforeUnauthorized, "unauthorized call leaves balances and accounting unchanged");
   for (let i = 0; i < vaults.length; i++) {
-    // One base unit of early headroom cannot mask a late expiry of the saturation checkpoint.
     const amount = i === 0 ? 1n : unit;
-    const result = await outflow(vaults[i]!, amount);
+    const result = i === 0 ? atOpening : await outflow(vaults[i]!, amount);
     assert.equal(result.success, true, purposes[i]);
     assert.equal(BigInt(await call(vaults[i]!, "grossOutflow()")), amount);
   }
@@ -257,7 +292,7 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   assert.equal((await Promise.all([controller, nested, grantVault, ...vaults, recipient].map(address => balance(address)))).reduce((a, b) => a + b), 100_000_000n * unit);
   const finalBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
   const finalVaultStates = await vaultStatesAt(finalBlock.number);
-  const report = { schema: "agtmai-local-purpose-proof-v1", evidenceClass: "observed-disposable-local-execution", status: "success", qualification: "disposable-local-only", candidateRevision, configuration: prepared.configuration, configurationSha256: prepared.configurationSha256, planSha256: prepared.planSha256, artifacts: prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactSha256: artifact.artifactSha256, buildInfoSha256: artifact.buildInfoSha256, compilerInputSha256: artifact.compilerInputSha256 })), safes: safes.map(safe => ({ address: safe.safe, owners: safe.owners, threshold: 2, singleton: local.singleton, proxyCodeHash: local.pins.proxy.runtimeKeccak256, singletonCodeHash: local.pins.singleton.runtimeKeccak256, setupTransaction: safe.setup.transactionHash, guard: ZERO, fallbackHandler: ZERO, modules: [] })), genesis: { ...blockIdentity(genesisBlock), allocations: reserve.allocations, founderVault: nested, vaultStates: genesisVaultStates }, finalState: { ...blockIdentity(finalBlock), vaultStates: finalVaultStates }, receipts, scenarioReceipts, scenarios: { sixSafeOutflows: true, preOpeningDenied: true, capSaturated: true, refundDidNotReplenishCap: true, exactExpirySpend: true, unauthorizedDenied: true, oneSignatureDenied: true, founderFunded: true, contributorGrantRefunded: true }, conservation: "100000000000000000", cleanup: "complete" };
+  const report = { schema: "agtmai-local-purpose-proof-v1", evidenceClass: "observed-disposable-local-execution", status: "success", qualification: "disposable-local-only", candidateRevision, configuration: prepared.configuration, configurationSha256: prepared.configurationSha256, planSha256: prepared.planSha256, artifacts: prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactSha256: artifact.artifactSha256, buildInfoSha256: artifact.buildInfoSha256, compilerInputSha256: artifact.compilerInputSha256 })), safes: safes.map(safe => ({ address: safe.safe, owners: safe.owners, threshold: 2, singleton: local.singleton, proxyCodeHash: local.pins.proxy.runtimeKeccak256, singletonCodeHash: local.pins.singleton.runtimeKeccak256, setupTransaction: safe.setup.transactionHash, guard: ZERO, fallbackHandler: ZERO, modules: [] })), genesis: { ...blockIdentity(genesisBlock), allocations: reserve.allocations, founderVault: nested, vaultStates: genesisVaultStates }, finalState: { ...blockIdentity(finalBlock), vaultStates: finalVaultStates }, receipts, scenarioReceipts, scenarios: { sixSafeOutflows: true, preOpeningDenied: true, exactOpeningSpend: true, capSaturated: true, refundDidNotReplenishCap: true, exactExpirySpend: true, unauthorizedDenied: true, oneSignatureDenied: true, founderFunded: true, founderCancellationDenied: true, contributorGrantRefunded: true }, conservation: "100000000000000000", cleanup: "complete" };
   // Validate the serialized snapshot labels against the chain before disposing it.
   for (const snapshot of [report.genesis, report.finalState]) {
     const block = await rpc("eth_getBlockByHash", [snapshot.blockHash, false]);
