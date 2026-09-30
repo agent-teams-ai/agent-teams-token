@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { TestContext } from "node:test";
 import type { Hex } from "@agent-teams/supply/deployment";
 import { startOwnedAnvil } from "../../../local-evm/process.ts";
-import { authenticateFoundryBinaries, pinnedFoundryBinary } from "../../../local-evm/toolchain.ts";
+import { pinnedFoundryBinaries, pinnedFoundryBinary } from "../../../local-evm/toolchain.ts";
 import { qualifySafeArtifacts, type SafeArtifactPins } from "../../../testnet-ccip/src/adapters/safe-artifacts.ts";
 import { custodyKeccak, custodyTopic } from "../../../testnet-ccip/src/adapters/safe-custody.ts";
 
@@ -25,8 +25,7 @@ export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
   assert.ok(directory && selected, "SAFE_OFFICIAL_ARTIFACTS_REQUIRED: set AGTMAI_SAFE_ARTIFACT_DIRECTORY and AGTMAI_SAFE_PINS_SHA256");
   const temporary = await mkdtemp(join(tmpdir(), "agtmai-local-safe-"));
   t.after(() => rm(temporary, { recursive: true, force: true }));
-  const install = join(root, ".tools/foundry-v1.8.0-linux-x64");
-  const foundry = authenticateFoundryBinaries(root, { anvil: join(install, "anvil"), cast: join(install, "cast"), forge: join(install, "forge") });
+  const foundry = pinnedFoundryBinaries(root);
   const cast = pinnedFoundryBinary(root, foundry, "cast");
   const run = (args: string[]): Promise<string> => new Promise((resolve, reject) => {
     execFile(cast, args, { timeout: 30_000, maxBuffer: 2_000_000 }, (error, stdout) => error ? reject(error) : resolve(stdout.trim()));
