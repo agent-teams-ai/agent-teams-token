@@ -18,8 +18,11 @@ and artifact/build-info records did not establish Git or compiler authority.
 Local artifact admission must use the exact clean selected Git tree, verify
 vendored dependency pins, and compare with fresh output from the authenticated
 pinned compiler. Preflight must observe every top-level and nested CREATE target
-exactly once in a dense inventory. These fixes do not qualify local execution;
-candidate-bound compiler and full gates remain required before acceptance.
+exactly once in a dense inventory. Those checks alone did not qualify local
+execution. Checkpoint 3 adds a disposable Anvil run using official Safe 1.4.1 contracts, six funded vaults,
+observed spending and rejection boundaries, and token conservation. The local
+proof has three passing E2E scenarios. It does not select production caps,
+addresses or dates and does not qualify Mainnet deployment or public trading.
 
 ## Accepted release sequence, 2026-09-24
 

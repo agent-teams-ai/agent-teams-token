@@ -1,5 +1,17 @@
 # AGTMAI release status
 
+## Local purpose-reserve qualification, 2026-09-30
+
+The six non-grant allocation buckets have a shared immutable
+`PurposeReserveVault` implementation with purpose-bound gross outflow caps.
+Authenticated local genesis checks the selected clean Git tree, vendored
+source pins and fresh pinned-compiler output before preparing six vaults.
+A disposable Anvil run with official Safe 1.4.1 contracts observes ERC20
+funding, 2-of-3 approvals, cap and time boundaries, grant cancellation and
+supply conservation in three passing E2E scenarios. This is local development
+evidence only. Real Safe addresses, cap amounts, opening dates, production
+genesis wiring and Mainnet deployment are still unapproved or unproven.
+
 ## Ethereum-first decision, 2026-09-24
 
 The owner selected [ADR-0010](decisions/0010-ethereum-first-launch-sequence.md):
@@ -50,9 +62,9 @@ oracle. Exact final command evidence is recorded in the implementation handoff.
 This is implemented local custody behavior, not configured or deployment-
 qualified production. Canonical deployment/token identity, beneficiary,
 originating reserve, controller Safe 2-of-3 and its owners, allocation, purpose
-and exact UTC schedule remain unset. Reserve caps, production genesis wiring,
-audit, committed-candidate Slither and Linux rollback qualification remain
-separate gates. No public network or blockchain transaction was used.
+and exact UTC schedule remain unset. Production reserve-cap values, genesis
+wiring, audit, committed-candidate Slither and Linux rollback qualification remain separate
+gates. No public network or blockchain transaction was used.
 
 Current protocol guidance is a proven mixed snapshot, not a single live Solana
 CCIP `1.6.3` lane: Router, BurnMint and LockRelease match `solana-v1.6.2`;
