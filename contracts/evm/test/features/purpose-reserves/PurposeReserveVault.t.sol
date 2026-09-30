@@ -22,6 +22,8 @@ contract PurposeToken is IERC20 {
     Mode public mode;
     PurposeController public controller;
     PurposeReserveVault public vault;
+    uint256 public reentryAttempts;
+    bytes4 public nestedRejection;
 
     function setMode(Mode next) external {
         mode = next;
@@ -55,7 +57,17 @@ contract PurposeToken is IERC20 {
     function transfer(address to, uint256 amount) external override returns (bool) {
         if (mode == Mode.FalseReturn) return false;
         if (mode == Mode.Revert) revert("token failure");
-        if (mode == Mode.Reenter) controller.send(vault, to, 1);
+        if (mode == Mode.Reenter && reentryAttempts == 0) {
+            ++reentryAttempts;
+            try controller.send(vault, to, 1) {
+                revert("nested transfer unexpectedly succeeded");
+            } catch (bytes memory reason) {
+                if (reason.length != 4) revert("unexpected nested rejection");
+                bytes4 selector;
+                assembly { selector := mload(add(reason, 32)) }
+                nestedRejection = selector;
+            }
+        }
         if (mode == Mode.NoMove) return true;
         uint256 debit = mode == Mode.Fee ? amount + 1 : amount;
         balanceOf[msg.sender] -= debit;
@@ -266,7 +278,7 @@ contract PurposeReserveVaultTest is TestBase {
         assertEq(vault.grossOutflow(), 10);
     }
 
-    function testMalformedReturnAndReentryAreAtomic() public {
+    function testMalformedReturnIsAtomic() public {
         MalformedPurposeToken malformed = new MalformedPurposeToken();
         PurposeReserveVault malformedVault = new PurposeReserveVault(
             IERC20(address(malformed)), address(controller), PURPOSE, 100, 10, 100
@@ -277,15 +289,54 @@ contract PurposeReserveVaultTest is TestBase {
         assertFalse(success);
         assertEq(malformedVault.grossOutflow(), 0);
         assertEq(malformed.balanceOf(address(malformedVault)), 100);
+    }
 
+    // A missing lock permits the single nested call; recursive cap exhaustion cannot
+    // make this regression pass accidentally.
+    function testOneAttemptReentryRejectsExactlyWhileOuterOutflowCompletes() public {
         token.setReentry(controller, vault);
         token.setMode(PurposeToken.Mode.Reenter);
-        (success,) =
-            address(controller).call(abi.encodeCall(PurposeController.send, (vault, RECIPIENT, 1)));
-        assertFalse(success);
-        assertEq(vault.grossOutflow(), 0);
+        vm.recordLogs();
+        controller.send(vault, RECIPIENT, 20);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(token.reentryAttempts(), 1);
+        assertEq(token.nestedRejection(), PurposeReserveVault.ReentrantCall.selector);
+        uint256 outflowEvents;
+        uint256 transferEvents;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter == address(token)) {
+                ++transferEvents;
+                assertEq(logs[i].topics[0], keccak256("Transfer(address,address,uint256)"));
+                assertEq(address(uint160(uint256(logs[i].topics[1]))), address(vault));
+                assertEq(address(uint160(uint256(logs[i].topics[2]))), RECIPIENT);
+                assertEq(abi.decode(logs[i].data, (uint256)), 20);
+                continue;
+            }
+            if (logs[i].emitter != address(vault)) continue;
+            ++outflowEvents;
+            assertEq(
+                logs[i].topics[0], keccak256("Outflow(address,uint256,uint256,uint256,uint256)")
+            );
+            assertEq(address(uint160(uint256(logs[i].topics[1]))), RECIPIENT);
+            (uint256 amount, uint256 gross, uint256 rolling, uint256 timestamp) =
+                abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+            assertEq(amount, 20);
+            assertEq(gross, 20);
+            assertEq(rolling, 20);
+            assertEq(timestamp, 100);
+        }
+        assertEq(outflowEvents, 1);
+        assertEq(transferEvents, 1);
+        assertEq(token.balanceOf(address(vault)), 280);
+        assertEq(token.balanceOf(RECIPIENT), 20);
+        assertEq(vault.grossOutflow(), 20);
+        assertEq(vault.rollingOutflow(), 20);
+        assertEq(vault.availableOutflow(), 80);
         token.setMode(PurposeToken.Mode.Normal);
-        controller.send(vault, RECIPIENT, 1);
-        assertEq(vault.grossOutflow(), 1);
+        controller.send(vault, RECIPIENT, 5);
+        assertEq(token.balanceOf(address(vault)), 275);
+        assertEq(token.balanceOf(RECIPIENT), 25);
+        assertEq(vault.grossOutflow(), 25);
+        assertEq(vault.rollingOutflow(), 25);
     }
 }

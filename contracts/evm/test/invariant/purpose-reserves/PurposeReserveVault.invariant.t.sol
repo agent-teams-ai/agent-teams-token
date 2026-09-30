@@ -40,6 +40,8 @@ contract PurposeOutflowHandler is TestBase {
         vm.warp(currentTime);
     }
 
+    // Detects wrongful acceptance and rejection independently of the vault's
+    // checkpoint search, while the append-only ledger checks resulting state.
     function step(uint8 elapsed, uint8 requested, uint8 bucketSeed, bool donate) external {
         currentTime += elapsed % 5;
         vm.warp(currentTime);
@@ -49,8 +51,20 @@ contract PurposeOutflowHandler is TestBase {
         if (donate) assertTrue(TOKEN.transfer(address(selected), 1));
         uint256 oldGross = selected.grossOutflow();
         uint256 oldInventory = TOKEN.balanceOf(address(selected));
+        uint256 expectedRolling;
+        for (uint256 i; i < records.length; ++i) {
+            TransferRecord memory record = records[i];
+            if (record.bucket == bucket && record.time + 17 > currentTime) {
+                expectedRolling += record.amount;
+            }
+        }
+        address recipient = address(0xBEEF);
+        bool expectedSuccess = currentTime >= 100 && recipient != address(0)
+            && recipient != address(selected) && recipient != address(TOKEN)
+            && expectedRolling + amount <= 100 && amount <= oldInventory;
         (bool success,) = address(CONTROLLER)
-            .call(abi.encodeCall(PurposeController.send, (selected, address(0xBEEF), amount)));
+            .call(abi.encodeCall(PurposeController.send, (selected, recipient, amount)));
+        assertEq(success ? 1 : 0, expectedSuccess ? 1 : 0);
         ++attempts;
         if (success) {
             records.push(TransferRecord(currentTime, amount, bucket));

@@ -29,7 +29,7 @@ test("production triage pins the exact current captured findings without suppres
   const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
     suppressions: { fingerprint: string; detectorId: string; sourceHash: string }[];
   };
-  // Exact lower-impact tuples from the Linux/Docker 545ec35c4f8e6526338a5911a68cfca7d0bd34ed capture.
+  // Exact lower-impact tuples from the retained historical and current pinned captures.
   const expected = [
     "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
     "sha256:14d28e3d595e6c0183a7aa9af6506913ff42e526ababa720b0740d32c25076bb",
@@ -57,12 +57,23 @@ test("production triage pins the exact current captured findings without suppres
     "sha256:475ac45ba5b092391c7ff99a3f85070b1d139f60fad980a153f566b1b064aafa",
     "sha256:003f4189357671c77ad24948da07946de03f4ebcb69ed7d421dfde7eb06ee861",
     "sha256:7401973b9268b84a98fb8aaeee22a9d2bc8768c98fc79d239e36958736c98e32",
-    "sha256:7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2",
     "sha256:b350056771ccd86c45901ba4efdcd3c8a3464ce6f03d85423144a9b59a7a04cd",
     "sha256:bf758266512a4c93aab2a313ae2604ecbd732624e1546f8ed413946b79e51fd2",
     "sha256:c9d6c5db026446d352bc82a40e2aff339aeb764aeeca2e828300c25ad9b352f0",
     "sha256:d59a459510dbbd608781cecfe1224b5fd2dd2100c5b454cd3ec954851f709c5c",
-    "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575"
+    "sha256:c0733ba38c14da5a9d324c802dd805bcc8a45546848291ed757360f735669575",
+    "sha256:0e9e00b810650b42904d15d5ce6c17a76c84b02737012bb46cc80c7499c993cb",
+    "sha256:2fb0b17517a8f798bfbc5d555e020d6821682cc91d83cebab3d0f289de1b6c96",
+    "sha256:71a825e3c154ba708f2966c6abdc1f30b9815784de2850a0e7f101c3edb77687",
+    "sha256:9450e838b6600f96decf18027263aa3bf351fdf1208cf7f16259c3901f50a5e4",
+    "sha256:d1231ace1e056d1fef6f2b6d7d56e9a60eadcfd058df4d4d33ae4fa4b82a2eb8",
+    "sha256:e480a77aa52c148eefbc8a45f0e1738a85966c8ddf2c12ed26876674fbba9a53",
+    "sha256:5264a558854189b7487926b3e691dadce470ff89957aa99ca64942029ac73d7f",
+    "sha256:75a553d887c3815c0aedee43e6473d827f5d46a12982594c47297e95557fe940",
+    "sha256:932ffd387f9e8791077e074ee76ede8f87b84561144d20cce569fb233c0e02dc",
+    "sha256:bf76c4cdc2324db2d2487aafeda18b515a551b80e5c886c5dd855c6d920feb8e",
+    "sha256:f65f3ed40a7df2f34a03431a965569d510d3688588c217e09ca17ea759346a7d",
+    "sha256:a72d427b4724429216bff2861dbb9c7fbf22ed823dbfb86f16f58b32da43db07"
   ];
   const reviewedDates = [
     "2026-08-29T00:00:00.000Z",
@@ -96,7 +107,7 @@ test("production triage pins the exact current captured findings without suppres
     "2026-09-20T00:00:00Z",
     "2026-09-20T00:00:00Z",
     "2026-09-20T00:00:00Z",
-    "2026-09-20T00:00:00Z"
+    ...Array(12).fill("2026-09-30T11:56:22Z")
   ];
 
   assert.equal(document.schemaVersion, 1);
@@ -162,9 +173,9 @@ test("historical captured findings require retained triage and reject current tr
   const parsed = await parseSlitherJson(await readFile("tooling/security/slither/tests/fixtures/slither-0.11.6-production.json", "utf8"), process.cwd());
   assert.deepEqual(validateFindingTriage(parsed.findings, historical.findings), []);
   const errors = validateFindingTriage(parsed.findings, current.findings);
-  assert.equal(errors.length, 22);
+  assert.equal(errors.length, 33);
   assert.ok(errors.some((error) => error.includes("467424bcf1a60111645314c6c00da8f7fba5ddeb991f55d82eae0cd5b54c4742 requires exactly one")));
-  assert.ok(errors.some((error) => error.includes("7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2 is stale")));
+  assert.ok(errors.some((error) => error.includes("a72d427b4724429216bff2861dbb9c7fbf22ed823dbfb86f16f58b32da43db07 is stale")));
 });
 
 // Observed tuples from the real pinned host capture at 545ec35; no Docker replay here.

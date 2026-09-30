@@ -136,7 +136,7 @@
     },
     {
       "path": "tooling/security/slither/triage.v1.json",
-      "sha256": "3a77f84b733322ca382b26a6387f51f151ec9f192154b6c345ef279de97b8fb8"
+      "sha256": "40b3ff8c6b8b7f613d4cfd3e6ea0f26a1febbceb192ac5c319c8530190e65ede"
     },
     {
       "path": "tooling/security/slither/triage-ledger.schema.v1.json",
