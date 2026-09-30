@@ -1,4 +1,8 @@
 import * as fixtureSupport from "./cleanup-fixture.mjs";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { cleanupStrictIdentityFingerprint } from "../runtime/cleanup-tree.mjs";
 const { assert, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, test, captureCleanupTreeSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, targetPrefix, cleanupIdentityBoundDirectory, fixture, checkout, caught, preservedQuarantine } = fixtureSupport;
 export { assert, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, test, captureCleanupTreeSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, targetPrefix, cleanupIdentityBoundDirectory, fixture, checkout, caught, preservedQuarantine };
 
@@ -254,6 +258,159 @@ test("strict cleanup fingerprints reject same-inode content mutation", () => {
     rmSync(current.boundary, { recursive: true, force: true });
   }
 });
+
+// Model a filesystem clock tick containing both writes. Only timestamps are
+// fixed; inode, size, path operations and file bytes remain real filesystem IO.
+function holdMutationTimestamps(victim) {
+  const identity = fs.lstatSync(victim, { bigint: true });
+  const native = { lstatSync: fs.lstatSync, fstatSync: fs.fstatSync };
+  for (const key of Object.keys(native)) {
+    fs[key] = (...arguments_) => {
+      const actual = native[key](...arguments_);
+      if (actual.dev === identity.dev && actual.ino === identity.ino) {
+        actual.ctimeNs = identity.ctimeNs;
+        actual.mtimeNs = identity.mtimeNs;
+      }
+      return actual;
+    };
+  }
+  syncBuiltinESMExports();
+  return () => {
+    Object.assign(fs, native);
+    syncBuiltinESMExports();
+  };
+}
+
+for (const [stage, size] of [
+  ["before-target-quarantine", 12], ["before-entry-quarantine", 12],
+  ["before-entry-delete", 12], ["before-entry-delete", 3 * 64 * 1024 + 17],
+]) {
+  test(`strict cleanup preserves ${size} same-size bytes with identical metadata at ${stage}`, () => {
+    const current = fixture();
+    let restore = () => {};
+    try {
+      const victim = join(checkout(current.target), "owned");
+      const original = size === 12 ? Buffer.from("owned-before\n") : Buffer.alloc(size, 0x61);
+      const replacement = Buffer.from(original);
+      if (size === 12) { replacement.set(Buffer.from("foreign-now!\n")); }
+      else { replacement[64 * 1024 + 5] = 0x62; } // Interior byte beyond the first chunk.
+      writeFileSync(victim, original);
+      restore = holdMutationTimestamps(victim);
+      const handle = createCleanupHandle(current.target, current.policy);
+      let mutatedPath;
+      const error = caught(() => cleanupIdentityBoundDirectory(handle, {
+        onBoundary(event) {
+          if (event.stage !== stage || stage !== "before-target-quarantine"
+            && event.path !== "checkout/owned") { return; }
+          mutatedPath = stage === "before-target-quarantine" ? victim
+            : stage === "before-entry-delete" ? event.stagedPath : event.sourcePath;
+          const before = fs.lstatSync(mutatedPath, { bigint: true });
+          writeFileSync(mutatedPath, replacement);
+          const after = fs.lstatSync(mutatedPath, { bigint: true });
+          for (const field of ["dev", "ino", "size", "birthtimeNs", "ctimeNs", "mtimeNs", "mode", "nlink", "uid", "gid"]) {
+            assert.equal(after[field], before[field], field);
+          }
+        },
+      }), /ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=checkout\/owned/u);
+      const quarantine = preservedQuarantine(error);
+      const survivor = stage === "before-target-quarantine"
+        ? join(quarantine, "tree", "checkout", "owned")
+        : stage === "before-entry-quarantine"
+          ? join(quarantine, "entries", "entry-0000001", "owned")
+          : join(quarantine, "entries", "entry-0000002");
+      assert.deepEqual(readFileSync(survivor), replacement);
+      assert.equal(handle.closed, true);
+    } finally {
+      restore();
+      rmSync(current.boundary, { recursive: true, force: true });
+    }
+  });
+}
+
+test("entry quarantine never rebaselines content changed during rename", () => {
+  const current = fixture();
+  const nativeRename = fs.renameSync;
+  let restore = () => {};
+  try {
+    const victim = join(checkout(current.target), "owned");
+    writeFileSync(victim, "owned-before\n");
+    restore = holdMutationTimestamps(victim);
+    let source;
+    let reachedDelete = false;
+    fs.renameSync = (from, to) => {
+      nativeRename(from, to);
+      if (from === source) { writeFileSync(to, "foreign-now!\n"); }
+    };
+    syncBuiltinESMExports();
+    const error = caught(() => cleanupIdentityBoundDirectory(createCleanupHandle(current.target, current.policy), {
+      onBoundary(event) {
+        if (event.path !== "checkout/owned") { return; }
+        if (event.stage === "before-entry-quarantine") { source = event.sourcePath; }
+        if (event.stage === "before-entry-delete") { reachedDelete = true; }
+      },
+    }), /ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=checkout\/owned/u);
+    assert.equal(reachedDelete, false);
+    assert.equal(readFileSync(join(preservedQuarantine(error), "entries", "entry-0000002"), "utf8"), "foreign-now!\n");
+  } finally {
+    fs.renameSync = nativeRename;
+    restore();
+    syncBuiltinESMExports();
+    rmSync(current.boundary, { recursive: true, force: true });
+  }
+});
+
+test("content fingerprints cover empty and multi-chunk files and permit unchanged cleanup", () => {
+  const current = fixture();
+  try {
+    const root = checkout(current.target);
+    for (const bytes of [Buffer.alloc(0), Buffer.alloc(3 * 64 * 1024 + 17, 0x61)]) {
+      const victim = join(root, "owned");
+      writeFileSync(victim, bytes);
+      const fingerprint = cleanupStrictIdentityFingerprint(lstatSync(victim, { bigint: true }), "file", victim);
+      assert.equal(fingerprint.contentSha256, createHash("sha256").update(bytes).digest("hex"));
+    }
+    writeFileSync(join(root, "empty"), "");
+    cleanupIdentityBoundDirectory(createCleanupHandle(current.target, current.policy));
+    assert.equal(existsSync(current.target), false);
+  } finally {
+    rmSync(current.boundary, { recursive: true, force: true });
+  }
+});
+
+for (const scenario of ["growth", "truncation", "read-failure"]) {
+  test(`content verification is bounded and closes its descriptor on ${scenario}`, () => {
+    const current = fixture();
+    const nativeRead = fs.readSync;
+    let descriptor;
+    let reads = 0;
+    try {
+      const victim = join(checkout(current.target), "owned");
+      writeFileSync(victim, Buffer.alloc(2 * 64 * 1024, 0x61));
+      const identity = lstatSync(victim, { bigint: true });
+      const injected = new Error("injected read failure");
+      fs.readSync = (held, buffer, offset, length, position) => {
+        descriptor = held;
+        reads += 1;
+        assert.ok(length <= 64 * 1024);
+        if (scenario === "read-failure") { throw injected; }
+        const count = nativeRead(held, buffer, offset, length, position);
+        if (scenario === "growth") { fs.appendFileSync(victim, "growth"); }
+        else if (reads === 1) { fs.truncateSync(victim, 0); }
+        return count;
+      };
+      syncBuiltinESMExports();
+      assert.throws(() => cleanupStrictIdentityFingerprint(identity, "file", victim),
+        scenario === "read-failure" ? (error) => error === injected
+          : /ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH/u);
+      assert.ok(reads <= 3, "verification must not chase a growing EOF");
+      assert.throws(() => fs.fstatSync(descriptor), { code: "EBADF" });
+    } finally {
+      fs.readSync = nativeRead;
+      syncBuiltinESMExports();
+      rmSync(current.boundary, { recursive: true, force: true });
+    }
+  });
+}
 
 test("strict cleanup fingerprints preserve an unlink-recreated substitute without assuming inode reuse", () => {
   const current = fixture();
