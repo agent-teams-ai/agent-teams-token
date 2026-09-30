@@ -28,6 +28,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantCalendar.sol",
       "contract": "GrantCalendar"
+    },
+    {
+      "path": "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol",
+      "contract": "PurposeReserveVault"
     }
   ],
   "expectedContracts": [
@@ -44,6 +48,7 @@
     "IERC20Errors",
     "IERC20Metadata",
     "IERC721Errors",
+    "PurposeReserveVault",
     "ReserveController"
   ],
   "sources": [
@@ -94,6 +99,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantCalendar.sol",
       "sha256": "ab6b7bab6a9aeee5dfb66ed2c48fd53a7b3faf2d4b6b11d5fc101462ea426f4f"
+    },
+    {
+      "path": "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol",
+      "sha256": "5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e"
     }
   ],
   "config": [
@@ -119,7 +128,7 @@
     },
     {
       "path": "tooling/security/slither/suppressions.v1.json",
-      "sha256": "2409b54b9ac061ef8c1967bc8d0cf093ee7237fe40b46a0c6ef14f512544716d"
+      "sha256": "713f2d7a8d4365f82a37ddfcb8e3a7b5fe6a147601acfbb4d8b606792dc8bb0d"
     },
     {
       "path": "tooling/security/slither/suppression-ledger.schema.v1.json",
@@ -127,7 +136,7 @@
     },
     {
       "path": "tooling/security/slither/triage.v1.json",
-      "sha256": "3a77f84b733322ca382b26a6387f51f151ec9f192154b6c345ef279de97b8fb8"
+      "sha256": "40b3ff8c6b8b7f613d4cfd3e6ea0f26a1febbceb192ac5c319c8530190e65ede"
     },
     {
       "path": "tooling/security/slither/triage-ledger.schema.v1.json",

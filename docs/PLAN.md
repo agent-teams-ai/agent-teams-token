@@ -1,5 +1,18 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Local purpose reserve vault checkpoint, 2026-09-30
+
+The reviewed local plan adds one immutable `PurposeReserveVault` implementation
+for the six non-grant allocations. Checkpoint 1 covers the contract, focused
+accounting and adversarial tests, and a proposed decision. Later checkpoints
+own local genesis wiring and observable Safe execution. This local code does
+not make production configuration accepted or change existing grant policy.
+Each vault has an immutable controller, purpose, opening, window and rolling
+gross outflow cap. A full cap can leave at opening, and the controller may
+select any valid recipient; transferred assets are no longer controlled by
+the vault. Returns and donations do not restore gross cap use. Exact production
+caps, dates, recipients, custody, deployment and market controls remain open.
+
 ## Accepted release sequence, 2026-09-24
 
 The owner selected [Ethereum-first Mainnet genesis](decisions/0010-ethereum-first-launch-sequence.md).
@@ -49,11 +62,12 @@ costs are recomputed against pinned creation bytecode and fresh Ethereum block
 fees after the exact constructor inputs, deployer and nonce are known. The
 prepared package remains unsigned and `broadcastAllowed: false`.
 
-The six other allocation destinations are purpose-labeled at genesis but the
-current contracts do not impose immutable spending caps on those balances.
-Do not advertise them as contract-locked reserves. Selecting custody and any
-additional constraints for those buckets is an explicit release decision, not
-an excuse to add a generic treasury or prebuild the later market/bridge.
+The six other allocation destinations are purpose-labeled at genesis, but the
+current production preparer does not route them through the new local-only
+`PurposeReserveVault` implementation. Do not advertise the production
+destinations as contract-locked reserves. Selecting exact custody and caps for
+those buckets is an explicit release decision, not an excuse to add a generic
+treasury or prebuild the later market/bridge.
 Creating a DEX pool is a separate public-market step and requires its own
 liquidity, price-discovery, disclosure and legal review.
 

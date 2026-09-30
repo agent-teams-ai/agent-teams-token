@@ -211,14 +211,6 @@
     },
     {
       "schemaVersion": 1,
-      "fingerprint": "sha256:7ba28f1a745ec296842bb58a3b031fad40c857450e551b1376434d2b483e02b2",
-      "owner": "project-security",
-      "disposition": "accepted-design",
-      "rationale": "Pinned OpenZeppelin compatibility constraints and all seven production sources are compatible with the pinned solc 0.8.36 compiler; differing source constraints do not select different compilers. Production compiler/closure authentication remains mandatory in the unchanged gate.",
-      "reviewedAt": "2026-09-20T00:00:00Z"
-    },
-    {
-      "schemaVersion": 1,
       "fingerprint": "sha256:b350056771ccd86c45901ba4efdcd3c8a3464ce6f03d85423144a9b59a7a04cd",
       "owner": "project-security",
       "disposition": "accepted-design",
@@ -256,6 +248,102 @@
       "disposition": "accepted-design",
       "rationale": "Variable FounderGrantReserve.VAULT intentionally uses uppercase for an immutable constructor-assigned binding with no reassignment path.",
       "reviewedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:0e9e00b810650b42904d15d5ce6c17a76c84b02737012bb46cc80c7499c993cb",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "WINDOW_SECONDS intentionally names an immutable constructor-assigned duration in uppercase; no setter exists.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:2fb0b17517a8f798bfbc5d555e020d6821682cc91d83cebab3d0f289de1b6c96",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "ROLLING_CAP intentionally names an immutable constructor-assigned cap in uppercase; no setter exists.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:71a825e3c154ba708f2966c6abdc1f30b9815784de2850a0e7f101c3edb77687",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "TOKEN intentionally names an immutable token-address binding in uppercase; this naming does not authenticate the token implementation.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:9450e838b6600f96decf18027263aa3bf351fdf1208cf7f16259c3901f50a5e4",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "CONTROLLER intentionally names an immutable authorization address in uppercase; Safe qualification remains separate.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:d1231ace1e056d1fef6f2b6d7d56e9a60eadcfd058df4d4d33ae4fa4b82a2eb8",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "OPENS_AT intentionally names an immutable constructor-assigned opening timestamp in uppercase; no setter exists.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:e480a77aa52c148eefbc8a45f0e1738a85966c8ddf2c12ed26876674fbba9a53",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "PURPOSE intentionally names an immutable purpose label in uppercase; it does not constrain recipients’ downstream spending.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:5264a558854189b7487926b3e691dadce470ff89957aa99ca64942029ac73d7f",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Chain time intentionally defines (now - WINDOW_SECONDS, now]; upper-bound search excludes the exact cutoff, and the pre-subtraction branch prevents underflow.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:75a553d887c3815c0aedee43e6473d827f5d46a12982594c47297e95557fe940",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Availability is intentionally zero before opening and afterward is the lesser of inventory and remaining rolling capacity.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:932ffd387f9e8791077e074ee76ede8f87b84561144d20cce569fb233c0e02dc",
+      "owner": "project-security",
+      "disposition": "false-positive",
+      "rationale": "grossOutflow compares array length, not time, and retains lifetime cumulative outflow after checkpoints expire.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:bf76c4cdc2324db2d2487aafeda18b515a551b80e5c886c5dd855c6d920feb8e",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "Chain time intentionally controls opening, rolling-cap expiry and same-timestamp coalescing; it is not used as randomness.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:f65f3ed40a7df2f34a03431a965569d510d3688588c217e09ca17ea759346a7d",
+      "owner": "project-security",
+      "disposition": "false-positive",
+      "rationale": "The lock remains held through exact balance verification and Outflow emission; failed transfers revert accounting and logs, and nested transfers cannot reorder vault outflows.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
+    },
+    {
+      "schemaVersion": 1,
+      "fingerprint": "sha256:a72d427b4724429216bff2861dbb9c7fbf22ed823dbfb86f16f58b32da43db07",
+      "owner": "project-security",
+      "disposition": "accepted-design",
+      "rationale": "All eight production sources require solc 0.8.36, compatible with the pinned OpenZeppelin ranges; differing source constraints do not select different compilers.",
+      "reviewedAt": "2026-09-30T11:56:22Z"
     }
   ]
 }
