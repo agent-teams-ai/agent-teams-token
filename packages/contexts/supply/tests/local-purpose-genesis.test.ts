@@ -126,6 +126,21 @@ test("rejects sparse or decorated inventories before a policy can be normalized"
   }
 });
 
+test("rejects malformed Safes and purpose policies with inherited map overrides", () => {
+  for (const [select, corrupt] of [
+    [(v: Mutable) => v.custodySafes, (v: Mutable) => { v.custodySafes[0].threshold = 1; }],
+    [(v: Mutable) => v.purposeVaults, (v: Mutable) => { v.purposeVaults[0].rollingCapBaseUnits = "0"; }],
+  ] as const) {
+    invalid(v => {
+      corrupt(v);
+      Object.setPrototypeOf(select(v), Object.create(Array.prototype, {
+        // Return a plain copy without invoking the element-validation callback.
+        map: { value(this: unknown[]) { return Array.from(this); } },
+      }));
+    });
+  }
+});
+
 test("rejects hidden required fields, unknown substitutes and accessors at object boundaries", () => {
   // Unknown keys once compensated for hidden required fields, then clone dropped the required field.
   invalid(v => { Object.defineProperty(v.purposeVaults[0], "opensAt", { enumerable: false }); v.purposeVaults[0].extra = "unknown"; });

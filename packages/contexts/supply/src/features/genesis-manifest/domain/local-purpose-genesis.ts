@@ -49,7 +49,7 @@ function exact(value: unknown, keys: readonly string[]): Record<string, unknown>
   return record;
 }
 function list(value: unknown, length: number): unknown[] {
-  if (!Array.isArray(value) || value.length !== length
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length !== length
     || Reflect.ownKeys(value).length !== length + 1) { return reject(); }
   for (let index = 0; index < length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
