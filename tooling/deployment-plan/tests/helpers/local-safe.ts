@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { TestContext } from "node:test";
 import type { Hex } from "@agent-teams/supply/deployment";
@@ -19,7 +19,7 @@ type Key = { owner: Hex; path: string };
 
 /** Owned chain, test-only identities and official provisioned Safe 1.4.1 bytes. */
 export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
-  const root = resolve(".");
+  const root = resolvePath(".");
   const selected = process.env.AGTMAI_SAFE_PINS_SHA256 as Hex | undefined;
   const directory = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY;
   assert.ok(directory && selected, "SAFE_OFFICIAL_ARTIFACTS_REQUIRED: set AGTMAI_SAFE_ARTIFACT_DIRECTORY and AGTMAI_SAFE_PINS_SHA256");
@@ -28,8 +28,8 @@ export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
   const install = join(root, ".tools/foundry-v1.8.0-linux-x64");
   const foundry = authenticateFoundryBinaries(root, { anvil: join(install, "anvil"), cast: join(install, "cast"), forge: join(install, "forge") });
   const cast = pinnedFoundryBinary(root, foundry, "cast");
-  const run = (args: string[]): Promise<string> => new Promise((done, reject) => {
-    execFile(cast, args, { timeout: 30_000, maxBuffer: 2_000_000 }, (error, stdout) => error ? reject(error) : done(stdout.trim()));
+  const run = (args: string[]): Promise<string> => new Promise((resolve, reject) => {
+    execFile(cast, args, { timeout: 30_000, maxBuffer: 2_000_000 }, (error, stdout) => error ? reject(error) : resolve(stdout.trim()));
   });
   const keys: Key[] = [];
   for (const name of [...Array.from({ length: count * 3 }, (_, i) => `owner-${i}`), "executor"]) {
@@ -45,7 +45,7 @@ export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
     const response = await fetch(anvil.rpcUrl, { method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000), headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
     assert.equal(response.status, 200);
     const body = await response.json();
-    if (body.error) throw Object.assign(new Error(body.error.message), { code: body.error.code, data: body.error.data });
+    if (body.error) { throw Object.assign(new Error(body.error.message), { code: body.error.code, data: body.error.data }); }
     return body.result;
   };
   assert.equal(await rpc("eth_chainId"), "0x7a69");

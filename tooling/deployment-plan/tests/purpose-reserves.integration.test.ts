@@ -3,8 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { calendarSchedule, prepareLocalPurposeGenesis, verifyLocalPurposePreflight, type Hex } from "@agent-teams/supply/deployment";
-import { deploymentBytes } from "@agent-teams/supply/deployment";
+import { calendarSchedule, deploymentBytes, prepareLocalPurposeGenesis, verifyLocalPurposePreflight, type Hex, type LocalPurposeArtifact, type LocalPurposeGenesis, type PreparedLocalPurposeGenesis } from "@agent-teams/supply/deployment";
 import { localPurposeCompilerPorts, readLocalPurposeArtifactPins } from "@agent-teams/supply/deployment-files";
 import { encodeAllocationId, sha256 } from "@agent-teams/supply/genesis-manifest";
 import { custodySelector, custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
@@ -15,6 +14,7 @@ const paths = contracts.map(name => name === "AGTMAICCIPToken" ? `src/features/t
 const purposes = ["long-term", "users", "operations", "ecosystem", "financing", "liquidity"] as const;
 const unit = 1_000_000_000n;
 const asAddress = (value: Hex) => `0x${value.slice(-40)}` as Hex;
+const blockIdentity = (block: { hash: Hex; number: Hex; timestamp: Hex }) => ({ blockHash: block.hash, blockNumber: BigInt(block.number).toString(), timestamp: BigInt(block.timestamp).toString() });
 
 async function buildCandidateArtifacts(root: string, temporary: string) {
   const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
@@ -25,13 +25,11 @@ async function buildCandidateArtifacts(root: string, temporary: string) {
   assert.equal(build.status, 0, build.stderr);
   const buildInfo = await readFile(join(buildRoot, "build-info", (await readdir(join(buildRoot, "build-info")))[0]!));
   const sourceInputs = (JSON.parse(buildInfo.toString()) as { input: { sources: Record<string, { content: string }> } }).input.sources;
-  const sources: Record<string, string> = {};
   for (const [path, source] of Object.entries(sourceInputs)) {
     // Bind compiler input to the actual candidate tree, including pinned dependencies.
     const committed = spawnSync("git", ["show", `${candidateRevision}:contracts/evm/${path}`], { cwd: root, encoding: "utf8" });
     assert.equal(committed.status, 0, `Uncommitted or missing candidate source: ${path}`);
     assert.equal(source.content, committed.stdout, `Candidate source differs: ${path}`);
-    sources[path] = committed.stdout;
   }
   const artifactDir = join(temporary, "artifacts");
   await mkdir(artifactDir);
@@ -45,9 +43,85 @@ async function buildCandidateArtifacts(root: string, temporary: string) {
   }
   const pinPath = join(artifactDir, "pins.json");
   await writeFile(pinPath, deploymentBytes({ schema: "agtmai-local-purpose-artifact-pins-v1", sourceRevision: candidateRevision, artifacts: pins }));
-  const loaded = await readLocalPurposeArtifactPins(pinPath, { revision: candidateRevision, sources });
-  await assert.rejects(readLocalPurposeArtifactPins(pinPath, { revision: "0".repeat(40), sources }), /ARTIFACT|INVALID|PIN/u);
+  // Admission reads the clean selected Git tree and independently recompiles with pinned solc.
+  const candidate = { repositoryRoot: root, revision: candidateRevision };
+  const loaded = await readLocalPurposeArtifactPins(pinPath, candidate);
+  await assert.rejects(readLocalPurposeArtifactPins(pinPath, { ...candidate, revision: "0".repeat(40) }), /ARTIFACT|INVALID|PIN/u);
   return { candidateRevision, loaded };
+}
+
+// Catch misrouted genesis balances, altered runtime/immutables and unenforced six-vault policy.
+async function assertGenesis(local: Awaited<ReturnType<typeof setupLocalSafes>>, prepared: PreparedLocalPurposeGenesis, expectations: {
+  tokenTransactionHash: Hex; predicted: readonly Hex[]; caps: readonly bigint[];
+  config: Pick<LocalPurposeGenesis, "reserve" | "purposeVaults">; artifacts: readonly LocalPurposeArtifact[];
+}) {
+  const { rpc, call, safes, executor } = local;
+  const { tokenTransactionHash, predicted, caps, config, artifacts } = expectations;
+  const reserve = config.reserve;
+  const token = predicted[0]!, founder = predicted[1]!, controller = predicted[2]!, nested = prepared.operations[1]!.nestedAddress!;
+  const tokenReceipt = await rpc("eth_getTransactionReceipt", [tokenTransactionHash]);
+  const allocations = tokenReceipt.logs.filter((log: { address: Hex; topics: Hex[] }) => log.address.toLowerCase() === token && log.topics[0] === custodyTopic("GenesisAllocation(bytes32,address,uint256)"));
+  assert.equal(allocations.length, 8);
+  for (const allocation of reserve.allocations) {
+    assert.equal(allocations.filter((log: { topics: Hex[]; data: Hex }) => log.topics[1] === encodeAllocationId(allocation.id) && asAddress(log.topics[2]!) === allocation.recipient && BigInt(log.data) === BigInt(allocation.amountBaseUnits)).length, 1, allocation.id);
+  }
+  const verifyRuntime = async (address: Hex, name: typeof contracts[number], values: Record<string, bigint | Hex>) => {
+    const artifact = artifacts.find(item => item.contract === name)!;
+    const actual = (await rpc("eth_getCode", [address, "latest"]) as Hex).slice(2).toLowerCase();
+    const template = artifact.runtimeBytecode.slice(2).toLowerCase();
+    assert.equal(actual.length, template.length, `${name} runtime length`);
+    const covered = new Set<number>();
+    const checkedGetters = new Set<string>();
+    for (const ref of artifact.immutableReferences) {
+      const expected = word(BigInt(values[ref.name]!));
+      assert.equal(actual.slice(ref.start * 2, (ref.start + 32) * 2), expected, `${name}.${ref.name} immutable`);
+      if (!checkedGetters.has(ref.name)) {
+        const getter = ref.name === "INITIAL_CCIP_ADMIN" ? "getCCIPAdmin" : ref.name;
+        assert.equal(await call(address, `${getter}()`), `0x${expected}`, `${name}.${ref.name} getter`);
+        checkedGetters.add(ref.name);
+      }
+      for (let byte = ref.start; byte < ref.start + 32; byte++) { covered.add(byte); }
+    }
+    for (let byte = 0; byte < actual.length / 2; byte++) {
+      if (!covered.has(byte)) { assert.equal(actual.slice(byte * 2, byte * 2 + 2), template.slice(byte * 2, byte * 2 + 2), `${name} runtime byte ${byte}`); }
+    }
+  };
+  await verifyRuntime(token, "AGTMAICCIPToken", { GENESIS_ALLOCATION_HASH: prepared.genesisAllocationHash, INITIAL_CCIP_ADMIN: safes[0]!.safe, INITIAL_SUPPLY: 100_000_000n * unit });
+  await verifyRuntime(founder, "FounderGrantReserve", { TOKEN: token, VAULT: nested });
+  await verifyRuntime(controller, "ReserveController", { TOKEN: token, CONTROLLER: safes[0]!.safe, PURPOSE: reserve.contributors.purpose as Hex, ROLLING_CAP: BigInt(reserve.contributors.rollingCapBaseUnits), PER_GRANT_CAP: BigInt(reserve.contributors.perGrantCapBaseUnits) });
+  await verifyRuntime(nested, "GrantVault", { TOKEN: token, BENEFICIARY: safes[1]!.safe, ORIGINAL_RESERVE: founder, CONTROLLER: safes[0]!.safe });
+  const balance = async (address: Hex, block?: Hex) => BigInt(await call(token, "balanceOf(address)", [address], { block }));
+  assert.equal(BigInt(await call(token, "totalSupply()")), 100_000_000n * unit);
+  assert.equal(BigInt(await call(token, "INITIAL_SUPPLY()")), 100_000_000n * unit);
+  assert.equal(BigInt(await call(token, "decimals()")), 9n);
+  assert.equal(asAddress(await call(token, "getCCIPAdmin()")), safes[0]!.safe);
+  assert.equal(await call(token, "GENESIS_ALLOCATION_HASH()"), prepared.genesisAllocationHash);
+  assert.equal(await balance(controller), 17_000_000n * unit);
+  assert.equal(await balance(nested), 3_000_000n * unit);
+  assert.equal(await balance(founder), 0n);
+  assert.equal(await balance(executor.owner), 0n);
+  assert.equal(BigInt(await call(nested, "funded()")), 1n);
+  assert.equal(asAddress(await call(nested, "BENEFICIARY()")), safes[1]!.safe);
+  assert.equal(asAddress(await call(nested, "ORIGINAL_RESERVE()")), founder);
+  const founderTerms = (await call(nested, "grant()")).slice(2).match(/.{64}/g)!;
+  assert.deepEqual(founderTerms.slice(0, 6), [word(3_000_000n * unit), word(BigInt(reserve.founder.schedule.start)), word(BigInt(reserve.founder.schedule.cliff)), word(BigInt(reserve.founder.schedule.end)), word(0n), reserve.founder.purpose.slice(2)]);
+  assert.equal(BigInt(await call(token, "allowance(address,address)", [founder, nested])), 0n);
+  const vaults = predicted.slice(3);
+  assert.equal((await Promise.all(vaults.map(address => balance(address)))).reduce((a, b) => a + b), 80_000_000n * unit);
+  for (let i = 0; i < vaults.length; i++) {
+    const vault = vaults[i]!;
+    const allocation = reserve.allocations.find(item => item.id === purposes[i])!;
+    assert.equal(await balance(vault), BigInt(allocation.amountBaseUnits), `${purposes[i]} genesis funding`);
+    assert.notEqual(await rpc("eth_getCode", [vault, "latest"]), "0x");
+    await verifyRuntime(vault, "PurposeReserveVault", { TOKEN: token, CONTROLLER: safes[0]!.safe, PURPOSE: encodeAllocationId(purposes[i]!)!, OPENS_AT: BigInt(config.purposeVaults[i]!.opensAt), WINDOW_SECONDS: BigInt(config.purposeVaults[i]!.windowSeconds), ROLLING_CAP: caps[i]! * unit });
+    assert.equal(asAddress(await call(vault, "TOKEN()")), token);
+    assert.equal(asAddress(await call(vault, "CONTROLLER()")), safes[0]!.safe);
+    assert.equal(await call(vault, "PURPOSE()"), encodeAllocationId(purposes[i]!));
+    assert.equal(BigInt(await call(vault, "ROLLING_CAP()")), caps[i]! * unit);
+    assert.equal(BigInt(await call(vault, "grossOutflow()")), 0n);
+    assert.equal(BigInt(await call(vault, "rollingOutflow()")), 0n);
+  }
+  return { token, controller, nested, vaults, balance };
 }
 
 test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 300_000 }, async t => {
@@ -94,71 +168,8 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
     receipts.push({ id: operation.id, hash: receipt.transactionHash, blockHash: receipt.blockHash, blockNumber: receipt.blockNumber, timestamp: block.timestamp, status: receipt.status, contractAddress: receipt.contractAddress });
   }
   const genesisBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
-  const token = predicted[0]!, founder = predicted[1]!, controller = predicted[2]!, nested = prepared.operations[1]!.nestedAddress!;
-  const tokenReceipt = await rpc("eth_getTransactionReceipt", [receipts[0]!.hash]);
-  const allocations = tokenReceipt.logs.filter((log: { address: Hex; topics: Hex[] }) => log.address.toLowerCase() === token && log.topics[0] === custodyTopic("GenesisAllocation(bytes32,address,uint256)"));
-  assert.equal(allocations.length, 8);
-  for (const allocation of reserve.allocations) {
-    assert.equal(allocations.filter((log: { topics: Hex[]; data: Hex }) => log.topics[1] === encodeAllocationId(allocation.id) && asAddress(log.topics[2]!) === allocation.recipient && BigInt(log.data) === BigInt(allocation.amountBaseUnits)).length, 1, allocation.id);
-  }
-  const verifyRuntime = async (address: Hex, name: typeof contracts[number], values: Record<string, bigint | Hex>) => {
-    const artifact = loaded.artifacts.find(item => item.contract === name)!;
-    const actual = (await rpc("eth_getCode", [address, "latest"]) as Hex).slice(2).toLowerCase();
-    const template = artifact.runtimeBytecode.slice(2).toLowerCase();
-    assert.equal(actual.length, template.length, `${name} runtime length`);
-    const covered = new Set<number>();
-    const checkedGetters = new Set<string>();
-    for (const ref of artifact.immutableReferences) {
-      const expected = word(BigInt(values[ref.name]!));
-      assert.equal(actual.slice(ref.start * 2, (ref.start + 32) * 2), expected, `${name}.${ref.name} immutable`);
-      if (!checkedGetters.has(ref.name)) {
-        const getter = ref.name === "INITIAL_CCIP_ADMIN" ? "getCCIPAdmin" : ref.name;
-        assert.equal(await call(address, `${getter}()`), `0x${expected}`, `${name}.${ref.name} getter`);
-        checkedGetters.add(ref.name);
-      }
-      for (let byte = ref.start; byte < ref.start + 32; byte++) covered.add(byte);
-    }
-    for (let byte = 0; byte < actual.length / 2; byte++) {
-      if (!covered.has(byte)) assert.equal(actual.slice(byte * 2, byte * 2 + 2), template.slice(byte * 2, byte * 2 + 2), `${name} runtime byte ${byte}`);
-    }
-  };
-  await verifyRuntime(token, "AGTMAICCIPToken", { GENESIS_ALLOCATION_HASH: prepared.genesisAllocationHash, INITIAL_CCIP_ADMIN: safes[0]!.safe, INITIAL_SUPPLY: 100_000_000n * unit });
-  await verifyRuntime(founder, "FounderGrantReserve", { TOKEN: token, VAULT: nested });
-  await verifyRuntime(controller, "ReserveController", { TOKEN: token, CONTROLLER: safes[0]!.safe, PURPOSE: reserve.contributors.purpose, ROLLING_CAP: BigInt(reserve.contributors.rollingCapBaseUnits), PER_GRANT_CAP: BigInt(reserve.contributors.perGrantCapBaseUnits) });
-  await verifyRuntime(nested, "GrantVault", { TOKEN: token, BENEFICIARY: safes[1]!.safe, ORIGINAL_RESERVE: founder, CONTROLLER: safes[0]!.safe });
-  const balance = async (address: Hex, block?: Hex) => BigInt(await call(token, "balanceOf(address)", [address], { block }));
-  assert.equal(BigInt(await call(token, "totalSupply()")), 100_000_000n * unit);
-  assert.equal(BigInt(await call(token, "INITIAL_SUPPLY()")), 100_000_000n * unit);
-  assert.equal(BigInt(await call(token, "decimals()")), 9n);
-  assert.equal(asAddress(await call(token, "getCCIPAdmin()")), safes[0]!.safe);
-  assert.equal(await call(token, "GENESIS_ALLOCATION_HASH()"), prepared.genesisAllocationHash);
-  assert.equal(await balance(controller), 17_000_000n * unit);
-  assert.equal(await balance(nested), 3_000_000n * unit);
-  assert.equal(await balance(founder), 0n);
-  assert.equal(await balance(executor.owner), 0n);
-  assert.equal(BigInt(await call(nested, "funded()")), 1n);
-  assert.equal(asAddress(await call(nested, "BENEFICIARY()")), safes[1]!.safe);
-  assert.equal(asAddress(await call(nested, "ORIGINAL_RESERVE()")), founder);
-  const founderTerms = (await call(nested, "grant()")).slice(2).match(/.{64}/g)!;
-  assert.deepEqual(founderTerms.slice(0, 6), [word(3_000_000n * unit), word(BigInt(reserve.founder.schedule.start)), word(BigInt(reserve.founder.schedule.cliff)), word(BigInt(reserve.founder.schedule.end)), word(0n), reserve.founder.purpose.slice(2)]);
-  assert.equal(BigInt(await call(token, "allowance(address,address)", [founder, nested])), 0n);
-  const vaults = predicted.slice(3);
-  assert.equal((await Promise.all(vaults.map(address => balance(address)))).reduce((a, b) => a + b), 80_000_000n * unit);
-  for (let i = 0; i < vaults.length; i++) {
-    const vault = vaults[i]!;
-    const allocation = reserve.allocations.find(item => item.id === purposes[i])!;
-    assert.equal(await balance(vault), BigInt(allocation.amountBaseUnits), `${purposes[i]} genesis funding`);
-    assert.notEqual(await rpc("eth_getCode", [vault, "latest"]), "0x");
-    await verifyRuntime(vault, "PurposeReserveVault", { TOKEN: token, CONTROLLER: safes[0]!.safe, PURPOSE: encodeAllocationId(purposes[i]!)!, OPENS_AT: BigInt(config.purposeVaults[i]!.opensAt), WINDOW_SECONDS: BigInt(config.purposeVaults[i]!.windowSeconds), ROLLING_CAP: caps[i]! * unit });
-    assert.equal(asAddress(await call(vault, "TOKEN()")), token);
-    assert.equal(asAddress(await call(vault, "CONTROLLER()")), safes[0]!.safe);
-    assert.equal(await call(vault, "PURPOSE()"), encodeAllocationId(purposes[i]!));
-    assert.equal(BigInt(await call(vault, "ROLLING_CAP()")), caps[i]! * unit);
-    assert.equal(BigInt(await call(vault, "grossOutflow()")), 0n);
-    assert.equal(BigInt(await call(vault, "rollingOutflow()")), 0n);
-  }
+  const { token, controller, nested, vaults, balance } = await assertGenesis(local, prepared, { tokenTransactionHash: receipts[0]!.hash, predicted, caps, config, artifacts: loaded.artifacts });
   assert.equal((await rpc("eth_getBlockByNumber", ["latest", false])).hash, genesisBlock.hash);
-  const blockIdentity = (block: { hash: Hex; number: Hex; timestamp: Hex }) => ({ blockHash: block.hash, blockNumber: BigInt(block.number).toString(), timestamp: BigInt(block.timestamp).toString() });
   const vaultStatesAt = (block: Hex) => Promise.all(vaults.map(async (vault, i) => ({ allocationId: purposes[i], address: vault, balance: (await balance(vault, block)).toString(), grossOutflow: BigInt(await call(vault, "grossOutflow()", [], { block })).toString(), rollingOutflow: BigInt(await call(vault, "rollingOutflow()", [], { block })).toString() })));
   const genesisVaultStates = await vaultStatesAt(genesisBlock.number);
   const recipient = executor.owner;
