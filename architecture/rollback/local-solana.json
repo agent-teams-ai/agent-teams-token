@@ -70,8 +70,8 @@
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
-      "beforeSha256": "a73bf7e0f1a672af95e590f9b001794f77fb776f6010e87679924988fd7b798f",
-      "afterSha256": "aeff33f97b71a252ba465a8515c0db9dd9821ac3c344e06027497b458bfda826"
+      "beforeSha256": "c1e19fc4a43afef46c3a7a6418eff79aa54d392f633b732c1d63deb7c098fdc7",
+      "afterSha256": "023101b0b1ff8464d3152394fdf229d312307f04ccab370f9ac83ae76108704a"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
@@ -80,8 +80,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "27eddcd913ae480acf21ada1b56952d3bbccf85d71fd9123f8c3b4e99c56b367",
-      "afterSha256": "dbbb2949d0a83270e49eba4b0508002dee91538b630889a9e3eee4f80a182466"
+      "beforeSha256": "297675a4b5b5e77ba9f9574f7c8cd18078d45eca06816b7a0c15424c2ce2a933",
+      "afterSha256": "5b60614fa94734c647c033c3ce3487b675942401f6b24f40c85f944351d82abe"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
@@ -122,7 +122,7 @@
     },
     {
       "path": "scripts/tests/node26-compatibility.test.mjs",
-      "sha256": "6afc3830b87159ac37d0d06d1a60862564a9495f6326846bc395c4a363e40573",
+      "sha256": "e4502b93abb34194a901ad047e1697ce5595fa7f746777afc3b6634081215371",
       "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {
