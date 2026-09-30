@@ -282,18 +282,20 @@ function holdMutationTimestamps(victim) {
 }
 
 for (const [stage, size] of [
-  ["before-target-quarantine", 12], ["before-entry-quarantine", 12],
-  ["before-entry-delete", 12], ["before-entry-delete", 3 * 64 * 1024 + 17],
+  ["before-target-quarantine", 13], ["before-entry-quarantine", 13],
+  ["before-entry-delete", 13], ["before-entry-delete", 3 * 64 * 1024 + 17],
 ]) {
   test(`strict cleanup preserves ${size} same-size bytes with identical metadata at ${stage}`, () => {
     const current = fixture();
     let restore;
     try {
       const victim = join(checkout(current.target), "owned");
-      const original = size === 12 ? Buffer.from("owned-before\n") : Buffer.alloc(size, 0x61);
+      const original = size === 13 ? Buffer.from("owned-before\n") : Buffer.alloc(size, 0x61);
       const replacement = Buffer.from(original);
-      if (size === 12) { replacement.set(Buffer.from("foreign-now!\n")); }
+      assert.equal(original.length, size);
+      if (size === 13) { replacement.set(Buffer.from("foreign-now!\n")); }
       else { replacement[64 * 1024 + 5] = 0x62; } // Interior byte beyond the first chunk.
+      assert.equal(replacement.length, size);
       writeFileSync(victim, original);
       restore = holdMutationTimestamps(victim);
       const handle = createCleanupHandle(current.target, current.policy);
