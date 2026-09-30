@@ -8,6 +8,33 @@ export const settings = { evmVersion: "paris", optimizer: { enabled: true, runs:
   remappings: ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/", "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"],
   outputSelection: { "*": { "*": ["abi", "evm.bytecode", "evm.deployedBytecode", "metadata", "storageLayout"], "": ["ast"] } } };
 
+/** Model the reported pinned Forge presentation differences; never claim this is a Forge invocation. */
+export function forgePresentation(output: Record<string, any>): Record<string, any> {
+  const presented = structuredClone(output);
+  for (const contracts of Object.values(presented.contracts) as Record<string, any>[]) {
+    for (const contract of Object.values(contracts)) {
+      if (Array.isArray(contract.abi)) { contract.abi.reverse(); }
+      contract.devdoc = { kind: "dev", methods: {}, version: 1 };
+      contract.userdoc = { kind: "user", methods: {}, version: 1 };
+      if (contract.storageLayout?.storage.length === 0) { delete contract.storageLayout; }
+      if (contract.evm.methodIdentifiers && !Object.keys(contract.evm.methodIdentifiers).length) { delete contract.evm.methodIdentifiers; }
+      if (contract.evm.deployedBytecode.immutableReferences && !Object.keys(contract.evm.deployedBytecode.immutableReferences).length) {
+        delete contract.evm.deployedBytecode.immutableReferences;
+      }
+    }
+  }
+  addEmptyNodes(presented.sources);
+  return presented;
+}
+
+function addEmptyNodes(value: any): void {
+  if (Array.isArray(value)) { value.forEach(addEmptyNodes); }
+  else if (value !== null && typeof value === "object") {
+    if (typeof value.nodeType === "string" && !Object.hasOwn(value, "nodes")) { value.nodes = []; }
+    Object.values(value).forEach(addEmptyNodes);
+  }
+}
+
 /** Disposable Git fixture, with real tracked Solidity and lock/pin bytes. No source-repository writes. */
 export async function buildFixture(): Promise<{ candidate: LocalPurposeCandidate; sources: Readonly<Record<string, string>>; input: Record<string, any>; inputs: string }> {
   const repository = resolve("../../..");

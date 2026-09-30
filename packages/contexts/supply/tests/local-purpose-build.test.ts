@@ -4,8 +4,9 @@ import { chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promise
 import { join } from "node:path";
 import test from "node:test";
 import { readLocalPurposeGitSources, verifiedLocalPurposeCompilerInput, assertLocalPurposeCompilerOutput, compileLocalPurposeBuild } from "../src/features/genesis-manifest/adapters/local-purpose-build.js";
-import { buildFixture } from "./local-purpose-build-fixture.js";
+import { buildFixture, forgePresentation } from "./local-purpose-build-fixture.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
+import { deploymentBytes } from "../src/features/genesis-manifest/application/compile-deployment.js";
 
 const invalid = /DEPLOYMENT_ARTIFACT_PINS_INVALID/;
 for (const treePath of ["contracts", "contracts/evm", "contracts/evm/src", "contracts/evm/src/features/purpose-reserves"]) {
@@ -162,6 +163,71 @@ test("independent compiler oracle rejects coherent creation/runtime/metadata/imm
     assert.match(sha256(buildBytes), /^0x[0-9a-f]{64}$/);
     assert.match(sha256(artifactBytes), /^0x[0-9a-f]{64}$/);
     assert.throws(() => assertLocalPurposeCompilerOutput(JSON.parse(buildBytes.toString()).output, fresh), invalid);
+  }
+});
+
+test("compiler output admits only Forge presentation changes while preserving code, ABI multiplicity and AST identity", () => {
+  // Semantic comparison fixture only; the artifact-reader test invokes authenticated solc.
+  const fresh: Record<string, any> = {
+    contracts: { "Vault.sol": {
+      PurposeReserveVault: { metadata: "exact metadata", storageLayout: { storage: [], types: null },
+        abi: [
+          { type: "function", name: "move", inputs: [{ name: "recipient", type: "address" }, { name: "amount", type: "uint256" }], outputs: [], stateMutability: "nonpayable" },
+          { type: "function", name: "move", inputs: [{ name: "request", type: "tuple", components: [{ name: "recipient", type: "address" }, { name: "amount", type: "uint256" }] }], outputs: [], stateMutability: "nonpayable" },
+        ],
+        evm: { bytecode: { object: "60006000f3", linkReferences: {} }, methodIdentifiers: {},
+          deployedBytecode: { object: "60".repeat(100), linkReferences: {}, immutableReferences: { "1": [{ start: 2, length: 32 }] } } } },
+      Unselected: { metadata: "other metadata", abi: [], storageLayout: { storage: [], types: null },
+        evm: { bytecode: { object: "", linkReferences: {} }, methodIdentifiers: {}, deployedBytecode: { object: "", linkReferences: {}, immutableReferences: {} } } },
+    } },
+    sources: { "Vault.sol": { id: 0, ast: { nodeType: "SourceUnit", nodes: [
+      { nodeType: "VariableDeclaration", id: 1, mutability: "immutable", name: "TOKEN", src: "0:10:0", typeDescriptions: { typeString: "address" } },
+      { nodeType: "ParameterList", id: 2, parameters: [] },
+    ] } } },
+  };
+  const presented = forgePresentation(fresh);
+  // Both exact comparisons in the old admission reject this legitimate presentation.
+  assert.notEqual(sha256(deploymentBytes(presented.contracts)), sha256(deploymentBytes(fresh.contracts)));
+  assert.notEqual(sha256(deploymentBytes(presented.sources)), sha256(deploymentBytes(fresh.sources)));
+  const before = structuredClone(presented);
+  assert.doesNotThrow(() => assertLocalPurposeCompilerOutput(presented, fresh));
+  assert.deepEqual(presented, before); // Comparison never rewrites the evidence or oracle.
+  assert.doesNotThrow(() => assertLocalPurposeCompilerOutput(fresh, presented));
+  const mutations: Record<string, (v: Record<string, any>) => void> = {
+    creation: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.bytecode.object = "60016000f3"; },
+    runtime: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.deployedBytecode.object = "61".repeat(100); },
+    metadata: v => { v.contracts["Vault.sol"].PurposeReserveVault.metadata = "forged metadata"; },
+    immutableOffset: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.deployedBytecode.immutableReferences["1"][0].start++; },
+    immutableLength: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.deployedBytecode.immutableReferences["1"][0].length = 31; },
+    immutableId: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.deployedBytecode.immutableReferences = { "3": [{ start: 2, length: 32 }] }; },
+    missingImmutables: v => { delete v.contracts["Vault.sol"].PurposeReserveVault.evm.deployedBytecode.immutableReferences; },
+    nullImmutables: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.deployedBytecode.immutableReferences = null; },
+    immutableName: v => { v.sources["Vault.sol"].ast.nodes[0].name = "CONTROLLER"; },
+    astId: v => { v.sources["Vault.sol"].ast.nodes[0].id = 3; },
+    astMutability: v => { v.sources["Vault.sol"].ast.nodes[0].mutability = "mutable"; },
+    astLocation: v => { v.sources["Vault.sol"].ast.nodes[0].src = "1:10:0"; },
+    nonemptyNodes: v => { v.sources["Vault.sol"].ast.nodes[0].nodes.push({ nodeType: "VariableDeclaration", id: 3, mutability: "immutable", name: "CONTROLLER" }); },
+    otherEmptyArray: v => { delete v.sources["Vault.sol"].ast.nodes[1].parameters; },
+    missingAst: v => { delete v.sources["Vault.sol"].ast; },
+    sourceId: v => { v.sources["Vault.sol"].id = 1; },
+    extraSource: v => { v.sources["Injected.sol"] = structuredClone(v.sources["Vault.sol"]); },
+    missingSource: v => { delete v.sources["Vault.sol"]; },
+    // immutableNames traverses all source fields, so an out-of-AST injection must fail too.
+    injectedImmutable: v => { v.sources["Vault.sol"].extra = { nodeType: "VariableDeclaration", id: 1, mutability: "immutable", name: "CONTROLLER" }; },
+    missingAbi: v => { delete v.contracts["Vault.sol"].PurposeReserveVault.abi; },
+    duplicateAbi: v => { v.contracts["Vault.sol"].PurposeReserveVault.abi.push(structuredClone(v.contracts["Vault.sol"].PurposeReserveVault.abi[0])); },
+    removedAbi: v => { v.contracts["Vault.sol"].PurposeReserveVault.abi.pop(); },
+    abiParameterOrder: v => { v.contracts["Vault.sol"].PurposeReserveVault.abi[1].inputs.reverse(); },
+    abiTupleOrder: v => { v.contracts["Vault.sol"].PurposeReserveVault.abi[0].inputs[0].components.reverse(); },
+    abiMutability: v => { v.contracts["Vault.sol"].PurposeReserveVault.abi[0].stateMutability = "view"; },
+    unselectedCode: v => { v.contracts["Vault.sol"].Unselected.evm.bytecode.object = "60006000f3"; },
+    extraContract: v => { v.contracts["Vault.sol"].Injected = structuredClone(v.contracts["Vault.sol"].Unselected); },
+    missingContract: v => { delete v.contracts["Vault.sol"].Unselected; },
+    linkReferences: v => { v.contracts["Vault.sol"].PurposeReserveVault.evm.bytecode.linkReferences = { "Library.sol": { Library: [{ start: 1, length: 20 }] } }; },
+  };
+  for (const [name, mutate] of Object.entries(mutations)) {
+    const forged = structuredClone(presented); mutate(forged);
+    assert.throws(() => assertLocalPurposeCompilerOutput(forged, fresh), invalid, name);
   }
 });
 

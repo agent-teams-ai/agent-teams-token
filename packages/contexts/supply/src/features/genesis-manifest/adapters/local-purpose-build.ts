@@ -140,11 +140,41 @@ function assertLocalPurposeCompilerSettings(settings: Record<string, unknown>): 
   object(settings.outputSelection);
 }
 
-/** Compare independent compiler output, including the AST that gives immutable IDs their names. */
+/** Foundry reorders ABI entries; nested parameter/component order remains significant. */
+function abiMultiset(value: unknown): readonly string[] | null {
+  if (value === undefined) { return null; }
+  if (!Array.isArray(value)) { return refuse(); }
+  return value.map(entry => sha256(deploymentBytes(object(entry)))).toSorted();
+}
+
+function contractSemantics(value: unknown): Record<string, unknown> {
+  const contract = object(value), evm = object(contract.evm);
+  const bytecode = object(evm.bytecode), runtime = object(evm.deployedBytecode);
+  if (typeof contract.metadata !== "string" || typeof bytecode.object !== "string" || typeof runtime.object !== "string") { return refuse(); }
+  // Compare every contract, including unselected libraries/interfaces. Documentation,
+  // storageLayout, methodIdentifiers and disassembly are not decoder inputs.
+  return { metadata: contract.metadata, abi: abiMultiset(contract.abi), bytecode: bytecode.object, runtime: runtime.object,
+    linkReferences: object(bytecode.linkReferences === undefined ? {} : bytecode.linkReferences),
+    runtimeLinkReferences: object(runtime.linkReferences === undefined ? {} : runtime.linkReferences),
+    immutableReferences: object(runtime.immutableReferences === undefined ? {} : runtime.immutableReferences) };
+}
+
+/** Only absent versus empty AST nodes is presentation; all other fields/order are identity. */
+function withoutEmptyNodes(value: unknown): unknown {
+  if (Array.isArray(value)) { return value.map(withoutEmptyNodes); }
+  if (value === null || typeof value !== "object") { return value; }
+  return Object.fromEntries(Object.entries(value).filter(([key, child]) =>
+    !(key === "nodes" && Array.isArray(child) && child.length === 0)).map(([key, child]) => [key, withoutEmptyNodes(child)]));
+}
+
+/** Fresh solc is authority for code, metadata, ABI and the complete immutable-name source inventory. */
 export function assertLocalPurposeCompilerOutput(supplied: unknown, fresh: unknown): void {
   const claimed = object(supplied), compiled = object(fresh);
-  if (!same(object(claimed.contracts), object(compiled.contracts))
-    || !same(object(claimed.sources), object(compiled.sources))) { refuse(); }
+  const contracts = (value: unknown) => Object.fromEntries(Object.entries(object(value)).map(([source, entries]) =>
+    [source, Object.fromEntries(Object.entries(object(entries)).map(([name, contract]) => [name, contractSemantics(contract)]))]));
+  if (!same(contracts(claimed.contracts), contracts(compiled.contracts))
+    // Keep the entire source records bound: immutableNames traverses all their fields.
+    || !same(withoutEmptyNodes(object(claimed.sources)), withoutEmptyNodes(object(compiled.sources)))) { refuse(); }
 }
 
 /** Fresh pinned compiler, private snapshot, bounded process, and no callback/import path to ambient files. */

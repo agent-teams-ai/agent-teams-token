@@ -5,7 +5,7 @@ import test from "node:test";
 import { readLocalPurposeArtifactPins } from "../src/features/genesis-manifest/adapters/deployment-artifacts.js";
 import { compileLocalPurposeBuild } from "../src/features/genesis-manifest/adapters/local-purpose-build.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
-import { buildFixture } from "./local-purpose-build-fixture.js";
+import { buildFixture, forgePresentation } from "./local-purpose-build-fixture.js";
 
 const layouts = {
   AGTMAICCIPToken: ["GENESIS_ALLOCATION_HASH", "INITIAL_CCIP_ADMIN", "INITIAL_SUPPLY"],
@@ -76,6 +76,16 @@ test("reader compares every artifact with an actual authenticated pinned compile
   const selected = { ...candidate, sources: Object.fromEntries(Object.entries(input.sources as Record<string, { content: string }>).map(([name, entry]) => [name, entry.content])) };
   const loaded = await readLocalPurposeArtifactPins(path, selected);
   assert.equal(loaded.artifacts.length, 5);
+  const presented = forgePresentation(fresh);
+  assert.notEqual(sha256(Buffer.from(JSON.stringify(presented))), sha256(Buffer.from(JSON.stringify(fresh))));
+  await publish(inputs, candidate.revision, input, presented);
+  const admitted = await readLocalPurposeArtifactPins(path, selected);
+  for (const artifact of admitted.artifacts) {
+    const original = loaded.artifacts.find(entry => entry.contract === artifact.contract)!;
+    assert.equal(artifact.creationBytecode, original.creationBytecode);
+    assert.equal(artifact.runtimeBytecode, original.runtimeBytecode);
+    assert.deepEqual(artifact.immutableReferences, original.immutableReferences);
+  }
   for (const mutate of [
     (target: Record<string, any>) => { target.evm.bytecode.object = "60006000f3"; },
     (target: Record<string, any>) => { target.evm.deployedBytecode.object = `61${target.evm.deployedBytecode.object.slice(2)}`; },
