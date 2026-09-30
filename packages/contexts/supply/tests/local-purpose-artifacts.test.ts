@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { readLocalPurposeArtifactPins } from "../src/features/genesis-manifest/adapters/deployment-artifacts.js";
 import { compileLocalPurposeBuild } from "../src/features/genesis-manifest/adapters/local-purpose-build.js";
@@ -42,14 +43,16 @@ function fictitiousOutput(): Record<string, any> {
     const refs = Object.fromEntries(names.map((_, index) => [String(firstId + index), [{ start: 1 + 32 * index, length: 32 }]]));
     const metadata = JSON.stringify({ compiler: { version: "0.8.36+commit.8a079791" }, settings: { compilationTarget: { [path]: contract } } });
     output.contracts[path] = { [contract]: { metadata, evm: { bytecode: { object: "60006000f3", linkReferences: {} },
-      deployedBytecode: { object: `60${"00".repeat(32 * names.length)}`, immutableReferences: refs, linkReferences: {} } } } };
+      deployedBytecode: { object: `60${"00".repeat(32 * names.length)}00`, immutableReferences: refs, linkReferences: {} } } } };
     output.sources[path] = { ast: { nodes: names.map((name, index) => ({ nodeType: "VariableDeclaration", mutability: "immutable", id: firstId + index, name })) } };
     firstId += names.length;
   }
   return output;
 }
 
-test("reader rejects a coherent forged Git source map even with agreeing candidate and pin revision labels", async context => {
+const compilerPlatformSkip = (process.platform !== "linux" || process.arch !== "x64") && "requires pinned Linux x64 solc";
+
+test("reader rejects a coherent forged Git source map even with agreeing candidate and pin revision labels", { skip: compilerPlatformSkip }, async context => {
   const { candidate, input, inputs, sources } = await buildFixture();
   context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
   const forged = { ...sources };
@@ -60,11 +63,23 @@ test("reader rejects a coherent forged Git source map even with agreeing candida
   const { path } = await publish(inputs, candidate.revision, input, fictitiousOutput());
   // Old reader accepted this supplied map as its authority. Extra map has no authority in the new IO API.
   const labelled = { ...candidate, sources: forged };
-  await assert.rejects(readLocalPurposeArtifactPins(path, labelled), /DEPLOYMENT_ARTIFACT_PINS_INVALID/);
+  await assert.rejects(readLocalPurposeArtifactPins(path, labelled), error => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, "DEPLOYMENT_ARTIFACT_PINS_INVALID");
+    // Bounds/metadata rejection must not mask the Git-vs-build-input check.
+    assert.match(error.stack!, /at verifiedLocalPurposeCompilerInput\b/);
+    return true;
+  });
 });
 
-test("reader compares every artifact with an actual authenticated pinned compiler invocation", async context => {
-  const installed = resolve("../../../.tools/solc-v0.8.36-linux-x64/solc");
+test("reader compares every artifact with an actual authenticated pinned compiler invocation", { skip: compilerPlatformSkip }, async context => {
+  // Locate the workspace from the module, including compiled .local/tests output.
+  let repository = import.meta.dirname;
+  while (!existsSync(join(repository, "pnpm-workspace.yaml"))) {
+    assert.notEqual(repository, dirname(repository), "repository workspace not found");
+    repository = dirname(repository);
+  }
+  const installed = join(repository, ".tools/solc-v0.8.36-linux-x64/solc");
   // This qualification is required, and missing pinned prerequisites must fail visibly.
   const binary = await readFile(installed);
   const { candidate, input, inputs } = await buildFixture();

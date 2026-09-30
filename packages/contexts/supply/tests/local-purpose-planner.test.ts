@@ -63,6 +63,9 @@ test("existing v1 token ABI and allocation commitment remain byte-for-byte stabl
     + `${word(BigInt(normalized.allocations.length))}${normalized.allocations.map(a =>
       `${a.idBytes32.slice(2)}${a.recipient.slice(2).padStart(64, "0")}${word(BigInt(a.amountBaseUnits))}`).join("")}`;
   assert.equal(actual.constructorArgs, expectedArgs);
+  // Independent Foundry 1.8.0 cast abi-encode + keccak vector for the v1 tuple:
+  // domain, chain 1, name/symbol hashes, decimals 9, supply 10^17, sorted allocations.
+  assert.equal(actual.genesisAllocationHash, "0x434dbfaa6fdefb3a843e981e8ef04009e88d14b48a040396aa2e5075add44d53");
   assert.deepEqual(actual, encodeLocalPurposeToken(deployment.environment.evmChainId, deployment.token.initialSupplyBaseUnits,
     deployment.token.initialCCIPAdmin!, normalized.allocations));
 });
