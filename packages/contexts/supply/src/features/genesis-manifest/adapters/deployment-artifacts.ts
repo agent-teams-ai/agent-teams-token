@@ -1,10 +1,12 @@
 import { basename, dirname, resolve, join } from "node:path";
 import { deploymentBytes, type DeploymentArtifact, type PreparedDeployment } from "../application/compile-deployment.js";
 import type { ProductionArtifactPin } from "../application/prepare-production-deployment.js";
+import type { LocalPurposeArtifact, LocalPurposeContract } from "../application/prepare-local-purpose-genesis.js";
 import { isDigest } from "../domain/deployment.js";
 import { readDeploymentFile } from "./deployment-store.js";
 import { sha256 } from "./digest.js";
 import { parseStrict } from "./strict-source.js";
+import { readLocalPurposeGitSources, compileLocalPurposeBuild, assertLocalPurposeCompilerOutput, type LocalPurposeCandidate } from "./local-purpose-build.js";
 
 const refuse = (): never => { throw new Error("DEPLOYMENT_ARTIFACT_PINS_INVALID"); };
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : refuse();
@@ -49,10 +51,39 @@ export async function readProductionArtifactPins(path: string): Promise<{ readon
   return { sourceRevision: pins.sourceRevision, artifacts, files };
 }
 
-async function readProductionPinnedArtifact(input: unknown, path: string): Promise<{ readonly artifact: ProductionArtifactPin; readonly files: Record<string, Uint8Array> }> {
+/** Closed local-only inventory; the historic v1 and production inventories retain their schemas. */
+export async function readLocalPurposeArtifactPins(path: string, candidate: LocalPurposeCandidate): Promise<{ readonly sourceRevision: string; readonly artifacts: readonly LocalPurposeArtifact[]; readonly files: Readonly<Record<string, Uint8Array>> }> {
+  const parsed = parseStrict(new TextDecoder().decode(await readDeploymentFile(path, 1_048_576)));
+  if (parsed.diagnostics.length) { return refuse(); }
+  const pins = record(parsed.value);
+  exact(pins, ["schema", "sourceRevision", "artifacts"]);
+  const names: readonly LocalPurposeContract[] = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", "PurposeReserveVault", "GrantVault"];
+  if (pins.schema !== "agtmai-local-purpose-artifact-pins-v1" || typeof pins.sourceRevision !== "string"
+    || !/^[0-9a-f]{40}$/.test(pins.sourceRevision) || !Array.isArray(pins.artifacts) || pins.artifacts.length !== names.length) { return refuse(); }
+  if (!candidate || candidate.revision !== pins.sourceRevision) { return refuse(); }
+  await readLocalPurposeGitSources(candidate);
+  const builds = new Map<string, Record<string, unknown>>();
+  const artifacts: LocalPurposeArtifact[] = [];
+  const files: Record<string, Uint8Array> = {};
+  for (const item of pins.artifacts) {
+    const loaded = await readProductionPinnedArtifact(item, path, names);
+    const build = json(loaded.files[`${(item as { contract: string }).contract.toLowerCase()}.build-info.json`]!);
+    const key = sha256(deploymentBytes(build.input));
+    let fresh = builds.get(key);
+    if (!fresh) { fresh = await compileLocalPurposeBuild(candidate, build.input); builds.set(key, fresh); }
+    // Provided build-info is evidence to check, never the bytecode/AST oracle.
+    assertLocalPurposeCompilerOutput(build.output, fresh);
+    artifacts.push(loaded.artifact as unknown as LocalPurposeArtifact);
+    Object.assign(files, loaded.files);
+  }
+  if (new Set(artifacts.map(a => a.contract)).size !== names.length) { return refuse(); }
+  await readLocalPurposeGitSources(candidate);
+  return { sourceRevision: pins.sourceRevision, artifacts, files };
+}
+
+async function readProductionPinnedArtifact(input: unknown, path: string, contracts: readonly string[] = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"]): Promise<{ readonly artifact: ProductionArtifactPin; readonly files: Record<string, Uint8Array> }> {
   const pin = record(input);
   exact(pin, ["contract", "artifactPath", "artifactSha256", "buildInfoPath", "buildInfoSha256"]);
-  const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"];
   if (typeof pin.contract !== "string" || !contracts.includes(pin.contract) || typeof pin.artifactPath !== "string" || typeof pin.buildInfoPath !== "string" || !isDigest(pin.artifactSha256) || !isDigest(pin.buildInfoSha256)) { return refuse(); }
   const artifactPath = pinnedPath(path, pin.artifactPath, [`${pin.contract}.json`, `${pin.contract.toLowerCase()}.artifact.json`]);
   const buildInfoPath = pinnedPath(path, pin.buildInfoPath, [`${pin.contract.toLowerCase()}.build-info.json`], true);
@@ -140,7 +171,9 @@ function productionImmutableReferences(runtime: Record<string, unknown>, build: 
     }).toSorted((a, b) => a.start - b.start);
     const expected = contract === "AGTMAICCIPToken" ? ["GENESIS_ALLOCATION_HASH", "INITIAL_CCIP_ADMIN", "INITIAL_SUPPLY"]
       : contract === "FounderGrantReserve" ? ["TOKEN", "VAULT"]
-      : contract === "ReserveController" ? ["CONTROLLER", "PER_GRANT_CAP", "PURPOSE", "ROLLING_CAP", "TOKEN"] : [];
+      : contract === "ReserveController" ? ["CONTROLLER", "PER_GRANT_CAP", "PURPOSE", "ROLLING_CAP", "TOKEN"]
+      : contract === "PurposeReserveVault" ? ["CONTROLLER", "OPENS_AT", "PURPOSE", "ROLLING_CAP", "TOKEN", "WINDOW_SECONDS"]
+      : contract === "GrantVault" ? ["BENEFICIARY", "CONTROLLER", "ORIGINAL_RESERVE", "TOKEN"] : [];
     const observedNames = [...new Set(references.map(reference => reference.name))].toSorted();
     if (observedNames.join() !== expected.toSorted().join()
       || references.some((reference, index) => index > 0 && reference.start < references[index - 1]!.start + 32)) { return refuse(); }

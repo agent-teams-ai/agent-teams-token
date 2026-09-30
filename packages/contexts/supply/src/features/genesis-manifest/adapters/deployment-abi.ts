@@ -1,4 +1,4 @@
-import { encodeAllocationId, type NormalizedAllocation } from "../domain/model.js";
+import { encodeAllocationId, EXPECTED_TOKEN, type NormalizedAllocation } from "../domain/model.js";
 import { isEvmAddress, type DeploymentConfig, type DeploymentGrant, type Hex } from "../domain/deployment.js";
 import { encodeAllocationCommitment } from "./abi.js";
 
@@ -16,10 +16,18 @@ const productionWord = (value: bigint): string => {
 };
 
 export function encodeDeploymentToken(config: DeploymentConfig, allocations: readonly NormalizedAllocation[]): { constructorArgs: Hex; rawAllocationAbi: Hex; genesisAllocationHash: Hex } {
+  return encodeLocalPurposeToken(config.environment.evmChainId, config.token.initialSupplyBaseUnits, config.token.initialCCIPAdmin, allocations);
+}
+
+export function encodeLocalPurposeToken(chainId: string, supply: string, administrator: Hex, allocations: readonly NormalizedAllocation[]): { constructorArgs: Hex; rawAllocationAbi: Hex; genesisAllocationHash: Hex } {
   const body = allocations.map(a => `${a.idBytes32.slice(2)}${addressWord(a.recipient)}${word(BigInt(a.amountBaseUnits))}`).join("");
-  const constructorArgs: Hex = `0x${word(BigInt(config.token.initialSupplyBaseUnits))}${word(96n)}${addressWord(config.token.initialCCIPAdmin)}${word(BigInt(allocations.length))}${body}`;
-  const commitment = encodeAllocationCommitment({ network: { chainId: config.environment.evmChainId }, token: config.token }, allocations);
+  const constructorArgs: Hex = `0x${word(BigInt(supply))}${word(96n)}${addressWord(administrator)}${word(BigInt(allocations.length))}${body}`;
+  const commitment = encodeAllocationCommitment({ network: { chainId }, token: { ...EXPECTED_TOKEN, initialSupplyBaseUnits: supply } }, allocations);
   return { constructorArgs, rawAllocationAbi: commitment.rawAbi, genesisAllocationHash: commitment.hash };
+}
+
+export function encodeLocalPurposeVault(input: { token: Hex; controller: Hex; purpose: Hex; opensAt: string; windowSeconds: string; rollingCap: string }): Hex {
+  return `0x${[addressWord(input.token), addressWord(input.controller), input.purpose.slice(2), word(BigInt(input.opensAt)), word(BigInt(input.windowSeconds)), word(BigInt(input.rollingCap))].join("")}`;
 }
 
 /** The actual GrantVault constructor: four addresses followed by the six static Terms words. */

@@ -48,6 +48,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/domain/deployment.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/grant-schedule.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/reserve-genesis.ts
+      - packages/contexts/supply/src/features/genesis-manifest/domain/local-purpose-genesis.ts
       - packages/contexts/supply/src/features/genesis-manifest/domain/production-deployment.ts
     allow:
       boundaries: []
@@ -65,6 +66,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/application/canonical.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts
       - packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts
+      - packages/contexts/supply/src/features/genesis-manifest/application/prepare-local-purpose-genesis.ts
     allow:
       boundaries:
         - supply.genesis-manifest.domain
@@ -80,6 +82,7 @@ boundaries:
       - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-abi.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-store.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts
+      - packages/contexts/supply/src/features/genesis-manifest/adapters/local-purpose-build.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-observations.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-evidence.ts
       - packages/contexts/supply/src/features/genesis-manifest/adapters/passport-render.ts
@@ -94,6 +97,7 @@ boundaries:
         - "@noble/hashes"
         - yaml
       builtins:
+        - node:child_process
         - node:crypto
         - node:fs/promises
         - node:path
