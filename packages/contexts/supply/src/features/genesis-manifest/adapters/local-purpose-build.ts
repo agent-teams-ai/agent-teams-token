@@ -26,6 +26,40 @@ function git(root: string, args: readonly string[]): Buffer {
   return result.stdout;
 }
 
+function authenticatedGitObject(root: string, type: "commit" | "tree", identity: string): Buffer {
+  const bytes = git(root, ["cat-file", type, identity]);
+  if (createHash("sha1").update(`${type} ${bytes.length}\0`).update(bytes).digest("hex") !== identity) { return refuse(); }
+  return bytes;
+}
+
+/** Follow only child IDs decoded from authenticated parent bytes, never ls-tree traversal. */
+function authenticatedGitBlobs(root: string, revision: string): readonly { path: string; identity: string }[] {
+  const commit = authenticatedGitObject(root, "commit", revision);
+  const tree = /^tree ([0-9a-f]{40})\n/.exec(commit.toString("utf8"));
+  if (!tree) { return refuse(); }
+  const blobs: { path: string; identity: string }[] = [];
+  const walk = (identity: string, prefix: string): void => {
+    const bytes = authenticatedGitObject(root, "tree", identity);
+    for (let offset = 0; offset < bytes.length;) {
+      // Git tree records are: octal mode, space, name, NUL, twenty raw SHA1 bytes.
+      const space = bytes.indexOf(0x20, offset), nul = bytes.indexOf(0, offset);
+      if (space <= offset || nul <= space + 1 || nul + 21 > bytes.length) { return refuse(); }
+      const mode = bytes.subarray(offset, space).toString("utf8");
+      const name = bytes.subarray(space + 1, nul).toString("utf8");
+      const child = bytes.subarray(nul + 1, nul + 21).toString("hex");
+      offset = nul + 21;
+      const path = `${prefix}${name}`;
+      if (!canonicalPaths.some(p => path === p || path.startsWith(`${p}/`) || p.startsWith(`${path}/`))) { continue; }
+      if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") { return refuse(); }
+      if (mode === "40000") { walk(child, `${path}/`); }
+      else if (mode === "100644" || mode === "100755") { blobs.push({ path, identity: child }); }
+      else { return refuse(); }
+    }
+  };
+  walk(tree[1]!, "");
+  return blobs;
+}
+
 /** IO authority: Git objects, not an authored source map. Recheck even files hidden by index flags. */
 export async function readLocalPurposeGitSources(candidate: LocalPurposeCandidate): Promise<Readonly<Record<string, string>>> {
   if (!candidate || typeof candidate.repositoryRoot !== "string" || !/^[0-9a-f]{40}$/.test(candidate.revision)) { return refuse(); }
@@ -33,17 +67,16 @@ export async function readLocalPurposeGitSources(candidate: LocalPurposeCandidat
   if (await realpath(root) !== root || git(root, ["rev-parse", "--show-toplevel"]).toString().trim() !== root
     || git(root, ["rev-parse", "HEAD"]).toString().trim() !== candidate.revision
     || git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"]).length) { return refuse(); }
-  const entries = git(root, ["ls-tree", "-r", "-z", candidate.revision, "--", ...canonicalPaths]).toString().split("\0").filter(Boolean);
+  const entries = authenticatedGitBlobs(root, candidate.revision);
   const files = new Map<string, Uint8Array>();
   const sources: Record<string, string> = {};
-  for (const entry of entries) {
-    const match = /^(100644|100755) blob ([0-9a-f]{40})\t([A-Za-z0-9._/-]+)$/.exec(entry);
-    if (!match || match[3]!.split("/").some(p => !p || p === "." || p === "..")) { return refuse(); }
-    const path = match[3]!, bytes = await readDeploymentFile(join(root, path));
+  for (const { path, identity: expected } of entries) {
+    if (files.has(path)) { return refuse(); }
+    const bytes = await readDeploymentFile(join(root, path));
     // Recompute Git's blob identity. cat-file can return substituted loose blob bytes
     // without checking their hash, so comparing two reads is not source authority.
     const identity = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
-    if (identity !== match[2]) { return refuse(); }
+    if (identity !== expected) { return refuse(); }
     files.set(path, bytes);
     if (path.endsWith(".sol") && (path.startsWith(`${sourcePrefix}src/`) || path.startsWith(`${sourcePrefix}lib/`))) {
       sources[path.slice(sourcePrefix.length)] = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

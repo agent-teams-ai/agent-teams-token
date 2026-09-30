@@ -8,6 +8,37 @@ import { buildFixture } from "./local-purpose-build-fixture.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 
 const invalid = /DEPLOYMENT_ARTIFACT_PINS_INVALID/;
+for (const treePath of ["contracts", "contracts/evm", "contracts/evm/src", "contracts/evm/src/features/purpose-reserves"]) {
+  test(`Git authority rejects substituted ${treePath} tree bytes before compilation`, async context => {
+    const { candidate, input } = await buildFixture();
+    context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
+    const git = (args: string[]) => execFileSync("/usr/bin/git", ["-C", candidate.repositoryRoot, ...args]);
+    const relative = "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol";
+    const commit = git(["cat-file", "commit", candidate.revision]);
+    const treeAt = (revision: string) => git(["rev-parse", `${revision}:${treePath}`]).toString().trim();
+    const original = treeAt(candidate.revision);
+    const forged = "contract PurposeReserveVault {}\n";
+    await writeFile(join(candidate.repositoryRoot, relative), forged);
+    git(["add", relative]);
+    const replacementRoot = git(["write-tree"]).toString().trim();
+    const replacement = treeAt(replacementRoot);
+    git(["update-index", "--assume-unchanged", relative]);
+    const objectPath = (id: string) => join(candidate.repositoryRoot, ".git/objects", id.slice(0, 2), id.slice(2));
+    await chmod(objectPath(original), 0o600);
+    await copyFile(objectPath(replacement), objectPath(original));
+    assert.deepEqual(git(["cat-file", "commit", candidate.revision]), commit);
+    assert.equal(git(["rev-parse", "HEAD"]).toString().trim(), candidate.revision);
+    assert.equal(git(["status", "--porcelain"]).toString(), "");
+    // The counterfeit tree points to a genuine, hash-matching malicious blob.
+    assert.equal(git(["show", `${candidate.revision}:${relative}`]).toString(), forged);
+    input.sources[relative.slice("contracts/evm/".length)].content = forged;
+    // No compiler is installed: reaching compiler admission would throw ENOENT,
+    // so this pins rejection to source authentication, before compilation.
+    await assert.rejects(compileLocalPurposeBuild(candidate, input), invalid);
+    await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
+  });
+}
+
 test("Git authority rejects source bytes stored under a different blob's claimed identity", async context => {
   const { candidate } = await buildFixture();
   context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
