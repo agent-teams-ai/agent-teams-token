@@ -14,7 +14,7 @@
   },
   "strictInstall": {
     "command": "pnpm install --frozen-lockfile --config.engine-strict=true",
-    "status": "blocked-by-upstream-engine-ranges",
+    "status": "pending-lock-regeneration",
     "blockers": [
       {
         "name": "@agent-teams/docs-protocol",
@@ -49,8 +49,8 @@
     ]
   },
   "focusedCompatibility": {
-    "install": "pnpm install --frozen-lockfile --config.engine-strict=false",
-    "reason": "Exercise repository and dependency behavior on Node 26 while the recorded upstream engine declarations remain unresolved",
+    "install": "pnpm install --frozen-lockfile --config.engine-strict=true",
+    "reason": "Exercise repository and dependency behavior on Node 24 and Node 26 with strict package engines after lock regeneration",
     "checks": [
       "pnpm check:fast",
       "pnpm lint",

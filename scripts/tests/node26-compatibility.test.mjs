@@ -77,7 +77,11 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
     assert.ok(Number.isInteger(job["timeout-minutes"]));
     assert.ok(job["timeout-minutes"] <= 20);
   }
-  assert.equal(node26Workflow.jobs["node26-strict-install"]["continue-on-error"], true);
+  assert.equal(node26Workflow.jobs["node26-strict-install"]["continue-on-error"], undefined);
+  for (const job of Object.values(node26Workflow.jobs)) {
+    assert.deepEqual(job.strategy.matrix["node-version"], ["24.21.0", "26.10.0"]);
+    assert.equal(job.strategy["fail-fast"], false);
+  }
   assert.equal(node26Workflow.jobs["node26-focused-checks"]["continue-on-error"], undefined);
   for (const [name, job] of Object.entries(node26Workflow.jobs)) {
     const checkout = job.steps.find((step) => step.name === "Checkout exact head");
@@ -89,7 +93,7 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
   const setupActions = Object.values(node26Workflow.jobs).map((job) => job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")));
   for (const action of setupActions) {
     assert.equal(action.uses, "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38");
-    assert.equal(action.with["node-version"], "26.10.0");
+    assert.equal(action.with["node-version"], "${{ matrix.node-version }}");
     assert.equal(action.with["check-latest"], false);
   }
 
@@ -103,7 +107,7 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
   assert.equal(uses.filter((value) => value.startsWith("actions/upload-artifact@")).length, 1);
 });
 
-test("Node 26 lane records upstream engine blockers and runs observable regression suites", () => {
+test("Node 26 lane requires strict engines and runs observable regression suites", () => {
   const lock = parse(readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8"));
   const blockers = node26Policy.strictInstall.blockers.map(({ name, version }) => `${name}@${version}`).toSorted();
   const lockBlockers = Object.entries(lock.packages)
@@ -117,7 +121,7 @@ test("Node 26 lane records upstream engine blockers and runs observable regressi
   }
   assert.deepEqual(node26Policy.strictInstall, {
     command: "pnpm install --frozen-lockfile --config.engine-strict=true",
-    status: "blocked-by-upstream-engine-ranges",
+    status: "pending-lock-regeneration",
     blockers: node26Policy.strictInstall.blockers,
   });
 
@@ -131,7 +135,7 @@ test("Node 26 lane records upstream engine blockers and runs observable regressi
 
   const strictInstall = node26Workflow.jobs["node26-strict-install"].steps.find((step) => step.name === "Attempt frozen strict install").run;
   const focusedChecks = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Run focused Node 26 compatibility checks").run;
-  const focusedInstall = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Install frozen workspace with recorded upstream engine exceptions").run;
+  const focusedInstall = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Install frozen workspace with strict engines").run;
   const packageScripts = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")).scripts;
   assert.ok(strictInstall.includes('pnpm peers check --lockfile-only 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"'));
   assert.ok(strictInstall.includes(node26Policy.strictInstall.command + ' 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"'));
@@ -193,20 +197,20 @@ test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen in
   }
 });
 
-test("focused lane bootstraps pinned cast before supply tests while retaining Node 26 on PATH", () => {
+test("focused lanes bootstrap pinned cast before supply tests while retaining the matrix Node on PATH", () => {
   const steps = node26Workflow.jobs["node26-focused-checks"].steps;
   const bootstrapIndex = steps.findIndex((step) => step.name === "Fetch, install and verify pinned repository tools");
-  const installIndex = steps.findIndex((step) => step.name === "Install frozen workspace with recorded upstream engine exceptions");
+  const installIndex = steps.findIndex((step) => step.name === "Install frozen workspace with strict engines");
   const checksIndex = steps.findIndex((step) => step.name === "Run focused Node 26 compatibility checks");
   assert.ok(bootstrapIndex > 0 && bootstrapIndex < installIndex && installIndex < checksIndex);
   assert.deepEqual(steps[bootstrapIndex].run.trimEnd().split("\n"), [
     "./dev bootstrap fetch",
     "./dev bootstrap install --offline",
     "./dev bootstrap verify --offline",
-    'test "$(node --version)" = "v26.10.0"',
+    'test "$(node --version)" = "v${{ matrix.node-version }}"',
     'test "$(.tools/bin/node --version)" = "v24.20.0"',
   ]);
-  assert.ok(steps[checksIndex].run.split("\n").includes('test "$(node --version)" = "v26.10.0"'));
+  assert.ok(steps[checksIndex].run.split("\n").includes('test "$(node --version)" = "v${{ matrix.node-version }}"'));
   const rootScripts = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")).scripts;
   assert.match(rootScripts.test, /pnpm --filter @agent-teams\/token-domain test:built/u);
   assert.match(rootScripts.test, /pnpm --filter @agent-teams\/supply test:built/u);

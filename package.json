@@ -69,9 +69,9 @@
     "test:custody:local": ".tools/bin/node --test tooling/testnet-ccip/tests/custody-*.test.ts"
   },
   "devDependencies": {
-    "@agent-teams/docs-protocol": "0.6.0",
-    "@agent-teams/docs-protocol-agent-teams": "0.2.9",
-    "@agent-teams/engineering-foundation": "1.4.0",
+    "@agent-teams/docs-protocol": "0.6.2",
+    "@agent-teams/docs-protocol-agent-teams": "0.2.13",
+    "@agent-teams/engineering-foundation": "1.7.0",
     "@types/node": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:",
