@@ -45,7 +45,7 @@ export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
     const response = await fetch(anvil.rpcUrl, { method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000), headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.error, undefined, JSON.stringify(body.error));
+    if (body.error) throw Object.assign(new Error(body.error.message), { code: body.error.code, data: body.error.data });
     return body.result;
   };
   assert.equal(await rpc("eth_chainId"), "0x7a69");
@@ -55,7 +55,7 @@ export async function setupLocalSafes(t: TestContext, count: 1 | 2 = 1) {
   await rpc("evm_mine");
   assert.equal(BigInt((await rpc("eth_getBlockByNumber", ["latest", false])).timestamp), beforeSlowOperation + 1n);
   const encode = (signature: string, args: string[]) => run(["calldata", signature, ...args]) as Promise<Hex>;
-  const call = async (to: Hex, signature: string, args: string[] = []) => rpc("eth_call", [{ to, data: await encode(signature, args) }, "latest"]) as Promise<Hex>;
+  const call = async (to: Hex, signature: string, args: string[] = [], options: { from?: Hex; block?: Hex } = {}) => rpc("eth_call", [{ to, data: await encode(signature, args), ...(options.from ? { from: options.from } : {}) }, options.block ?? "latest"]) as Promise<Hex>;
   const send = async (to: Hex | null, data: Hex) => {
     const nonce = await rpc("eth_getTransactionCount", [executor.owner, "latest"]);
     const hash = await run(["send", "--rpc-url", anvil.rpcUrl, "--chain", "31337", "--keystore", executor.path, "--password", "local-test-only", "--gas-limit", "6000000", "--async", ...(to ? [to, data] : ["--create", data])]);

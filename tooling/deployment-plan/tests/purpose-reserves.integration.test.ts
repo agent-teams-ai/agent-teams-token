@@ -7,7 +7,7 @@ import { calendarSchedule, prepareLocalPurposeGenesis, verifyLocalPurposePreflig
 import { deploymentBytes } from "@agent-teams/supply/deployment";
 import { localPurposeCompilerPorts, readLocalPurposeArtifactPins } from "@agent-teams/supply/deployment-files";
 import { encodeAllocationId, sha256 } from "@agent-teams/supply/genesis-manifest";
-import { custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
+import { custodySelector, custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
 import { setupLocalSafes, ZERO, word } from "./helpers/local-safe.ts";
 
 const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", "PurposeReserveVault", "GrantVault"] as const;
@@ -126,7 +126,7 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   await verifyRuntime(founder, "FounderGrantReserve", { TOKEN: token, VAULT: nested });
   await verifyRuntime(controller, "ReserveController", { TOKEN: token, CONTROLLER: safes[0]!.safe, PURPOSE: reserve.contributors.purpose, ROLLING_CAP: BigInt(reserve.contributors.rollingCapBaseUnits), PER_GRANT_CAP: BigInt(reserve.contributors.perGrantCapBaseUnits) });
   await verifyRuntime(nested, "GrantVault", { TOKEN: token, BENEFICIARY: safes[1]!.safe, ORIGINAL_RESERVE: founder, CONTROLLER: safes[0]!.safe });
-  const balance = async (address: Hex) => BigInt(await call(token, "balanceOf(address)", [address]));
+  const balance = async (address: Hex, block?: Hex) => BigInt(await call(token, "balanceOf(address)", [address], { block }));
   assert.equal(BigInt(await call(token, "totalSupply()")), 100_000_000n * unit);
   assert.equal(BigInt(await call(token, "INITIAL_SUPPLY()")), 100_000_000n * unit);
   assert.equal(BigInt(await call(token, "decimals()")), 9n);
@@ -143,9 +143,11 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   assert.deepEqual(founderTerms.slice(0, 6), [word(3_000_000n * unit), word(BigInt(reserve.founder.schedule.start)), word(BigInt(reserve.founder.schedule.cliff)), word(BigInt(reserve.founder.schedule.end)), word(0n), reserve.founder.purpose.slice(2)]);
   assert.equal(BigInt(await call(token, "allowance(address,address)", [founder, nested])), 0n);
   const vaults = predicted.slice(3);
-  assert.equal((await Promise.all(vaults.map(balance))).reduce((a, b) => a + b), 80_000_000n * unit);
+  assert.equal((await Promise.all(vaults.map(address => balance(address)))).reduce((a, b) => a + b), 80_000_000n * unit);
   for (let i = 0; i < vaults.length; i++) {
     const vault = vaults[i]!;
+    const allocation = reserve.allocations.find(item => item.id === purposes[i])!;
+    assert.equal(await balance(vault), BigInt(allocation.amountBaseUnits), `${purposes[i]} genesis funding`);
     assert.notEqual(await rpc("eth_getCode", [vault, "latest"]), "0x");
     await verifyRuntime(vault, "PurposeReserveVault", { TOKEN: token, CONTROLLER: safes[0]!.safe, PURPOSE: encodeAllocationId(purposes[i]!)!, OPENS_AT: BigInt(config.purposeVaults[i]!.opensAt), WINDOW_SECONDS: BigInt(config.purposeVaults[i]!.windowSeconds), ROLLING_CAP: caps[i]! * unit });
     assert.equal(asAddress(await call(vault, "TOKEN()")), token);
@@ -156,6 +158,9 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
     assert.equal(BigInt(await call(vault, "rollingOutflow()")), 0n);
   }
   assert.equal((await rpc("eth_getBlockByNumber", ["latest", false])).hash, genesisBlock.hash);
+  const blockIdentity = (block: { hash: Hex; number: Hex; timestamp: Hex }) => ({ blockHash: block.hash, blockNumber: BigInt(block.number).toString(), timestamp: BigInt(block.timestamp).toString() });
+  const vaultStatesAt = (block: Hex) => Promise.all(vaults.map(async (vault, i) => ({ allocationId: purposes[i], address: vault, balance: (await balance(vault, block)).toString(), grossOutflow: BigInt(await call(vault, "grossOutflow()", [], { block })).toString(), rollingOutflow: BigInt(await call(vault, "rollingOutflow()", [], { block })).toString() })));
+  const genesisVaultStates = await vaultStatesAt(genesisBlock.number);
   const recipient = executor.owner;
   const scenarioReceipts: { scenario: string; transactionHash: Hex; blockHash: Hex; blockNumber: string; timestamp: string; innerSuccess: boolean }[] = [];
   const recordSafe = async (scenario: string, result: Awaited<ReturnType<typeof safeExec>>) => {
@@ -165,19 +170,37 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
     }
     return result;
   };
-  const outflow = async (vault: Hex, value: bigint) => recordSafe(`outflow:${vault}:${value}`, await safeExec(safes[0]!, vault, await encode("transferOut(address,uint256)", [recipient, value.toString()])));
-  await assert.rejects(call(vaults[0]!, "transferOut(address,uint256)", [recipient, "1"]));
+  const outflow = async (vault: Hex, value: bigint) => {
+    const beforeVault = await balance(vault), beforeRecipient = await balance(recipient);
+    const result = await recordSafe(`outflow:${vault}:${value}`, await safeExec(safes[0]!, vault, await encode("transferOut(address,uint256)", [recipient, value.toString()])));
+    assert.equal(await balance(vault), beforeVault - (result.success ? value : 0n), "exact vault debit");
+    assert.equal(await balance(recipient), beforeRecipient + (result.success ? value : 0n), "exact recipient credit");
+    return result;
+  };
   assert.equal((await safeExec(safes[0]!, vaults[0]!, await encode("transferOut(address,uint256)", [recipient, "1"]), 1)).success, false);
   assert.equal((await outflow(vaults[0]!, unit)).success, false, "pre-opening Safe inner failure");
   await rpc("evm_setNextBlockTimestamp", [1800000160]);
   await rpc("evm_mine");
-  for (let i = 0; i < vaults.length; i++) {
-    const result = await outflow(vaults[i]!, unit);
-    assert.equal(result.success, true, purposes[i]);
-    assert.equal(BigInt(await call(vaults[i]!, "grossOutflow()")), unit);
-  }
   const first = vaults[0]!;
-  const saturated = await outflow(first, caps[0]! * unit - unit);
+  assert.notEqual(executor.owner, safes[0]!.safe);
+  assert.ok(BigInt((await rpc("eth_getBlockByNumber", ["latest", false])).timestamp) >= BigInt(config.purposeVaults[0]!.opensAt));
+  assert.ok(await balance(first) >= unit);
+  assert.ok(BigInt(await call(first, "availableOutflow()")) >= unit);
+  const unauthorizedState = async () => ({ vaultBalance: await balance(first), recipientBalance: await balance(recipient), gross: await call(first, "grossOutflow()"), rolling: await call(first, "rollingOutflow()"), available: await call(first, "availableOutflow()") });
+  const beforeUnauthorized = await unauthorizedState();
+  await assert.rejects(call(first, "transferOut(address,uint256)", [recipient, unit.toString()], { from: executor.owner }), (error: unknown) => error instanceof Error && "data" in error && error.data === custodySelector("Unauthorized()"));
+  const unauthorizedReceipt = await send(first, await encode("transferOut(address,uint256)", [recipient, unit.toString()]));
+  assert.equal(unauthorizedReceipt.status, "0x0", "non-controller transaction must revert after opening");
+  assert.equal(unauthorizedReceipt.logs.length, 0, "unauthorized transaction emits no outflow or token transfer");
+  assert.deepEqual(await unauthorizedState(), beforeUnauthorized, "unauthorized call leaves balances and accounting unchanged");
+  for (let i = 0; i < vaults.length; i++) {
+    // One base unit of early headroom cannot mask a late expiry of the saturation checkpoint.
+    const amount = i === 0 ? 1n : unit;
+    const result = await outflow(vaults[i]!, amount);
+    assert.equal(result.success, true, purposes[i]);
+    assert.equal(BigInt(await call(vaults[i]!, "grossOutflow()")), amount);
+  }
+  const saturated = await outflow(first, caps[0]! * unit - 1n);
   assert.equal(saturated.success, true);
   const saturationBlock = await rpc("eth_getBlockByHash", [saturated.receipt!.blockHash, false]);
   assert.equal((await outflow(first, 1n)).success, false, "cap saturated");
@@ -185,10 +208,18 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   assert.equal(refund.status, "0x1");
   assert.equal((await outflow(first, 1n)).success, false, "refund does not erase gross history");
   const expiry = BigInt(saturationBlock.timestamp) + 100n;
+  await rpc("evm_setNextBlockTimestamp", [Number(expiry - 1n)]);
+  const beforeExpiry = await outflow(first, unit);
+  assert.equal(beforeExpiry.success, false, "one second before expiry, spend exceeds the earlier one-base-unit headroom");
+  assert.equal(BigInt((await rpc("eth_getBlockByHash", [beforeExpiry.receipt!.blockHash, false])).timestamp), expiry - 1n);
+  assert.equal(BigInt(await call(first, "rollingOutflow()")), caps[0]! * unit - 1n);
+  assert.equal(BigInt(await call(first, "availableOutflow()")), 1n);
+  assert.equal(BigInt(await call(first, "grossOutflow()")), caps[0]! * unit);
   await rpc("evm_setNextBlockTimestamp", [Number(expiry)]);
   const expired = await outflow(first, unit);
   assert.equal(expired.success, true, "exact expiry permits returned inventory");
   assert.equal(BigInt((await rpc("eth_getBlockByHash", [expired.receipt!.blockHash, false])).timestamp), expiry);
+  assert.equal(BigInt(await call(first, "rollingOutflow()")), unit, "saturation checkpoint expires at the exact cutoff");
   assert.equal(BigInt(await call(first, "grossOutflow()")), (caps[0]! + 1n) * unit);
   const grantSchedule = calendarSchedule("1800003000");
   const grantCall = await encode("commit(address,(uint256,uint64,uint64,uint64,uint8,bytes32))", [safes[1]!.safe, `(${unit},${grantSchedule.start},${grantSchedule.cliff},${grantSchedule.end},1,${reserve.contributors.purpose})`]);
@@ -212,9 +243,17 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   assert.equal(await balance(grantVault), unit - refundAmount);
   assert.equal(BigInt(await call(controller, "grossCommitted()")), unit);
   assert.equal(receipts.length, 10);
-  assert.equal((await Promise.all([controller, nested, grantVault, ...vaults, recipient].map(balance))).reduce((a, b) => a + b), 100_000_000n * unit);
-  const vaultStates = await Promise.all(vaults.map(async (vault, i) => ({ allocationId: purposes[i], address: vault, balance: (await balance(vault)).toString(), grossOutflow: BigInt(await call(vault, "grossOutflow()")).toString(), rollingOutflow: BigInt(await call(vault, "rollingOutflow()")).toString() })));
-  const report = { schema: "agtmai-local-purpose-proof-v1", evidenceClass: "observed-disposable-local-execution", status: "success", qualification: "disposable-local-only", candidateRevision, configuration: prepared.configuration, configurationSha256: prepared.configurationSha256, planSha256: prepared.planSha256, artifacts: prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactSha256: artifact.artifactSha256, buildInfoSha256: artifact.buildInfoSha256, compilerInputSha256: artifact.compilerInputSha256 })), safes: safes.map(safe => ({ address: safe.safe, owners: safe.owners, threshold: 2, singleton: local.singleton, proxyCodeHash: local.pins.proxy.runtimeKeccak256, singletonCodeHash: local.pins.singleton.runtimeKeccak256, setupTransaction: safe.setup.transactionHash, guard: ZERO, fallbackHandler: ZERO, modules: [] })), genesis: { blockHash: genesisBlock.hash, blockNumber: genesisBlock.number, allocations: reserve.allocations, founderVault: nested, vaultStates }, receipts, scenarioReceipts, scenarios: { sixSafeOutflows: true, preOpeningDenied: true, capSaturated: true, refundDidNotReplenishCap: true, exactExpirySpend: true, unauthorizedDenied: true, oneSignatureDenied: true, founderFunded: true, contributorGrantRefunded: true }, conservation: "100000000000000000", cleanup: "complete" };
+  assert.equal((await Promise.all([controller, nested, grantVault, ...vaults, recipient].map(address => balance(address)))).reduce((a, b) => a + b), 100_000_000n * unit);
+  const finalBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
+  const finalVaultStates = await vaultStatesAt(finalBlock.number);
+  const report = { schema: "agtmai-local-purpose-proof-v1", evidenceClass: "observed-disposable-local-execution", status: "success", qualification: "disposable-local-only", candidateRevision, configuration: prepared.configuration, configurationSha256: prepared.configurationSha256, planSha256: prepared.planSha256, artifacts: prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactSha256: artifact.artifactSha256, buildInfoSha256: artifact.buildInfoSha256, compilerInputSha256: artifact.compilerInputSha256 })), safes: safes.map(safe => ({ address: safe.safe, owners: safe.owners, threshold: 2, singleton: local.singleton, proxyCodeHash: local.pins.proxy.runtimeKeccak256, singletonCodeHash: local.pins.singleton.runtimeKeccak256, setupTransaction: safe.setup.transactionHash, guard: ZERO, fallbackHandler: ZERO, modules: [] })), genesis: { ...blockIdentity(genesisBlock), allocations: reserve.allocations, founderVault: nested, vaultStates: genesisVaultStates }, finalState: { ...blockIdentity(finalBlock), vaultStates: finalVaultStates }, receipts, scenarioReceipts, scenarios: { sixSafeOutflows: true, preOpeningDenied: true, capSaturated: true, refundDidNotReplenishCap: true, exactExpirySpend: true, unauthorizedDenied: true, oneSignatureDenied: true, founderFunded: true, contributorGrantRefunded: true }, conservation: "100000000000000000", cleanup: "complete" };
+  // Validate the serialized snapshot labels against the chain before disposing it.
+  for (const snapshot of [report.genesis, report.finalState]) {
+    const block = await rpc("eth_getBlockByHash", [snapshot.blockHash, false]);
+    assert.equal(BigInt(block.number).toString(), snapshot.blockNumber);
+    assert.equal(BigInt(block.timestamp).toString(), snapshot.timestamp);
+    assert.deepEqual(snapshot.vaultStates, await vaultStatesAt(block.number), "reported vault state belongs to its labeled block");
+  }
   await local.cleanup();
   t.diagnostic(`LOCAL_PURPOSE_E2E_SUCCESS ${JSON.stringify(report)}`);
 });
