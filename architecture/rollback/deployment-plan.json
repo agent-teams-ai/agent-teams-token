@@ -81,8 +81,8 @@
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
-      "beforeSha256": "5d3b4fcb95c171e84e7f6ed57f98ff0e30830742908f826cfc299faf023e5c42",
-      "afterSha256": "bc7ab156085048061efd75a21ee426cfbffaea8dbcc25023ab23a11c13902a72"
+      "beforeSha256": "52e80a3c7c9c312a0fa31af1c944cadf761c8986ca96bb1b18375bb5c8fc555c",
+      "afterSha256": "62dee96597997eec4dc0696c55bece82d59fcf819442d99abd2fc1507373476a"
     },
     {
       "path": "package.json",
@@ -91,7 +91,7 @@
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-      "beforeSha256": "cdb43c639eb82e0f862904639db2cc403f110d2fb7c05b82ae35365c8eb99f5a",
+      "beforeSha256": "f51080c3ad2c7babe38665d962e2109c719765b19b3ea53508e34233dc65d6ab",
       "afterSha256": "9ad40ca763848d8aa572240adcb1482b82d9a46f993ed1e550197d0b2f26ae47"
     },
     {
@@ -101,7 +101,7 @@
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-      "beforeSha256": "8ab52a2ad05ffbdc93d7d9259c0473c3cc7872b4a77feca3439c5bc2ca68c409",
+      "beforeSha256": "50a166071320c7ee470095d7fe813b05a7b00738bab7d670bd41fd3f636d568a",
       "afterSha256": "b21325d8ef6d9adf0f04ae314f7e6ce9ea824dddd9b67c46782ae38b85aa4046"
     },
     {
