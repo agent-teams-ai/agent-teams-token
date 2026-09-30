@@ -13,6 +13,14 @@ select any valid recipient; transferred assets are no longer controlled by
 the vault. Returns and donations do not restore gross cap use. Exact production
 caps, dates, recipients, custody, deployment and market controls remain open.
 
+Checkpoint 2 review found that matching supplied revision labels, source maps
+and artifact/build-info records did not establish Git or compiler authority.
+Local artifact admission must use the exact clean selected Git tree, verify
+vendored dependency pins, and compare with fresh output from the authenticated
+pinned compiler. Preflight must observe every top-level and nested CREATE target
+exactly once in a dense inventory. These fixes do not qualify local execution;
+candidate-bound compiler and full gates remain required before acceptance.
+
 ## Accepted release sequence, 2026-09-24
 
 The owner selected [Ethereum-first Mainnet genesis](decisions/0010-ethereum-first-launch-sequence.md).

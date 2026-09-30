@@ -23,6 +23,14 @@ function approval(input: ReserveGenesis): `0x${string}` {
   return sha256(new TextEncoder().encode(canonicalJson(validateReserveGenesis(input) as unknown as JsonValue)));
 }
 
+test("v1 accepted normalization keeps its established canonical bytes", () => {
+  const source = fixture();
+  assert.equal(approval(source), "0x2b927897053755c986783c7e6a32e5192ed54e19238f85a95063766a32fc44b5");
+  assert.equal(approval({ ...source, allocations: source.allocations.toReversed() }), approval(source));
+  assert.deepEqual(validateReserveGenesis(source).allocations.map(a => a.id),
+    ["contributors", "ecosystem", "financing", "founder", "liquidity", "long-term", "operations", "users"]);
+});
+
 test("offline facts bind exact allocation, founder rights and gross cap inputs deterministically", () => {
   const source = fixture(), hash = approval(source);
   const first = verifyReserveFacts(source, hash, { sha256 });
