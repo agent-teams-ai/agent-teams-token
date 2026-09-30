@@ -110,6 +110,7 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
 test("Node 26 lane requires strict engines and runs observable regression suites", () => {
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
   const lock = parse(readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8"));
+  const workspace = parse(readFileSync(join(repositoryRoot, "pnpm-workspace.yaml"), "utf8"));
   const lockBlockers = Object.entries(lock.packages)
     .filter(([, value]) => value.engines?.node === ">=24.18.0 <25")
     .map(([name]) => name)
@@ -123,11 +124,16 @@ test("Node 26 lane requires strict engines and runs observable regression suites
     "@agent-teams/repository-mutation": "0.2.2",
   })) {
     assert.equal(lock.packages[`${name}@${version}`].engines.node, "^24.18.0 || ^26.0.0", name);
-    if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation", "@agent-teams/repository-mutation"].includes(name)) {
+    if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation"].includes(name)) {
       assert.equal(lock.importers["."].devDependencies[name].specifier, version, name);
       assert.equal(packageJson.devDependencies[name], version, name);
     }
   }
+  // Docs Cohort owns this published dependency transitively; Foundation rejects a direct root role.
+  assert.equal(packageJson.devDependencies["@agent-teams/repository-mutation"], undefined);
+  assert.equal(lock.importers["."].devDependencies["@agent-teams/repository-mutation"], undefined);
+  assert.deepEqual(workspace.publicHoistPattern, ["@agent-teams/repository-mutation"]);
+  assert.equal(lock.snapshots["@agent-teams/docs-protocol@0.6.2"].dependencies["@agent-teams/repository-mutation"], "0.2.2");
   assert.deepEqual(node26Policy.strictInstall, {
     command: "pnpm install --frozen-lockfile --config.engine-strict=true",
     status: "qualified",
@@ -159,7 +165,7 @@ test("Node 26 lane requires strict engines and runs observable regression suites
   assert.doesNotMatch(node26WorkflowText, /agent commands|launch|provisioning|terminal runtime|task assignment|smoke flows|mainnet|seed phrase|private key/iu);
 });
 
-test("docs gate resolves repository mutation v2 from the root physical install", () => {
+test("docs gate resolves transitive repository mutation v2 from the root physical install", () => {
   const installed = join(repositoryRoot, "node_modules/@agent-teams/repository-mutation");
   const physical = realpathSync(installed);
   const manifest = JSON.parse(readFileSync(join(physical, "package.json"), "utf8"));

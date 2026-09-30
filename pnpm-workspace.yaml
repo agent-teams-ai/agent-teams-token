@@ -5,6 +5,8 @@ packages:
 
 catalogMode: strict
 autoInstallPeers: false
+publicHoistPattern:
+  - '@agent-teams/repository-mutation'
 catalog:
   "@types/node": 24.13.3
   "@noble/hashes": 2.4.0
