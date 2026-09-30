@@ -163,13 +163,11 @@ export function removeQuarantinedEntry({
   if (kind === "directory") {
     heldDescriptor = openDirectoryDescriptor(sourcePath);
   } else if (kind === "file") {
-    heldDescriptor = openSync(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    heldDescriptor = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   }
   let primaryFailure;
   try {
-    if (heldDescriptor !== undefined) {
-      assertSameIdentity(before, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
-    }
+    assertHeldEntryIdentity(before, heldDescriptor, logicalPath);
     state.nextSlot += 1;
     const slot = "entry-" + String(state.nextSlot).padStart(7, "0");
     const stagedPath = descriptorChild(staging.descriptor, slot);
@@ -181,18 +179,8 @@ export function removeQuarantinedEntry({
     });
     assertCustodyDescriptor(parentDescriptor);
     assertCustodyDescriptor(staging.descriptor);
-    const atQuarantineBoundary = assertCleanupStrictFingerprint(
-      expected.fingerprint,
-      sourcePath,
-      logicalPath,
-    );
-    if (heldDescriptor !== undefined) {
-      assertSameIdentity(
-        atQuarantineBoundary,
-        fstatSync(heldDescriptor, { bigint: true }),
-        logicalPath,
-      );
-    }
+    const atQuarantineBoundary = assertCleanupStrictFingerprint(expected.fingerprint, sourcePath, logicalPath);
+    assertHeldEntryIdentity(atQuarantineBoundary, heldDescriptor, logicalPath);
     assertCleanupDestinationAbsent(
       stagedPath,
       "ROLLBACK_CLEANUP_ENTRY_DESTINATION_SUBSTITUTED path=" + logicalPath,
@@ -203,14 +191,13 @@ export function removeQuarantinedEntry({
       updateCustodyDescriptor(heldDescriptor, realpathSync(stagedPath), stagedIdentity);
     }
     assertSameIdentity(before, stagedIdentity, logicalPath);
-    if (heldDescriptor !== undefined) {
-      assertSameIdentity(stagedIdentity, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
+    assertHeldEntryIdentity(stagedIdentity, heldDescriptor, logicalPath);
+    let stagedFingerprint = cleanupStrictIdentityFingerprint(stagedIdentity, kind, stagedPath);
+    // Rename may change ctime, but must never authorize different file bytes.
+    if (kind === "file" && (typeof expected.fingerprint.fileContentSha256 !== "string"
+      || stagedFingerprint.fileContentSha256 !== expected.fingerprint.fileContentSha256)) {
+      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
     }
-    let stagedFingerprint = cleanupStrictIdentityFingerprint(
-      stagedIdentity,
-      kind,
-      stagedPath,
-    );
 
     if (kind === "directory") {
       assertSnapshotDirectoryEntries(heldDescriptor, expected.children, logicalPath);
@@ -251,9 +238,7 @@ export function removeQuarantinedEntry({
         logicalPath,
       );
       assertSameIdentity(stagedIdentity, atBoundary, logicalPath);
-      if (heldDescriptor !== undefined) {
-        assertSameIdentity(atBoundary, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
-      }
+      assertHeldEntryIdentity(atBoundary, heldDescriptor, logicalPath);
       unlinkSync(stagedPath);
       if (heldDescriptor !== undefined) {
         const unlinked = fstatSync(heldDescriptor, { bigint: true });
@@ -274,6 +259,12 @@ export function removeQuarantinedEntry({
     "ROLLBACK_CLEANUP_ENTRY_CLOSE_FAILED",
     primaryFailure,
   );
+}
+
+function assertHeldEntryIdentity(identity, descriptor, logicalPath) {
+  if (descriptor !== undefined) {
+    assertSameIdentity(identity, fstatSync(descriptor, { bigint: true }), logicalPath);
+  }
 }
 
 export function createCleanupQuarantine(handle) {

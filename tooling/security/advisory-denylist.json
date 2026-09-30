@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "frozenAt": "2026-09-28T00:00:00Z",
   "validThrough": "2026-10-28",
-  "source": "Maintainer-frozen review of public package advisories; refresh and review this file before expiry.",
+  "source": "Maintainer-frozen public advisory denylist retained without extending its review dates. Current TEST pnpm-lock.yaml SHA256 83a30e0d504b90ded54cfbf1b1c7a7bcdd4d78950876cf0d7dd352983c628916 has no verified online audit in this reconciliation: pnpm cannot start because its Corepack launcher is absent, and registry network access is blocked. The previous patch's reported zero-vulnerability audit of lock SHA256 33c86d9a25523a2ed39e6ae05c2fd3d60704564288f7c07863d394d49387f225 does not certify this lock and was not independently verified here. Audit the final selected lock and refresh and review this file before expiry.",
   "denylist": [
     {
       "id": "GHSA-c2qf-rxjj-qqgw",

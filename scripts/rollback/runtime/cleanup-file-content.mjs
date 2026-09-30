@@ -9,7 +9,10 @@ export function cleanupFileContentSha256(identity, path, identityFields) {
   if (!Number.isInteger(constants.O_NOFOLLOW)) {
     throw new Error("ROLLBACK_CLEANUP_FILE_NOFOLLOW_UNAVAILABLE");
   }
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  if (!Number.isInteger(constants.O_NONBLOCK)) {
+    throw new Error("ROLLBACK_CLEANUP_FILE_NONBLOCK_UNAVAILABLE");
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   return useCustodyDescriptor(descriptor, "ROLLBACK_CLEANUP_FILE_CLOSE_FAILED", () => {
     const assertStable = () => {
       const held = fstatSync(descriptor, { bigint: true });
@@ -24,21 +27,27 @@ export function cleanupFileContentSha256(identity, path, identityFields) {
       assertStable();
       const hash = createHash("sha256");
       const buffer = Buffer.allocUnsafe(64 * 1024);
+      const read = (length, position) => {
+        try {
+          return readSync(descriptor, buffer, 0, length, position);
+        } catch (error) {
+          throw new Error("ROLLBACK_CLEANUP_FILE_READ_FAILED", { cause: error });
+        }
+      };
       let position = 0n;
       while (position < identity.size) {
         const remaining = identity.size - position;
         const length = Number(remaining < BigInt(buffer.length) ? remaining : BigInt(buffer.length));
-        let count;
-        try {
-          count = readSync(descriptor, buffer, 0, length, position);
-        } catch (error) {
-          throw new Error("ROLLBACK_CLEANUP_FILE_READ_FAILED", { cause: error });
-        }
+        const count = read(length, position);
         if (count <= 0) {
           throw new Error("ROLLBACK_CLEANUP_FILE_CHANGED");
         }
         hash.update(buffer.subarray(0, count));
         position += BigInt(count);
+      }
+      // Probe once at the captured EOF; never chase a growing file.
+      if (read(1, identity.size) !== 0) {
+        throw new Error("ROLLBACK_CLEANUP_FILE_CHANGED");
       }
       assertStable();
       return hash.digest("hex");
