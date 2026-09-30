@@ -109,20 +109,27 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
 
 test("Node 26 lane requires strict engines and runs observable regression suites", () => {
   const lock = parse(readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8"));
-  const blockers = node26Policy.strictInstall.blockers.map(({ name, version }) => `${name}@${version}`).toSorted();
   const lockBlockers = Object.entries(lock.packages)
     .filter(([, value]) => value.engines?.node === ">=24.18.0 <25")
     .map(([name]) => name)
     .toSorted();
-  assert.deepEqual(blockers, lockBlockers);
-  for (const blocker of node26Policy.strictInstall.blockers) {
-    assert.equal(lock.packages[`${blocker.name}@${blocker.version}`].engines.node, blocker.nodeEngine);
-    assert.equal(blocker.resolution, "upstream release with a Node 26-compatible engine range");
+  assert.deepEqual(lockBlockers, [], "the frozen lock contains no old Node 24-only package engines");
+  for (const [name, version] of Object.entries({
+    "@agent-teams/docs-protocol": "0.6.2",
+    "@agent-teams/docs-protocol-agent-teams": "0.2.13",
+    "@agent-teams/document-authoring": "0.3.2",
+    "@agent-teams/engineering-foundation": "1.7.0",
+    "@agent-teams/repository-mutation": "0.2.2",
+  })) {
+    assert.equal(lock.packages[`${name}@${version}`].engines.node, "^24.18.0 || ^26.0.0", name);
+    if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation"].includes(name)) {
+      assert.equal(lock.importers["."].devDependencies[name].specifier, version, name);
+    }
   }
   assert.deepEqual(node26Policy.strictInstall, {
     command: "pnpm install --frozen-lockfile --config.engine-strict=true",
-    status: "pending-lock-regeneration",
-    blockers: node26Policy.strictInstall.blockers,
+    status: "qualified",
+    blockers: [],
   });
 
   for (const dependency of node26Policy.publishedArtifactAudit.runtimeDependencies) {

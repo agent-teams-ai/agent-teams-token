@@ -14,43 +14,12 @@
   },
   "strictInstall": {
     "command": "pnpm install --frozen-lockfile --config.engine-strict=true",
-    "status": "pending-lock-regeneration",
-    "blockers": [
-      {
-        "name": "@agent-teams/docs-protocol",
-        "version": "0.6.0",
-        "nodeEngine": ">=24.18.0 <25",
-        "resolution": "upstream release with a Node 26-compatible engine range"
-      },
-      {
-        "name": "@agent-teams/docs-protocol-agent-teams",
-        "version": "0.2.9",
-        "nodeEngine": ">=24.18.0 <25",
-        "resolution": "upstream release with a Node 26-compatible engine range"
-      },
-      {
-        "name": "@agent-teams/document-authoring",
-        "version": "0.3.0",
-        "nodeEngine": ">=24.18.0 <25",
-        "resolution": "upstream release with a Node 26-compatible engine range"
-      },
-      {
-        "name": "@agent-teams/engineering-foundation",
-        "version": "1.4.0",
-        "nodeEngine": ">=24.18.0 <25",
-        "resolution": "upstream release with a Node 26-compatible engine range"
-      },
-      {
-        "name": "@agent-teams/repository-mutation",
-        "version": "0.2.0",
-        "nodeEngine": ">=24.18.0 <25",
-        "resolution": "upstream release with a Node 26-compatible engine range"
-      }
-    ]
+    "status": "qualified",
+    "blockers": []
   },
   "focusedCompatibility": {
     "install": "pnpm install --frozen-lockfile --config.engine-strict=true",
-    "reason": "Exercise repository and dependency behavior on Node 24 and Node 26 with strict package engines after lock regeneration",
+    "reason": "Exercise repository and dependency behavior on Node 24 and Node 26 with strict package engines",
     "checks": [
       "pnpm check:fast",
       "pnpm lint",
