@@ -80,8 +80,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "37b54efcee73b067557ebf5e5c003292facce0eb04b7b156173d0cf618dd3f66",
-      "afterSha256": "148cce82dcf199bd200bb9316569ffe40c327849b30b2baf7a6cd3f174d722a3"
+      "beforeSha256": "297675a4b5b5e77ba9f9574f7c8cd18078d45eca06816b7a0c15424c2ce2a933",
+      "afterSha256": "5b60614fa94734c647c033c3ce3487b675942401f6b24f40c85f944351d82abe"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
@@ -122,7 +122,7 @@
     },
     {
       "path": "scripts/tests/node26-compatibility.test.mjs",
-      "sha256": "f0a6ca2f6a6f875f9a4c0a83136271a02439e2aad44c64698fa0861d236710ab",
+      "sha256": "5561f0c8e0539a3e243434994315d199dec559eadbb110fbbc5a44fe681d1cef",
       "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {

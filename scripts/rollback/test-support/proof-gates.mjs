@@ -275,6 +275,7 @@ test("clean-candidate CLI validates current hashes and rejects drift and unpinne
       "scripts/execution-environment/toolchain-environment.mjs",
       "scripts/toolchain-policy.mjs",
       "scripts/toolchain-provenance.mjs",
+      "scripts/tests/node26-compatibility.test.mjs",
     ]) {
       mkdirSync(dirname(join(checkout, path)), { recursive: true });
       cpSync(join(repositoryRoot, path), join(checkout, path));
@@ -302,6 +303,7 @@ test("clean-candidate CLI validates current hashes and rejects drift and unpinne
       "scripts/execution-environment/toolchain-environment.mjs",
       "scripts/toolchain-policy.mjs",
       "scripts/toolchain-provenance.mjs",
+      "scripts/tests/node26-compatibility.test.mjs",
       "package.json",
     ]);
     git(checkout, [
