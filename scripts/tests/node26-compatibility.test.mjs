@@ -108,6 +108,7 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
 });
 
 test("Node 26 lane requires strict engines and runs observable regression suites", () => {
+  const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
   const lock = parse(readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8"));
   const lockBlockers = Object.entries(lock.packages)
     .filter(([, value]) => value.engines?.node === ">=24.18.0 <25")
@@ -144,7 +145,7 @@ test("Node 26 lane requires strict engines and runs observable regression suites
   const strictInstall = node26Workflow.jobs["node26-strict-install"].steps.find((step) => step.name === "Attempt frozen strict install").run;
   const focusedChecks = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Run focused Node 26 compatibility checks").run;
   const focusedInstall = node26Workflow.jobs["node26-focused-checks"].steps.find((step) => step.name === "Install frozen workspace with strict engines").run;
-  const packageScripts = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")).scripts;
+  const packageScripts = packageJson.scripts;
   assert.ok(strictInstall.includes('pnpm peers check --lockfile-only 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"'));
   assert.ok(strictInstall.includes(node26Policy.strictInstall.command + ' 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"'));
   assert.deepEqual(focusedInstall.trimEnd().split("\n"), [
