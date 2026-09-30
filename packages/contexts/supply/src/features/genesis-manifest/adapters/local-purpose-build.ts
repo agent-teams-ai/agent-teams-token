@@ -128,6 +128,7 @@ function assertLocalPurposeCompilerSettings(settings: Record<string, unknown>): 
   if (settings.evmVersion !== "paris" || optimizer.enabled !== true || optimizer.runs !== 200
     || Object.keys(optimizer).some(k => !["enabled", "runs"].includes(k))
     || (settings.viaIR !== undefined && settings.viaIR !== false)
+    || ("viaSSACFG" in settings && settings.viaSSACFG !== false)
     || (settings.experimental !== undefined && settings.experimental !== false)
     || metadata.bytecodeHash !== "ipfs" || metadata.appendCBOR !== true
     || (metadata.useLiteralContent !== undefined && metadata.useLiteralContent !== false)
@@ -135,7 +136,7 @@ function assertLocalPurposeCompilerSettings(settings: Record<string, unknown>): 
     || Object.keys(object(settings.libraries)).length
     || !same(settings.remappings, ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
       "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])
-    || Object.keys(settings).some(k => !["optimizer", "evmVersion", "viaIR", "experimental", "metadata", "libraries", "remappings", "outputSelection"].includes(k))) { return refuse(); }
+    || Object.keys(settings).some(k => !["optimizer", "evmVersion", "viaIR", "viaSSACFG", "experimental", "metadata", "libraries", "remappings", "outputSelection"].includes(k))) { return refuse(); }
   object(settings.outputSelection);
 }
 

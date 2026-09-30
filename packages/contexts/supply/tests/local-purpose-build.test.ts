@@ -103,6 +103,26 @@ test("Git authority rejects changed vendored pins even when Git itself is clean"
   await assert.rejects(readLocalPurposeGitSources({ ...candidate, revision: git(["rev-parse", "HEAD"]).trim() }), invalid);
 });
 
+test("exact compiler input admits absent or false viaSSACFG without changing pinned settings or sources", async context => {
+  const { candidate, sources, input } = await buildFixture();
+  context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
+  assert.equal(Object.hasOwn(input.settings, "viaSSACFG"), false);
+  assert.deepEqual(verifiedLocalPurposeCompilerInput(input, sources), input);
+  // Pinned Foundry 1.8.0 build-info includes this solc 0.8.36 setting.
+  input.settings.viaSSACFG = false;
+  assert.deepEqual(verifiedLocalPurposeCompilerInput(input, sources), input);
+});
+
+test("exact compiler input rejects enabled or malformed viaSSACFG", async context => {
+  const { candidate, sources, input } = await buildFixture();
+  context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
+  for (const value of [true, null, undefined, 0, 1, "", "false", "true", [], {}]) {
+    const changed = structuredClone(input);
+    changed.settings.viaSSACFG = value;
+    assert.throws(() => verifiedLocalPurposeCompilerInput(changed, sources), invalid, `viaSSACFG=${JSON.stringify(value)}`);
+  }
+});
+
 test("exact compiler input rejects unpinned settings, source URLs and traversal aliases", async context => {
   const { candidate, sources, input } = await buildFixture();
   context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
