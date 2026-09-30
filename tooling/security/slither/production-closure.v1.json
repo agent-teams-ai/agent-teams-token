@@ -28,6 +28,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantCalendar.sol",
       "contract": "GrantCalendar"
+    },
+    {
+      "path": "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol",
+      "contract": "PurposeReserveVault"
     }
   ],
   "expectedContracts": [
@@ -44,6 +48,7 @@
     "IERC20Errors",
     "IERC20Metadata",
     "IERC721Errors",
+    "PurposeReserveVault",
     "ReserveController"
   ],
   "sources": [
@@ -94,6 +99,10 @@
     {
       "path": "contracts/evm/src/features/contributor-grants/GrantCalendar.sol",
       "sha256": "ab6b7bab6a9aeee5dfb66ed2c48fd53a7b3faf2d4b6b11d5fc101462ea426f4f"
+    },
+    {
+      "path": "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol",
+      "sha256": "5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e"
     }
   ],
   "config": [
