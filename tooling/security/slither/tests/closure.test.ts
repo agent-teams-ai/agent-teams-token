@@ -19,6 +19,7 @@ test("committed closure assigns every tracked production source to analysis", as
     { path: "contracts/evm/src/features/contributor-grants/FounderGrantReserve.sol", contract: "FounderGrantReserve" },
     { path: "contracts/evm/src/features/contributor-grants/ReserveController.sol", contract: "ReserveController" },
     { path: "contracts/evm/src/features/contributor-grants/GrantCalendar.sol", contract: "GrantCalendar" },
+    { path: "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol", contract: "PurposeReserveVault" },
   ]);
   for (const target of manifest.targets) {
     assert.ok(manifest.expectedContracts.includes(target.contract));

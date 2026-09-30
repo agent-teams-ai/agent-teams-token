@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "frozenAt": "2026-08-28T00:00:00Z",
-  "validThrough": "2026-09-27",
-  "source": "Maintainer-frozen review of public package advisories; refresh and review this file before expiry.",
+  "frozenAt": "2026-09-30T00:00:00Z",
+  "validThrough": "2026-10-30",
+  "source": "Maintainer review on 2026-09-30: pnpm audit --json reported zero vulnerabilities for pnpm-lock.yaml SHA256 33c86d9a25523a2ed39e6ae05c2fd3d60704564288f7c07863d394d49387f225; retain explicit historical denylist.",
   "denylist": [
     {
       "id": "GHSA-c2qf-rxjj-qqgw",
