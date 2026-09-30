@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   constants,
   fstatSync,
@@ -6,6 +7,7 @@ import {
   mkdtempSync,
   openSync,
   opendirSync,
+  readSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -165,9 +167,7 @@ export function removeQuarantinedEntry({
   }
   let primaryFailure;
   try {
-    if (heldDescriptor !== undefined) {
-      assertSameIdentity(before, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
-    }
+    assertHeldEntryIdentity(before, heldDescriptor, logicalPath);
     state.nextSlot += 1;
     const slot = "entry-" + String(state.nextSlot).padStart(7, "0");
     const stagedPath = descriptorChild(staging.descriptor, slot);
@@ -179,18 +179,8 @@ export function removeQuarantinedEntry({
     });
     assertCustodyDescriptor(parentDescriptor);
     assertCustodyDescriptor(staging.descriptor);
-    const atQuarantineBoundary = assertCleanupStrictFingerprint(
-      expected.fingerprint,
-      sourcePath,
-      logicalPath,
-    );
-    if (heldDescriptor !== undefined) {
-      assertSameIdentity(
-        atQuarantineBoundary,
-        fstatSync(heldDescriptor, { bigint: true }),
-        logicalPath,
-      );
-    }
+    const atQuarantineBoundary = assertCleanupStrictFingerprint(expected.fingerprint, sourcePath, logicalPath);
+    assertHeldEntryIdentity(atQuarantineBoundary, heldDescriptor, logicalPath);
     assertCleanupDestinationAbsent(
       stagedPath,
       "ROLLBACK_CLEANUP_ENTRY_DESTINATION_SUBSTITUTED path=" + logicalPath,
@@ -201,14 +191,12 @@ export function removeQuarantinedEntry({
       updateCustodyDescriptor(heldDescriptor, realpathSync(stagedPath), stagedIdentity);
     }
     assertSameIdentity(before, stagedIdentity, logicalPath);
-    if (heldDescriptor !== undefined) {
-      assertSameIdentity(stagedIdentity, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
+    assertHeldEntryIdentity(stagedIdentity, heldDescriptor, logicalPath);
+    let stagedFingerprint = cleanupStrictIdentityFingerprint(stagedIdentity, kind, stagedPath);
+    // Rename may change ctime, but must never authorize different file bytes.
+    if (kind === "file" && stagedFingerprint.contentSha256 !== expected.fingerprint.contentSha256) {
+      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
     }
-    let stagedFingerprint = cleanupStrictIdentityFingerprint(
-      stagedIdentity,
-      kind,
-      stagedPath,
-    );
 
     if (kind === "directory") {
       assertSnapshotDirectoryEntries(heldDescriptor, expected.children, logicalPath);
@@ -249,9 +237,7 @@ export function removeQuarantinedEntry({
         logicalPath,
       );
       assertSameIdentity(stagedIdentity, atBoundary, logicalPath);
-      if (heldDescriptor !== undefined) {
-        assertSameIdentity(atBoundary, fstatSync(heldDescriptor, { bigint: true }), logicalPath);
-      }
+      assertHeldEntryIdentity(atBoundary, heldDescriptor, logicalPath);
       unlinkSync(stagedPath);
       if (heldDescriptor !== undefined) {
         const unlinked = fstatSync(heldDescriptor, { bigint: true });
@@ -272,6 +258,12 @@ export function removeQuarantinedEntry({
     "ROLLBACK_CLEANUP_ENTRY_CLOSE_FAILED",
     primaryFailure,
   );
+}
+
+function assertHeldEntryIdentity(identity, descriptor, logicalPath) {
+  if (descriptor !== undefined) {
+    assertSameIdentity(identity, fstatSync(descriptor, { bigint: true }), logicalPath);
+  }
 }
 
 export function createCleanupQuarantine(handle) {
@@ -451,7 +443,44 @@ export function cleanupStrictIdentityFingerprint(identity, kind, path) {
   } else {
     fingerprint.linkTargetBase64 = null;
   }
+  fingerprint.contentSha256 = kind === "file" ? cleanupFileSha256(identity, path) : null;
   return Object.freeze(fingerprint);
+}
+
+function assertCleanupFileMetadata(expected, actual, path) {
+  if (!actual.isFile() || CLEANUP_STRICT_IDENTITY_FIELDS.some(
+    (field) => expected[field] !== actual[field],
+  )) {
+    throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
+  }
+}
+
+function cleanupFileSha256(identity, path) {
+  // Read every byte with bounded memory and at most captured size + 1 bytes:
+  // sampled bytes miss interior writes; reading until EOF can chase growth.
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  return useCustodyDescriptor(descriptor, "ROLLBACK_CLEANUP_ENTRY_CLOSE_FAILED", () => {
+    assertCleanupFileMetadata(identity, fstatSync(descriptor, { bigint: true }), path);
+    const hash = createHash("sha256");
+    const chunkBytes = 64n * 1024n;
+    const buffer = Buffer.allocUnsafe(Number(identity.size < chunkBytes ? identity.size + 1n : chunkBytes));
+    let remaining = identity.size;
+    while (remaining > 0n) {
+      const length = Number(remaining < BigInt(buffer.length) ? remaining : BigInt(buffer.length));
+      const count = readSync(descriptor, buffer, 0, length, null);
+      if (count === 0) {
+        throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
+      }
+      hash.update(buffer.subarray(0, count));
+      remaining -= BigInt(count);
+    }
+    if (readSync(descriptor, buffer, 0, 1, null) !== 0) {
+      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
+    }
+    assertCleanupFileMetadata(identity, fstatSync(descriptor, { bigint: true }), path);
+    assertCleanupFileMetadata(identity, lstatSync(path, { bigint: true }), path);
+    return hash.digest("hex");
+  });
 }
 
 export function assertCleanupStrictFingerprint(expected, path, logicalPath, message) {
@@ -460,6 +489,12 @@ export function assertCleanupStrictFingerprint(expected, path, logicalPath, mess
   try {
     actualIdentity = lstatSync(path, { bigint: true });
     const kind = cleanupEntryKind(actualIdentity, logicalPath);
+    // Reject changed metadata before reading potentially foreign file bytes.
+    if (kind !== expected.kind || CLEANUP_STRICT_IDENTITY_FIELDS.some(
+      (field) => String(actualIdentity[field]) !== expected[field],
+    )) {
+      throw new Error(message ?? "ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
+    }
     actual = cleanupStrictIdentityFingerprint(actualIdentity, kind, path);
   } catch (error) {
     throw new Error(
@@ -467,7 +502,7 @@ export function assertCleanupStrictFingerprint(expected, path, logicalPath, mess
       { cause: error },
     );
   }
-  const fields = ["kind", ...CLEANUP_STRICT_IDENTITY_FIELDS, "linkTargetBase64"];
+  const fields = ["kind", ...CLEANUP_STRICT_IDENTITY_FIELDS, "linkTargetBase64", "contentSha256"];
   if (fields.some((field) => actual[field] !== expected[field])) {
     throw new Error(message ?? "ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
   }
