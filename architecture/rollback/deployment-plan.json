@@ -92,7 +92,7 @@
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
       "beforeSha256": "f51080c3ad2c7babe38665d962e2109c719765b19b3ea53508e34233dc65d6ab",
-      "afterSha256": "9ad40ca763848d8aa572240adcb1482b82d9a46f993ed1e550197d0b2f26ae47"
+      "afterSha256": "e4e9c5e8109a8658217ed9c8be565ab5820a76818f92ad8ae34783ee519be226"
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",

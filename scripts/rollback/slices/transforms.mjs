@@ -72,6 +72,32 @@ export function restoreArchitectureBoundarySource(source, baseline, sliceId) {
 
 export function restoreDeploymentPlanSharedEdits(root, sharedPlan, workspaceHandle) {
   for (const path of deploymentPlanSharedEditBaseline.paths) {
+    if (path === "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts") {
+      // The independent local-purpose reader needs named immutable slots and
+      // authenticated compiler/Git checks. Retain it and its shared helpers;
+      // restore unnamed slots only for the historical production inventory.
+      editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) => {
+        let result = replaceExactly(
+          source,
+          'contracts: readonly string[] = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"]',
+          "contracts?: readonly string[]",
+          "deployment-artifacts:production-inventory",
+        );
+        result = replaceExactly(
+          result,
+          "!contracts.includes(pin.contract)",
+          '!(contracts ?? ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"]).includes(pin.contract)',
+          "deployment-artifacts:production-contracts",
+        );
+        return replaceExactly(
+          result,
+          "immutableReferences: productionImmutableReferences(runtime, build, pin.contract)",
+          "immutableReferences: contracts === undefined ? immutableReferences(runtime) : productionImmutableReferences(runtime, build, pin.contract)",
+          "deployment-artifacts:production-immutable-slots",
+        );
+      });
+      continue;
+    }
     const content = run("git", [
       "show", `${deploymentPlanSharedEditBaseline.sha}:${path}`,
     ], { cwd: root });

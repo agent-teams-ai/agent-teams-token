@@ -28,6 +28,36 @@ test("every production manifest verifies declared hashes through the default app
         () => verifyAppliedState(checkout, manifest, { workspaceHandle }),
         manifest.sliceId,
       );
+      if (manifest.sliceId === "deployment-plan") {
+        const adapterPath = "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts";
+        const current = readFileSync(join(repositoryRoot, adapterPath), "utf8");
+        const applied = readFileSync(join(checkout, adapterPath), "utf8");
+        // Rehashed manifests must not silently restore a pre-purpose reader:
+        // the independent Supply test and its complete reader still survive.
+        const localReader = current.slice(
+          current.indexOf("export async function readLocalPurposeArtifactPins("),
+          current.indexOf("async function readProductionPinnedArtifact("),
+        );
+        assert.ok(localReader.startsWith("export async function readLocalPurposeArtifactPins("));
+        assert.ok(applied.includes(localReader), "retain local reader's Git/compiler checks unchanged");
+        const namedSlots = current.slice(
+          current.indexOf("function productionImmutableReferences("),
+          current.indexOf("/** Reopen the actual pinned inputs;"),
+        );
+        assert.ok(namedSlots.startsWith("function productionImmutableReferences("));
+        assert.ok(applied.includes(namedSlots), "retain local named immutable validation unchanged");
+        for (const line of current.split("\n").filter((value) =>
+          value.startsWith("import ") && /local-purpose/u.test(value))) {
+          assert.ok(applied.includes(line), "retain local reader's imports");
+        }
+        const survivor = "packages/contexts/supply/tests/local-purpose-artifacts.test.ts";
+        assert.deepEqual(readFileSync(join(checkout, survivor)), readFileSync(join(repositoryRoot, survivor)));
+        assert.match(
+          applied,
+          /immutableReferences: contracts === undefined \? immutableReferences\(runtime\) : productionImmutableReferences\(runtime, build, pin\.contract\)/u,
+          "historical production reader restores unnamed slots; only local inventory uses named slots",
+        );
+      }
     } finally {
       closeRollbackWorkspaceHandle(workspaceHandle);
       rmSync(boundary, { recursive: true, force: true });
