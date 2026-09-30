@@ -287,7 +287,7 @@ for (const [stage, size] of [
 ]) {
   test(`strict cleanup preserves ${size} same-size bytes with identical metadata at ${stage}`, () => {
     const current = fixture();
-    let restore = () => {};
+    let restore;
     try {
       const victim = join(checkout(current.target), "owned");
       const original = size === 12 ? Buffer.from("owned-before\n") : Buffer.alloc(size, 0x61);
@@ -321,7 +321,7 @@ for (const [stage, size] of [
       assert.deepEqual(readFileSync(survivor), replacement);
       assert.equal(handle.closed, true);
     } finally {
-      restore();
+      restore?.();
       rmSync(current.boundary, { recursive: true, force: true });
     }
   });
@@ -330,7 +330,7 @@ for (const [stage, size] of [
 test("entry quarantine never rebaselines content changed during rename", () => {
   const current = fixture();
   const nativeRename = fs.renameSync;
-  let restore = () => {};
+  let restore;
   try {
     const victim = join(checkout(current.target), "owned");
     writeFileSync(victim, "owned-before\n");
@@ -353,7 +353,7 @@ test("entry quarantine never rebaselines content changed during rename", () => {
     assert.equal(readFileSync(join(preservedQuarantine(error), "entries", "entry-0000002"), "utf8"), "foreign-now!\n");
   } finally {
     fs.renameSync = nativeRename;
-    restore();
+    restore?.();
     syncBuiltinESMExports();
     rmSync(current.boundary, { recursive: true, force: true });
   }
