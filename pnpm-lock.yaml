@@ -35,6 +35,9 @@ importers:
       '@agent-teams/engineering-foundation':
         specifier: 1.7.0
         version: 1.7.0(@types/node@24.13.3)
+      '@agent-teams/repository-mutation':
+        specifier: 0.2.2
+        version: 0.2.2
       '@agent-teams/supply':
         specifier: workspace:*
         version: link:packages/contexts/supply

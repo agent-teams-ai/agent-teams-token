@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -122,8 +122,9 @@ test("Node 26 lane requires strict engines and runs observable regression suites
     "@agent-teams/repository-mutation": "0.2.2",
   })) {
     assert.equal(lock.packages[`${name}@${version}`].engines.node, "^24.18.0 || ^26.0.0", name);
-    if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation"].includes(name)) {
+    if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation", "@agent-teams/repository-mutation"].includes(name)) {
       assert.equal(lock.importers["."].devDependencies[name].specifier, version, name);
+      assert.equal(packageJson.devDependencies[name], version, name);
     }
   }
   assert.deepEqual(node26Policy.strictInstall, {
@@ -155,6 +156,15 @@ test("Node 26 lane requires strict engines and runs observable regression suites
     assert.equal(present, command === "pnpm rollback:test" ? "rollback:test" in packageScripts : true, command);
   }
   assert.doesNotMatch(node26WorkflowText, /agent commands|launch|provisioning|terminal runtime|task assignment|smoke flows|mainnet|seed phrase|private key/iu);
+});
+
+test("docs gate resolves repository mutation v2 from the root physical install", () => {
+  const installed = join(repositoryRoot, "node_modules/@agent-teams/repository-mutation");
+  const physical = realpathSync(installed);
+  const manifest = JSON.parse(readFileSync(join(physical, "package.json"), "utf8"));
+  assert.equal(manifest.name, "@agent-teams/repository-mutation");
+  assert.equal(manifest.version, "0.2.2");
+  assert.match(physical, /\/node_modules\/\.pnpm\/@agent-teams\+repository-mutation@0\.2\.2\/node_modules\/@agent-teams\/repository-mutation$/u);
 });
 
 test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen install", () => {
