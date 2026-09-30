@@ -65,6 +65,129 @@ test("every production manifest verifies declared hashes through the default app
   }
 });
 
+// Regression trigger: whole-file restoration removes these named public exports
+// while the local-purpose implementation survives and all manifest hashes pass.
+test("deployment-plan rollback preserves the local-purpose public named-import consumer", () => {
+  const boundary = temporaryDirectory("agtmai-rollback-public-consumer-");
+  const checkout = join(boundary, "checkout");
+  const quarantineRoot = join(boundary, "gate-tmp");
+  const supply = join(checkout, "packages/contexts/supply");
+  const consumer = join(supply, ".local");
+  const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
+  const compiler = join(repositoryRoot, "node_modules/typescript/bin/tsc");
+  let workspaceHandle;
+  try {
+    cloneRepository(repositoryRoot, checkout, boundary);
+    copyCurrentRollbackSharedState(checkout, manifest);
+    for (const path of ["node_modules", "packages/contexts/supply/node_modules"]) {
+      mkdirSync(join(checkout, path), { recursive: true });
+      for (const name of readdirSync(join(repositoryRoot, path))) {
+        symlinkSync(join(repositoryRoot, path, name), join(checkout, path, name));
+      }
+    }
+    mkdirSync(consumer, { recursive: true });
+    writeFileSync(join(consumer, "public-consumer.mjs"), `
+import assert from "node:assert/strict";
+import { localPurposeCompilerPorts, prepareLocalPurposeGenesis, readLocalPurposeArtifactPins }
+  from "@agent-teams/supply/deployment-files";
+const bytes = new TextEncoder().encode("abc");
+assert.equal(localPurposeCompilerPorts.sha256(bytes),
+  "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+assert.equal(localPurposeCompilerPorts.createAddress("0x" + "11".repeat(20), "0"),
+  "0x8f7a45ebde059392e46a46dcc14ab24681a961ea");
+assert.throws(() => prepareLocalPurposeGenesis({}, "0".repeat(40),
+  { sourceRevision: "0".repeat(40), artifacts: [] }, localPurposeCompilerPorts),
+  /LOCAL_PURPOSE_GENESIS_INVALID/);
+await assert.rejects(readLocalPurposeArtifactPins("./invalid-pins.json",
+  { repositoryRoot: process.cwd(), revision: "0".repeat(40) }),
+  /DEPLOYMENT_ARTIFACT_PINS_INVALID/);
+`);
+    writeFileSync(join(consumer, "invalid-pins.json"), "{}\n");
+    writeFileSync(join(consumer, "public-consumer.mts"), `
+import { localPurposeCompilerPorts, prepareLocalPurposeGenesis, readLocalPurposeArtifactPins,
+  type LocalPurposeCandidate } from "@agent-teams/supply/deployment-files";
+const candidate: LocalPurposeCandidate = { repositoryRoot: ".", revision: "0".repeat(40) };
+const readerCandidate: Parameters<typeof readLocalPurposeArtifactPins>[1] = candidate;
+const ports: Parameters<typeof prepareLocalPurposeGenesis>[3] = localPurposeCompilerPorts;
+void readerCandidate;
+void ports;
+`);
+    const verifyConsumer = () => {
+      // Rebuild from the applied sources, including declarations, so neither
+      // stale dist nor the root workspace link can supply the missing exports.
+      basicRun(process.execPath, [compiler, "--build", "--force", "--pretty", "false"], { cwd: checkout });
+      basicRun(process.execPath, ["public-consumer.mjs"], { cwd: consumer });
+      basicRun(process.execPath, [compiler, "--ignoreConfig", "--noEmit", "--strict", "--module", "NodeNext",
+        "--moduleResolution", "NodeNext", "--target", "ES2024", "--types", "node",
+        "public-consumer.mts"], { cwd: consumer });
+    };
+    verifyConsumer();
+    mkdirSync(quarantineRoot, { mode: 0o700 });
+    workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+    applyManifest(checkout, manifest, { workspaceHandle });
+    verifyAppliedState(checkout, manifest, { workspaceHandle });
+    verifyConsumer();
+    const applied = readFileSync(join(supply, "src/features/genesis-manifest/composition/deployment-files.ts"), "utf8");
+    const current = readFileSync(join(repositoryRoot,
+      "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts"), "utf8");
+    assert.equal(applied, current
+      .replace("export const productionCompilerPorts =", "const productionCompilerPorts =")
+      .replace("export { readProductionArtifactPins, readLocalPurposeArtifactPins }",
+        "export { readLocalPurposeArtifactPins }"));
+    basicRun(process.execPath, ["--input-type=module", "--eval", `
+import assert from "node:assert/strict";
+import * as entrypoint from "@agent-teams/supply/deployment-files";
+assert.equal(Object.hasOwn(entrypoint, "productionCompilerPorts"), false);
+assert.equal(Object.hasOwn(entrypoint, "readProductionArtifactPins"), false);
+`], { cwd: supply });
+  } finally {
+    closeRollbackWorkspaceHandle(workspaceHandle);
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
+
+test("deployment-plan public reversal rejects missing and duplicate owned edits", () => {
+  const path = "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts";
+  const edits = [
+    ["production-compiler-export", "export const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,"],
+    ["production-reader-export", 'export { readProductionArtifactPins, readLocalPurposeArtifactPins } from "../adapters/deployment-artifacts.js";\n'],
+  ];
+  for (const [label, token] of edits) {
+    for (const mode of ["missing", "duplicate"]) {
+      const boundary = temporaryDirectory("agtmai-rollback-public-edit-drift-");
+      const checkout = join(boundary, "checkout");
+      const quarantineRoot = join(boundary, "gate-tmp");
+      const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
+      let workspaceHandle;
+      try {
+        cloneRepository(repositoryRoot, checkout, boundary);
+        copyCurrentRollbackSharedState(checkout, manifest);
+        const original = readFileSync(join(checkout, path), "utf8");
+        const drifted = mode === "missing" ? original.replace(token, "") : original + token;
+        writeFileSync(join(checkout, path), drifted);
+        // Even a manifest admitting the drifted input cannot turn an ambiguous
+        // or missing owned edit into a successful historical-file restoration.
+        manifest.reverseEdits.find(edit => edit.path === path).beforeSha256 =
+          createHash("sha256").update(drifted).digest("hex");
+        mkdirSync(quarantineRoot, { mode: 0o700 });
+        workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+        assert.throws(
+          () => applyManifest(checkout, manifest, { workspaceHandle }),
+          error => {
+            assert.ok(error.message.includes(`ROLLBACK_EXACT_EDIT_MISMATCH edit=deployment-files:${label}`));
+            return true;
+          },
+          mode + ": " + label,
+        );
+        assert.equal(readFileSync(join(checkout, path), "utf8"), drifted);
+      } finally {
+        closeRollbackWorkspaceHandle(workspaceHandle);
+        rmSync(boundary, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
 test("held shared ancestor descriptors reject an equal-shape replacement", {
   skip: process.platform !== "linux",
 }, () => {

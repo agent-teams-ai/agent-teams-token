@@ -102,7 +102,7 @@
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
       "beforeSha256": "50a166071320c7ee470095d7fe813b05a7b00738bab7d670bd41fd3f636d568a",
-      "afterSha256": "b21325d8ef6d9adf0f04ae314f7e6ce9ea824dddd9b67c46782ae38b85aa4046"
+      "afterSha256": "bbd3aed0f0efb9609cdeffeb1bab6dd88097dd416c05806b4c63228dd14f383a"
     },
     {
       "path": "packages/contexts/supply/tests/deployment-cli.test.ts",

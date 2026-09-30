@@ -72,6 +72,25 @@ export function restoreArchitectureBoundarySource(source, baseline, sliceId) {
 
 export function restoreDeploymentPlanSharedEdits(root, sharedPlan, workspaceHandle) {
   for (const path of deploymentPlanSharedEditBaseline.paths) {
+    if (path === "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts") {
+      // Reverse only the two public exports added for deployment-plan execution.
+      // Local-purpose imports, ports, reader and candidate type are independent.
+      editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) => {
+        const result = replaceExactly(
+          source,
+          "export const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,",
+          "const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,",
+          "deployment-files:production-compiler-export",
+        );
+        return replaceExactly(
+          result,
+          'export { readProductionArtifactPins, readLocalPurposeArtifactPins } from "../adapters/deployment-artifacts.js";\n',
+          'export { readLocalPurposeArtifactPins } from "../adapters/deployment-artifacts.js";\n',
+          "deployment-files:production-reader-export",
+        );
+      });
+      continue;
+    }
     if (path === "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts") {
       // The independent local-purpose reader needs named immutable slots and
       // authenticated compiler/Git checks. Retain it and its shared helpers;
