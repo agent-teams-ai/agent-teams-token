@@ -26,9 +26,6 @@ test("production triage pins the exact current captured findings without suppres
     schemaVersion: number;
     findings: FindingTriage[];
   };
-  const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
-    suppressions: { fingerprint: string; detectorId: string; sourceHash: string }[];
-  };
   // Exact lower-impact tuples from the retained historical and current pinned captures.
   const expected = [
     "sha256:140af649035e807216f8c00445e94afd9bc7ead2c6e488c07a055e1a9f4351cb",
@@ -115,6 +112,12 @@ test("production triage pins the exact current captured findings without suppres
   assert.ok(document.findings.every(({ owner }) => owner === "project-security"));
   assert.deepEqual(document.findings.map(({ reviewedAt }) => reviewedAt), reviewedDates);
   assert.ok(document.findings.every(({ rationale }) => rationale.trim().length >= 20));
+});
+
+test("production suppressions pin exact reviewed tuples", async () => {
+  const suppressions = JSON.parse(await readFile("tooling/security/slither/suppressions.v1.json", "utf8")) as {
+    suppressions: { fingerprint: string; detectorId: string; sourceHash: string }[];
+  };
   assert.deepEqual(suppressions.suppressions.map(({ fingerprint, detectorId, sourceHash }) => ({ fingerprint, detectorId, sourceHash })), [
     {
       fingerprint: "sha256:704c6fd405b64b61d8f0712240be87d8ce8b180287dc75322e25459bd3cea098",
@@ -160,6 +163,46 @@ test("production triage pins the exact current captured findings without suppres
       fingerprint: "sha256:e8e7464fb50f08c474434449f181f8daacda04e35fcc631afee1b47a12ed03f0",
       detectorId: "reentrancy-no-eth",
       sourceHash: "sha256:000656119ee066eedb72da76ef58f92025babfbb1ba364cd6f2d50638e5de0eb"
+    },
+    {
+      fingerprint: "sha256:0d70c169f3518091a7c431fa9c69eabcaa5136130be6b198b19b89bf1a90b536",
+      detectorId: "reentrancy-balance",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:227f1b23ad3818dc8bbeedb9d02d4304cc007bdd0cdfacf039cd49382cd0328f",
+      detectorId: "reentrancy-balance",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:3401d44c36b84a0d2e37633c4dcd1c36afe341b19b01049c18388d55b1cd11c5",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:6c53728d1a9dc94919c499b29755b493278b60c7f43868cc2b3f60a7a921aa82",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:8c01e632f034f622bf6f1555a88b59f37c9887c8b7bf5dbdb84f2fd3a66a813b",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:9e93e48ce3ecd006e8b4db611b7892b313c6d510e55a51e22f11c734b61708bc",
+      detectorId: "incorrect-equality",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:e553b4a6cae8f5f9dcb981eb09f65ef69ec3c9b3956d1c5f70dbcbd7118cae8e",
+      detectorId: "uninitialized-local",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
+    },
+    {
+      fingerprint: "sha256:fba8966679a4f3013bef8737348a921545777df955f3e4d600c0d69aa3b4c521",
+      detectorId: "reentrancy-no-eth",
+      sourceHash: "sha256:5b5d3d1100c17d113d3c64e4c15a93a024150379534bd086ac16347743f6577e",
     },
   ]);
 });

@@ -128,7 +128,7 @@
     },
     {
       "path": "tooling/security/slither/suppressions.v1.json",
-      "sha256": "2409b54b9ac061ef8c1967bc8d0cf093ee7237fe40b46a0c6ef14f512544716d"
+      "sha256": "713f2d7a8d4365f82a37ddfcb8e3a7b5fe6a147601acfbb4d8b606792dc8bb0d"
     },
     {
       "path": "tooling/security/slither/suppression-ledger.schema.v1.json",
