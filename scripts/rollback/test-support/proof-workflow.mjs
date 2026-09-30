@@ -1,3 +1,4 @@
+import { realpathSync, symlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
   assert, spawnSync, join, dirname, mkdirSync, rmSync, copyFileSync, cpSync,
@@ -8,7 +9,7 @@ import {
 
 export const workflowPolicyTitle = "package-manager policy disables implicit downloads and the final check has no silent omissions";
 
-const node26TestCount = 5;
+const node26TestCount = 6;
 const node26PnpmVersion = "11.24.0\n";
 
 function fixturePnpmPackage() {
@@ -49,7 +50,7 @@ export function checkNode26Policies(checkout, { failures = 0, failingTitle } = {
     assert.match(result.stdout, new RegExp(`^# ${field} ${expected}$`, "mu"), output);
   }
   assert.equal([...result.stdout.matchAll(/^# Subtest: /gmu)].length, node26TestCount, output);
-  assert.match(result.stdout, /^ok 4 - pinned pnpm rejects invalid fresh peers and its lock graph after frozen install$/mu, output);
+  assert.match(result.stdout, /^ok 5 - pinned pnpm rejects invalid fresh peers and its lock graph after frozen install$/mu, output);
   if (failingTitle !== undefined) {
     assert.match(result.stdout, new RegExp(`^not ok [0-9]+ - ${failingTitle}$`, "mu"), output);
   }
@@ -92,6 +93,16 @@ export function workflowPolicyFixture(context, manifest) {
   cpSync(dirname(requireFromSupply.resolve("yaml/package.json")), join(checkout, "node_modules/yaml"), {
     recursive: true, dereference: true,
   });
+  const repositoryMutationPhysical = join(
+    checkout, "node_modules/.pnpm/@agent-teams+repository-mutation@0.2.2/node_modules/@agent-teams/repository-mutation",
+  );
+  mkdirSync(dirname(repositoryMutationPhysical), { recursive: true });
+  cpSync(realpathSync(join(repositoryRoot, "node_modules/@agent-teams/repository-mutation")), repositoryMutationPhysical, {
+    recursive: true, dereference: true,
+  });
+  const repositoryMutationLink = join(checkout, "node_modules/@agent-teams/repository-mutation");
+  mkdirSync(dirname(repositoryMutationLink), { recursive: true });
+  symlinkSync("../.pnpm/@agent-teams+repository-mutation@0.2.2/node_modules/@agent-teams/repository-mutation", repositoryMutationLink);
   assert.ok(readFileSync(join(checkout, "pnpm-workspace.yaml"), "utf8").startsWith("packages:\n"));
   const fixturePackage = join(checkout, ".tools/pnpm-11.24.0");
   mkdirSync(dirname(fixturePackage), { recursive: true });
