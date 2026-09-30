@@ -90,7 +90,10 @@ export async function readLocalPurposeGitSources(candidate: LocalPurposeCandidat
 
 /** Require the complete vendored inventory to match the selected dependency pins. */
 function assertLocalPurposeVendorPins(files: ReadonlyMap<string, Uint8Array>): void {
-  const vendor = object(JSON.parse(new TextDecoder().decode(files.get("tooling/security/vendor-dependencies.json")!)));
+  const manifest = files.get("tooling/security/vendor-dependencies.json");
+  // Bind the complete inventory to the separately reviewed manifest, not candidate-authored pins.
+  if (!manifest || sha256(manifest) !== "0xc149262c68809d6540cc47878740a73008ac86e49bbddb1e6a0b137975e20e47") { return refuse(); }
+  const vendor = object(JSON.parse(new TextDecoder().decode(manifest)));
   if (vendor.schemaVersion !== 1 || !Array.isArray(vendor.dependencies) || vendor.dependencies.length !== 1) { return refuse(); }
   const dependency = object(vendor.dependencies[0]);
   if (dependency.name !== "@openzeppelin/contracts" || dependency.version !== "5.7.0"
@@ -133,7 +136,7 @@ function assertLocalPurposeCompilerSettings(settings: Record<string, unknown>): 
     || metadata.bytecodeHash !== "ipfs" || metadata.appendCBOR !== true
     || (metadata.useLiteralContent !== undefined && metadata.useLiteralContent !== false)
     || Object.keys(metadata).some(k => !["bytecodeHash", "appendCBOR", "useLiteralContent"].includes(k))
-    || Object.keys(object(settings.libraries)).length
+    || (settings.libraries !== undefined && Object.keys(object(settings.libraries)).length)
     || !same(settings.remappings, ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
       "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"])
     || Object.keys(settings).some(k => !["optimizer", "evmVersion", "viaIR", "viaSSACFG", "experimental", "metadata", "libraries", "remappings", "outputSelection"].includes(k))) { return refuse(); }

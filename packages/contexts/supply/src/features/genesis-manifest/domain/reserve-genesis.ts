@@ -53,7 +53,8 @@ function positive(value: unknown): bigint {
 }
 
 function validateAllocations(allocations: unknown, supply: bigint): void {
-  if (!Array.isArray(allocations) || allocations.length !== 8 || Reflect.ownKeys(allocations).length !== 9) { reject(); }
+  if (!Array.isArray(allocations) || Object.getPrototypeOf(allocations) !== Array.prototype
+    || allocations.length !== 8 || Reflect.ownKeys(allocations).length !== 9) { reject(); }
   for (let index = 0; index < allocations.length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(allocations, String(index));
     if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) { reject(); }
