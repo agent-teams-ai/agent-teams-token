@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   constants,
   fstatSync,
@@ -7,7 +6,6 @@ import {
   mkdtempSync,
   openSync,
   opendirSync,
-  readSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -452,42 +450,6 @@ export function cleanupStrictIdentityFingerprint(identity, kind, path) {
     );
   }
   return Object.freeze(fingerprint);
-}
-
-function assertCleanupFileMetadata(expected, actual, path) {
-  if (!actual.isFile() || CLEANUP_STRICT_IDENTITY_FIELDS.some(
-    (field) => expected[field] !== actual[field],
-  )) {
-    throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
-  }
-}
-
-function cleanupFileSha256(identity, path) {
-  // Read every byte with bounded memory and at most captured size + 1 bytes:
-  // sampled bytes miss interior writes; reading until EOF can chase growth.
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  return useCustodyDescriptor(descriptor, "ROLLBACK_CLEANUP_ENTRY_CLOSE_FAILED", () => {
-    assertCleanupFileMetadata(identity, fstatSync(descriptor, { bigint: true }), path);
-    const hash = createHash("sha256");
-    const chunkBytes = 64n * 1024n;
-    const buffer = Buffer.allocUnsafe(Number(identity.size < chunkBytes ? identity.size + 1n : chunkBytes));
-    let remaining = identity.size;
-    while (remaining > 0n) {
-      const length = Number(remaining < BigInt(buffer.length) ? remaining : BigInt(buffer.length));
-      const count = readSync(descriptor, buffer, 0, length, null);
-      if (count === 0) {
-        throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
-      }
-      hash.update(buffer.subarray(0, count));
-      remaining -= BigInt(count);
-    }
-    if (readSync(descriptor, buffer, 0, 1, null) !== 0) {
-      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
-    }
-    assertCleanupFileMetadata(identity, fstatSync(descriptor, { bigint: true }), path);
-    assertCleanupFileMetadata(identity, lstatSync(path, { bigint: true }), path);
-    return hash.digest("hex");
-  });
 }
 
 export function assertCleanupStrictFingerprint(expected, path, logicalPath, message) {
