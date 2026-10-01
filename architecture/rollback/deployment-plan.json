@@ -123,7 +123,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "33e3c5e6d81144f2758063ba001a5e1ccf08df0949bb95d56fa9efd85f78f309",
+      "beforeSha256": "7edcd03b5fbf62dece785ecd63b52b448a4f83a2768eff5358011b48d88d7a0b",
       "afterSha256": "absent"
     },
     {
@@ -138,7 +138,7 @@
     },
     {
       "path": "tooling/local-evm/process.ts",
-      "beforeSha256": "f081446219ab0816a3905cfc86bd5aa99f9a64e3f1c097a313a6c52fa78e0c33",
+      "beforeSha256": "68adf527db058a8fbc153a5efb4f6488e20822577b38cac0d37dd9c63630eac5",
       "afterSha256": "74c901f9b039f185bd306efa31d1fff566ab46ec98b7a75dd133ce1b83063bff"
     },
     {
