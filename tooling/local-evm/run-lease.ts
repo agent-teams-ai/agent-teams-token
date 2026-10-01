@@ -137,12 +137,7 @@ async function reclaimLeasedEntry(directory: string, expectedDirectory: string, 
   if (runnerState === "ambiguous") {
     throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
   }
-  if (lease.anvil !== null) {
-    const anvilState = await authenticateProcess(lease.anvil);
-    if (anvilState === "owned" || anvilState === "ambiguous") {
-      throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "supervisor did not close its owned Anvil; refusing unauthenticated cross-process termination");
-    }
-  }
+  await assertRunAnvilStopped(lease);
   await hooks.afterDirectoryList?.(directory);
   const claim = await claimDirectory(directory, expectedDirectory);
   if (claim === undefined) {return false;}
@@ -343,15 +338,28 @@ export async function removeOwnedRunDirectory(directory: string): Promise<void> 
     throw cause;
   });
   if (expectedDirectory === undefined) {return;}
-  const claim = await claimDirectory(directory, expectedDirectory);
-  if (claim === undefined) {return;}
-  await validatePrivateDirectory(claim);
-  const lease = (await readLease(claim)).lease;
+  await validatePrivateDirectory(directory);
+  const lease = (await readLease(directory)).lease;
   const current = await processStartIdentity(process.pid);
   if (lease.runner.pid !== process.pid || lease.runner.processStart !== current) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "refusing to delete a claimed directory not owned by this runner");
   }
+  await assertRunAnvilStopped(lease);
+  const claim = await claimDirectory(directory, expectedDirectory);
+  if (claim === undefined) {return;}
+  await validatePrivateDirectory(claim);
+  if (JSON.stringify((await readLease(claim)).lease) !== JSON.stringify(lease)) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "run lease changed during owned-run deletion");
+  }
   await deleteClaim(claim, expectedDirectory);
+}
+
+async function assertRunAnvilStopped(lease: RunLease): Promise<void> {
+  if (lease.anvil === null) {return;}
+  const state = await authenticateProcess(lease.anvil);
+  if (state === "owned" || state === "ambiguous") {
+    throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "Anvil termination is unconfirmed; preserving its run directory and lease");
+  }
 }
 
 async function directoryIdentity(directory: string): Promise<string> {

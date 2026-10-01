@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
 import { LocalEvmError } from "./model.ts";
+import { finishWithCleanup } from "./cleanup.ts";
 
 export interface CommandResult {
   readonly stdout: string;
@@ -147,6 +148,7 @@ export async function startOwnedAnvil(
     stdio: ["pipe", "pipe", "pipe"], env: process.env,
   });
   supervisor.stdin.on("error", () => {});
+  let identity: OwnedProcessIdentity | undefined;
   try {
     const identityMessage = await supervisorMessage(supervisor, "identity");
     if (typeof identityMessage.pid !== "number" || !Number.isSafeInteger(identityMessage.pid)
@@ -154,7 +156,7 @@ export async function startOwnedAnvil(
       || !/^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(identityMessage.processStart)) {
       throw new LocalEvmError("LOCAL_EVM_ANVIL_SUPERVISOR_PROTOCOL", "Anvil supervisor returned an invalid process identity");
     }
-    const identity: OwnedProcessIdentity = {pid: identityMessage.pid, processStart: identityMessage.processStart};
+    identity = {pid: identityMessage.pid, processStart: identityMessage.processStart};
     await registerIdentity?.(identity);
     supervisor.stdin.write("ack\n");
     const ready = await supervisorMessage(supervisor, "ready");
@@ -166,12 +168,12 @@ export async function startOwnedAnvil(
       pid: identity.pid,
       rpcUrl: ready.rpcUrl,
       stop(): Promise<void> {
-        stopPromise ??= stopSupervisor(supervisor);
+        stopPromise ??= stopSupervisor(supervisor, identity);
         return stopPromise;
       },
     };
   } catch (cause) {
-    await stopSupervisor(supervisor);
+    await finishWithCleanup(cause, [async () => await stopSupervisor(supervisor, identity)]);
     throw cause;
   }
 }
@@ -348,11 +350,21 @@ async function supervisorMessage(
   });
 }
 
-async function stopSupervisor(supervisor: ChildProcess): Promise<void> {
-  if (supervisor.exitCode !== null || supervisor.signalCode !== null) {return;}
-  const closed = new Promise<void>((resolve) => {supervisor.once("close", () => resolve());});
-  supervisor.stdin?.end("stop\n");
-  if (!await closesWithin(closed, 11_000)) {await stopExactChild(supervisor);}
+async function stopSupervisor(supervisor: ChildProcess, identity?: OwnedProcessIdentity): Promise<void> {
+  if (supervisor.exitCode === null && supervisor.signalCode === null) {
+    const closed = new Promise<void>((resolve) => {supervisor.once("close", () => resolve());});
+    supervisor.stdin?.end("stop\n");
+    if (!await closesWithin(closed, 11_000)) {await stopExactChild(supervisor);}
+  }
+  if (identity !== undefined) {
+    const state = await authenticateProcess(identity);
+    if (state === "owned" || state === "ambiguous") {
+      throw new LocalEvmError("LOCAL_EVM_ANVIL_STOP_UNCONFIRMED", "supervisor exit did not confirm owned Anvil termination");
+    }
+  }
+  if (supervisor.exitCode !== 0 || supervisor.signalCode !== null) {
+    throw new LocalEvmError("LOCAL_EVM_ANVIL_SUPERVISOR_FAILED", "Anvil supervisor did not finish successfully");
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -51,7 +51,8 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   const interrupt = (signal: NodeJS.Signals): void => {
     interruptedSignal = signal;
     commandAbort.abort();
-    void anvil?.stop();
+    // Finalization observes the shared stop promise and reports its failure.
+    void anvil?.stop().catch(() => {});
   };
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
@@ -236,12 +237,13 @@ async function finalizeLocalRun(state: {
   readonly runDirectory: string;
   readonly interruptedSignal?: NodeJS.Signals;
 }): Promise<void> {
+  let stopped = false;
   await finishWithCleanup(state.primary, [
     () => {process.removeListener("SIGINT", state.interrupt);},
     () => {process.removeListener("SIGTERM", state.interrupt);},
     () => state.solc?.close(),
-    async () => await state.anvil?.stop(),
-    async () => await removeOwnedRunDirectory(state.runDirectory),
+    async () => {await state.anvil?.stop(); stopped = true;},
+    async () => {if (stopped) {await removeOwnedRunDirectory(state.runDirectory);}},
     () => {
       if (state.interruptedSignal) {
         process.exitCode = state.interruptedSignal === "SIGINT" ? 130 : 143;
