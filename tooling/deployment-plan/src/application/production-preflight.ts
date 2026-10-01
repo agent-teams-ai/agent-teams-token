@@ -87,6 +87,7 @@ function validateExecutionContext(expectations: ProductionExpectations, observat
 // oxlint-disable-next-line complexity -- every receipt identity field is mandatory and independently bound.
 function validateExecutionOperations(expectations: ProductionExpectations, observations: ProductionObservation, byId: ReadonlyMap<string, ProductionObservation["operations"][number]>, reasons: string[]): void {
   let previousBlock: bigint | undefined;
+  let previousTimestamp: bigint | undefined;
   let observedTotal = 0n;
   for (const [index, expected] of expectations.operations.entries()) {
     const seen = byId.get(expected.id);
@@ -100,6 +101,9 @@ function validateExecutionOperations(expectations: ProductionExpectations, obser
     const block = BigInt(seen.blockNumber!);
     if (previousBlock !== undefined && block !== previousBlock + 1n) {reasons.push("execution-block-sequence-mismatch");}
     previousBlock = block;
+    const timestamp = BigInt(seen.timestamp!);
+    if (previousTimestamp !== undefined && timestamp <= previousTimestamp) {reasons.push("execution-timestamp-sequence-mismatch");}
+    previousTimestamp = timestamp;
     if (index === expectations.operations.length - 1 && (observations.blockNumber !== seen.blockNumber || observations.blockHash !== seen.blockHash)) {reasons.push("execution-final-block-mismatch");}
   }
   if (observations.observedTotalCostWei !== observedTotal.toString() || observedTotal > BigInt(expectations.maxTotalCostWei)) {reasons.push("execution-observed-cost-mismatch");}

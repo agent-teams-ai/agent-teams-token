@@ -17,6 +17,7 @@ test("authenticated Anvil executes the four prepared operations and existing pre
   context.after(() => rm(root, { recursive: true, force: true }));
   let fixture: RealProductionPackage | undefined;
   const output = join(root, "observations");
+  const beforeProof = BigInt(Math.floor(Date.now() / 1000));
   const result = await runLocalExecutionProof({
     repositoryRoot,
     outputDirectory: output,
@@ -24,6 +25,7 @@ test("authenticated Anvil executes the four prepared operations and existing pre
       fixture = await createRealProductionPackage(repositoryRoot, packageDirectory, signerAddress as `0x${string}`);
     },
   });
+  const afterProof = BigInt(Math.floor(Date.now() / 1000));
   assert.ok(fixture);
   assert.deepEqual(result.operationCount, 4);
   const observationBytes = await readFile(join(output, "production-observation-v2.json"));
@@ -46,8 +48,24 @@ test("authenticated Anvil executes the four prepared operations and existing pre
   assert.equal(result.signerAddress, expectations.sender);
   assert.deepEqual(expectations.operations.map(operation => operation.nonce), ["7", "8", "9", "10"]);
   const observation = parseProductionObservation(JSON.parse(raw));
+  const observedAt = BigInt(observation.observedAt);
+  assert.ok(observedAt >= beforeProof && observedAt <= afterProof);
+  for (const [index, operation] of observation.operations.entries()) {
+    const timestamp = BigInt(operation.timestamp!);
+    assert.ok(timestamp <= observedAt);
+    assert.ok(timestamp <= BigInt(deployment.policy.executionDeadline));
+    if (index > 0) {
+      const previous = observation.operations[index - 1]!;
+      assert.equal(BigInt(operation.blockNumber!), BigInt(previous.blockNumber!) + 1n);
+      assert.ok(timestamp > BigInt(previous.timestamp!));
+    }
+    if (operation.id === "founder-fund") {
+      assert.ok(timestamp <= BigInt(deployment.policy.fundingDeadline));
+      assert.ok(timestamp + BigInt(deployment.policy.fundingLeadSeconds) <= BigInt(prepared.configuration.reserveGenesis.founder.schedule.start));
+    }
+  }
   const report = assessProductionPreflight({ prepared, expectations, observations: observation, attempt: parseProductionAttempt(JSON.parse(attemptSource)), nowSeconds: BigInt(observation.observedAt), preparedConfigurationSha256: prepared.configurationSha256, preparedReserveConfigurationSha256: prepared.reserveConfigurationSha256, preparedArtifactPinsSha256: expectations.artifactPinsSha256, expectedGenesisAllocationHash: allocationHash });
-  assert.equal(report.status, "checks-passed-offline");
+  assert.equal(report.status, "checks-passed-offline", JSON.stringify(report));
   assert.equal(report.broadcastAllowed, false);
   assert.deepEqual(report.reasons, []);
   assert.equal(observation.operations.map(operation => operation.id).join(","), "token-create,founder-reserve-create,controller-create,founder-fund");

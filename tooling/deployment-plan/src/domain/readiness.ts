@@ -59,11 +59,12 @@ export function evaluateReadiness(evidence: ReadinessEvidence, protocol?: Readin
   const fixed = quantity(evidence.ethereum.fixedSupply, "fixedSupply"), backing = quantity(evidence.ethereum.backing, "backing"), supply = quantity(evidence.solana.supply, "supply");
   const pendingES = evidence.ethereum.pendingEthereumToSolana === null ? null : quantity(evidence.ethereum.pendingEthereumToSolana, "pendingEthereumToSolana");
   const pendingSE = evidence.ethereum.pendingSolanaToEthereum === null ? null : quantity(evidence.ethereum.pendingSolanaToEthereum, "pendingSolanaToEthereum");
-  if (pendingES === null || pendingSE === null) { reasons.push("reconciliation-unknown"); }
+  const reconciliationKnown = evidence.coverageComplete && pendingES !== null && pendingSE !== null;
+  if (!reconciliationKnown) { reasons.push("reconciliation-unknown"); }
   if (backing > fixed) {reasons.push("backing-exceeds-fixed-supply");}
-  const adjusted = pendingES === null || pendingSE === null ? null : fixed - backing + supply + pendingES + pendingSE;
+  const adjusted = reconciliationKnown ? fixed - backing + supply + pendingES + pendingSE : null;
   if (adjusted !== null && adjusted < 0n) { fail("ADJUSTED_SUPPLY_NEGATIVE"); }
-  const surplus = pendingES === null || pendingSE === null ? null : backing - supply - pendingES - pendingSE;
+  const surplus = reconciliationKnown ? backing - supply - pendingES - pendingSE : null;
   const reconciliationStatus = surplus === null ? "unknown" : surplus < 0n ? "under-backed" : surplus > 0n ? "surplus" : "exact";
   if (reconciliationStatus !== "exact" && reconciliationStatus !== "unknown") {reasons.push(reconciliationStatus);}
   const estimatesComplete = evidence.estimates?.complete === true && (evidence.estimates.operations ?? []).every(op => quantity(op.estimatedNative, `estimate.${op.id}`) >= 0n && quantity(op.worstCaseNative, `estimate.${op.id}`) >= quantity(op.estimatedNative, `estimate.${op.id}`));

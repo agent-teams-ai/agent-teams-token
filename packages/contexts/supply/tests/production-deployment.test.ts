@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareProductionDeployment, type ProductionArtifactPin, type ProductionExpectation } from "../src/features/genesis-manifest/application/prepare-production-deployment.js";
 import { canonicalJson, type JsonValue } from "../src/features/genesis-manifest/application/canonical.js";
+import { validateDeployment } from "../src/features/genesis-manifest/domain/deployment.js";
 import type { Hex } from "../src/features/genesis-manifest/domain/deployment.js";
 import { validateProductionDeployment } from "../src/features/genesis-manifest/domain/production-deployment.js";
 import { sha256 as digestBytes } from "../src/features/genesis-manifest/adapters/digest.js";
@@ -190,4 +191,46 @@ test("runtime immutable claims remain explicitly unresolved while preparation st
   assert.equal(result.diagnostics.length, 0);
   assert.equal(result.prepared?.runtimeVerification.status, "unresolved-immutables");
   assert.equal(result.prepared?.runtimeVerification.reason, "PRODUCTION_RUNTIME_IMMUTABLES_REQUIRE_DETERMINISTIC_LOCAL_EXECUTION");
+});
+
+
+test("production rejects generic grant instructions before preparation even with refreshed approval digests", () => {
+  const fixture = syntheticPreparation();
+  const deployment = fixture.value.deployment as { grants: unknown[] };
+  const reserve = fixture.value.reserveGenesis as { founder: { schedule: unknown } };
+  deployment.grants = [{ id: "extra-founder", kind: "founder", beneficiary: `0x${"ab".repeat(20)}`,
+    fundingAllocation: "founder", controllerSafe: "project-controller", amountBaseUnits: "1",
+    originalPurpose: hash("different-purpose"), schedule: reserve.founder.schedule }];
+  const generic = validateDeployment(deployment);
+  assert.deepEqual(generic.diagnostics, []);
+  assert.ok(generic.value);
+  const configurationSha256 = sha256(new TextEncoder().encode(canonicalJson(generic.value as unknown as JsonValue)));
+  fixture.pins.approval.configurationSha256 = configurationSha256;
+  (fixture.pins.expectations as { configurationSha256: Hex }).configurationSha256 = configurationSha256;
+  const result = prepareProductionDeployment(fixture.value, fixture.pins, fixture.ports, sha256);
+  assert.equal(result.prepared, undefined, JSON.stringify(result.prepared?.operations.map(operation => operation.id)));
+  assert.deepEqual(result.diagnostics.map(({ code, pointer }) => ({ code, pointer })),
+    [{ code: "PRODUCTION_GRANTS_UNSUPPORTED", pointer: "/deployment/grants" }]);
+  const admission = validateProductionDeployment(fixture.value);
+  assert.equal(admission.value, undefined);
+  assert.deepEqual(admission.diagnostics, result.diagnostics);
+  assert.match(admission.diagnostics[0]!.message, /deployment.grants must be empty.*reserveGenesis/);
+});
+
+
+test("unsupported raw grants retain their diagnostic when generic deployment validation fails", () => {
+  const value = syntheticEnvelope() as { deployment: { grants: unknown[]; token: { symbol: string } } };
+  value.deployment.grants = [{}];
+  value.deployment.token.symbol = "INVALID";
+  const generic = validateDeployment(value.deployment);
+  assert.equal(generic.value, undefined);
+  assert.ok(generic.diagnostics.length > 0);
+  const result = validateProductionDeployment(value);
+  assert.equal(result.value, undefined);
+  const unsupported = result.diagnostics.filter(diagnostic => diagnostic.code === "PRODUCTION_GRANTS_UNSUPPORTED");
+  assert.equal(unsupported.length, 1);
+  assert.equal(unsupported[0]!.pointer, "/deployment/grants");
+  assert.match(unsupported[0]!.message, /deployment.grants must be empty.*reserveGenesis/);
+  assert.deepEqual(result.diagnostics.filter(diagnostic => diagnostic.code !== "PRODUCTION_GRANTS_UNSUPPORTED"),
+    generic.diagnostics.map(diagnostic => ({ ...diagnostic, code: `PRODUCTION_DEPLOYMENT_${diagnostic.code}` })));
 });

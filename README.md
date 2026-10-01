@@ -14,7 +14,8 @@ tooling.
   verification.
 - TypeScript 7 for Solana instructions, CCIP tooling, configuration, monitor,
   web application, and cross-chain test harness.
-- Engineering Foundation 0.20.0 for dev-only dependency, architecture,
+- Engineering Foundation 1.4.0 (exact [package pin](package.json) and
+  [toolchain authority](tooling/toolchain.lock.json)) for dev-only dependency, architecture,
   documentation, ADR, suppression and quality-gate policy.
 - Agave local validator and LiteSVM for local Solana testing.
 - Docker only for Linux CI parity and supporting services.

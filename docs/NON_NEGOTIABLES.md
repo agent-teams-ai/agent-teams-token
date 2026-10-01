@@ -51,8 +51,12 @@ Status: обязательные product/security invariants. Ослаблени
   fee-admin или backing-withdrawal path без protocol-line-specific policy.
 - Никогда не оставлять bootstrap admin, случайный proposer/canceller role,
   неизвестный Safe module, guard или fallback handler.
-- Никогда не принимать изоляцию Safe только потому, что адреса разные. Signer,
-  device и recovery overlap должны быть ниже threshold.
+- Никогда не принимать изоляцию Safe только потому, что адреса разные. Для
+  заявления независимого контроля signer, device и recovery overlap должны быть
+  ниже threshold. Текущая solo-founder custody допускает два разных 2-of-3 Safe
+  с общими тремя signer addresses при явном disclosure; это не independent
+  governance. Ключи остаются раздельными и хранятся на отдельных устройствах по
+  [ADR-0009](decisions/0009-custody-split-and-launch-gates.md).
 - Никогда не использовать один общий founder/team cliff или cliff catch-up.
   Grants имеют отдельные старты, zero до cliff и linear stream после него.
 - Никогда не смешивать assigned contributor obligations и unassigned future
@@ -123,8 +127,11 @@ Status: обязательные product/security invariants. Ослаблени
 - Никогда не подменять `community-designated` словом `community-directed`: на
   genesis binding community control равен 0%, пока решения принимают project roles.
 - Никогда не считать слово utility или community юридической классификацией.
-- Никогда не freeze-ить holder rights/ABI или mainnet genesis до определения
-  live consumptive utility, issuer/entity, launch countries и classification.
+- Ethereum-only genesis по [ADR-0010](decisions/0010-ethereum-first-launch-sequence.md)
+  не требует live utility, но требует external entity, jurisdiction,
+  classification и disclosure review по ADR-0009 до mainnet genesis.
+  До freeze holder rights/ABI для utility и до public distribution определить
+  live consumptive utility и пройти соответствующий phase-specific legal gate.
   Local/test-only neutral implementation не является offer и разрешена раньше.
 - Никогда не выдавать live utility за classification safe harbor, а Token Facts
   Pack - за замену обязательного MiCA white paper/notification/publication flow.

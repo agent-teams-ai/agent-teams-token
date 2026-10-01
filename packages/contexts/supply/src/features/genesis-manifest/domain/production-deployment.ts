@@ -106,6 +106,10 @@ export function validateProductionDeployment(input: unknown): ProductionValidati
   if (!root || root.schema !== "agtmai-production-deployment-v1") { diagnostics.push(error("SCHEMA", "/schema")); }
   if (!root) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
   const deployment = readDeployment(root, diagnostics);
+  const rawDeployment = root.deployment;
+  const rawGrants = rawDeployment !== null && typeof rawDeployment === "object" && !Array.isArray(rawDeployment)
+    ? (rawDeployment as Record<string, unknown>).grants : undefined;
+  if (Array.isArray(rawGrants) && rawGrants.length !== 0) { diagnostics.push({ ...error("GRANTS_UNSUPPORTED", "/deployment/grants"), message: "deployment.grants must be empty; the production envelope supports only reserveGenesis founder/contributor topology" }); }
   const reserve = readReserve(root, diagnostics);
   const ids = readSafeIds(root, diagnostics);
   if (!deployment || !reserve || !ids) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }

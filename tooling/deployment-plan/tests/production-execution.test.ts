@@ -37,7 +37,7 @@ function executionFixture(): ProductionPreflightRequest {
   const observedOperations = operations.map((item, index) => { const blockNumber = String(index + 11), blockHash = digest(String(index + 1)), transactionHash = digest(String(index + 5)), bindings = immutableBindings[index]; const runtime = bindings ? `0x${bindings.map(binding => binding.value.slice(2)).join("")}` : undefined; return { id: item.id, address: item.expectedAddress, ...(item.id === "founder-reserve-create" ? {nestedAddress: vault} : {}), ...(item.kind === "create" && bindings && runtime ? { creation: item.initcode!, runtime, runtimeHash: keccak256(Buffer.from(runtime.slice(2), "hex")), artifact: staticRuntime, artifactSha256: digest("1"), immutableReferences: bindings.map((binding, referenceIndex) => ({name: binding.name, start: String(referenceIndex * 32), length: "32", value: binding.value})) } : {calldata: item.calldata!}), value: "0", nonce: item.nonce, transactionHash, receiptTransactionHash: transactionHash, transactionIndex: "0", sender, input: item.kind === "create" ? item.initcode! : item.calldata!, status: "1", blockNumber, blockHash, timestamp: String(100 + index), expectedAddress: item.expectedAddress, actualAddress: item.expectedAddress, gasLimit: "1", maxFeePerGas: "1", maxPriorityFeePerGas: "0", gasUsed: "1", effectiveGasPrice: "1", observedCostWei: "1" }; });
   const allocations = configuredAllocations.map((allocation, index) => ({ identifier: allocation.id, bps: String(allocation.bps), amountBaseUnits: allocation.amountBaseUnits, recipient: allocation.recipient, balance: index === 2 ? "0" : allocation.amountBaseUnits, syntheticPreparedAddress: true as const }));
   const state = { blockNumber: "14", blockHash: digest("4"), token: { address: token, name: "Agent Teams AI", symbol: "AGTMAI", decimals: "9", initialSupply: "100000000000000000", totalSupply: "100000000000000000", genesisAllocationHash: allocationHash, ccipAdmin: address("b") }, founderReserve: { address: reserve, token, vault }, founderVault: { address: vault, token, beneficiary: address("a"), originalReserve: reserve, controller: address("b"), funded: true, terms: {allocation: amounts[2]!, start: "1800000000", cliff: "1800000001", end: "1800000002", kind: "0", originalPurpose: digest("3")} }, controller: { address: controller, token, controller: address("b"), purpose: digest("4"), rollingCap: "16000000000000000", perGrantCap: "5000000000000000", window: "31536000", grossCommitted: "0", rollingCommitted: "0" }, allocations, funding: { caller: sender, amountBaseUnits: amounts[2]!, beforeBlockNumber: "13", beforeBlockHash: digest("3"), afterBlockNumber: "14", afterBlockHash: digest("4"), reserveBefore: amounts[2]!, reserveAfter: "0", vaultBefore: "0", vaultAfter: amounts[2]!, allowanceBefore: "0", allowanceAfter: "0", fundedBefore: false, fundedAfter: true, secondCallRejected: true }, conservation: { totalSupplyBaseUnits: "100000000000000000", observedBalancesBaseUnits: "100000000000000000" } };
-  const observations = { schema: "agtmai-production-observation-v2", chainId: "1", sender, pendingNonce: "4", blockNumber: "14", blockHash: digest("4"), observedAt: "100", expiresAt: "200", observedTotalCostWei: "4", rpcEndpoint: "http://127.0.0.1:8545/", netVersion: "1", binding: { sourceRevision: expectations.sourceRevision, configurationSha256: expectations.configurationSha256, reserveConfigurationSha256: expectations.reserveConfigurationSha256, artifactPinsSha256: expectations.artifactPinsSha256 }, operations: observedOperations, checkedAddresses: [...new Set([...configuredAllocations.map(item => item.recipient), token, reserve, controller, vault])].toSorted(), occupiedAddresses: [], authority, state, cleanup: { processExited: true, exitCode: "0", descriptorsClosed: true, temporaryRootRemoved: true, diagnostic: null } } as unknown as ProductionObservation;
+  const observations = { schema: "agtmai-production-observation-v2", chainId: "1", sender, pendingNonce: "4", blockNumber: "14", blockHash: digest("4"), observedAt: "103", expiresAt: "203", observedTotalCostWei: "4", rpcEndpoint: "http://127.0.0.1:8545/", netVersion: "1", binding: { sourceRevision: expectations.sourceRevision, configurationSha256: expectations.configurationSha256, reserveConfigurationSha256: expectations.reserveConfigurationSha256, artifactPinsSha256: expectations.artifactPinsSha256 }, operations: observedOperations, checkedAddresses: [...new Set([...configuredAllocations.map(item => item.recipient), token, reserve, controller, vault])].toSorted(), occupiedAddresses: [], authority, state, cleanup: { processExited: true, exitCode: "0", descriptorsClosed: true, temporaryRootRemoved: true, diagnostic: null } } as unknown as ProductionObservation;
   const artifacts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"].map((contract, index) => ({contract, compilerVersion: "0.8.36", artifactSha256: digest("1"), buildInfoSha256: digest("2"), compilerInputSha256: digest("3"), creationBytecode: "0x6001", runtimeBytecode: staticRuntime, immutableReferences: immutableBindings[index]!.map((binding, referenceIndex) => ({name: binding.name, start: referenceIndex * 32, length: 32}))}));
   const policy = { evmMaxFeePerGasWei: "1", evmMaxPriorityFeePerGasWei: "0", evmMaxGasPerTransaction: "1", evmMaxTotalFeeWei: "4", observationMaxAgeSeconds: "100", estimateValiditySeconds: "100", executionDeadline: "1000", fundingDeadline: "900", fundingLeadSeconds: "100", gasBufferBps: 0, tokenExpenditureCeilingBaseUnits: amounts[2] };
   const configuration = { deployment: { status: "accepted", token: {initialCCIPAdmin: address("b")}, allocations: configuredAllocations, policy }, reserveGenesis: { allocations: configuredAllocations, founder: { beneficiary: address("a"), controller: address("b"), purpose: digest("3"), schedule: {start: "1800000000", cliff: "1800000001", end: "1800000002"} }, contributors: {controller: address("b"), purpose: digest("4"), rollingCapBaseUnits: "16000000000000000", perGrantCapBaseUnits: "5000000000000000"} } };
@@ -85,7 +85,136 @@ test("every execution identity, state and cleanup mutation fails closed", () => 
     ["transaction gas", value => {value.observations.operations[0]!.gasLimit = "2";}], ["transaction max fee", value => {value.observations.operations[0]!.maxFeePerGas = "2";}], ["receipt gas", value => {value.observations.operations[0]!.gasUsed = "2";}], ["receipt effective fee", value => {value.observations.operations[0]!.effectiveGasPrice = "2";}], ["operation cost", value => {value.observations.operations[0]!.observedCostWei = "2";}], ["aggregate cost", value => {value.observations.observedTotalCostWei = "5";}],
     ["chain", value => {value.observations.chainId = "2";}], ["endpoint", value => {value.observations.rpcEndpoint = "https://example.com";}], ["runtime", value => {value.observations.operations[0]!.runtime = staticRuntime;}], ["immutable", value => {value.observations.operations[0]!.immutableReferences![0]!.value = digest("f");}], ["immutable permutation", value => { const operation = value.observations.operations[0]!, references = operation.immutableReferences!; const first = references[0]!.value; references[0]!.value = references[1]!.value; references[1]!.value = first; operation.runtime = `0x${references.map(reference => reference.value.slice(2)).join("")}`; operation.runtimeHash = keccak256(Buffer.from(operation.runtime.slice(2), "hex")); }], ["getter", value => {value.observations.state!.token.symbol = "BAD";}], ["terms", value => {value.observations.state!.founderVault.terms.kind = "1";}], ["vault", value => {value.observations.state!.founderReserve.vault = address("8");}],
     ["allocation bps", value => {value.observations.state!.allocations[0]!.bps = "2999";}], ["allocation amount", value => {value.observations.state!.allocations[0]!.amountBaseUnits = "1";}], ["recipient", value => {value.observations.state!.allocations[0]!.recipient = address("8");}], ["balance", value => {value.observations.state!.allocations[0]!.balance = "1";}], ["supply", value => {value.observations.state!.token.totalSupply = "1";}], ["caller", value => {value.observations.state!.funding.caller = address("8");}], ["fund amount", value => {value.observations.state!.funding.amountBaseUnits = "1";}], ["allowance", value => {value.observations.state!.funding.allowanceAfter = "1";}], ["one shot", value => {value.observations.state!.funding.secondCallRejected = false as never;}],
-    ["stale", value => {value.nowSeconds = 201n;}], ["replay", value => {value.observations.pendingNonce = "0";}], ["attempt", value => {value.attempt.states[0]!.state = "unattempted";}], ["cleanup", value => {value.observations.cleanup!.temporaryRootRemoved = false;}],
+    ["stale", value => {value.nowSeconds = 204n;}], ["replay", value => {value.observations.pendingNonce = "0";}], ["attempt", value => {value.attempt.states[0]!.state = "unattempted";}], ["cleanup", value => {value.observations.cleanup!.temporaryRootRemoved = false;}],
   ];
   for (const [label, mutate] of cases) {const fixture = structuredClone(executionFixture()) as MutableRequest; mutate(fixture); const result = assessProductionPreflight(fixture as ProductionPreflightRequest); assert.notEqual(result.status, "checks-passed-offline", label); assert.equal(result.broadcastAllowed, false, label);}
+});
+
+
+test("observed founder funding after the accepted deadline is blocked despite an early verifier clock", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  fixture.observations.operations[3]!.timestamp = "901";
+  const observations = parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations)));
+  const result = assessProductionPreflight({ ...fixture, observations });
+  assert.equal(result.status, "blocked", JSON.stringify(result));
+  assert.equal(result.broadcastAllowed, false);
+  assert.deepEqual(result.reasons, ["execution-founder-fund-observation-time-mismatch", "execution-founder-fund-deadline-mismatch"]);
+});
+
+
+test("observed execution enforces the funding lead and contract start boundaries", () => {
+  type PreparedTiming = { configuration: { deployment: { policy: { fundingDeadline: string; fundingLeadSeconds: string; executionDeadline: string } }; reserveGenesis: { founder: { schedule: { start: string } } } } };
+  const fixtureAt = (timestamp: string, start: string, deadline = "900", lead = "100") => {
+    const fixture = structuredClone(executionFixture()) as MutableRequest;
+    const configuration = (fixture.prepared as PreparedTiming).configuration;
+    configuration.reserveGenesis.founder.schedule.start = start;
+    configuration.deployment.policy.fundingDeadline = deadline;
+    configuration.deployment.policy.fundingLeadSeconds = lead;
+    configuration.deployment.policy.executionDeadline = "1100";
+    fixture.observations.state!.founderVault.terms.start = start;
+    fixture.observations.operations[3]!.timestamp = timestamp;
+    fixture.observations.observedAt = timestamp;
+    fixture.observations.expiresAt = String(BigInt(timestamp) + 100n);
+    fixture.nowSeconds = BigInt(timestamp);
+    return fixture;
+  };
+  for (const [timestamp, start, deadline, lead, reasons] of [
+    ["901", "1000", "900", "100", ["production-deadline-policy-mismatch", "execution-founder-fund-deadline-mismatch", "execution-founder-fund-lead-time-mismatch"]],
+    ["1001", "1000", "1000", "0", ["production-deadline-policy-mismatch", "execution-founder-fund-founder-start-mismatch", "execution-founder-fund-deadline-mismatch", "execution-founder-fund-lead-time-mismatch"]],
+  ] as const) {
+    const fixture = fixtureAt(timestamp!, start!, deadline!, lead!);
+    const result = assessProductionPreflight({ ...fixture, observations: parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations))) });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.broadcastAllowed, false);
+    assert.deepEqual(result.reasons, reasons);
+  }
+  for (const fixture of [fixtureAt("900", "1000"), fixtureAt("1000", "1000", "1000", "0")]) {
+    const result = assessProductionPreflight(fixture);
+    assert.equal(result.status, "checks-passed-offline", JSON.stringify(result));
+    assert.equal(result.broadcastAllowed, false);
+  }
+  const creation = fixtureAt("1002", "1000", "1000", "0");
+  // Creation at start is valid; later funding still violates its own limits.
+  creation.observations.operations.forEach((operation, index) => { operation.timestamp = String(999 + index); });
+  const atStart = assessProductionPreflight(creation);
+  assert.deepEqual(atStart.reasons, ["production-deadline-policy-mismatch", "execution-founder-fund-founder-start-mismatch", "execution-founder-fund-deadline-mismatch", "execution-founder-fund-lead-time-mismatch"]);
+  creation.observations.operations.forEach((operation, index) => { operation.timestamp = String(1000 + index); });
+  creation.observations.observedAt = "1003";
+  creation.observations.expiresAt = "1103";
+  creation.nowSeconds = 1003n;
+  const lateCreation = assessProductionPreflight(creation);
+  assert.equal(lateCreation.status, "blocked");
+  assert.deepEqual(lateCreation.reasons, ["production-deadline-policy-mismatch", "execution-founder-reserve-create-founder-start-mismatch", "execution-founder-fund-founder-start-mismatch", "execution-founder-fund-deadline-mismatch", "execution-founder-fund-lead-time-mismatch"]);
+});
+
+test("execution deadline equality passes with strictly increasing receipt timestamps", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  const configuration = (fixture.prepared as { configuration: { deployment: { policy: { executionDeadline: string } } } }).configuration;
+  configuration.deployment.policy.executionDeadline = "900";
+  fixture.observations.operations.forEach((operation, index) => { operation.timestamp = String(897 + index); });
+  fixture.observations.observedAt = "900";
+  fixture.observations.expiresAt = "1000";
+  fixture.nowSeconds = 900n;
+  const result = assessProductionPreflight(fixture);
+  assert.equal(result.status, "checks-passed-offline");
+  assert.deepEqual(result.reasons, []);
+  assert.equal(result.broadcastAllowed, false);
+});
+
+test("every executed operation is bound to the execution deadline", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  fixture.observations.operations.forEach((operation, index) => { operation.timestamp = String(1001 + index); });
+  fixture.observations.observedAt = "1004";
+  fixture.observations.expiresAt = "1104";
+  fixture.nowSeconds = 1004n;
+  const result = assessProductionPreflight(fixture);
+  assert.equal(result.status, "blocked");
+  assert.equal(result.broadcastAllowed, false);
+  for (const id of ["token-create", "founder-reserve-create", "controller-create", "founder-fund"]) {
+    assert.ok(result.reasons.includes(`execution-${id}-deadline-mismatch`), id);
+  }
+});
+
+test("increasing receipt blocks cannot carry backward operation timestamps", () => {
+  for (const index of [1, 2, 3]) {
+    const fixture = structuredClone(executionFixture()) as MutableRequest;
+    fixture.observations.operations[index]!.timestamp = String(99 + index - 1);
+    const observations = parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations)));
+    const result = assessProductionPreflight({ ...fixture, observations });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.broadcastAllowed, false);
+    assert.deepEqual(result.reasons, ["execution-timestamp-sequence-mismatch"]);
+  }
+});
+
+
+test("consecutive receipt blocks reject equal timestamps", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  for (const operation of fixture.observations.operations) { operation.timestamp = "100"; }
+  const observations = parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations)));
+  const result = assessProductionPreflight({ ...fixture, observations });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.broadcastAllowed, false);
+  assert.deepEqual(result.reasons, ["execution-timestamp-sequence-mismatch"]);
+});
+
+test("each operation must be observed by capture time even before policy deadlines", () => {
+  const operationIds = ["token-create", "founder-reserve-create", "controller-create", "founder-fund"];
+  for (const [index, id] of operationIds.entries()) {
+    const fixture = structuredClone(executionFixture()) as MutableRequest;
+    fixture.observations.observedAt = String(99 + index);
+    const result = assessProductionPreflight({ ...fixture, observations: parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations))) });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.broadcastAllowed, false);
+    assert.deepEqual(result.reasons, operationIds.slice(index).map(operationId => `execution-${operationId}-observation-time-mismatch`), id);
+  }
+});
+
+test("last operation exactly at capture time passes with a later verifier clock", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  fixture.observations.observedAt = "103";
+  const result = assessProductionPreflight({ ...fixture, observations: parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations))) });
+  assert.equal(result.status, "checks-passed-offline");
+  assert.deepEqual(result.reasons, []);
+  assert.equal(result.broadcastAllowed, false);
 });

@@ -265,3 +265,36 @@ test("report and CLI freshness end at the earliest operation estimate expiry", a
   assert.equal(evaluateReadiness({ ...evidence, estimates: { ...evidence.estimates, complete: false } }).validUntil, "101");
   assert.equal(evaluateReadiness(base()).validUntil, "200");
 });
+
+
+test("incomplete activity coverage makes matching known balances unknown and rejects an exact serialized claim", () => {
+  const evidence = parseReadinessEvidence(new TextEncoder().encode(JSON.stringify({ ...base(), coverageComplete: false })));
+  const report = evaluateReadiness(evidence);
+  const contradictory = { ...report, reasons: report.reasons.filter(reason => reason !== "reconciliation-unknown"),
+    reconciliation: { status: "exact", adjustedGlobalSupply: "1000", backingSurplus: "0" } };
+  assert.throws(() => assertReadinessBundle(JSON.parse(JSON.stringify(contradictory)), report.manifestSha256), /READINESS_BUNDLE_INVALID/);
+  assert.equal(report.status, "incomplete");
+  assert.equal(report.broadcastAllowed, false);
+  assert.deepEqual(report.reconciliation, { status: "unknown", adjustedGlobalSupply: null, backingSurplus: null });
+  assert.ok(report.reasons.includes("activity-coverage-incomplete"));
+  assert.ok(report.reasons.includes("reconciliation-unknown"));
+  assertReadinessBundle(JSON.parse(JSON.stringify(report)), report.manifestSha256);
+});
+
+
+test("incomplete coverage cannot serialize surplus or under-backed reconciliation from partial totals", () => {
+  for (const [backing, status, surplus] of [["600", "surplus", "100"], ["400", "under-backed", "-100"]] as const) {
+    const report = evaluateReadiness({ ...base(), coverageComplete: false, ethereum: { ...base().ethereum, backing } });
+    assert.equal(report.status, "incomplete");
+    assert.deepEqual(report.reconciliation, { status: "unknown", adjustedGlobalSupply: null, backingSurplus: null });
+    assertReadinessBundle(JSON.parse(JSON.stringify(report)), report.manifestSha256);
+    const contradictory = { ...report, status: status === "under-backed" ? "inconsistent" : "incomplete",
+      reasons: [...report.reasons.filter(reason => reason !== "reconciliation-unknown"), status].toSorted(),
+      reconciliation: { status, adjustedGlobalSupply: backing === "600" ? "900" : "1100", backingSurplus: surplus } };
+    assert.throws(() => assertReadinessBundle(JSON.parse(JSON.stringify(contradictory)), report.manifestSha256), /READINESS_BUNDLE_INVALID/);
+  }
+  const impossibleBacking = evaluateReadiness({ ...base(), coverageComplete: false, ethereum: { ...base().ethereum, backing: "1501" } });
+  assert.equal(impossibleBacking.status, "inconsistent");
+  assert.ok(impossibleBacking.reasons.includes("backing-exceeds-fixed-supply"));
+  assert.deepEqual(impossibleBacking.reconciliation, { status: "unknown", adjustedGlobalSupply: null, backingSurplus: null });
+});

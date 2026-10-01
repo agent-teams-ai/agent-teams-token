@@ -113,7 +113,7 @@
     },
     {
       "path": "packages/contexts/supply/tests/production-deployment.test.ts",
-      "beforeSha256": "f3234d780197c7c3af3603322d2b461f96fa73bf5399cf8df8a95b186ec9e56e",
+      "beforeSha256": "f7516def6f9751689865c3df0bbbd431f0d9e599deb5fae83d692b593233d9ff",
       "afterSha256": "b8938b47ebd49c7eb944cbd8d6f98e3b1fedbcb60d881f825f3b2ac15ef3a1a4"
     },
     {
@@ -123,7 +123,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "613ed65bd4d5b81cd30181915d44a0d499ab99b2d317cab6c6ce8cbf55251b45",
+      "beforeSha256": "33e3c5e6d81144f2758063ba001a5e1ccf08df0949bb95d56fa9efd85f78f309",
       "afterSha256": "absent"
     },
     {
