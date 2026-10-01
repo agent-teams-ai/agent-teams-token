@@ -118,10 +118,12 @@ export async function runLocalExecutionProof(options: LocalExecutionProofOptions
     const lead = BigInt(policy.fundingLeadSeconds);
     const executionLimit = [BigInt(policy.executionDeadline), BigInt(policy.fundingDeadline), start - lead]
       .reduce((earliest, limit) => limit < earliest ? limit : earliest);
-    // Retain the local four-send headroom, measured from the approved limits.
-    // An impossible fixture must fail before starting Anvil rather than clamp to zero.
-    const initialTimestamp = executionLimit - 8n;
-    if (lead > start || initialTimestamp < 0n) {throw new Error("PROOF_EXECUTION_TIMING_IMPOSSIBLE");}
+    const clock = options.now ?? (() => BigInt(Math.floor(Date.now() / 1000)));
+    const initialNow = clock();
+    // Retain eight seconds of headroom within both approved limits and the
+    // fixture clock, so the four real receipt blocks precede observation.
+    const initialTimestamp = (initialNow < executionLimit ? initialNow : executionLimit) - 8n;
+    if (lead > start || initialTimestamp < 0n || initialNow > executionLimit) {throw new Error("PROOF_EXECUTION_TIMING_IMPOSSIBLE");}
     anvil = await startOwnedAnvil(foundry.anvil, signerAddress, async identity => await registerRunAnvil(runDirectory, identity), {
       chainId: "1", timestamp: initialTimestamp.toString(),
     });
@@ -138,12 +140,15 @@ export async function runLocalExecutionProof(options: LocalExecutionProofOptions
       if (!expected || expected.nonce !== operation.nonce || expected.kind !== operation.kind) {throw new Error("PROOF_OPERATION_BINDING");}
       const input = operation.kind === "create" ? operation.initcode! : operation.calldata!;
       if (operation.id === "founder-fund") {fundingBefore = await captureFundingBefore(rpc, prepared, finalBlock);}
+      const nextTimestamp = initialTimestamp + BigInt(operations.length) + 1n;
+      await checkedCommand(foundry.cast, ["rpc", "evm_setNextBlockTimestamp", quantity(nextTimestamp), "--rpc-url", anvil.rpcUrl, "--no-proxy"], { code: "PROOF_BLOCK_TIMESTAMP_CONFIGURATION", env: castEnvironment });
       const transactionHash = await sendSignedOperation({ cast: foundry.cast, signer, environment: castEnvironment, rpcUrl: anvil.rpcUrl, operation, expected, input });
       const receipt = await waitForReceipt(rpc, transactionHash);
       if (receipt.status !== "0x1") {throw new Error(`PROOF_RECEIPT_${operation.id}`);}
       const transactionFacts = assertTransaction(await transactionByHash(rpc, transactionHash), receipt, operation.kind, expectations.sender, operation.nonce, input, expected, operation.to);
       observedTotalCost += BigInt(transactionFacts.observedCostWei);
       const block = await blockByNumber(rpc, receipt.blockNumber); finalBlock = block;
+      if (BigInt(block.timestamp) !== nextTimestamp) {throw new Error("PROOF_BLOCK_TIMESTAMP_MISMATCH");}
       const expectedAddress = expected.expectedAddress;
       const actualAddress = operation.kind === "create" ? receipt.contractAddress : operation.to;
       if (actualAddress !== expectedAddress) {throw new Error(`PROOF_ADDRESS_${operation.id}`);}
@@ -157,7 +162,8 @@ export async function runLocalExecutionProof(options: LocalExecutionProofOptions
     const pendingNonce = quantityToDecimal(await rpc.request("eth_getTransactionCount", [expectations.sender, "pending"]) as string);
     if (pendingNonce !== (BigInt(expectations.startingNonce) + 4n).toString()) {throw new Error("PROOF_PENDING_NONCE");}
     const state = await collectState(rpc, prepared, expectations.sender, finalBlock, fundingBefore);
-    const now = options.now?.() ?? BigInt(Math.floor(Date.now() / 1000));
+    const now = clock();
+    if (now < initialNow || now < BigInt(finalBlock.timestamp) || now > executionLimit) {throw new Error("PROOF_EXECUTION_TIMING_IMPOSSIBLE");}
     const observation = { schema: "agtmai-production-observation-v2", chainId: "1", sender: expectations.sender, pendingNonce, blockNumber: finalBlock.number, blockHash: finalBlock.hash, observedAt: now.toString(), expiresAt: (now + BigInt(expectations.maxObservationAgeSeconds)).toString(), observedTotalCostWei: observedTotalCost.toString(), rpcEndpoint: anvil.rpcUrl, netVersion: "1", binding: { sourceRevision: expectations.sourceRevision, configurationSha256: prepared.configurationSha256, reserveConfigurationSha256: prepared.reserveConfigurationSha256, artifactPinsSha256: expectations.artifactPinsSha256 }, operations, checkedAddresses: [...new Set([...prepared.operations.flatMap(operation => operation.expectedAddress ? [operation.expectedAddress] : []), ...prepared.operations.flatMap(operation => operation.nestedAddress ? [operation.nestedAddress] : []), ...state.allocations.map(allocation => allocation.recipient)])].toSorted(), occupiedAddresses: [], authority: expectations.authority, state, cleanup: { processExited: false, exitCode: "0", descriptorsClosed: false, temporaryRootRemoved: false, diagnostic: null } };
     await anvil.stop(); anvil = undefined;
     await removeOwnedRunDirectory(runDirectory);
