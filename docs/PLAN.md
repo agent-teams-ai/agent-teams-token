@@ -1,5 +1,21 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Independent review correction, 2026-10-01
+
+Rollback qualification must preserve the independent Local EVM custody contract.
+Removing the deployment-plan slice must not restore a historical process helper
+that drops durable child registration before acknowledgement or the surviving
+runner's run-directory argument. Full CI exposed that invalid whole-file
+restoration after root tests and the local-solana rollback slice passed.
+Classify the current independent helper explicitly and enforce its exact bytes;
+continue deleting the actual deployment-plan slice and checking every survivor.
+
+The correction needs applied-state typecheck and real Local EVM recovery tests,
+then independent review and the complete sealed Linux rollback proof. Structural
+manifest checks alone do not prove surviving behavior. Unknown process custody
+remains conservative, and Mainnet release still needs actual owner inputs and
+fresh broadcast authorization.
+
 ## Local purpose reserve vault checkpoint, 2026-09-30
 
 The reviewed local plan adds one immutable `PurposeReserveVault` implementation

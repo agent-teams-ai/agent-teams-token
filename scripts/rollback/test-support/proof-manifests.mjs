@@ -1,7 +1,7 @@
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
-const { cloneRepository } = proofSupport;
+const { cloneRepository, assertRegisteredLocalEvmCustody } = proofSupport;
 
 test("all three rollback manifest schemas have complete, non-overlapping exact ownership", () => {
   assert.equal(validateManifestSet(manifests()).length, 3);
@@ -63,6 +63,62 @@ test("every production manifest verifies declared hashes through the default app
       rmSync(boundary, { recursive: true, force: true });
     }
   }
+});
+
+// Exercise the surviving caller and durable lease, rather than accepting a
+// rehashed historical process implementation that leaves lease.anvil null.
+test("deployment-plan rollback preserves Local EVM supervisor registration before acknowledgement", {timeout: 40_000}, () => {
+  const boundary = temporaryDirectory("agtmai-rollback-evm-custody-");
+  const checkout = join(boundary, "checkout");
+  const quarantineRoot = join(boundary, "gate-tmp");
+  const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
+  let workspaceHandle;
+  try {
+    cloneRepository(repositoryRoot, checkout, boundary);
+    copyCurrentRollbackSharedState(checkout, manifest);
+    mkdirSync(quarantineRoot, { mode: 0o700 });
+    workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+    applyManifest(checkout, manifest, { workspaceHandle });
+    verifyAppliedState(checkout, manifest, { workspaceHandle });
+    for (const path of ["tooling/local-evm/process.ts", "tooling/local-evm/toolchain.ts"]) {
+      const retained = manifest.retainedSharedPaths.find(entry => entry.path === path);
+      assert.ok(retained, "independent Local EVM behavior has exact retained authority");
+      assert.equal(digestFile(join(checkout, path)), retained.sha256);
+      assert.deepEqual(readFileSync(join(checkout, path)), readFileSync(join(repositoryRoot, path)));
+    }
+    // These additions serve the removed execution proof only. Their genuine
+    // historical reversals still run while the independent supervisor survives.
+    for (const path of ["tooling/local-evm/rpc.ts", "tooling/local-evm/tests/rpc.test.ts"]) {
+      assert.equal(readFileSync(join(checkout, path), "utf8"), git(checkout, [
+        "show", "dfe89da4c77a186aefbaead50981a327317f3bc4:" + path,
+      ]));
+    }
+    assertRegisteredLocalEvmCustody(checkout);
+    // The cases observe durable registration at the parent callback, reject a
+    // foreign lease before exposing identity, and independently observe exit.
+    for (const path of manifest.ownedPaths) {assert.equal(existsSync(join(checkout, path)), false, path);}
+    verifyAppliedState(checkout, manifest, { workspaceHandle });
+  } finally {
+    closeRollbackWorkspaceHandle(workspaceHandle);
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
+
+test("retained Local EVM authority rejects digest drift and arbitrary reclassification", () => {
+  const drifted = manifests();
+  const deployment = drifted.find(({ sliceId }) => sliceId === "deployment-plan");
+  deployment.retainedSharedPaths.find(entry => entry.path === "tooling/local-evm/process.ts").sha256 = "0".repeat(64);
+  assert.throws(() => validateManifestSet(drifted), /ROLLBACK_RETAINED_SHARED_PATH_DRIFT/u);
+
+  const arbitrary = manifests();
+  arbitrary.find(({ sliceId }) => sliceId === "deployment-plan").retainedSharedPaths.push({
+    path: "tooling/local-evm/runner.ts", reason: "Undeclared retention must remain forbidden", sha256: digestFile(join(repositoryRoot, "tooling/local-evm/runner.ts")),
+  });
+  assert.throws(() => validateManifestSet(arbitrary), /ROLLBACK_RETAINED_SHARED_PATH_COVERAGE/u);
+
+  const otherSlice = manifests();
+  otherSlice[0].retainedSharedPaths.push(deployment.retainedSharedPaths.find(entry => entry.path === "tooling/local-evm/toolchain.ts"));
+  assert.throws(() => validateManifestSet(otherSlice), /ROLLBACK_RETAINED_SHARED_PATH_COVERAGE/u);
 });
 
 // Regression trigger: whole-file restoration removes these named public exports
