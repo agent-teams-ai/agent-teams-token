@@ -84,6 +84,23 @@ test("rejects wrong deployment address or unfinished deployment before executing
   f.records.set(f.settings.tokenDeployment.journalFile, { ...record, phase: "submitted" });
   await assert.rejects(registerTestToken(f.settings, f.ports), /Finalized deployment/); assert.equal(f.calls.length, 0);
 });
+for (const kind of ["unknown", "not-found"] as const) {
+  test("pool deployment observation " + kind + " retains its cause and produces no registration effects", async () => {
+    const f = fixture(), observe = f.ports.observe;
+    let artifacts = 0, snapshots = 0, addresses = 0;
+    const ports = { ...f.ports,
+      observe: async (txHash: string) => txHash === f.records.get(f.settings.poolDeployment.journalFile)!.signed.hash
+        ? { kind } : observe(txHash),
+      poolArtifact: async (file: string) => { artifacts++; return f.ports.poolArtifact(file); },
+      snapshot: async () => { snapshots++; return f.ports.snapshot(); },
+      address: async (record: EvmJournalRecord) => { addresses++; return f.ports.address(record); },
+    };
+    const before = structuredClone([...f.records]);
+    await assert.rejects(registerTestToken(f.settings, ports), new RegExp("Pool deployment observation unavailable: " + kind));
+    assert.deepEqual(f.calls, []); assert.deepEqual([...f.records], before);
+    assert.equal(artifacts, 0); assert.equal(snapshots, 0); assert.equal(addresses, 1);
+  });
+}
 test("rejects reused journals and deployment intent mismatch", async () => {
   const f = fixture();
   await assert.rejects(registerTestToken({ ...f.settings, steps: { ...f.settings.steps,
@@ -144,7 +161,8 @@ test("authenticated artifact bytes must match actual reconciled pool creation ca
   for (const mutation of ["creation", "constructor", "trailing-data", "binding", "hash"] as const) {
     const f = fixture(), d = f.settings.poolDeployment;
     if (mutation === "creation" || mutation === "binding" || mutation === "hash") {
-      // Keep caller intent, journal and native transaction mutually consistent.
+      // Creation/hash cases keep caller intent, journal and observed calldata consistent.
+      // The binding case instead observes authentic calldata against the wrong binding.
       const creationBytecode = mutation === "creation" || mutation === "binding" ? "0x6000" : "0x6001600055";
       const intent = { ...d.intent, data: creationBytecode + poolConstructor.slice(2), deployment: {
         ...d.intent.deployment!, creationBytecode,

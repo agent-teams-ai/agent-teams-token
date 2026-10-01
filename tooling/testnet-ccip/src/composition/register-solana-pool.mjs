@@ -21,11 +21,10 @@ export async function verifyPreviousRegistrationCheckpoint(journalDirectory, exp
         if (reconciled.status !== "succeeded") { throw new Error("Previous registration checkpoint is unreadable or unresolved"); }
       }
 }
-export async function broadcastRegistration(bytes, expected, rpc, sdk) {
-  // A durable signed restart skips sign(); guard its first send here as well.
+export async function beforeBroadcastRegistration(expected, rpc, sdk) {
+  // A durable signed restart skips sign(); recheck before marking submission uncertain.
   await rpc.chain();
   await readRegistrationSnapshot(rpc.readRpc, sdk, expected, "before");
-  return rpc.broadcast(bytes);
 }
 /** One explicit prerequisite-gated operation, with its own non-replaceable durable journal. */
 export async function registerTestSolanaPool(settings) {
@@ -37,7 +36,7 @@ export async function registerTestSolanaPool(settings) {
   const result = await runSolanaRegistrationJournal(expected, {
     ...createJournalFile(journalFile), ...rpc,
     inspectSigned: async bytes => sdk.inspectSigned(bytes, expected),
-    broadcast: bytes => broadcastRegistration(bytes, expected, rpc, sdk),
+    beforeBroadcast: () => beforeBroadcastRegistration(expected, rpc, sdk),
     async sign() {
       await verifyPreviousRegistrationCheckpoint(settings.journalDirectory, expected, sdk, rpc);
       await rpc.chain();

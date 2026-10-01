@@ -60,11 +60,12 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
     if (record.phase !== "succeeded") { throw new Error("Finalized deployment journal required"); }
     const observed = await ports.observe(record.signed.hash);
     if (deployment === settings.poolDeployment) {
+      if (observed.kind !== "observed") { throw new Error("Pool deployment observation unavailable: " + observed.kind); }
       const artifact = await ports.poolArtifact(settings.poolDeployment.artifactFile);
       const calldata = artifact.creationBytecode + constructorBytes.slice(2);
       if (binding.artifactSha256 !== artifact.artifactSha256 ||
         binding.creationBytecode.toLowerCase() !== artifact.creationBytecode.toLowerCase() ||
-        observed.kind !== "observed" || observed.transaction.data.toLowerCase() !== calldata.toLowerCase()) {
+        observed.transaction.data.toLowerCase() !== calldata.toLowerCase()) {
         throw new Error("Authenticated pool deployment calldata mismatch");
       }
     }

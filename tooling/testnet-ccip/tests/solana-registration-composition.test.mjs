@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { verifyPreviousRegistrationCheckpoint, broadcastRegistration } from "../src/composition/register-solana-pool.mjs";
+import { verifyPreviousRegistrationCheckpoint, beforeBroadcastRegistration } from "../src/composition/register-solana-pool.mjs";
 import { createJournalFile } from "../src/adapters/evm-journal-file.ts";
 import { registrationInstruction, verifySolanaRegistrationIntent } from "../src/domain/solana-registration.ts";
 import { runSolanaRegistrationJournal } from "../src/application/solana-registration-journal.ts";
@@ -76,7 +76,8 @@ function signedTransferFixture(phase = "signed") {
     sign: async () => { assert.fail("signed restart must not sign again"); },
     inspectSigned: async bytes => { assert.equal(bytes, signed.bytesBase64); return { ...signed, messageBase64, intent }; },
     observe: async () => { events.push("observe"); return { kind: "not-found" }; },
-    broadcast: bytes => broadcastRegistration(bytes, e, rpc, sdk),
+    beforeBroadcast: () => beforeBroadcastRegistration(e, rpc, sdk),
+    broadcast: bytes => rpc.broadcast(bytes),
   };
   const finalized = { kind: "finalized", signature: signed.signature, messageBase64, slot: "200", err: null,
     state: { operation: e.operation, mint: e.mint, verified: true } };
@@ -84,25 +85,49 @@ function signedTransferFixture(phase = "signed") {
     run: () => runSolanaRegistrationJournal(e, ports) };
 }
 
-test("signed transfer restart rejects changed prerequisites before first broadcast, then remains observation-only", async () => {
-  const f = signedTransferFixture();
-  await assert.rejects(broadcastRegistration(f.signed.bytesBase64, f.e, f.rpc, f.sdk), /prerequisites changed/);
-  f.events.length = 0;
-  const result = await f.run();
-  assert.equal(result.status, "unresolved"); assert.equal(result.reason, "broadcast-outcome-unknown");
-  assert.equal(f.record().phase, "submitting");
-  assert.deepEqual(f.events, ["observe", "chain", "before"]);
-  f.events.length = 0;
-  await f.run(); assert.deepEqual(f.events, ["observe"]);
-  f.ports.observe = async () => f.finalized;
-  assert.equal((await f.run()).status, "succeeded");
-  assert.equal(f.record().phase, "succeeded");
+test("durable signed transfer restart preserves bytes after guard failure and sends once after repair", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agtmai-registration-retry-"));
+  try {
+    const f = signedTransferFixture(), original = structuredClone(f.record());
+    const file = createJournalFile(join(directory, "transfer-mint-authority.json"));
+    await file.exclusive(() => file.write(original));
+    // Each invocation rereads the durable record, as a restarted command does.
+    const run = () => runSolanaRegistrationJournal(f.e, { ...f.ports, ...file });
+    let broadcasts = 0;
+    f.rpc.broadcast = async bytes => {
+      assert.equal(bytes, original.signed.bytesBase64);
+      assert.equal((await file.read()).phase, "submitting");
+      broadcasts++; f.events.push("broadcast"); return original.signed.signature;
+    };
+    const result = await run();
+    assert.equal(result.status, "unresolved"); assert.equal(result.reason, "before-broadcast-precondition-failed");
+    assert.deepEqual(await file.exclusive(() => file.read()), original);
+    assert.equal(broadcasts, 0); assert.deepEqual(f.events, ["observe", "chain", "before"]);
+    f.events.length = 0;
+    f.sdk.verifySnapshot = (_values, _expected, when) => {
+      assert.equal(when, "before"); f.events.push("before"); return { verified: true };
+    };
+    assert.equal((await run()).reason, "submitted-awaiting-finality");
+    assert.deepEqual(await file.exclusive(() => file.read()), { ...original, phase: "submitted" });
+    assert.deepEqual(f.events, ["observe", "chain", "before", "broadcast"]);
+    f.events.length = 0;
+    f.sdk.verifySnapshot = () => { assert.fail("reconciliation must not require before state"); };
+    await run(); assert.deepEqual(f.events, ["observe"]);
+    f.ports.observe = async () => { f.events.push("observe"); return f.finalized; };
+    assert.equal((await run()).status, "succeeded");
+    assert.equal((await run()).status, "succeeded");
+    assert.deepEqual(f.events, ["observe", "observe", "observe"]);
+    assert.deepEqual(await file.exclusive(() => file.read()), { ...original, phase: "succeeded" });
+    assert.equal(broadcasts, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("signed transfer restart checks chain identity before prerequisites or sending", async () => {
   const f = signedTransferFixture();
   f.rpc.chain = async () => { f.events.push("wrong-chain"); throw new Error("not Devnet"); };
-  assert.equal((await f.run()).status, "unresolved");
+  const original = f.record();
+  assert.equal((await f.run()).reason, "before-broadcast-precondition-failed");
+  assert.equal(f.record(), original); assert.equal(f.record().phase, "signed");
   assert.deepEqual(f.events, ["observe", "wrong-chain"]);
 });
 
@@ -118,15 +143,17 @@ test("unchanged signed transfer restart broadcasts once after the current before
   await f.run(); assert.deepEqual(f.events, ["observe"]);
 });
 
-test("already submitted transfer can be observed with changed before prerequisites and never resent", async () => {
-  const f = signedTransferFixture("submitted");
-  for (const kind of ["unknown", "not-found", "expired"]) {
-    f.ports.observe = async () => ({ kind });
-    assert.equal((await f.run()).status, "unresolved");
-    assert.equal(f.record().phase, "submitted");
+test("uncertain and terminal transfers reconcile despite changed before prerequisites and never resend", async () => {
+  for (const phase of ["submitting", "submitted", "succeeded", "failed"]) {
+    const f = signedTransferFixture(phase);
+    for (const kind of ["unknown", "not-found", "expired"]) {
+      f.ports.observe = async () => ({ kind });
+      assert.equal((await f.run()).status, "unresolved");
+      assert.equal(f.record().phase, phase);
+    }
+    f.ports.observe = async () => phase === "failed" ? { ...f.finalized, err: { failure: true }, state: null } : f.finalized;
+    assert.equal((await f.run()).status, phase === "failed" ? "failed" : "succeeded");
+    assert.equal((await f.run()).status, phase === "failed" ? "failed" : "succeeded");
+    assert.deepEqual(f.events, []);
   }
-  f.ports.observe = async () => f.finalized;
-  assert.equal((await f.run()).status, "succeeded");
-  assert.equal((await f.run()).status, "succeeded");
-  assert.deepEqual(f.events, []);
 });
