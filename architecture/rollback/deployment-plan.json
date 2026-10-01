@@ -163,7 +163,7 @@
     },
     {
       "path": "packages/contexts/supply/tests/production-deployment.test.ts",
-      "sha256": "6f15fb0e5437bea03522c86f23e4b90f4231d2d880535b89120c4a9c3114612e",
+      "sha256": "f65f71d19a8851ee5285251cff1da7a99860ac2b1b29eb9727673abe0710cbda",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {

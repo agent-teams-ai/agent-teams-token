@@ -16,7 +16,10 @@ export interface AuthorityRegistryEntry { readonly capability: string; readonly 
 export interface TokenPassport { readonly schema: "agtmai-token-passport-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly generated: { readonly observedAt: string; readonly validUntil: string }; readonly markdown: string; readonly authorityRegistry: { readonly schema: "agtmai-authority-registry-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly entries: readonly AuthorityRegistryEntry[] }; }
 const fail = (reason: string): never => { throw new Error(`PASSPORT_${reason}`); };
 const validTime = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
-const escape = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("`", "\\`").replaceAll("\n", " ");
+// Flatten lines; encode ampersands first so entity-looking input stays literal.
+const escape = (value: string): string => value.replace(/\r\n?|\n/g, " ")
+  .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+  .replaceAll("\\", "\\\\").replaceAll("`", "\\`").replace(/([*_[\]~])/g, "\\$1");
 function validateInputs(manifest: DeploymentManifest | PreparedAssemblyManifest, observations: PassportObservation): void {
   if ((manifest.schema !== "agtmai-deployment-manifest-v1" && manifest.schema !== "agtmai-deployment-manifest-v2") || manifest.broadcastAllowed !== false) {fail("MANIFEST_REQUIRED");}
   if (observations.schema !== "agtmai-deployment-observations-v1" || !validTime(observations.observedAt) || !validTime(observations.validUntil) || BigInt(observations.validUntil) < BigInt(observations.observedAt)) {fail("OBSERVATIONS_INVALID");}
