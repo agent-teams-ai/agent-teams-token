@@ -96,6 +96,6 @@ export const expectedRetainedSharedPaths = Object.freeze({
     "packages/contexts/supply/tests/production-deployment.test.ts",
     "tooling/local-evm/process.ts",
     "tooling/local-evm/toolchain.ts",
-  ]),
+  ].toSorted()),
   slither: commonRetainedSharedPaths,
 });
