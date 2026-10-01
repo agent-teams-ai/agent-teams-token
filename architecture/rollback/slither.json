@@ -128,8 +128,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "4e0aafe4e7bea92f7f695849a37254078c05e827edcab388d42affe76ccffceb",
-      "afterSha256": "65dd7abede5999aa3103440574ff0f706cc74c8cd5e0a154d52f3eea6f64d67f"
+      "beforeSha256": "06818609e987c76bf1293a9043af94e9c9d2e215602abbcd01e4a58cc9b6f200",
+      "afterSha256": "29acacf5e8583e719deec26ef59fc5ffe7a7d30af00422dff821711aed8f1d4d"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
