@@ -11,6 +11,7 @@ import type { RegistrationTarget } from "../domain/evm-registration.ts";
 import type { SepoliaIntentInput } from "../domain/evm-intent.ts";
 import { lockReleaseConstructor } from "../domain/evm-pool.ts";
 import { testTokenConstructor } from "./deploy-token.ts";
+import { loadOfficialPoolArtifact } from "./deploy-pool.ts";
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
 
 const RPC = "https://ethereum-sepolia-rpc.publicnode.com";
@@ -19,10 +20,11 @@ type Kind = typeof kinds[number];
 export interface RegistrationSettings extends RegistrationTarget {
   readonly signer: CastSignerConfig;
   readonly tokenDeployment: { readonly journalFile: string; readonly intent: SepoliaIntentInput };
-  readonly poolDeployment: { readonly journalFile: string; readonly intent: SepoliaIntentInput };
+  readonly poolDeployment: { readonly artifactFile: string; readonly journalFile: string; readonly intent: SepoliaIntentInput };
   readonly steps: Readonly<Record<Kind, { readonly journalFile: string; readonly nonce: string }>>;
 }
 const defaults = {
+  poolArtifact: loadOfficialPoolArtifact,
   read: async (file: string): Promise<EvmJournalRecord> => JSON.parse(await readFile(file, "utf8")) as EvmJournalRecord,
   observe: createSepoliaRpc(RPC).observe,
   snapshot: readRegistrationSnapshot,
@@ -51,13 +53,21 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
     if (deployment.intent.kind !== "deploy" || deployment.intent.value !== "0" ||
       deployment.intent.from.toLowerCase() !== settings.administrator.toLowerCase() ||
       binding?.artifactId !== artifactId || binding.constructorBytes.toLowerCase() !== constructorBytes.toLowerCase() ||
-      binding.administrator.toLowerCase() !== settings.administrator.toLowerCase() ||
-      (artifactId.includes("LockRelease") && binding.artifactSha256 !== "82dac8896b84a7abe909e076a4de830258e19f5aae50f48ce17cfe8305f74114")) {
+      binding.administrator.toLowerCase() !== settings.administrator.toLowerCase()) {
       throw new Error("Unexpected test deployment intent");
     }
     const record = await ports.read(deployment.journalFile);
     if (record.phase !== "succeeded") { throw new Error("Finalized deployment journal required"); }
     const observed = await ports.observe(record.signed.hash);
+    if (deployment === settings.poolDeployment) {
+      const artifact = await ports.poolArtifact(settings.poolDeployment.artifactFile);
+      const calldata = artifact.creationBytecode + constructorBytes.slice(2);
+      if (binding.artifactSha256 !== artifact.artifactSha256 ||
+        binding.creationBytecode.toLowerCase() !== artifact.creationBytecode.toLowerCase() ||
+        observed.kind !== "observed" || observed.transaction.data.toLowerCase() !== calldata.toLowerCase()) {
+        throw new Error("Authenticated pool deployment calldata mismatch");
+      }
+    }
     const result = await runEvmJournal(deployment.intent, deployment.intent, {
       exclusive: work => work(), read: async () => record, observe: async () => observed,
       // No signing, mutation or broadcast is permitted during prerequisite reconciliation.

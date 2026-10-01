@@ -14,6 +14,17 @@ export interface PoolDeploymentSettings {
   readonly signer: CastSignerConfig;
 }
 const ARTIFACT_HASH = "82dac8896b84a7abe909e076a4de830258e19f5aae50f48ce17cfe8305f74114";
+/** The accepted testnet pool artifact, authenticated before its bytecode is used. */
+export async function loadOfficialPoolArtifact(artifactFile: string): Promise<{
+  artifactSha256: string; creationBytecode: string;
+}> {
+  const artifactBytes = await readFile(artifactFile);
+  if (createHash("sha256").update(artifactBytes).digest("hex") !== ARTIFACT_HASH) { throw new Error("Official pool artifact mismatch"); }
+  const artifact = JSON.parse(artifactBytes.toString("utf8")) as { bytecode: { object: string } };
+  const creationBytecode = artifact.bytecode.object;
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(creationBytecode)) { throw new Error("Invalid official pool bytecode"); }
+  return { artifactSha256: ARTIFACT_HASH, creationBytecode };
+}
 export async function deployTestPool(settings: PoolDeploymentSettings): Promise<{
   status: string; reason: string; transactionHash: string;
 }> {
@@ -40,10 +51,7 @@ export async function deployTestPool(settings: PoolDeploymentSettings): Promise<
     receipt.blockHash !== confirmed.receipt?.blockHash || !/^0x[0-9a-fA-F]{40}$/.test(receipt.contractAddress)) {
     throw new Error("Confirmed token address unavailable");
   }
-  const artifactBytes = await readFile(settings.artifactFile);
-  if (createHash("sha256").update(artifactBytes).digest("hex") !== ARTIFACT_HASH) { throw new Error("Official pool artifact mismatch"); }
-  const artifact = JSON.parse(artifactBytes.toString("utf8")) as { bytecode: { object: string } };
-  const creationBytecode = artifact.bytecode.object;
+  const { creationBytecode } = await loadOfficialPoolArtifact(settings.artifactFile);
   const constructorBytes = lockReleaseConstructor(receipt.contractAddress);
   return executeSepoliaIntent({ chainId: "11155111", kind: "deploy", from: tokenSettings.administrator,
     nonce: settings.nonce, value: "0", data: creationBytecode + constructorBytes.slice(2), deployment: {
