@@ -456,7 +456,7 @@ test("two reclaimers atomically claim one stale run without recreating it", asyn
   await mkdir(runDirectory, {mode: 0o700});
   await writeFile(join(runDirectory, "lease.v1.json"), `${JSON.stringify({
     schemaVersion: 1, kind: "agtmai-local-evm-run",
-    runner: {pid: 2147483647, processStart: "linux:1"}, anvil: null,
+    runner: {pid: 2147483647, processStart: "linux:1"}, anvil: {pid: 2147483647, processStart: "linux:1"},
   })}\n`, {mode: 0o600});
   let arrivals = 0;
   let release!: () => void;
@@ -470,7 +470,7 @@ test("two reclaimers atomically claim one stale run without recreating it", asyn
 test("reclaimer never deletes a hostile directory substituted after validation", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "agtmai-local-evm-reclaim-substitution-"))); const runDirectory = join(root, "run-stale-substitution-Z9"); const displaced = join(root, "displaced-owned-run");
   await mkdir(runDirectory, {mode: 0o700});
-  const staleLease = `${JSON.stringify({schemaVersion: 1, kind: "agtmai-local-evm-run", runner: {pid: 2147483647, processStart: "linux:1"}, anvil: null})}\n`;
+  const staleLease = `${JSON.stringify({schemaVersion: 1, kind: "agtmai-local-evm-run", runner: {pid: 2147483647, processStart: "linux:1"}, anvil: {pid: 2147483647, processStart: "linux:1"}})}\n`;
   await writeFile(join(runDirectory, "lease.v1.json"), staleLease, {mode: 0o600});
   try {
     await assert.rejects(reclaimStaleRuns(root, {afterDirectoryList: async () => {
@@ -494,7 +494,7 @@ test("a later reclaimer completes an inode-bound claim abandoned by a crashed re
   await mkdir(runDirectory, {mode: 0o700});
   await writeFile(join(runDirectory, "lease.v1.json"), `${JSON.stringify({
     schemaVersion: 1, kind: "agtmai-local-evm-run",
-    runner: {pid: 2147483647, processStart: "linux:1"}, anvil: null,
+    runner: {pid: 2147483647, processStart: "linux:1"}, anvil: {pid: 2147483647, processStart: "linux:1"},
   })}\n`, {mode: 0o600});
   const identity = await lstat(runDirectory, {bigint: true}); const abandoned = join(root, `.reclaim-v1-${identity.dev}-${identity.ino}-${identity.birthtimeNs}-999-${"a".repeat(24)}-${runName}`);
   await rename(runDirectory, abandoned);

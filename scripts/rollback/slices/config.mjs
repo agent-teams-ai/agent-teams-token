@@ -43,10 +43,8 @@ export const deploymentPlanSharedEditBaseline = Object.freeze({
     "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
     "packages/contexts/supply/tests/deployment-cli.test.ts",
     "packages/contexts/supply/tests/production-deployment.test.ts",
-    "tooling/local-evm/process.ts",
     "tooling/local-evm/rpc.ts",
     "tooling/local-evm/tests/rpc.test.ts",
-    "tooling/local-evm/toolchain.ts",
   ]),
 });
 
@@ -73,10 +71,8 @@ export const expectedSharedPaths = Object.freeze({
     "scripts/deployment/local-execution-proof.ts",
     "scripts/tests/workflow.test.mjs",
     "tooling/deployment-plan/src/README.md",
-    "tooling/local-evm/process.ts",
     "tooling/local-evm/rpc.ts",
     "tooling/local-evm/tests/rpc.test.ts",
-    "tooling/local-evm/toolchain.ts",
   ],
   slither: [
     ".github/workflows/ci.yml",
@@ -88,7 +84,21 @@ export const expectedSharedPaths = Object.freeze({
   ],
 });
 
-export const expectedRetainedSharedPaths = Object.freeze([
+const commonRetainedSharedPaths = Object.freeze([
   "architecture/foundation/repository-agent-workflow.yaml",
   "scripts/tests/tooling-boundaries.test.mjs",
 ]);
+
+// Deployment-plan rollback removes the planner, but Local EVM still owns
+// supervisor custody before acknowledgement and pinned Foundry archive admission.
+// Neither survivor imports the removed planner. RPC execution additions remain
+// slice-owned reversals; these two exact files are independent Local EVM behavior.
+export const expectedRetainedSharedPaths = Object.freeze({
+  "local-solana": commonRetainedSharedPaths,
+  "deployment-plan": Object.freeze([
+    ...commonRetainedSharedPaths,
+    "tooling/local-evm/process.ts",
+    "tooling/local-evm/toolchain.ts",
+  ]),
+  slither: commonRetainedSharedPaths,
+});

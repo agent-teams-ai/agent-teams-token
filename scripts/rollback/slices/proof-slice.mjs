@@ -432,6 +432,7 @@ function finalizeSlice(context, primaryFailure) {
     cleanupHandle: context.cleanupHandle,
     workspaceHandle: context.workspaceHandle,
     primaryFailure,
+    processesQuiescent: context.recorder.processesQuiescent,
   });
   const effectiveFailure = finalized.primaryFailure;
   const cleanupFailure = finalized.cleanupFailure;

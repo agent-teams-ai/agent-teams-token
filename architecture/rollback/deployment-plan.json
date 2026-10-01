@@ -47,6 +47,7 @@
     "tooling/deployment-plan/tests/contributor-safe-execution.integration.test.ts",
     "tooling/deployment-plan/tests/domain.test.ts",
     "tooling/deployment-plan/tests/fixtures/forge-build-info-1.8.0-representative.json",
+    "tooling/deployment-plan/tests/fixtures/proof-custody.ts",
     "tooling/deployment-plan/tests/helpers/local-safe.ts",
     "tooling/deployment-plan/tests/helpers/no-replace-directory-rename.ts",
     "tooling/deployment-plan/tests/helpers/real-production-package.ts",
@@ -59,6 +60,7 @@
     "tooling/deployment-plan/tests/production-execution.test.ts",
     "tooling/deployment-plan/tests/production-guards.test.ts",
     "tooling/deployment-plan/tests/production-native-policy.test.ts",
+    "tooling/deployment-plan/tests/proof-custody.test.ts",
     "tooling/deployment-plan/tests/purpose-reserves.integration.test.ts",
     "tooling/deployment-plan/tests/raw-artifact-fixture.ts",
     "tooling/deployment-plan/tests/readiness-transport.test.ts",
@@ -88,8 +90,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "4e0aafe4e7bea92f7f695849a37254078c05e827edcab388d42affe76ccffceb",
-      "afterSha256": "a692df291974c41d90d97136b008ba54a1c0589e9f65fa42d75365699399f10e"
+      "beforeSha256": "06818609e987c76bf1293a9043af94e9c9d2e215602abbcd01e4a58cc9b6f200",
+      "afterSha256": "ad95df2917a510dc7b4ffa62f7be50bd15ad54820f16645eb7d88c8fedc11263"
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
@@ -123,7 +125,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "33e3c5e6d81144f2758063ba001a5e1ccf08df0949bb95d56fa9efd85f78f309",
+      "beforeSha256": "7edcd03b5fbf62dece785ecd63b52b448a4f83a2768eff5358011b48d88d7a0b",
       "afterSha256": "absent"
     },
     {
@@ -137,11 +139,6 @@
       "afterSha256": "e497a44eec3f9c82b7a859f799e8d39266e9b7b207da6b262b165badf0200f62"
     },
     {
-      "path": "tooling/local-evm/process.ts",
-      "beforeSha256": "f081446219ab0816a3905cfc86bd5aa99f9a64e3f1c097a313a6c52fa78e0c33",
-      "afterSha256": "74c901f9b039f185bd306efa31d1fff566ab46ec98b7a75dd133ce1b83063bff"
-    },
-    {
       "path": "tooling/local-evm/rpc.ts",
       "beforeSha256": "659e2862a146e4ade666f2a269f1e02a33e557f7d31c7d7c88a2a23af9d464db",
       "afterSha256": "4e8c3fe1ec97161ef7e0ad05b604915cc1aa15e19734984af7c2339e6b30e4bb"
@@ -150,11 +147,6 @@
       "path": "tooling/local-evm/tests/rpc.test.ts",
       "beforeSha256": "ceb80de2b96fb86629be2e8a56be2a5d5ebc72a62d62aa9de2ed4b81096dc391",
       "afterSha256": "731bf0f8f357ba62505e49ac52d2724be1bc674c9f8f2a07980aa5f200459f39"
-    },
-    {
-      "path": "tooling/local-evm/toolchain.ts",
-      "beforeSha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e",
-      "afterSha256": "024fd537c43eb5fb067c485075dfe151ca764871f625e9250df29d1bfef27177"
     }
   ],
   "sharedPaths": [
@@ -170,10 +162,8 @@
     "scripts/deployment/local-execution-proof.ts",
     "scripts/tests/workflow.test.mjs",
     "tooling/deployment-plan/src/README.md",
-    "tooling/local-evm/process.ts",
     "tooling/local-evm/rpc.ts",
-    "tooling/local-evm/tests/rpc.test.ts",
-    "tooling/local-evm/toolchain.ts"
+    "tooling/local-evm/tests/rpc.test.ts"
   ],
   "retainedSharedPaths": [
     {
@@ -185,6 +175,16 @@
       "path": "scripts/tests/tooling-boundaries.test.mjs",
       "sha256": "9c2464af858f0a34c7d6bca0de91d9cc0943d2948b9fe5591dc879e38a74022d",
       "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"
+    },
+    {
+      "path": "tooling/local-evm/process.ts",
+      "reason": "Independent Local EVM supervisor custody: durably register the actual Anvil child in its run lease before exposing identity or accepting parent acknowledgement; retain the five-argument surviving runner API and authenticated stop confirmation. No dependency on the removed deployment planner.",
+      "sha256": "fe71c2570ba7ba2457df33e82037e3af254e58dc85c5c5cca6fcebe2e6b83497"
+    },
+    {
+      "path": "tooling/local-evm/toolchain.ts",
+      "reason": "Independent Local EVM toolchain admission: authenticate the pinned Foundry archive as well as installed binaries for surviving runner and tests. No dependency on the removed deployment planner.",
+      "sha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e"
     }
   ],
   "survivingGates": [

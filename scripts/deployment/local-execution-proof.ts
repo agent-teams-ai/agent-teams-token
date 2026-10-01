@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { loadPreparedProductionPackage } from "@agent-teams/supply/deployment-files";
 import { canonicalJson, keccak256 } from "../../tooling/deployment-plan/src/domain/identity.ts";
 import type { ProductionStateObservation } from "../../tooling/deployment-plan/src/domain/production-guards.ts";
-import { finishWithCleanup } from "../../tooling/local-evm/cleanup.ts";
+import { cleanupFailures, finishWithCleanup } from "../../tooling/local-evm/cleanup.ts";
 import { LocalEvmError } from "../../tooling/local-evm/model.ts";
 import { checkedCommand, startOwnedAnvil, type OwnedAnvil } from "../../tooling/local-evm/process.ts";
 import { createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "../../tooling/local-evm/run-lease.ts";
@@ -171,7 +171,16 @@ export async function runLocalExecutionProof(options: LocalExecutionProofOptions
     await publishObservation(options.outputDirectory, complete);
     return { status: "observed", observationPath: join(resolve(options.outputDirectory), "production-observation-v2.json"), operationCount: 4, signerAddress };
   } catch (cause) {primary = cause; throw cause;}
-  finally {await finishWithCleanup(primary, [async () => await anvil?.stop(), async () => await removeOwnedRunDirectory(runDirectory)]);}
+  finally {
+    let stopped = false;
+    await finishWithCleanup(primary, [
+      async () => {
+        await anvil?.stop();
+        stopped = anvil !== undefined || cleanupFailures(primary).length === 0;
+      },
+      async () => {if (stopped) {await removeOwnedRunDirectory(runDirectory);}},
+    ]);
+  }
 }
 /* oxlint-enable complexity */
 

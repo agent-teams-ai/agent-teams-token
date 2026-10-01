@@ -4,7 +4,7 @@ import {
 } from "node:fs";
 
 export function readVerifiedBytes(path, { maximumBytes } = {}) {
-  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {
     const before = checkedRegularDescriptor(fd);
     if (!Number.isSafeInteger(before.size)

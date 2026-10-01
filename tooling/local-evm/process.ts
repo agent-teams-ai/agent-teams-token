@@ -1,8 +1,12 @@
-import { execFile, spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
 import { LocalEvmError } from "./model.ts";
+import { finishWithCleanup } from "./cleanup.ts";
+import { authenticateProcess, processStartIdentity as exactProcessStartIdentity, type OwnedProcessIdentity } from "./process-identity.ts";
+import { registerSupervisedRunAnvil } from "./run-lease.ts";
+
+export { authenticateProcess, processAlive, type OwnedProcessIdentity } from "./process-identity.ts";
 
 export interface CommandResult {
   readonly stdout: string;
@@ -132,21 +136,22 @@ export interface OwnedAnvilOptions {
   readonly timestamp?: string;
 }
 
-export interface OwnedProcessIdentity {
-  readonly pid: number;
-  readonly processStart: string;
-}
-
 export async function startOwnedAnvil(
   executable: string,
   fundedAddress: string,
   registerIdentity?: (identity: OwnedProcessIdentity) => Promise<void>,
   options: OwnedAnvilOptions = {},
+  runDirectory?: string,
 ): Promise<OwnedAnvil> {
-  const supervisor = spawn(process.execPath, [fileURLToPath(import.meta.url), "--supervise-anvil", executable, fundedAddress, JSON.stringify(options)], {
+  const custody = runDirectory === undefined ? undefined : {
+    directory: runDirectory,
+    runner: {pid: process.pid, processStart: await processStartIdentity(process.pid)},
+  };
+  const supervisor = spawn(process.execPath, [fileURLToPath(import.meta.url), "--supervise-anvil", executable, fundedAddress, JSON.stringify(options), ...(custody === undefined ? [] : [JSON.stringify(custody)])], {
     stdio: ["pipe", "pipe", "pipe"], env: process.env,
   });
   supervisor.stdin.on("error", () => {});
+  let identity: OwnedProcessIdentity | undefined;
   try {
     const identityMessage = await supervisorMessage(supervisor, "identity");
     if (typeof identityMessage.pid !== "number" || !Number.isSafeInteger(identityMessage.pid)
@@ -154,7 +159,7 @@ export async function startOwnedAnvil(
       || !/^(?:linux:[0-9]+|darwin:[a-f0-9]+)$/u.test(identityMessage.processStart)) {
       throw new LocalEvmError("LOCAL_EVM_ANVIL_SUPERVISOR_PROTOCOL", "Anvil supervisor returned an invalid process identity");
     }
-    const identity: OwnedProcessIdentity = {pid: identityMessage.pid, processStart: identityMessage.processStart};
+    identity = {pid: identityMessage.pid, processStart: identityMessage.processStart};
     await registerIdentity?.(identity);
     supervisor.stdin.write("ack\n");
     const ready = await supervisorMessage(supervisor, "ready");
@@ -166,17 +171,17 @@ export async function startOwnedAnvil(
       pid: identity.pid,
       rpcUrl: ready.rpcUrl,
       stop(): Promise<void> {
-        stopPromise ??= stopSupervisor(supervisor);
+        stopPromise ??= stopSupervisor(supervisor, identity);
         return stopPromise;
       },
     };
   } catch (cause) {
-    await stopSupervisor(supervisor);
+    await finishWithCleanup(cause, [async () => await stopSupervisor(supervisor, identity)]);
     throw cause;
   }
 }
 
-async function superviseAnvil(executable: string, fundedAddress: string, options: OwnedAnvilOptions = {}): Promise<void> {
+async function superviseAnvil(executable: string, fundedAddress: string, options: OwnedAnvilOptions = {}, custody?: {directory: string; runner: OwnedProcessIdentity}): Promise<void> {
   const control = supervisorControl();
   let failure: {cause: unknown} | undefined;
   let cleanupFailure: {cause: unknown} | undefined;
@@ -204,6 +209,9 @@ async function superviseAnvil(executable: string, fundedAddress: string, options
         throw cause;
       }
       const identity = {pid: child.pid, processStart};
+      if (custody !== undefined) {
+        await registerSupervisedRunAnvil(custody.directory, custody.runner, identity);
+      }
       await control.write({ type: "identity", ...identity });
       if (await control.acknowledged) {
         const outcome = await Promise.race([startup, control.terminated]);
@@ -348,11 +356,21 @@ async function supervisorMessage(
   });
 }
 
-async function stopSupervisor(supervisor: ChildProcess): Promise<void> {
-  if (supervisor.exitCode !== null || supervisor.signalCode !== null) {return;}
-  const closed = new Promise<void>((resolve) => {supervisor.once("close", () => resolve());});
-  supervisor.stdin?.end("stop\n");
-  if (!await closesWithin(closed, 11_000)) {await stopExactChild(supervisor);}
+async function stopSupervisor(supervisor: ChildProcess, identity?: OwnedProcessIdentity): Promise<void> {
+  if (supervisor.exitCode === null && supervisor.signalCode === null) {
+    const closed = new Promise<void>((resolve) => {supervisor.once("close", () => resolve());});
+    supervisor.stdin?.end("stop\n");
+    if (!await closesWithin(closed, 11_000)) {await stopExactChild(supervisor);}
+  }
+  if (identity !== undefined) {
+    const state = await authenticateProcess(identity);
+    if (state === "owned" || state === "ambiguous") {
+      throw new LocalEvmError("LOCAL_EVM_ANVIL_STOP_UNCONFIRMED", "supervisor exit did not confirm owned Anvil termination");
+    }
+  }
+  if (supervisor.exitCode !== 0 || supervisor.signalCode !== null) {
+    throw new LocalEvmError("LOCAL_EVM_ANVIL_SUPERVISOR_FAILED", "Anvil supervisor did not finish successfully");
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -360,43 +378,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function processStartIdentity(pid: number): Promise<string> {
-  if (process.platform === "linux") {
-    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
-    const end = stat.lastIndexOf(")");
-    const field = end < 0 ? undefined : stat.slice(end + 2).trim().split(/\s+/u)[19];
-    if (field === undefined || !/^[0-9]+$/u.test(field)) {
-      throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY", "Linux process start identity is unavailable");
-    }
-    return `linux:${field}`;
-  }
-  if (process.platform === "darwin") {
-    const output = await new Promise<string>((resolve, reject) => {
-      execFile("/bin/ps", ["-o", "lstart=", "-p", `${pid}`], { encoding: "utf8" }, (cause, stdout) => {
-        if (cause) { reject(cause); } else { resolve(stdout); }
-      });
-    });
-    if (output.trim().length === 0) {
-      throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY", "Darwin process start identity is unavailable");
-    }
-    return `darwin:${Buffer.from(output.trim()).toString("hex")}`;
-  }
-  throw new LocalEvmError("LOCAL_EVM_PROCESS_IDENTITY", "cross-process identity is unsupported on this platform");
-}
-
-export function processAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
-  catch (cause) { return (cause as NodeJS.ErrnoException).code === "EPERM"; }
-}
-
-export async function authenticateProcess(
-  identity: OwnedProcessIdentity,
-): Promise<"owned" | "absent" | "reused" | "ambiguous"> {
-  if (!processAlive(identity.pid)) { return "absent"; }
-  try {
-    return await processStartIdentity(identity.pid) === identity.processStart ? "owned" : "reused";
-  } catch {
-    return processAlive(identity.pid) ? "ambiguous" : "absent";
-  }
+  return await exactProcessStartIdentity(pid);
 }
 
 type AnvilChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -471,7 +453,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === "-
   else {
     try {
       const options = process.argv[5] ? JSON.parse(process.argv[5]) as OwnedAnvilOptions : {};
-      superviseAnvil(executable, fundedAddress, options).catch((cause: unknown) => {
+      const custody = process.argv[6] ? JSON.parse(process.argv[6]) as {directory: string; runner: OwnedProcessIdentity} : undefined;
+      superviseAnvil(executable, fundedAddress, options, custody).catch((cause: unknown) => {
         process.stderr.write(`${redact(cause instanceof Error ? cause.message : String(cause))}\n`);
         process.exitCode = 1;
       });

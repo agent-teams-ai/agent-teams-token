@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { registerToolchainFifoTests } from "./toolchain-fifo.test.mjs";
 
 import {
   cleanupPreparedPayload,
@@ -32,6 +33,8 @@ import {
   canonicalGitEnvironment,
 } from "../toolchain-environment.mjs";
 import { makeFixture } from "./toolchain-fixture.mjs";
+
+registerToolchainFifoTests();
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 

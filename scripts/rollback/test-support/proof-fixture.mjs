@@ -98,6 +98,21 @@ function copyCurrentRollbackSharedState(checkout, manifest) {
   }
 }
 
+export function assertRegisteredLocalEvmCustody(checkout) {
+  const result = spawnSync(process.execPath, [
+    "--test", "--test-reporter=tap",
+    "--test-name-pattern=^(runner confirms only the durably registered supervisor child before acknowledgement|supervisor registration rejects a foreign runner lease and reaps its actual child)$",
+    "tooling/local-evm/tests/lease-initialization.test.ts",
+  ], { cwd: checkout, env: {TMPDIR: tmpdir(), PATH: process.env.PATH}, encoding: "utf8", timeout: 30_000 });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.signal, null);
+  assert.equal(parseStrictTap(result.stdout,
+    "runner confirms only the durably registered supervisor child before acknowledgement").tests, 2);
+  parseStrictTap(result.stdout,
+    "supervisor registration rejects a foreign runner lease and reaps its actual child");
+}
+
 function temporaryDirectory(prefix) {
   // Darwin's temporary root can be an alias; strict binary custody requires
   // canonical paths even for test-only executable fixtures.

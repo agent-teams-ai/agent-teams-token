@@ -8,7 +8,7 @@ import {
   authenticateProcess,
   processStartIdentity,
   type OwnedProcessIdentity,
-} from "./process.ts";
+} from "./process-identity.ts";
 import {
   publishInitialFile,
   readOwnedBoundedFile,
@@ -60,10 +60,44 @@ export async function registerRunAnvil(
   anvil: OwnedProcessIdentity,
   hooks: PublicationHooks = {},
 ): Promise<void> {
-  const observed = await readLease(directory);
-  const lease = observed.lease;
+  await registerAnvilForRunner(directory, anvil,
+    {pid: process.pid, processStart: await processStartIdentity(process.pid)}, hooks);
+}
+
+// The supervisor publishes its direct child's identity before sending it over
+// the control pipe. Runner death cannot erase this recovery authority. This is
+// registration, never a completion claim: reclamation still observes child exit.
+export async function registerSupervisedRunAnvil(
+  directory: string,
+  runner: OwnedProcessIdentity,
+  anvil: OwnedProcessIdentity,
+): Promise<void> {
+  if (!isIdentity(runner) || !isIdentity(anvil)
+    || await authenticateProcess(anvil) !== "owned") {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "supervised child identity is unavailable");
+  }
+  await registerAnvilForRunner(directory, anvil, runner, {});
+}
+
+export async function confirmRunAnvilRegistration(directory: string, anvil: OwnedProcessIdentity): Promise<void> {
+  const {lease} = await readLease(directory);
   if (lease.runner.pid !== process.pid
     || lease.runner.processStart !== await processStartIdentity(process.pid)
+    || lease.anvil?.pid !== anvil.pid || lease.anvil?.processStart !== anvil.processStart) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "supervised child registration does not match this runner");
+  }
+}
+
+async function registerAnvilForRunner(
+  directory: string,
+  anvil: OwnedProcessIdentity,
+  runner: OwnedProcessIdentity,
+  hooks: PublicationHooks,
+): Promise<void> {
+  const observed = await readLease(directory);
+  const lease = observed.lease;
+  if (lease.runner.pid !== runner.pid
+    || lease.runner.processStart !== runner.processStart
     || lease.anvil !== null) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "run lease cannot register this Anvil identity");
   }
@@ -137,12 +171,12 @@ async function reclaimLeasedEntry(directory: string, expectedDirectory: string, 
   if (runnerState === "ambiguous") {
     throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
   }
-  if (lease.anvil !== null) {
-    const anvilState = await authenticateProcess(lease.anvil);
-    if (anvilState === "owned" || anvilState === "ambiguous") {
-      throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "supervisor did not close its owned Anvil; refusing unauthenticated cross-process termination");
-    }
+  // Legacy/failed publication can still leave unknown startup custody. A null
+  // identity proves neither no spawn nor successful supervisor cleanup.
+  if (lease.anvil === null) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "unregistered Anvil termination is unconfirmed; preserving its run directory and lease");
   }
+  await assertRunAnvilStopped(lease);
   await hooks.afterDirectoryList?.(directory);
   const claim = await claimDirectory(directory, expectedDirectory);
   if (claim === undefined) {return false;}
@@ -343,15 +377,28 @@ export async function removeOwnedRunDirectory(directory: string): Promise<void> 
     throw cause;
   });
   if (expectedDirectory === undefined) {return;}
-  const claim = await claimDirectory(directory, expectedDirectory);
-  if (claim === undefined) {return;}
-  await validatePrivateDirectory(claim);
-  const lease = (await readLease(claim)).lease;
+  await validatePrivateDirectory(directory);
+  const lease = (await readLease(directory)).lease;
   const current = await processStartIdentity(process.pid);
   if (lease.runner.pid !== process.pid || lease.runner.processStart !== current) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "refusing to delete a claimed directory not owned by this runner");
   }
+  await assertRunAnvilStopped(lease);
+  const claim = await claimDirectory(directory, expectedDirectory);
+  if (claim === undefined) {return;}
+  await validatePrivateDirectory(claim);
+  if (JSON.stringify((await readLease(claim)).lease) !== JSON.stringify(lease)) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_CHANGED", "run lease changed during owned-run deletion");
+  }
   await deleteClaim(claim, expectedDirectory);
+}
+
+async function assertRunAnvilStopped(lease: RunLease): Promise<void> {
+  if (lease.anvil === null) {return;}
+  const state = await authenticateProcess(lease.anvil);
+  if (state === "owned" || state === "ambiguous") {
+    throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "Anvil termination is unconfirmed; preserving its run directory and lease");
+  }
 }
 
 async function directoryIdentity(directory: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { executeSupervisedCommand } from "../../toolchain-execution.mjs";
 import {
   constants,
   existsSync,
@@ -14,7 +14,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
-import { closeCommandLogDescriptors, selectedEnvironment } from "./evidence-command.mjs";
+import { closeCommandLogDescriptors, commandOutcomeFields, selectedEnvironment } from "./evidence-command.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
@@ -202,6 +202,18 @@ export class EvidenceRecorder {
   target;
 
   #survivorDirectories = new Map();
+  #processesQuiescent = true;
+
+  get processesQuiescent() {return this.#processesQuiescent;}
+
+  #recordInvocationFailure(error, failures) {
+    if (error.result !== undefined) {
+      if (error.result.targetStatus.quiescent === true) {failures.push(error); return error.result;}
+      return { ...error.result, error };
+    }
+    const quiescent = error.execution?.launched === false && error.execution.quiescent === true;
+    return { error, status: null, signal: null, targetStatus: { quiescent }, execution: error.execution };
+  }
 
   prepareSurvivorDirectory(survivor) {
     if (survivor !== "slither" && survivor !== "local-solana") {
@@ -264,6 +276,7 @@ export class EvidenceRecorder {
     let result;
     let invocation;
     let primaryFailure;
+    const invocationFailures = [];
     try {
       stdoutDescriptor = mutateEvidenceDirectory(
         this.target,
@@ -279,16 +292,16 @@ export class EvidenceRecorder {
         workingDirectory: options.cwd,
       });
       try {
-        result = spawnSync(command, invocation.arguments, {
+        result = executeSupervisedCommand({
+          command,
+          args: invocation.arguments,
           cwd: options.cwd,
           env: invocation.environment,
           input: options.input,
           stdio: [options.input === undefined ? "ignore" : "pipe", stdoutDescriptor, stderrDescriptor],
-          timeout: options.timeout ?? 600_000,
+          timeoutMs: options.timeout ?? 600_000,
         });
-      } catch (error) {
-        result = { error, status: null, signal: null };
-      }
+      } catch (error) {result = this.#recordInvocationFailure(error, invocationFailures);}
     } catch (error) {
       primaryFailure = error;
     }
@@ -297,11 +310,12 @@ export class EvidenceRecorder {
     const descriptors = [stdoutDescriptor, stderrDescriptor];
     stdoutDescriptor = undefined;
     stderrDescriptor = undefined;
-    const finalizationFailures = closeCommandLogDescriptors(descriptors);
+    const finalizationFailures = [...invocationFailures, ...closeCommandLogDescriptors(descriptors)];
     if (primaryFailure !== undefined) {
       throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
     }
-    const commandPassed = !result.error && result.status === 0;
+    if (result.targetStatus.quiescent !== true) {this.#processesQuiescent = false;}
+    const commandPassed = !result.error && result.status === 0 && result.targetStatus.quiescent === true;
     if (!commandPassed) {
       primaryFailure = new Error(
         "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
@@ -328,21 +342,10 @@ export class EvidenceRecorder {
         environment: selectedEnvironment(invocation.environment),
         startedAt: startedAt.toISOString(),
         durationMs: Date.now() - started,
-        exitCode: result.status,
-        signal: result.signal,
-        timedOut: result.error?.code === "ETIMEDOUT",
-        spawnError: result.error?.code ?? null,
+        ...commandOutcomeFields(result),
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
-        stdout: {
-          path: stdoutRelative,
-          byteLength: stdout.length,
-          sha256: sha256(stdout),
-        },
-        stderr: {
-          path: stderrRelative,
-          byteLength: stderr.length,
-          sha256: sha256(stderr),
-        },
+        stdout: { path: stdoutRelative, byteLength: stdout.length, sha256: sha256(stdout) },
+        stderr: { path: stderrRelative, byteLength: stderr.length, sha256: sha256(stderr) },
       };
       this.document.commands.push(entry);
       this.flush();

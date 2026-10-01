@@ -1,7 +1,7 @@
 import { lstat, mkdtemp, rename } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { LocalEvmError } from "./model.ts";
-import { authenticateProcess, processStartIdentity, type OwnedProcessIdentity } from "./process.ts";
+import { authenticateProcess, processStartIdentity, type OwnedProcessIdentity } from "./process-identity.ts";
 import { validatePrivateDirectory } from "./safe-fs.ts";
 
 export interface InitializingRun {
