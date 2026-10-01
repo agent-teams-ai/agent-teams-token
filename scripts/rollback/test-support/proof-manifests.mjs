@@ -57,7 +57,8 @@ test("every production manifest verifies declared hashes through the default app
           /immutableReferences: contracts === undefined \? immutableReferences\(runtime\) : productionImmutableReferences\(runtime, build, pin\.contract\)/u,
           "historical production reader restores unnamed slots; only local inventory uses named slots",
         );
-        const cleanup = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "tooling/local-evm/tests/cleanup.test.ts"], { cwd: checkout, env: {TMPDIR: tmpdir(), PATH: process.env.PATH}, encoding: "utf8", timeout: 90_000 });
+        // The complete sequential suite must allow its slow per-case timeout budgets (~280s).
+        const cleanup = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "tooling/local-evm/tests/cleanup.test.ts"], { cwd: checkout, env: {TMPDIR: tmpdir(), PATH: process.env.PATH}, encoding: "utf8", timeout: 360_000 });
         assert.equal(existsSync(join(checkout, "scripts/deployment/local-execution-proof.ts")), false); assert.equal(cleanup.error, undefined); assert.equal(cleanup.signal, null); assert.equal(cleanup.status, 0, cleanup.stdout + cleanup.stderr);
         for (const outcome of ["retains", "removes"]) {parseStrictTap(cleanup.stdout, `runner startup publication failure ${outcome} custody after real supervisor cleanup`);}
       }

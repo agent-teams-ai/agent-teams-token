@@ -4,7 +4,7 @@ import {mkdtemp, readFile, realpath, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "node:test";
-import {authenticateProcess, processStartIdentity} from "../../local-evm/process.ts";
+import {authenticateProcess, processStartIdentity, type OwnedProcessIdentity} from "../../local-evm/process.ts";
 import {createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil} from "../../local-evm/run-lease.ts";
 import {startupCustodyProbe} from "../../local-evm/tests/fixtures/startup-custody.ts";
 import {loadProofFinalizer} from "./fixtures/proof-custody.ts";
@@ -25,22 +25,40 @@ for (const stopFails of [true, false]) {
   });
 }
 
-test("proof stop rejection retains custody even if the registered child has exited", async () => {
+test("proof stop rejection retains custody even if the registered child has exited", async context => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "evm-proof-stop-")));
+  let child: ChildProcess | undefined;
+  let closed: Promise<void> | undefined;
+  let identity: OwnedProcessIdentity | undefined;
+  context.after(async () => {
+    if (child && closed) {
+      await reapSyntheticChild(child, closed);
+      if (child.pid !== undefined) {
+        assert(identity, "child identity unconfirmed; retaining fixture");
+        assert.equal(await authenticateProcess(identity), "absent", "child absence unconfirmed; retaining fixture");
+      }
+    }
+    await rm(root, {recursive: true, force: true});
+  });
   const directory = await createProvisionalRunDirectory(root, "proof");
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {stdio: "ignore"});
+  const spawnedChild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {stdio: "ignore"});
+  child = spawnedChild;
+  closed = new Promise<void>((resolve) => {spawnedChild.once("close", () => resolve());});
+  await new Promise<void>((resolve, reject) => {
+    spawnedChild.once("spawn", () => resolve());
+    spawnedChild.once("error", reject);
+  });
   assert(child.pid);
-  const closed = new Promise<void>((resolve) => {child.once("close", () => resolve());});
+  identity = {pid: child.pid, processStart: await processStartIdentity(child.pid)};
   const stopFailure = new Error("stop rejected");
   // Real owned-run deletion must not be attempted after a rejected stop.
   await createRunLease(directory);
-  await registerRunAnvil(directory, {pid: child.pid, processStart: await processStartIdentity(child.pid)});
+  await registerRunAnvil(directory, identity);
   await reapSyntheticChild(child, closed);
   const proof = await loadProofFinalizer();
-  try {
-    await assert.rejects(proof({runDirectory: directory, anvil: {async stop() {throw stopFailure;}}}), cause => cause === stopFailure);
-    assert.equal(JSON.parse(await readFile(join(directory, "lease.v1.json"), "utf8")).anvil.pid, child.pid);
-  } finally {await reapSyntheticChild(child, closed); await rm(root, {recursive: true, force: true});}
+  await assert.rejects(proof({runDirectory: directory, anvil: {async stop() {throw stopFailure;}}}), cause => cause === stopFailure);
+  assert.equal(await authenticateProcess(identity), "absent");
+  assert.equal(JSON.parse(await readFile(join(directory, "lease.v1.json"), "utf8")).anvil.pid, child.pid);
 });
 
 async function reapSyntheticChild(child: ChildProcess, closed: Promise<void>): Promise<void> {

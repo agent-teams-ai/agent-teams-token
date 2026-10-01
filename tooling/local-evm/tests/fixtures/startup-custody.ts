@@ -68,7 +68,8 @@ export async function startupCustodyProbe(context: TestContext, caller: "runner"
   return JSON.parse(await readFile(join(root, "result.json"), "utf8"));
 }
 
-export async function runStartupCustodyOwner(loadOwnerFinalizer: () => Promise<Finalizer> = loadFinalizer): Promise<void> {
+export async function runStartupCustodyOwner(loadOwnerFinalizer: () => Promise<Finalizer>): Promise<void> {
+  assert.equal(typeof loadOwnerFinalizer, "function", "fixture owner must explicitly select its finalizer");
   const [root, caller, errorKind, closeFails] = process.argv.slice(2);
   const directory = await createProvisionalRunDirectory(root, "owned");
   await createRunLease(directory);
@@ -118,4 +119,4 @@ export async function runStartupCustodyOwner(loadOwnerFinalizer: () => Promise<F
 
 function quote(value: string): string {return `'${value.replaceAll("'", "'\\''")}'`;}
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {await runStartupCustodyOwner();}
+if (process.argv[1] === fileURLToPath(import.meta.url)) {await runStartupCustodyOwner(loadFinalizer);}
