@@ -162,6 +162,11 @@
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {
+      "path": "packages/contexts/supply/tests/local-purpose-artifacts.test.ts",
+      "sha256": "a71ce73b9e17c9e6c70994f332ad807abc9bde550fd1757e511f07a7c456a2aa",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
       "path": "packages/contexts/supply/tests/production-deployment.test.ts",
       "sha256": "f65f71d19a8851ee5285251cff1da7a99860ac2b1b29eb9727673abe0710cbda",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."

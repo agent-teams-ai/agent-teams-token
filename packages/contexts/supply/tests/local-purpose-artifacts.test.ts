@@ -306,7 +306,7 @@ function assertPassportDisclosure(manifest: ReturnType<typeof prepareAssemblyMan
   assert.ok(refreshed.markdown.includes("- Unresolved: new blocker"));
   assert.ok(passport.authorityRegistry.entries.length > 0);
   for (const entry of passport.authorityRegistry.entries) {
-    assert.ok(passport.markdown.includes(`- ${entry.capability} on ${entry.chain}: power ${entry.power}; expected ${entry.expected}; observed unresolved; ${entry.limitation}.`), entry.capability);
+    assert.ok(passport.markdown.includes(`- ${entry.capability.replaceAll("_", "\\_")} on ${entry.chain}: power ${entry.power}; expected ${entry.expected}; observed unresolved; ${entry.limitation}.`), entry.capability);
   }
   assert.equal(passport.authorityRegistry.entries.every(e => e.observed === null), true);
 }
