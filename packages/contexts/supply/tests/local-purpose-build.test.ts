@@ -6,9 +6,24 @@ import test from "node:test";
 import { readLocalPurposeGitSources, verifiedLocalPurposeCompilerInput, assertLocalPurposeCompilerOutput, compileLocalPurposeBuild } from "../src/features/genesis-manifest/adapters/local-purpose-build.js";
 import { buildFixture, forgePresentation } from "./local-purpose-build-fixture.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
+import { readProductionArtifactPins } from "../src/features/genesis-manifest/adapters/deployment-artifacts.js";
+import type { LocalPurposeCandidate } from "../src/features/genesis-manifest/adapters/local-purpose-build.js";
 import { deploymentBytes } from "../src/features/genesis-manifest/application/compile-deployment.js";
 
 const invalid = /DEPLOYMENT_ARTIFACT_PINS_INVALID/;
+async function rejectProductionSource(candidate: LocalPurposeCandidate): Promise<void> {
+  const dir = join(candidate.repositoryRoot, ".local/source-admission");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, "pins.json");
+  await writeFile(path, JSON.stringify({ schema: "agtmai-production-artifact-pins-v2", sourceRevision: candidate.revision,
+    artifacts: ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", "PurposeReserveVault", "GrantVault"].map(contract => ({ contract })) }));
+  // Invalid Git must be rejected before accessing these intentionally absent artifact files.
+  await assert.rejects(readProductionArtifactPins(path, candidate), error => {
+    assert.ok(error instanceof Error); assert.equal(error.message, "DEPLOYMENT_ARTIFACT_PINS_INVALID");
+    assert.match(error.stack!, /at (?:readLocalPurposeGitSources|authenticatedGitObject|assertLocalPurposeVendorPins)\b/);
+    return true;
+  });
+}
 for (const treePath of ["contracts", "contracts/evm", "contracts/evm/src", "contracts/evm/src/features/purpose-reserves"]) {
   test(`Git authority rejects substituted ${treePath} tree bytes before compilation`, async context => {
     const { candidate, input } = await buildFixture();
@@ -37,6 +52,7 @@ for (const treePath of ["contracts", "contracts/evm", "contracts/evm/src", "cont
     // so this pins rejection to source authentication, before compilation.
     await assert.rejects(compileLocalPurposeBuild(candidate, input), invalid);
     await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
+    await rejectProductionSource(candidate);
   });
 }
 
@@ -55,6 +71,7 @@ test("Git authority rejects source bytes stored under a different blob's claimed
   git(["update-index", "--assume-unchanged", relative]);
   assert.equal(git(["status", "--porcelain"]).toString(), "");
   await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
+  await rejectProductionSource(candidate);
 });
 
 test("Git authority rejects a forged object store with a clean checkout and the original revision label", async context => {
@@ -73,6 +90,7 @@ test("Git authority rejects a forged object store with a clean checkout and the 
   assert.equal(git(["rev-parse", "HEAD"]).toString().trim(), candidate.revision);
   assert.equal(git(["status", "--porcelain"]).toString(), "");
   await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
+  await rejectProductionSource(candidate);
 });
 
 test("Git authority rejects matching source labels with forged bytes and dirty/hidden checkout changes", async context => {
@@ -88,9 +106,11 @@ test("Git authority rejects matching source labels with forged bytes and dirty/h
   const before = await readFile(file);
   await writeFile(file, `${before}\n`);
   await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
+  await rejectProductionSource(candidate);
   execFileSync("/usr/bin/git", ["-C", candidate.repositoryRoot, "update-index", "--assume-unchanged", `contracts/evm/${path}`]);
   assert.equal(execFileSync("/usr/bin/git", ["-C", candidate.repositoryRoot, "status", "--porcelain"], { encoding: "utf8" }), "");
   await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
+  await rejectProductionSource(candidate);
 });
 
 test("Git authority rejects changed vendored pins even when Git itself is clean", async context => {
@@ -102,6 +122,7 @@ test("Git authority rejects changed vendored pins even when Git itself is clean"
   git(["add", relative]);
   git(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "test: changed dependency"]);
   await assert.rejects(readLocalPurposeGitSources({ ...candidate, revision: git(["rev-parse", "HEAD"]).trim() }), invalid);
+  await rejectProductionSource({ ...candidate, revision: git(["rev-parse", "HEAD"]).trim() });
 });
 
 test("exact compiler input admits absent or false viaSSACFG without changing pinned settings or sources", async context => {

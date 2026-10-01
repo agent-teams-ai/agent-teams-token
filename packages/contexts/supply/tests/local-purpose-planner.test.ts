@@ -9,6 +9,8 @@ import { PURPOSE_ALLOCATION_IDS } from "../src/features/genesis-manifest/domain/
 import { syntheticProductionEnvelope } from "./production-fixture.js";
 import { encodeAllocationId, normalizeAllocationSet } from "../src/features/genesis-manifest/domain/model.js";
 import type { DeploymentConfig, Hex } from "../src/features/genesis-manifest/domain/deployment.js";
+import { constructProductionAssembly } from "../src/features/genesis-manifest/application/prepare-production-deployment.js";
+import { productionCompilerPorts } from "../src/features/genesis-manifest/composition/deployment-files.js";
 
 const word = (value: bigint) => value.toString(16).padStart(64, "0");
 
@@ -80,6 +82,38 @@ test("closed order binds nine CREATE addresses and founder funding at nonce n+9"
   assert.equal(prepared.operations[9]?.calldata, "0xb60d4288");
   assert.equal(prepared.broadcastAllowed, false);
   assert.equal(validateProductionDeployment(prepared).value, undefined);
+});
+
+test("EIP-2681 permits ten operations at max-10 and rejects max-9", () => {
+  const max = 18446744073709551615n;
+  const source = fixture(); source.execution.startingNonce = String(max - 10n);
+  for (const allocation of source.reserve.allocations) {
+    const offset = allocation.id === "founder" ? 1 : allocation.id === "contributors" ? 2 : PURPOSE_ALLOCATION_IDS.indexOf(allocation.id) + 3;
+    allocation.recipient = deploymentCreateAddress(sender, String(max - 10n + BigInt(offset)));
+  }
+  const production = syntheticProductionEnvelope() as Record<string, any>;
+  production.schema = "agtmai-production-deployment-v2"; production.deployment.bridge = null;
+  production.deployment.policy.executionDeadline = source.execution.executionDeadline;
+  production.purposeVaults = source.purposeVaults;
+  const construct = (startingNonce: string) => {
+    const selected = structuredClone(production);
+    for (const allocations of [selected.deployment.allocations, selected.reserveGenesis.allocations]) {
+      for (const allocation of allocations) {
+        const offset = allocation.id === "founder" ? 1 : allocation.id === "contributors" ? 2 : PURPOSE_ALLOCATION_IDS.indexOf(allocation.id) + 3;
+        allocation.recipient = deploymentCreateAddress(sender, String(BigInt(startingNonce) + BigInt(offset)));
+      }
+    }
+    return constructProductionAssembly(selected, { sourceRevision: revision, artifacts, sender, startingNonce }, productionCompilerPorts, sha256);
+  };
+  const assembly = construct(String(max - 10n));
+  assert.equal(assembly.operations.length, 10);
+  assert.equal(assembly.operations[0]!.nonce, String(max - 10n));
+  assert.equal(assembly.operations[9]!.nonce, String(max - 1n));
+  assert.ok(assembly.operations.every(op => BigInt(op.nonce) < max));
+  assert.doesNotThrow(() => plan(source));
+  source.execution.startingNonce = String(max - 9n);
+  assert.throws(() => plan(source), /LOCAL_PURPOSE_GENESIS_INVALID/);
+  assert.throws(() => construct(String(max - 9n)), /LOCAL_PURPOSE_PLAN_INVALID/);
 });
 
 test("each purpose constructor binds its own encoded purpose and distinct opening/window", () => {

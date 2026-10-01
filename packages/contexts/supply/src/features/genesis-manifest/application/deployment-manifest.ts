@@ -1,6 +1,7 @@
 import { compileDeployment, deploymentBytes, prepareGrant, type DeploymentCompilerPorts, type PreparedDeployment, type DeploymentArtifact } from "./compile-deployment.js";
 import { isDigest, isEvmAddress, type DeploymentConfig, type DeploymentGrant, type Hex } from "../domain/deployment.js";
 import { parseCanonicalUint, UINT64_MAX } from "../domain/model.js";
+import { prepareProductionDeployment, type PreparedProductionDeployment, type ProductionPreparationPorts } from "./prepare-production-deployment.js";
 
 export interface DeploymentBlock { readonly number: string; readonly hash: Hex; readonly timestamp: string }
 export interface ContractDeploymentEvidence {
@@ -37,6 +38,26 @@ export interface DeploymentManifest {
 const refuse = (reason: string): never => { throw new Error(`DEPLOYMENT_EVIDENCE_${reason}`); };
 const publicBlock = (b: DeploymentBlock): DeploymentBlock => ({ number: b.number, hash: b.hash, timestamp: b.timestamp });
 const same = (a: unknown, b: unknown): boolean => new TextDecoder().decode(deploymentBytes(a)) === new TextDecoder().decode(deploymentBytes(b));
+
+/** The v2 variant describes complete unsigned construction, with every observed field unavailable. */
+export function prepareAssemblyManifest(prepared: PreparedProductionDeployment, ports: ProductionPreparationPorts & { readonly sha256: (bytes: Uint8Array) => Hex }) {
+  const rebuilt = prepareProductionDeployment(prepared.configuration, { artifactSourceRevision: prepared.expectations.sourceRevision,
+    artifacts: prepared.artifacts, approval: prepared.approval, expectations: prepared.expectations }, ports, ports.sha256).prepared;
+  if (!rebuilt || !same(rebuilt, prepared) || rebuilt.schema !== "agtmai-prepared-production-deployment-v2") { return refuse("PREPARATION_MISMATCH"); }
+  return { schema: "agtmai-deployment-manifest-v2" as const, coverage: rebuilt.coverage, broadcastAllowed: false as const,
+    status: "unsigned-preparation" as const, configurationSha256: rebuilt.configurationSha256,
+    reserveConfigurationSha256: rebuilt.reserveConfigurationSha256, assemblyConfigurationSha256: rebuilt.assemblyConfigurationSha256!,
+    artifactPinsSha256: rebuilt.expectations.artifactPinsSha256, sourceRevision: rebuilt.expectations.sourceRevision,
+    preparedSha256: ports.sha256(deploymentBytes(rebuilt)), evidenceSha256: null, attemptIdentity: rebuilt.expectations.attemptIdentity,
+    configuration: rebuilt.configuration, facts: rebuilt.facts!, contracts: rebuilt.constructors!,
+    funding: { operation: rebuilt.operations[9]!, observed: null },
+    gas: rebuilt.expectations.operations.map(o => ({ id: o.id, gasEstimate: o.gasEstimate!, gasLimit: o.gasLimit!, baseFeePerGas: o.baseFeePerGas!,
+      maxPriorityFeePerGas: o.maxPriorityFeePerGas!, maxFeePerGas: o.maxFeePerGas!, value: o.value!,
+      gasUsed: null, effectiveGasPrice: null, observedCostWei: null })),
+    worstCaseWei: rebuilt.expectations.operations.reduce((sum, op) => sum + BigInt(op.gasLimit!) * BigInt(op.maxFeePerGas!) + BigInt(op.value!), 0n).toString(),
+    observedWei: null, actualProductionDeployment: "unavailable" as const };
+}
+export type PreparedAssemblyManifest = ReturnType<typeof prepareAssemblyManifest>;
 
 /** Regenerate facts only from validated preparation and native creation/runtime/getter observations. */
 export function materializeDeploymentManifest(prepared: PreparedDeployment, evidence: DeploymentEvidence, ports: DeploymentManifestPorts): DeploymentManifest {

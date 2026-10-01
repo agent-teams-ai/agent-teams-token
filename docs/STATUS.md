@@ -1,5 +1,23 @@
 # AGTMAI release status
 
+## Full unsigned Ethereum assembly PR1, 2026-10-01
+
+Supply now prepares explicit production v2 with six mandatory immutable purpose
+policies, nine top-level CREATEs, founder child CREATE at nonce 1 and founder
+funding. Complete normalized inputs bind approval, expectations and attempt
+identity. All five artifact kinds use authenticated Git/vendor/fresh pinned
+compiler admission, repeated when reopening the exact package. Offline facts,
+constructor inputs and template/materialized runtime identities are available;
+actual deployment, runtime/getter observations and costs remain unavailable.
+
+Production v1 and local-purpose v1 retain their existing meanings. Synthetic
+local-purpose v2 uses chain ID 1 with test-only authority and no approval; it
+cannot enter production admission. PR2 execution/scenarios and observed reports,
+clean-SHA review, CI and sealed Linux rollback proof are pending. The precise
+rollback transform preserves Supply bytes; manifest ownership migration and
+official hash maintenance follow the orchestrator's candidate commit. Mainnet is excluded,
+all output is unsigned, and `broadcastAllowed` remains `false`.
+
 ## Local purpose-reserve qualification, 2026-09-30
 
 The six non-grant allocation buckets have a shared immutable
@@ -26,12 +44,12 @@ Quoter attribution gap is tracked in [issue #43](https://github.com/agent-teams-
 and does not block the Ethereum-only stage. Production keys stay with the owner;
 the agent only needs public addresses and unsigned transaction data.
 
-The current unsigned preparation candidate is `AGTMAICCIPToken` plus
+The v1 unsigned preparation candidate is `AGTMAICCIPToken` plus
 `FounderGrantReserve` and `ReserveController`; exact bytecode remains a release
 gate. Ethereum-only production configuration can use `bridge: null`, and the
 token-and-reserves preflight does not count CCIP setup as a prerequisite. No
 real-address accepted configuration, live gas quote or Mainnet transaction has
-been produced. Six non-grant allocation destinations still need unique public
+been produced. V1's six non-grant allocation destinations need unique public
 custody addresses and a truthful disclosure of their spending powers.
 
 ## Post-custody implementation in progress, 2026-09-15

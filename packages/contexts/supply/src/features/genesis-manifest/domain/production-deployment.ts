@@ -1,13 +1,15 @@
 import { validateDeployment, type DeploymentConfig, type DeploymentSafe, type ValidatedDeployment } from "./deployment.js";
 import { validateReserveGenesis, type ReserveGenesis } from "./reserve-genesis.js";
 import { compareDiagnostics, type Diagnostic } from "./model.js";
+import { validatePurposePolicies, type PurposePolicy } from "./purpose-policy.js";
 
 export interface ProductionDeploymentConfig {
-  readonly schema: "agtmai-production-deployment-v1";
+  readonly schema: "agtmai-production-deployment-v1" | "agtmai-production-deployment-v2";
   readonly deployment: DeploymentConfig;
   readonly reserveGenesis: ReserveGenesis;
   readonly projectControllerSafeId: string;
   readonly founderBeneficiarySafeId: string;
+  readonly purposeVaults?: readonly PurposePolicy[];
 }
 
 export interface ValidatedProductionDeployment extends ProductionDeploymentConfig {
@@ -102,8 +104,9 @@ function checkProductionBindings(deployment: ValidatedDeployment, reserve: Reser
 /** Joins the two existing authorities without producing deployable defaults. */
 export function validateProductionDeployment(input: unknown): ProductionValidation {
   const diagnostics: Diagnostic[] = [];
-  const root = object(input, ["deployment", "founderBeneficiarySafeId", "projectControllerSafeId", "reserveGenesis", "schema"], "", diagnostics);
-  if (!root || root.schema !== "agtmai-production-deployment-v1") { diagnostics.push(error("SCHEMA", "/schema")); }
+  const v2 = input !== null && typeof input === "object" && Object.getOwnPropertyDescriptor(input, "schema")?.value === "agtmai-production-deployment-v2";
+  const root = object(input, ["deployment", "founderBeneficiarySafeId", "projectControllerSafeId", "reserveGenesis", "schema", ...(v2 ? ["purposeVaults"] : [])], "", diagnostics);
+  if (!root || (!v2 && root.schema !== "agtmai-production-deployment-v1")) { diagnostics.push(error("SCHEMA", "/schema")); }
   if (!root) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
   const deployment = readDeployment(root, diagnostics);
   const rawDeployment = root.deployment;
@@ -114,6 +117,19 @@ export function validateProductionDeployment(input: unknown): ProductionValidati
   const ids = readSafeIds(root, diagnostics);
   if (!deployment || !reserve || !ids) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
   checkProductionBindings(deployment, reserve, ids, diagnostics);
+  const purposeVaults = v2 ? readProductionPurposePolicies(root, deployment, reserve, diagnostics) : undefined;
   if (diagnostics.length) { return { diagnostics: diagnostics.toSorted(compareDiagnostics) }; }
-  return { diagnostics: [], value: structuredClone({ schema: root.schema, deployment, reserveGenesis: reserve, projectControllerSafeId: ids.projectId, founderBeneficiarySafeId: ids.founderId }) as ValidatedProductionDeployment };
+  return { diagnostics: [], value: structuredClone({ schema: root.schema, deployment, reserveGenesis: reserve, projectControllerSafeId: ids.projectId, founderBeneficiarySafeId: ids.founderId, ...(v2 ? { purposeVaults } : {}) }) as ValidatedProductionDeployment };
+}
+
+function readProductionPurposePolicies(root: Record<string, unknown>, deployment: ValidatedDeployment, reserve: ReserveGenesis, diagnostics: Diagnostic[]): readonly PurposePolicy[] | undefined {
+  let policies: readonly PurposePolicy[] | undefined;
+  try { policies = validatePurposePolicies(root.purposeVaults, reserve); }
+  catch { diagnostics.push(error("PURPOSE_POLICIES", "/purposeVaults")); }
+  if (deployment.custodySafes.length !== 2) { diagnostics.push(error("SAFE_INVENTORY", "/deployment/custodySafes")); }
+  if (deployment.bridge !== null) { diagnostics.push(error("ETHEREUM_ONLY", "/deployment/bridge")); }
+  if (policies?.some(p => BigInt(deployment.policy.executionDeadline) >= BigInt(p.opensAt))) {
+    diagnostics.push(error("PURPOSE_OPENING", "/purposeVaults"));
+  }
+  return policies;
 }

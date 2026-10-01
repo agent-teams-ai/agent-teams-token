@@ -38,11 +38,6 @@ export const sliceRoots = Object.freeze({
 export const deploymentPlanSharedEditBaseline = Object.freeze({
   sha: "dfe89da4c77a186aefbaead50981a327317f3bc4",
   paths: Object.freeze([
-    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-    "packages/contexts/supply/tests/deployment-cli.test.ts",
-    "packages/contexts/supply/tests/production-deployment.test.ts",
     "tooling/local-evm/rpc.ts",
     "tooling/local-evm/tests/rpc.test.ts",
   ]),
@@ -62,11 +57,6 @@ export const expectedSharedPaths = Object.freeze({
     ".github/workflows/ci.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
-    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-    "packages/contexts/supply/tests/deployment-cli.test.ts",
-    "packages/contexts/supply/tests/production-deployment.test.ts",
     "scripts/deployment/estimate-local.ts",
     "scripts/deployment/local-execution-proof.ts",
     "scripts/tests/workflow.test.mjs",
@@ -89,6 +79,8 @@ const commonRetainedSharedPaths = Object.freeze([
   "scripts/tests/tooling-boundaries.test.mjs",
 ]);
 
+// Supply owns full unsigned assembly, authenticated artifact admission and its tests.
+// Retain those exact bytes and public entrypoints when removing deployment-plan.
 // Deployment-plan rollback removes the planner, but Local EVM still owns
 // supervisor custody before acknowledgement and pinned Foundry archive admission.
 // Neither survivor imports the removed planner. RPC execution additions remain
@@ -97,8 +89,13 @@ export const expectedRetainedSharedPaths = Object.freeze({
   "local-solana": commonRetainedSharedPaths,
   "deployment-plan": Object.freeze([
     ...commonRetainedSharedPaths,
+    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+    "packages/contexts/supply/tests/deployment-cli.test.ts",
+    "packages/contexts/supply/tests/production-deployment.test.ts",
     "tooling/local-evm/process.ts",
     "tooling/local-evm/toolchain.ts",
-  ]),
+  ].toSorted()),
   slither: commonRetainedSharedPaths,
 });

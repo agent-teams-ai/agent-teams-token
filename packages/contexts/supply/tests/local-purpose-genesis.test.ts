@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateLocalPurposeGenesis, PURPOSE_ALLOCATION_IDS } from "../src/features/genesis-manifest/domain/local-purpose-genesis.js";
+import { validateLocalPurposeGenesis, PURPOSE_ALLOCATION_IDS, type LocalPurposeGenesis } from "../src/features/genesis-manifest/domain/local-purpose-genesis.js";
 import { validateProductionDeployment } from "../src/features/genesis-manifest/domain/production-deployment.js";
 import { validateReserveGenesis } from "../src/features/genesis-manifest/domain/reserve-genesis.js";
 import { syntheticProductionEnvelope } from "./production-fixture.js";
@@ -29,6 +29,26 @@ function invalid(mutator: (value: Mutable) => void): void {
   const value = fixture(); mutator(value);
   assert.throws(() => validateLocalPurposeGenesis(value), /LOCAL_PURPOSE_GENESIS_INVALID/);
 }
+
+test("public local-purpose type pairs schema and chain and preserves both callers", () => {
+  const normalized = validateLocalPurposeGenesis(fixture());
+  const v1: LocalPurposeGenesis = { ...normalized, schema: "agtmai-local-purpose-genesis-v1", chainId: "31337" };
+  const v2: LocalPurposeGenesis = { ...normalized, schema: "agtmai-local-purpose-genesis-v2", chainId: "1" };
+  type CrossedV1 = Omit<LocalPurposeGenesis, "schema" | "chainId"> & { schema: "agtmai-local-purpose-genesis-v1"; chainId: "1" };
+  type CrossedV2 = Omit<LocalPurposeGenesis, "schema" | "chainId"> & { schema: "agtmai-local-purpose-genesis-v2"; chainId: "31337" };
+  const rejected: [CrossedV1 extends LocalPurposeGenesis ? false : true, CrossedV2 extends LocalPurposeGenesis ? false : true] = [true, true];
+  assert.deepEqual(rejected, [true, true]);
+  for (const crossed of [{ ...v1, chainId: "1" }, { ...v2, chainId: "31337" }]) {
+    assert.throws(() => validateLocalPurposeGenesis(crossed), /LOCAL_PURPOSE_GENESIS_INVALID/);
+  }
+  for (const config of [validateLocalPurposeGenesis(v1), validateLocalPurposeGenesis(v2)]) {
+    if (config.schema === "agtmai-local-purpose-genesis-v1") {
+      const id: "31337" = config.chainId; assert.equal(id, "31337");
+    } else {
+      const id: "1" = config.chainId; assert.equal(id, "1");
+    }
+  }
+});
 
 test("accepts a detached, sorted six-vault local policy while both production entrypoints reject it", () => {
   const source = fixture();

@@ -10,7 +10,7 @@ test("black-box consumer can use the declared subpaths without opening private i
   const entry = join(consumer, "consumer.mjs"); await writeFile(entry, 'import * as manifest from "@agent-teams/supply/genesis-manifest"; if (manifest.ALLOCATION_DOMAIN.length !== 66 || !manifest.encodeAllocationId("test-alpha") || "compileLocalSource" in manifest) process.exit(2);\n');
   assert.equal(await exitCode(entry), 0);
   await writeFile(entry, 'import { compileLocalSource } from "@agent-teams/supply/genesis-manifest"; void compileLocalSource;\n'); assert.notEqual(await exitCode(entry), 0);
-  await writeFile(entry, 'import * as deployment from "@agent-teams/supply/deployment"; if (typeof deployment.validateDeployment !== "function" || "parseDeploymentSource" in deployment || "sha256" in deployment) process.exit(2);\n'); assert.equal(await exitCode(entry), 0);
+  await writeFile(entry, 'import * as deployment from "@agent-teams/supply/deployment"; if (typeof deployment.validateDeployment !== "function" || typeof deployment.constructProductionAssembly !== "function" || typeof deployment.prepareAssemblyManifest !== "function" || typeof deployment.verifyAssemblyRuntime !== "function" || "parseDeploymentSource" in deployment || "sha256" in deployment) process.exit(2);\n'); assert.equal(await exitCode(entry), 0);
   await writeFile(entry, 'import "@agent-teams/supply/domain/model.js";\n'); assert.notEqual(await exitCode(entry), 0);
 });
 
