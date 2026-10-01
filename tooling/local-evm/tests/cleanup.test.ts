@@ -72,22 +72,20 @@ test("multiple cleanup-only failures use a redacted aggregate message", async ()
 
 // Exercise the runner's real finalization seam, supplying only its external
 // resources. Keep the function private in production, as in the supervisor tests.
-const finalize = await loadFinalizer("runner");
+const finalize = await loadFinalizer();
 
-for (const caller of ["runner", "proof"] as const) {
-  for (const stopFails of [true, false]) {
-    test(`${caller} startup publication failure ${stopFails ? "retains" : "removes"} custody after real supervisor cleanup`, {timeout: 20_000}, async context => {
-      const {root, directory, identity} = await startupCustodyProbe(context, caller, stopFails);
-      assert.equal(await authenticateProcess(identity), stopFails ? "owned" : "absent");
-      if (stopFails) {
-        const lease = JSON.parse(await readFile(join(directory, "lease.v1.json"), "utf8"));
-        assert.equal(lease.anvil, null);
-        assert.equal(await authenticateProcess(lease.runner), "absent");
-        await assert.rejects(reclaimStaleRuns(root), {code: "LOCAL_EVM_RUN_ANVIL_STILL_OWNED"});
-        assert.equal(await readFile(join(directory, "custody-sentinel"), "utf8"), "retain");
-      } else {await assert.rejects(readFile(join(directory, "lease.v1.json")), {code: "ENOENT"});}
-    });
-  }
+for (const stopFails of [true, false]) {
+  test(`runner startup publication failure ${stopFails ? "retains" : "removes"} custody after real supervisor cleanup`, {timeout: 20_000}, async context => {
+    const {root, directory, identity} = await startupCustodyProbe(context, "runner", stopFails);
+    assert.equal(await authenticateProcess(identity), stopFails ? "owned" : "absent");
+    if (stopFails) {
+      const lease = JSON.parse(await readFile(join(directory, "lease.v1.json"), "utf8"));
+      assert.equal(lease.anvil, null);
+      assert.equal(await authenticateProcess(lease.runner), "absent");
+      await assert.rejects(reclaimStaleRuns(root), {code: "LOCAL_EVM_RUN_ANVIL_STILL_OWNED"});
+      assert.equal(await readFile(join(directory, "custody-sentinel"), "utf8"), "retain");
+    } else {await assert.rejects(readFile(join(directory, "lease.v1.json")), {code: "ENOENT"});}
+  });
 }
 
 for (const errorKind of ["frozen", "primitive", "undefined"] as const) {
@@ -103,24 +101,6 @@ test("startup stop failure and later descriptor failure both survive finalizatio
   const {directory, identity} = await startupCustodyProbe(context, "runner", true, "mutable", true);
   assert.equal(await authenticateProcess(identity), "owned");
   assert.equal(await readFile(join(directory, "custody-sentinel"), "utf8"), "retain");
-});
-
-test("proof stop rejection retains custody even if the registered child has exited", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "evm-proof-stop-")));
-  const directory = await createProvisionalRunDirectory(root, "proof");
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {stdio: "ignore"});
-  assert(child.pid);
-  const closed = new Promise<void>((resolve) => {child.once("close", () => resolve());});
-  const stopFailure = new Error("stop rejected");
-  // Real owned-run deletion must not be attempted after a rejected stop.
-  await createRunLease(directory);
-  await registerRunAnvil(directory, {pid: child.pid, processStart: await processStartIdentity(child.pid)});
-  await reapSyntheticChild(child, closed);
-  const proof = await loadFinalizer("proof");
-  try {
-    await assert.rejects(proof({runDirectory: directory, anvil: {async stop() {throw stopFailure;}}}), cause => cause === stopFailure);
-    assert.equal(JSON.parse(await readFile(join(directory, "lease.v1.json"), "utf8")).anvil.pid, child.pid);
-  } finally {await reapSyntheticChild(child, closed); await rm(root, {recursive: true, force: true});}
 });
 
 for (const outcome of ["failed-primary", "failed-only", "failed-reaped", "fulfilled-live", "missing-handle", "reused-identity", "success"] as const) {

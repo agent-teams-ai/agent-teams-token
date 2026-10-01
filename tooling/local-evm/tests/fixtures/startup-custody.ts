@@ -12,21 +12,19 @@ import {cleanupFailures, finishWithCleanup} from "../../cleanup.ts";
 import {authenticateProcess, startOwnedAnvil, type OwnedProcessIdentity} from "../../process.ts";
 import {createProvisionalRunDirectory, createRunLease, registerRunAnvil, removeOwnedRunDirectory} from "../../run-lease.ts";
 
-export type Caller = "runner" | "proof";
+export type Finalizer = (state: {
+  primary?: unknown; interrupt?: () => void; runDirectory: string; solc?: {close(): Promise<void>}; anvil?: {stop(): Promise<void>}; interruptedSignal?: NodeJS.Signals;
+}) => Promise<void>;
 
-// Evaluate the actual private finalization seams; no production injection hook.
-export async function loadFinalizer(caller: Caller) {
-  const source = await readFile(new URL(caller === "runner" ? "../../runner.ts" : "../../../../scripts/deployment/local-execution-proof.ts", import.meta.url), "utf8");
-  const body = caller === "runner"
-    ? source.slice(source.indexOf("async function finalizeLocalRun("), source.indexOf("async function publishProcessId("))
-    : `async function finalizeLocalRun({primary, anvil, runDirectory}) {${source.slice(source.lastIndexOf("  finally {", source.indexOf("/* oxlint-enable complexity */")), source.indexOf("/* oxlint-enable complexity */")).replace(/^  finally \{/u, "").replace(/\}\s*\}\s*$/u, "")}}`;
+// Evaluate the runner's actual private finalization seam; no production hook.
+export async function loadFinalizer(): Promise<Finalizer> {
+  const source = await readFile(new URL("../../runner.ts", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("async function finalizeLocalRun("), source.indexOf("async function publishProcessId("));
   return compileFunction(`${stripTypeScriptTypes(body)}\nreturn finalizeLocalRun;`,
-    ["process", "finishWithCleanup", "cleanupFailures", "removeOwnedRunDirectory"])(process, finishWithCleanup, cleanupFailures, removeOwnedRunDirectory) as (state: {
-      primary?: unknown; interrupt?: () => void; runDirectory: string; solc?: {close(): Promise<void>}; anvil?: {stop(): Promise<void>}; interruptedSignal?: NodeJS.Signals;
-    }) => Promise<void>;
+    ["process", "finishWithCleanup", "cleanupFailures", "removeOwnedRunDirectory"])(process, finishWithCleanup, cleanupFailures, removeOwnedRunDirectory) as Finalizer;
 }
 
-export async function startupCustodyProbe(context: TestContext, caller: Caller | "startup-only", stopFails = true, errorKind = "mutable", closeFails = false): Promise<{
+export async function startupCustodyProbe(context: TestContext, caller: "runner" | "startup-only" | URL, stopFails = true, errorKind = "mutable", closeFails = false): Promise<{
   root: string; directory: string; identity: OwnedProcessIdentity;
 }> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "evm-startup-custody-")));
@@ -35,7 +33,10 @@ export async function startupCustodyProbe(context: TestContext, caller: Caller |
     if (process.argv.includes("--supervise-anvil")) ChildProcess.prototype.kill = function() {
       throw Object.assign(new Error("fixture child signal denied"), {code: "EPERM"});
     };`);
-  const owner = spawn(process.execPath, [fileURLToPath(import.meta.url), root, caller, errorKind, String(closeFails)], {
+  // A component-owned fixture can reuse the real child/probe lifecycle while
+  // loading its own private finalizer only in that fixture's owner process.
+  const entrypoint = caller instanceof URL ? caller : import.meta.url;
+  const owner = spawn(process.execPath, [fileURLToPath(entrypoint), root, caller instanceof URL ? "fixture" : caller, errorKind, String(closeFails)], {
     env: {...process.env, NODE_OPTIONS: stopFails ? `--import=${pathToFileURL(preload).href}` : ""},
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -67,7 +68,7 @@ export async function startupCustodyProbe(context: TestContext, caller: Caller |
   return JSON.parse(await readFile(join(root, "result.json"), "utf8"));
 }
 
-async function runOwner(): Promise<void> {
+export async function runStartupCustodyOwner(loadOwnerFinalizer: () => Promise<Finalizer> = loadFinalizer): Promise<void> {
   const [root, caller, errorKind, closeFails] = process.argv.slice(2);
   const directory = await createProvisionalRunDirectory(root, "owned");
   await createRunLease(directory);
@@ -100,7 +101,7 @@ async function runOwner(): Promise<void> {
   }
   const closeFailure = new Error("fixture descriptor close failed");
   let closed = false;
-  const finalize = await loadFinalizer(caller as Caller);
+  const finalize = await loadOwnerFinalizer();
   const rejected = await finalize({primary, runDirectory: directory, interrupt() {}, solc: {async close() {
     closed = true;
     if (closeFails === "true") {throw closeFailure;}
@@ -117,4 +118,4 @@ async function runOwner(): Promise<void> {
 
 function quote(value: string): string {return `'${value.replaceAll("'", "'\\''")}'`;}
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {await runOwner();}
+if (process.argv[1] === fileURLToPath(import.meta.url)) {await runStartupCustodyOwner();}
