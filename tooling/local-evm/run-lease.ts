@@ -8,7 +8,7 @@ import {
   authenticateProcess,
   processStartIdentity,
   type OwnedProcessIdentity,
-} from "./process.ts";
+} from "./process-identity.ts";
 import {
   publishInitialFile,
   readOwnedBoundedFile,

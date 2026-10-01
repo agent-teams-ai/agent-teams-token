@@ -49,3 +49,16 @@ export function closeCommandLogDescriptors(descriptors) {
   }
   return failures;
 }
+
+export function commandOutcomeFields(result) {
+  return {
+    exitCode: result.status,
+    signal: result.signal,
+    timedOut: result.targetStatus.timedOut === true || result.error?.code === "ETIMEDOUT"
+      || result.supervisorStatus?.error === "ETIMEDOUT",
+    processesQuiescent: result.targetStatus.quiescent,
+    supervisor: result.supervisorStatus,
+    execution: result.execution,
+    spawnError: result.error?.code ?? null,
+  };
+}

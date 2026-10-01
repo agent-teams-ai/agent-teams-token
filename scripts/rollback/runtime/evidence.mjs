@@ -14,7 +14,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
-import { closeCommandLogDescriptors, selectedEnvironment } from "./evidence-command.mjs";
+import { closeCommandLogDescriptors, commandOutcomeFields, selectedEnvironment } from "./evidence-command.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
@@ -342,14 +342,7 @@ export class EvidenceRecorder {
         environment: selectedEnvironment(invocation.environment),
         startedAt: startedAt.toISOString(),
         durationMs: Date.now() - started,
-        exitCode: result.status,
-        signal: result.signal,
-        timedOut: result.targetStatus.timedOut === true || result.error?.code === "ETIMEDOUT"
-          || result.supervisorStatus?.error === "ETIMEDOUT",
-        processesQuiescent: result.targetStatus.quiescent,
-        supervisor: result.supervisorStatus,
-        execution: result.execution,
-        spawnError: result.error?.code ?? null,
+        ...commandOutcomeFields(result),
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
         stdout: { path: stdoutRelative, byteLength: stdout.length, sha256: sha256(stdout) },
         stderr: { path: stderrRelative, byteLength: stderr.length, sha256: sha256(stderr) },

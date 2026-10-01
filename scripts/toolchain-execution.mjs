@@ -439,6 +439,13 @@ async function quiesceChild(pgid) {
   return waitForGroupDisappearance(pgid, KILL_GRACE_MS);
 }
 
+function writeSupervisorFailure(statusFd, error, child, outcome, timedOut) {
+  try {writeSupervisorStatus(statusFd, {
+    error: error?.code ?? "unknown", pgid: child?.pid, quiescent: false,
+    signal: outcome?.signal ?? null, status: outcome?.status ?? null, timedOut,
+  });} catch {}
+}
+
 async function supervisorMain(encoded) {
   const config = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   let child;
@@ -491,10 +498,7 @@ async function supervisorMain(encoded) {
     else if (outcome.signal) {process.exitCode = 128;}
     else {process.exitCode = outcome.status ?? 1;}
   } catch (error) {
-    try {writeSupervisorStatus(config.statusFd, {
-      error: error?.code ?? "unknown", pgid: child?.pid, quiescent: false,
-      signal: outcome?.signal ?? null, status: outcome?.status ?? null, timedOut,
-    });} catch {}
+    writeSupervisorFailure(config.statusFd, error, child, outcome, timedOut);
     process.exitCode = 125;
   }
 }
@@ -514,6 +518,48 @@ function readSupervisorStatus(invocation) {
     invocation.status.identity = descriptor;
     return status;
   } catch {return;}
+}
+
+function readCapturedOutput(captures, status, maxBuffer, encoding) {
+  const output = [null, null, null];
+  const captureFailures = [];
+  for (const [index, file] of captures.entries()) {
+    if (!file) {continue;}
+    try {
+      file.identity = checkedRegularDescriptor(file.fd);
+      if (status?.quiescent === true) {file.expectedHash = hashDescriptor(file.fd);}
+      if (index === 0) {continue;}
+      if (file.identity.size > maxBuffer && status) {status.error ??= "ENOBUFS";}
+      const buffer = Buffer.alloc(Math.min(file.identity.size, maxBuffer));
+      const count = readSync(file.fd, buffer, 0, buffer.length, 0);
+      output[index] = encoding ? buffer.subarray(0, count).toString(encoding) : buffer.subarray(0, count);
+    } catch (error) {captureFailures.push(error);}
+  }
+  return { output, captureFailures };
+}
+
+function fallbackTerminateUncertainGroup(status) {
+  const failures = [];
+  if (status?.quiescent === true) {return failures;}
+  if (Number.isSafeInteger(status?.pgid) && status.pgid > 1) {
+    try {
+      signalGroup(status.pgid, "SIGTERM");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TERM_GRACE_MS);
+      signalGroup(status.pgid, "SIGKILL");
+    } catch (error) {failures.push(error);}
+  }
+  return failures;
+}
+
+function supervisedOutcome(result, status, output) {
+  const errorCode = status?.timedOut ? "ETIMEDOUT" : status?.error;
+  const observedError = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
+  return {
+    ...result, error: observedError, output, stdout: output[1], stderr: output[2],
+    signal: status?.signal ?? null, status: status?.status ?? null,
+    targetStatus: status ?? { quiescent: false },
+    supervisorStatus: { status: result.status, signal: result.signal, error: result.error?.code ?? null },
+  };
 }
 
 function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, targetFds = [], timeoutMs,
@@ -559,39 +605,12 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
     killSignal: "SIGKILL",
   });
   const status = readSupervisorStatus(invocation);
-  const output = [null, null, null];
-  const captureFailures = [];
-  for (const [index, file] of captures.entries()) {
-    if (!file) {continue;}
-    try {
-      file.identity = checkedRegularDescriptor(file.fd);
-      if (status?.quiescent === true) {file.expectedHash = hashDescriptor(file.fd);}
-      if (index === 0) {continue;}
-      if (file.identity.size > maxBuffer && status) {status.error ??= "ENOBUFS";}
-      const buffer = Buffer.alloc(Math.min(file.identity.size, maxBuffer));
-      const count = readSync(file.fd, buffer, 0, buffer.length, 0);
-      output[index] = encoding ? buffer.subarray(0, count).toString(encoding) : buffer.subarray(0, count);
-    } catch (error) {captureFailures.push(error);}
-  }
-  const errorCode = status?.timedOut ? "ETIMEDOUT" : status?.error;
-  const observedError = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
-  const outcome = {
-    ...result, error: observedError, output, stdout: output[1], stderr: output[2],
-    signal: status?.signal ?? null, status: status?.status ?? null,
-    targetStatus: status ?? { quiescent: false },
-    supervisorStatus: { status: result.status, signal: result.signal, error: result.error?.code ?? null },
-  };
+  const failures = fallbackTerminateUncertainGroup(status);
+  const { output, captureFailures } = readCapturedOutput(captures, status, maxBuffer, encoding);
+  const outcome = supervisedOutcome(result, status, output);
   if (status?.quiescent !== true) {
-    const failures = [];
-    if (Number.isSafeInteger(status?.pgid) && status.pgid > 1) {
-      try {
-        signalGroup(status.pgid, "SIGTERM");
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TERM_GRACE_MS);
-        signalGroup(status.pgid, "SIGKILL");
-      } catch (error) {failures.push(error);}
-    }
     const error = new Error(`TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN invocation=${invocation.root}`,
-      { cause: result.error ?? observedError });
+      { cause: result.error ?? outcome.error });
     error.code = "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN";
     // Supervisor exit/signal is distinct from the target's observed outcome.
     // Killing the group is a fallback, not a proof that every child is gone.
