@@ -111,7 +111,8 @@ function createControlledFile(path, contents = "") {
     0o600,
   );
   try {
-    if (contents) {writeSync(fd, contents, 0, "utf8");}
+    if (Buffer.isBuffer(contents)) {writeSync(fd, contents, 0, contents.length, 0);}
+    else if (contents) {writeSync(fd, contents, 0, "utf8");}
     fchmodSync(fd, 0o600);
     const identity = checkedRegularDescriptor(fd);
     return { expectedHash: hashDescriptor(fd), fd, identity, path };
@@ -361,12 +362,14 @@ function processGroupMembers(pgid) {
         const stat = readFileSync(`/proc/${leaf}/stat`, "utf8");
         const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
         if (Number(fields[2]) === pgid && fields[0] !== "Z") {members.push(Number(leaf));}
-      } catch {}
+      } catch (error) {
+        if (!["ENOENT", "ESRCH"].includes(error?.code)) {throw error;}
+      }
     }
     return members;
   }
   if (process.platform !== "darwin") {throw typedError("TOOLCHAIN_PROCESS_GROUP_INSPECTION_FAILED");}
-  const result = spawnSync("/bin/ps", ["-axo", "pid=,pgid=,stat="], { encoding: "utf8" });
+  const result = spawnSync("/bin/ps", ["-axo", "pid=,pgid=,stat="], { encoding: "utf8", timeout: KILL_GRACE_MS, killSignal: "SIGKILL" });
   if (result.status !== 0) {throw typedError("TOOLCHAIN_PROCESS_GROUP_INSPECTION_FAILED");}
   return result.stdout.split("\n").map((line) => line.trim().split(/\s+/))
     .filter(([pid, group, state]) => Number(pid) > 0 && Number(group) === pgid && !state?.startsWith("Z"))
@@ -405,6 +408,16 @@ function writeSupervisorStatus(fd, status) {
   writeSync(fd, payload, 0, "utf8");
 }
 
+async function quiesceChild(pgid) {
+  if (pgid === undefined) {return true;} // spawn error: no child was created.
+  if (groupHasLiveMembers(pgid)) {
+    signalGroup(pgid, "SIGTERM");
+    await delay(TERM_GRACE_MS);
+    if (groupHasLiveMembers(pgid)) {signalGroup(pgid, "SIGKILL");}
+  }
+  return waitForGroupDisappearance(pgid, KILL_GRACE_MS);
+}
+
 async function supervisorMain(encoded) {
   const config = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   let child;
@@ -413,29 +426,35 @@ async function supervisorMain(encoded) {
   let supervisorError;
   try {
     child = spawn(config.command, config.args, {
+      cwd: config.cwd,
       detached: true,
       env: process.env,
       stdio: config.childStdio,
     });
     writeSupervisorStatus(config.statusFd, { error: null, pgid: child.pid, quiescent: false });
     const outcome = await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        timedOut = true;
-        termination = terminateProcessGroup(child.pid).catch((error) => {supervisorError ??= error;});
-      }, config.timeoutMs);
-      child.once("error", (error) => resolve({ error }));
-      child.once("exit", (status, signal) => {
+      const stop = () => {
+        termination ??= terminateProcessGroup(child.pid).catch((error) => {supervisorError ??= error;});
+      };
+      const timer = setTimeout(() => {timedOut = true; stop();}, config.timeoutMs);
+      const captureTimer = setInterval(() => {
+        try {
+          if (config.captureFds.some((fd) => fstatSync(fd).size > config.maxBuffer)) {
+            supervisorError ??= { code: "ENOBUFS" };
+            stop();
+          }
+        } catch (error) {supervisorError ??= error; stop();}
+      }, 10);
+      const finish = (childOutcome) => {
         clearTimeout(timer);
-        resolve({ signal, status });
-      });
+        clearInterval(captureTimer);
+        resolve(childOutcome);
+      };
+      child.once("error", (error) => finish({ error }));
+      child.once("exit", (status, signal) => finish({ signal, status }));
     });
     if (termination) {await termination;}
-    if (groupHasLiveMembers(child.pid)) {
-      signalGroup(child.pid, "SIGTERM");
-      await delay(TERM_GRACE_MS);
-      if (groupHasLiveMembers(child.pid)) {signalGroup(child.pid, "SIGKILL");}
-    }
-    const quiescent = await waitForGroupDisappearance(child.pid, KILL_GRACE_MS);
+    const quiescent = await quiesceChild(child.pid);
     writeSupervisorStatus(config.statusFd, {
       error: outcome.error?.code ?? supervisorError?.code ?? null,
       pgid: child.pid,
@@ -450,7 +469,7 @@ async function supervisorMain(encoded) {
     else if (outcome.signal) {process.exitCode = 128;}
     else {process.exitCode = outcome.status ?? 1;}
   } catch (error) {
-    try {writeSupervisorStatus(config.statusFd, { error: error?.code ?? "unknown", quiescent: false });} catch {}
+    try {writeSupervisorStatus(config.statusFd, { error: error?.code ?? "unknown", pgid: child?.pid, quiescent: false });} catch {}
     process.exitCode = 125;
   }
 }
@@ -472,15 +491,29 @@ function readSupervisorStatus(invocation) {
   } catch {return;}
 }
 
-function supervisedSpawn({ args, command, env, invocation, stdio, targetFds = [], timeoutMs }) {
+function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, targetFds = [], timeoutMs,
+  encoding = "utf8", maxBuffer = 1024 * 1024 }) {
+  // File-backed pipes keep the outer sync watchdog bounded even if a lost
+  // supervisor leaves a descendant holding its streams open.
+  const captures = [];
+  const supervisorStdio = stdio.map((entry, index) => {
+    if (entry !== "pipe") {return entry;}
+    const file = createControlledFile(join(invocation.root, `stdio-${index}`), index === 0 ? input : "");
+    invocation.files.push(file);
+    captures[index] = file;
+    return file.fd;
+  });
   const statusFd = 3 + targetFds.length;
   const config = {
     args,
+    captureFds: [1, 2].filter((index) => captures[index]),
     childStdio: [
-      ...stdio.map((entry) => entry === "pipe" ? "inherit" : entry),
+      ...stdio.map((entry) => entry === "ignore" ? "ignore" : "inherit"),
       ...targetFds.map((_, index) => index + 3),
     ],
     command,
+    cwd,
+    maxBuffer,
     statusFd,
     timeoutMs,
   };
@@ -489,23 +522,49 @@ function supervisedSpawn({ args, command, env, invocation, stdio, targetFds = []
     SUPERVISOR_ARGUMENT,
     Buffer.from(JSON.stringify(config)).toString("base64url"),
   ], {
-    encoding: stdio[1] === "inherit" ? undefined : "utf8",
     env,
-    stdio: [...stdio, ...targetFds, invocation.status.fd],
+    stdio: [...supervisorStdio, ...targetFds, invocation.status.fd],
     timeout: timeoutMs + TERM_GRACE_MS + KILL_GRACE_MS + 2_000,
+    killSignal: "SIGKILL",
   });
   const status = readSupervisorStatus(invocation);
-  if (!status?.quiescent) {
+  if (status?.quiescent !== true) {
     if (Number.isSafeInteger(status?.pgid) && status.pgid > 1) {
       try {
         signalGroup(status.pgid, "SIGTERM");
-        spawnSync("/bin/sleep", [String(TERM_GRACE_MS / 1_000)]);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TERM_GRACE_MS);
         signalGroup(status.pgid, "SIGKILL");
       } catch {}
     }
-    throw typedError("TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN", `invocation=${invocation.root}`);
+    const error = typedError("TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN", `invocation=${invocation.root}`);
+    error.code = "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN";
+    throw error;
   }
-  return { ...result, status: status.status, targetStatus: status };
+  const output = [null, null, null];
+  for (const [index, file] of captures.entries()) {
+    if (!file) {continue;}
+    file.identity = checkedRegularDescriptor(file.fd);
+    file.expectedHash = hashDescriptor(file.fd);
+    if (index === 0) {continue;}
+    if (file.identity.size > maxBuffer) {status.error ??= "ENOBUFS";}
+    const buffer = Buffer.alloc(Math.min(file.identity.size, maxBuffer));
+    readSync(file.fd, buffer, 0, buffer.length, 0);
+    output[index] = encoding ? buffer.toString(encoding) : buffer;
+  }
+  const errorCode = status.timedOut ? "ETIMEDOUT" : status.error;
+  const error = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
+  return { ...result, error, output, stdout: output[1], stderr: output[2], signal: status.signal,
+    status: status.status, targetStatus: status };
+}
+
+// Rollback supplies its own trusted environment and log descriptors; verified
+// toolchain entrypoints retain their descriptor binding and private environment.
+export function executeSupervisedCommand({ command, args = [], cwd, env, input, encoding = "utf8",
+  stdio = [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  maxBuffer = 1024 * 1024, timeoutMs = 600_000 }) {
+  return withInvocation([], process.platform, ({ invocation }) => supervisedSpawn({
+    args, command, cwd, env, input, encoding, invocation, maxBuffer, stdio, timeoutMs,
+  }));
 }
 
 function singleLine(value) {

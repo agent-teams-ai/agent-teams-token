@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { executeSupervisedCommand } from "../../toolchain-execution.mjs";
 import {
   lstatSync,
   readFileSync,
@@ -37,13 +37,15 @@ export function basicRun(command, arguments_, options = {}) {
   const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
     workingDirectory: options.cwd,
   });
-  const result = spawnSync(command, invocation.arguments, {
+  const result = executeSupervisedCommand({
+    command,
+    args: invocation.arguments,
     cwd: options.cwd,
     encoding: "utf8",
     env: invocation.environment,
     input: options.input,
     maxBuffer: 128 * 1024 * 1024,
-    timeout: options.timeout ?? 600_000,
+    timeoutMs: options.timeout ?? 600_000,
   });
   if (result.error || result.status !== 0) {
     const output = String(result.stdout ?? "") + "\n" + String(result.stderr ?? "");
@@ -60,12 +62,14 @@ function basicRunBuffer(command, arguments_, options = {}) {
   const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
     workingDirectory: options.cwd,
   });
-  const result = spawnSync(command, invocation.arguments, {
+  const result = executeSupervisedCommand({
+    command,
+    args: invocation.arguments,
     cwd: options.cwd,
     encoding: null,
     env: invocation.environment,
     maxBuffer: 256 * 1024 * 1024,
-    timeout: options.timeout ?? 600_000,
+    timeoutMs: options.timeout ?? 600_000,
   });
   if (result.error || result.status !== 0) {
     throw new Error(

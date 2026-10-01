@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { executeSupervisedCommand } from "../../toolchain-execution.mjs";
 import {
   constants,
   existsSync,
@@ -202,6 +202,9 @@ export class EvidenceRecorder {
   target;
 
   #survivorDirectories = new Map();
+  #processesQuiescent = true;
+
+  get processesQuiescent() {return this.#processesQuiescent;}
 
   prepareSurvivorDirectory(survivor) {
     if (survivor !== "slither" && survivor !== "local-solana") {
@@ -279,15 +282,18 @@ export class EvidenceRecorder {
         workingDirectory: options.cwd,
       });
       try {
-        result = spawnSync(command, invocation.arguments, {
+        result = executeSupervisedCommand({
+          command,
+          args: invocation.arguments,
           cwd: options.cwd,
           env: invocation.environment,
           input: options.input,
           stdio: [options.input === undefined ? "ignore" : "pipe", stdoutDescriptor, stderrDescriptor],
-          timeout: options.timeout ?? 600_000,
+          timeoutMs: options.timeout ?? 600_000,
         });
       } catch (error) {
-        result = { error, status: null, signal: null };
+        this.#processesQuiescent = false;
+        result = { error, status: null, signal: null, targetStatus: { quiescent: false } };
       }
     } catch (error) {
       primaryFailure = error;
@@ -331,18 +337,11 @@ export class EvidenceRecorder {
         exitCode: result.status,
         signal: result.signal,
         timedOut: result.error?.code === "ETIMEDOUT",
+        processesQuiescent: result.targetStatus.quiescent,
         spawnError: result.error?.code ?? null,
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
-        stdout: {
-          path: stdoutRelative,
-          byteLength: stdout.length,
-          sha256: sha256(stdout),
-        },
-        stderr: {
-          path: stderrRelative,
-          byteLength: stderr.length,
-          sha256: sha256(stderr),
-        },
+        stdout: { path: stdoutRelative, byteLength: stdout.length, sha256: sha256(stdout) },
+        stderr: { path: stderrRelative, byteLength: stderr.length, sha256: sha256(stderr) },
       };
       this.document.commands.push(entry);
       this.flush();
