@@ -114,8 +114,16 @@ export async function runLocalExecutionProof(options: LocalExecutionProofOptions
     signerAddress = parseAddress((await checkedCommand(foundry.cast, ["wallet", "address", ...signer], { code: "PROOF_SIGNER_ADDRESS_FAILED", env: castEnvironment })).stdout);
     if (signerAddress !== expectations.sender) {throw new Error("PROOF_SIGNER_SENDER_MISMATCH");}
     const start = BigInt(prepared.configuration.reserveGenesis.founder.schedule.start);
+    const policy = prepared.configuration.deployment.policy;
+    const lead = BigInt(policy.fundingLeadSeconds);
+    const executionLimit = [BigInt(policy.executionDeadline), BigInt(policy.fundingDeadline), start - lead]
+      .reduce((earliest, limit) => limit < earliest ? limit : earliest);
+    // Retain the local four-send headroom, measured from the approved limits.
+    // An impossible fixture must fail before starting Anvil rather than clamp to zero.
+    const initialTimestamp = executionLimit - 8n;
+    if (lead > start || initialTimestamp < 0n) {throw new Error("PROOF_EXECUTION_TIMING_IMPOSSIBLE");}
     anvil = await startOwnedAnvil(foundry.anvil, signerAddress, async identity => await registerRunAnvil(runDirectory, identity), {
-      chainId: "1", timestamp: (start > 8n ? start - 8n : 0n).toString(),
+      chainId: "1", timestamp: initialTimestamp.toString(),
     });
     const rpc = createLocalExecutionRpcClient(anvil.rpcUrl);
     const chainId = await rpc.request("eth_chainId"), netVersion = await rpc.request("net_version");
