@@ -405,8 +405,9 @@ test(cleanupUncertain ? "completed full assembly with unresolved custody cleanup
     const setups = report.bootstrap.filter((tx: { to: Hex | null; input: Hex }) => tx.to === configured.address && tx.input.startsWith(custodySelector("setup(address[],uint256,address,bytes,address,address,uint256,address)")));
     assert.equal(setups.length, 1); const setup = setups[0];
     assert.equal(setup.status, "0x1"); assert.equal(setup.sender, report.roles.bootstrapFunderRelayer); assert.equal(setup.chainId, "1");
-    assert.deepEqual(custodySafeSetupOwners(configured.address, setup.input).toSorted(), configured.owners.toSorted());
-    verifyCustodySafeSetupEvent(configured.address, setup.sender, configured.owners, setup.logs);
+    const setupOwners = custodySafeSetupOwners(configured.address, setup.input);
+    assert.deepEqual(setupOwners.toSorted(), configured.owners.toSorted());
+    verifyCustodySafeSetupEvent(configured.address, setup.sender, setupOwners, setup.logs);
     return { address: configured.address, setupTransactionHash: setup.transactionHash as Hex };
   });
   const authenticatedSafe = { singletonAddress, proxyCodeHash: safeProfile.proxyRuntimeKeccak256, singletonCodeHash: safeProfile.singletonRuntimeKeccak256, deployments: safeDeployments };
