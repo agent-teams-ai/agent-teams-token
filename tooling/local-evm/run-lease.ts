@@ -137,6 +137,11 @@ async function reclaimLeasedEntry(directory: string, expectedDirectory: string, 
   if (runnerState === "ambiguous") {
     throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
   }
+  // Only the live owner can confirm cleanup of an unregistered startup child.
+  // Once it exits, a null identity proves neither no spawn nor successful stop.
+  if (lease.anvil === null) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "unregistered Anvil termination is unconfirmed; preserving its run directory and lease");
+  }
   await assertRunAnvilStopped(lease);
   await hooks.afterDirectoryList?.(directory);
   const claim = await claimDirectory(directory, expectedDirectory);

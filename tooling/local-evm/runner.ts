@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
-import { finishWithCleanup } from "./cleanup.ts";
+import { cleanupFailures, finishWithCleanup } from "./cleanup.ts";
 import { canonicalJson, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
@@ -242,7 +242,12 @@ async function finalizeLocalRun(state: {
     () => {process.removeListener("SIGINT", state.interrupt);},
     () => {process.removeListener("SIGTERM", state.interrupt);},
     () => state.solc?.close(),
-    async () => {await state.anvil?.stop(); stopped = true;},
+    async () => {
+      await state.anvil?.stop();
+      // Rejected startup returns no handle, but can leave a live child before
+      // identity registration. Keep that cleanup debt in custody.
+      stopped = state.anvil !== undefined || cleanupFailures(state.primary).length === 0;
+    },
     async () => {if (stopped) {await removeOwnedRunDirectory(state.runDirectory);}},
     () => {
       if (state.interruptedSignal) {

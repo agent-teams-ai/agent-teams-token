@@ -285,6 +285,7 @@ test("structural command timeout remains failed with complete logs and no READY"
   assert.equal(entry.status, "failed");
   assert.equal(entry.timedOut, true);
   assert.equal(entry.spawnError, "ETIMEDOUT");
+  assert.equal(entry.processesQuiescent, true);
   assert.equal(entry.exitCode, 143);
   assert.equal(entry.signal, null);
   assert.ok(entry.durationMs < 4_000);
@@ -295,7 +296,13 @@ test("structural command timeout remains failed with complete logs and no READY"
   }
   const { events } = captureEvidence({ status: entry.exitCode, signal: entry.signal, error: commandError.cause },
     entry.durationMs, fs.readFileSync(join(evidence, entry.stdout.path)), fs.readFileSync(join(evidence, entry.stderr.path)));
-  assertSequence(events, "SIGTERM");
+  // The group executor signals both wrapper and child; the wrapper also
+  // relays TERM to its child. Standard signals can coalesce into one delivery.
+  assert.equal(events[0].event, "started");
+  assert.ok(events.length === 2 || events.length === 3, "one or two TERM deliveries, with no other events");
+  for (const event of events.slice(1)) {
+    assert.deepEqual(event, { event: "signal", signal: "SIGTERM", privateExists: true });
+  }
   const started = assertChildReaped(events);
   assert.equal(events.some(({ event }) => event === "completed"), false);
   assert.equal(fs.existsSync(started.root), false);

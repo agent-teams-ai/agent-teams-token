@@ -6,7 +6,22 @@ import { basename, join } from "node:path";
 import { test } from "node:test";
 import { createInitializingRunDirectory, publishInitializedRun } from "../run-initialization.ts";
 import { simulateDarwinClaimIdentity } from "./fixtures/darwin-claim-identity.ts";
-import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, removeOwnedRunDirectory } from "../run-lease.ts";
+import { createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "../run-lease.ts";
+import { authenticateProcess } from "../process.ts";
+import { startupCustodyProbe } from "./fixtures/startup-custody.ts";
+
+test("stale reclamation retains an unregistered failed-start child after its actual owner exits", {timeout: 20_000}, async context => {
+  const {root, directory, identity} = await startupCustodyProbe(context, "startup-only");
+  const lease = await fs.readFile(join(directory, "lease.v1.json"));
+  const parsed = JSON.parse(lease.toString("utf8"));
+  assert.equal(parsed.anvil, null);
+  assert.equal(await authenticateProcess(parsed.runner), "absent", "the real runner has exited");
+  assert.equal(await authenticateProcess(identity), "owned", "the failed-start child still lives");
+  await assert.rejects(reclaimStaleRuns(root), {code: "LOCAL_EVM_RUN_ANVIL_STILL_OWNED"});
+  assert.deepEqual(await fs.readFile(join(directory, "lease.v1.json")), lease);
+  assert.equal(await fs.readFile(join(directory, "custody-sentinel"), "utf8"), "retain");
+  assert.equal(await authenticateProcess(identity), "owned");
+});
 
 for (const owner of ["runner", "stale-reclaimer"] as const) {
   test(`scanner overlaps ${owner} deleting a still-present claim`, {timeout: 10_000}, async (context) => {
@@ -15,6 +30,8 @@ for (const owner of ["runner", "stale-reclaimer"] as const) {
     const path = join(directory, "lease.v1.json");
     await createRunLease(directory);
     if (owner === "stale-reclaimer") {
+      // Stale deletion needs a positively absent child identity, not null.
+      await registerRunAnvil(directory, {pid: 2147483647, processStart: "linux:1"});
       const lease = JSON.parse(await fs.readFile(path, "utf8"));
       lease.runner = {pid: 2147483647, processStart: "linux:1"};
       await fs.writeFile(path, JSON.stringify(lease));
@@ -121,6 +138,9 @@ for (const phase of ["owner", "initializer", "unfinished-hardlink", "provisional
         directory = await publishInitializedRun(initial, async () => await createRunLease(initial.directory));
       }
       if (phase === "provisional") {await fs.unlink(join(directory, "lease.v1.json"));}
+      if (phase === "reclaim" || phase === "abandoned-reclaim") {
+        await registerRunAnvil(directory, {pid: 2147483647, processStart: "linux:1"});
+      }
       if (phase === "unfinished-hardlink") {
         await fs.writeFile(join(directory, "unfinished.tmp"), "unfinished", {mode: 0o600});
         await fs.link(join(directory, "unfinished.tmp"), join(directory, "lease.v1.json"));
