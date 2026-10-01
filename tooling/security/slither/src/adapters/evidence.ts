@@ -199,7 +199,7 @@ export class ExclusiveDirectoryPublication implements PublicationCapability {
 
   private async markReady(staging: string, output: string, directories: readonly AncestorIdentity[]): Promise<void> {
     const source = join(staging, "READY"); const path = join(output, "READY");
-    const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const failures: unknown[] = [];
     let identity: BigIntStats | undefined;
     let linked = false;
@@ -315,7 +315,7 @@ export async function copyStableExclusive(source: string, destination: string, s
   assertNotCancelled(signal);
   const before = await lstat(source, {bigint: true});
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {throw new SlitherGateError("PUBLICATION_UNAVAILABLE", "staging entry is unsafe");}
-  const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   let destinationHandle: Awaited<ReturnType<typeof open>> | undefined;
   let retainedPath: BigIntStats | undefined;
   const failures: unknown[] = [];

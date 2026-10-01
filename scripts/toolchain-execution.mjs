@@ -61,7 +61,7 @@ function hashDescriptor(fd) {
 }
 
 function openExpectedFile(path, expectedHash) {
-  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {
     const identity = checkedRegularDescriptor(fd);
     const actual = hashDescriptor(fd);
@@ -240,7 +240,7 @@ function validateInvocationFile(file, errorCode) {
     || hashDescriptor(file.fd) !== file.expectedHash) {
     throw typedError(errorCode);
   }
-  const pathFd = openSync(file.path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  const pathFd = openSync(file.path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {
     const pathname = fstatSync(pathFd);
     if (!sameFileMetadata(file.identity, pathname)
@@ -262,7 +262,7 @@ function sameOwnedDirectory(left, right) {
 }
 
 function hashPathNoFollow(path) {
-  const opened = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  const opened = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {return hashDescriptor(opened);} finally {closeSync(opened);}
 }
 

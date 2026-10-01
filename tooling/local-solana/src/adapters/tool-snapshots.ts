@@ -130,7 +130,7 @@ function hash(bytes: Buffer): string { return createHash("sha256").update(bytes)
 function ensureActive(signal?: AbortSignal): void { if (signal?.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "tool resolution interrupted"); } }
 
 export async function stableRead(path: string): Promise<Buffer> {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(() => {
     throw new LocalSolanaError("SOLANA_TOOL_MISSING", "tool is absent or substituted");
   });
   const errors: unknown[] = [];

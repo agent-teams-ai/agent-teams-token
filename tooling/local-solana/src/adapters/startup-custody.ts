@@ -68,7 +68,7 @@ export async function updateStartupCustody(custody: StartupCustody, settled: boo
 }
 
 export async function startupCustodySettled(directory: string, token: string, legacyRegistered = false): Promise<boolean> {
-  const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW).catch((cause) => {
+  const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((cause) => {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") { return null; } throw cause;
   });
   if (handle === null) { return legacyRegistered; }

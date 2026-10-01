@@ -140,7 +140,7 @@ async function privateDirectoryIdentity(directory: string): Promise<FileIdentity
 async function assertDirectoryIdentity(directory: string, expected: FileIdentity): Promise<void> { if (!sameIdentity(await privateDirectoryIdentity(directory), expected)) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "private directory identity changed"); } }
 
 async function readLease(directory: string): Promise<{ readonly raw: Record<string, unknown>; readonly identity: FileIdentity }> {
-  const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await open(join(directory, MARKER), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const entry = await handle.stat({ bigint: true }); assertPrivateMarkerStat(entry); const identity = fileIdentity(entry);
     const content = await readBoundedMarker(handle);
