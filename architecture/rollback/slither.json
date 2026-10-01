@@ -67,6 +67,7 @@
     "tooling/security/slither/tests/executable.test.ts",
     "tooling/security/slither/tests/failure-taxonomy.test.ts",
     "tooling/security/slither/tests/fault-injection.test.ts",
+    "tooling/security/slither/tests/fifo-admission.test.ts",
     "tooling/security/slither/tests/fixtures/Vulnerable.sol",
     "tooling/security/slither/tests/fixtures/foundry-1.8.0-production-artifact.json",
     "tooling/security/slither/tests/fixtures/foundry-1.8.0-production-build-info.json",

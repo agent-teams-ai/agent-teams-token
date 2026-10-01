@@ -30,6 +30,7 @@
     "tooling/local-solana/src/domain/model.ts",
     "tooling/local-solana/tests/cli-boundary.test.ts",
     "tooling/local-solana/tests/cli.test.ts",
+    "tooling/local-solana/tests/fifo-admission.test.ts",
     "tooling/local-solana/tests/filesystem.test.ts",
     "tooling/local-solana/tests/helpers/agave-recovery.ts",
     "tooling/local-solana/tests/helpers/captured-validator.ts",
