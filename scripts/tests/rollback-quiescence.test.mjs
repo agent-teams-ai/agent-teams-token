@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import childProcess, { spawnSync } from "node:child_process";
+import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -131,6 +132,13 @@ for (const signal of ["SIGKILL", "SIGSTOP"]) {
     context.diagnostic(`lost supervisor elapsed=${elapsed}ms`);
     assert.ok(elapsed < 6000, `outer supervisor wait took ${elapsed}ms`);
     assert.match(failure?.cause?.message ?? "", /TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN/u);
+    const [lost] = value.recorder.document.commands;
+    assert.equal(lost.processesQuiescent, false);
+    assert.equal(lost.supervisor.signal, "SIGKILL");
+    assert.equal(lost.supervisor.error, signal === "SIGSTOP" ? "ETIMEDOUT" : null);
+    assert.equal(lost.timedOut, signal === "SIGSTOP");
+    assert.equal(lost.exitCode, null, "supervisor exit is not the child's exit");
+    assert.equal(lost.signal, null, "supervisor signal is not the child's signal");
     run("evidence", value, "process.stdout.write('next command')", { timeout: 5000 });
     assert.equal(value.recorder.processesQuiescent, false, "a later success must not clear uncertainty");
     assert.equal(value.recorder.document.commands[0].status, "failed");
@@ -175,13 +183,130 @@ test("stopped supervisor with captured pipes returns within its outer kill bound
   const script = "process.on('SIGTERM', () => {}); process.kill(process.ppid, 'SIGSTOP'); setTimeout(() => {}, 7000)";
   const start = Date.now();
   assert.throws(() => run("candidate", value, script), (error) => {
-    assert.match(error.message, /TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN/u);
-    const invocation = error.message.split("invocation=")[1];
+    assert.match(error.message, /ROLLBACK_COMMAND_FAILED/u);
+    assert.match(error.cause.message, /TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN/u);
+    assert.equal(error.cause.cause.code, "ETIMEDOUT");
+    assert.equal(error.result.targetStatus.quiescent, false);
+    const invocation = error.cause.message.split("invocation=")[1];
     assert.equal(existsSync(invocation), true);
     context.after(() => rmSync(invocation, { recursive: true, force: true }));
     return true;
   });
   assert.ok(Date.now() - start < 6000, "captured streams held the outer wait open");
+});
+
+// Launch the real supervisor with a preload that causes an actual filesystem
+// exception, or kills it before it can write status. Never fabricate a result.
+function supervisorFault(value, source) {
+  const preload = join(value.root, "supervisor-fault.mjs");
+  writeFileSync(preload, source);
+  const original = childProcess.spawnSync;
+  childProcess.spawnSync = (command, args, options) => original(command,
+    args.includes("--agtmai-toolchain-process-supervisor") ? ["--import", preload, ...args] : args, options);
+  syncBuiltinESMExports();
+  return () => { childProcess.spawnSync = original; syncBuiltinESMExports(); };
+}
+
+test("observed deadline survives a real post-timeout inspection exception", (context) => {
+  const value = fixture(context);
+  const restore = supervisorFault(value, `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const original = fs.readdirSync;
+    fs.readdirSync = (path, ...args) => original(path === '/proc' ? ${JSON.stringify(join(value.root, "missing-proc"))} : path, ...args);
+    syncBuiltinESMExports();
+  `);
+  try {
+    assert.throws(() => run("evidence", value,
+      "process.stdout.write('out'); process.stderr.write('err'); setInterval(() => {}, 1000)"), (error) => {
+      const result = error.cause.result;
+      assert.equal(result.targetStatus.timedOut, true);
+      assert.equal(result.targetStatus.error, "ENOENT");
+      assert.equal(result.targetStatus.signal, "SIGTERM");
+      assert.equal(result.targetStatus.quiescent, false);
+      context.after(() => rmSync(error.cause.message.split("invocation=")[1], { recursive: true, force: true }));
+      return true;
+    });
+    const [entry] = JSON.parse(readFileSync(join(value.root, "diagnostics.json"), "utf8")).commands;
+    assert.equal(entry.timedOut, true);
+    assert.equal(entry.processesQuiescent, false);
+    assert.equal(value.recorder.processesQuiescent, false);
+    assert.equal(entry.status, "failed");
+    assert.equal(readFileSync(join(value.root, entry.stdout.path), "utf8"), "out");
+    assert.equal(readFileSync(join(value.root, entry.stderr.path), "utf8"), "err");
+    assert.equal(existsSync(join(value.root, "READY")), false);
+  } finally { restore(); }
+});
+
+test("missing supervisor status preserves real signal and bounded captures", (context) => {
+  const value = fixture(context);
+  const restore = supervisorFault(value,
+    "process.stdout.write('startup out'); process.stderr.write('startup err'); process.kill(process.pid, 'SIGKILL');");
+  try {
+    assert.throws(() => execution.executeSupervisedCommand({
+      command: process.execPath, cwd: value.root, env: {}, maxBuffer: 7, timeoutMs: 5000,
+    }), (error) => {
+      assert.equal(error.code, "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN");
+      assert.equal(error.result.supervisorStatus.signal, "SIGKILL");
+      assert.equal(error.result.supervisorStatus.status, null);
+      assert.equal(error.result.targetStatus.quiescent, false);
+      assert.equal(error.result.status, null);
+      assert.equal(error.result.signal, null);
+      assert.equal(error.result.stdout, "startup");
+      assert.equal(error.result.stderr, "startup");
+      context.after(() => rmSync(error.message.split("invocation=")[1], { recursive: true, force: true }));
+      return true;
+    });
+  } finally { restore(); }
+});
+
+for (const consumer of ["text", "buffer"]) {
+  test(`candidate ${consumer} normalizes a real executor finalization exception`, (context) => {
+    const value = fixture(context);
+    basicRun("/usr/bin/git", ["init", "--quiet"], { cwd: value.root });
+    writeFileSync(join(value.root, "unicode-\u00e9.txt"), "bytes");
+    const injection = invocationFault({ cleanup: true });
+    try {
+      assert.throws(() => consumer === "text"
+        ? run("candidate", value, "process.stdout.write('out'); process.stderr.write('err'); process.exit(23)", { timeout: 5000 })
+        : captureGitStatusSnapshot(value.root), (error) => {
+        assert.match(error.message, /ROLLBACK_COMMAND_FAILED command=/u);
+        assert.match(error.message, consumer === "text" ? /status=23.*\nout\nerr/su : /status=0.*unicode-\u00e9.txt/su);
+        assert.ok(containsFailure(error.cause, injection.failures[0]));
+        assert.equal(error.result, error.cause.result);
+        assert.equal(error.result.targetStatus.quiescent, true);
+        if (consumer === "buffer") { assert.ok(Buffer.isBuffer(error.result.stdout)); }
+        return true;
+      });
+      injection.assertCloses();
+    } finally { injection.release(); }
+  });
+}
+
+test("maxBuffer bounds captured pipes independently and leaves passed FDs to their owner", (context) => {
+  const value = fixture(context);
+  const script = "process.stdout.write(Buffer.alloc(8192, 'o')); process.stderr.write(Buffer.alloc(8192, 'e'))";
+  const settings = { cwd: value.root, env: {}, maxBuffer: 1024, timeoutMs: 5000 };
+  const pipes = execution.executeSupervisedCommand({ command: process.execPath, args: ["-e", script], ...settings });
+  assert.equal(pipes.error.code, "ENOBUFS");
+  assert.equal(pipes.stdout.length, 1024);
+  assert.equal(pipes.stderr.length, 1024);
+  assert.equal(pipes.targetStatus.quiescent, true);
+  const output = join(value.root, "fd-output");
+  const descriptor = openSync(output, "w+");
+  try {
+    for (const nodeCompatible of [true, false]) {
+      const options = { ...settings, stdio: ["ignore", descriptor, "ignore"] };
+      const result = nodeCompatible
+        ? spawnSync(process.execPath, ["-e", script], { ...options, timeout: options.timeoutMs })
+        : execution.executeSupervisedCommand({ command: process.execPath, args: ["-e", script], ...options });
+      assert.equal(result.status, 0);
+      assert.equal(result.error, undefined);
+      assert.equal(fstatSync(descriptor).size, nodeCompatible ? 8192 : 16384);
+      assert.equal(result.stdout, null);
+    }
+    assert.equal(readFileSync(output).length, 16384);
+  } finally { closeSync(descriptor); }
 });
 
 const lifecycleCases = [
@@ -345,6 +470,7 @@ test("partial acquisition EMFILE releases the real EvidenceRecorder invocation F
     import childProcess from 'node:child_process';
     import { syncBuiltinESMExports } from 'node:module';
     import { EvidenceRecorder } from ${JSON.stringify(new URL("../rollback/runtime/evidence.mjs", import.meta.url).href)};
+    import { basicRun, captureGitStatusSnapshot } from ${JSON.stringify(new URL("../rollback/runtime/candidate.mjs", import.meta.url).href)};
     import { invocationFault } from ${JSON.stringify(new URL("./toolchain-invocation-fault-fixture.mjs", import.meta.url).href)};
     const root = process.argv[1];
     const recorder = new EvidenceRecorder(root, {});
@@ -366,6 +492,9 @@ test("partial acquisition EMFILE releases the real EvidenceRecorder invocation F
       injection.assertCloses();
       assert.equal(launches, 0);
       assert.equal(recorder.document.commands[0].status, 'failed');
+      assert.equal(recorder.processesQuiescent, true, 'failed prelaunch acquisition created no process');
+      assert.equal(recorder.document.commands[0].processesQuiescent, true);
+      recorder.finalize('failed', failure);
     } finally {
       childProcess.spawnSync = originalSpawn;
       syncBuiltinESMExports();
@@ -375,13 +504,30 @@ test("partial acquisition EMFILE releases the real EvidenceRecorder invocation F
     assert.equal(fs.existsSync(root + '/READY'), false);
     const [entry] = JSON.parse(fs.readFileSync(root + '/diagnostics.json', 'utf8')).commands;
     assert.equal(entry.status, 'failed');
+    assert.equal(JSON.parse(fs.readFileSync(root + '/diagnostics.json', 'utf8')).status, 'failed');
+    assert.equal(entry.processesQuiescent, true);
     assert.equal(entry.spawnError, 'EMFILE');
     assert.equal(entry.exitCode, null);
     for (const stream of ['stdout', 'stderr']) {
       assert.equal(entry[stream].byteLength, 0);
       assert.equal(fs.readFileSync(root + '/' + entry[stream].path).length, 0);
     }
-    console.log('real EMFILE; npmrc EBADF; one close; zero launches; failed evidence; empty logs');
+    for (const consumer of ['text', 'buffer']) {
+      const fault = invocationFault({ exhaust: true });
+      try {
+        assert.throws(() => consumer === 'text'
+          ? basicRun(process.execPath, ['-e', 'process.exit(0)'], { env: {}, cwd: root })
+          : captureGitStatusSnapshot(root), error => {
+            assert.match(error.message, /ROLLBACK_COMMAND_FAILED command=.*status=unknown/su);
+            assert.equal(error.cause.code, 'EMFILE');
+            assert.equal(error.cause.execution.launched, false);
+            assert.equal(Object.hasOwn(error, 'result'), false, 'no result was observed');
+            return true;
+          });
+        fault.assertCloses();
+      } finally { fault.release(); }
+    }
+    console.log('real EMFILE; npmrc EBADF; one close per invocation; zero launches; failed evidence; empty logs; text/buffer boundaries without invented result');
   `;
   const result = spawnSync("/bin/bash", ["-c", 'ulimit -n 128; exec "$@"', "emfile-test",
     process.execPath, "--input-type=module", "-e", program, value.root], {

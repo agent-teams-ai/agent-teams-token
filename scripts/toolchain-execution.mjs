@@ -445,6 +445,7 @@ async function supervisorMain(encoded) {
   let timedOut = false;
   let termination;
   let supervisorError;
+  let outcome;
   try {
     child = spawn(config.command, config.args, {
       cwd: config.cwd,
@@ -453,7 +454,7 @@ async function supervisorMain(encoded) {
       stdio: config.childStdio,
     });
     writeSupervisorStatus(config.statusFd, { error: null, pgid: child.pid, quiescent: false });
-    const outcome = await new Promise((resolve) => {
+    outcome = await new Promise((resolve) => {
       const stop = () => {
         termination ??= terminateProcessGroup(child.pid).catch((error) => {supervisorError ??= error;});
       };
@@ -490,7 +491,10 @@ async function supervisorMain(encoded) {
     else if (outcome.signal) {process.exitCode = 128;}
     else {process.exitCode = outcome.status ?? 1;}
   } catch (error) {
-    try {writeSupervisorStatus(config.statusFd, { error: error?.code ?? "unknown", pgid: child?.pid, quiescent: false });} catch {}
+    try {writeSupervisorStatus(config.statusFd, {
+      error: error?.code ?? "unknown", pgid: child?.pid, quiescent: false,
+      signal: outcome?.signal ?? null, status: outcome?.status ?? null, timedOut,
+    });} catch {}
     process.exitCode = 125;
   }
 }
@@ -517,13 +521,19 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
   // File-backed pipes keep the outer sync watchdog bounded even if a lost
   // supervisor leaves a descendant holding its streams open.
   const captures = [];
-  const supervisorStdio = stdio.map((entry, index) => {
-    if (entry !== "pipe") {return entry;}
-    const file = createControlledFile(join(invocation.root, `stdio-${index}`), index === 0 ? input : "");
-    invocation.files.push(file);
-    captures[index] = file;
-    return file.fd;
-  });
+  let supervisorStdio;
+  try {
+    supervisorStdio = stdio.map((entry, index) => {
+      if (entry !== "pipe") {return entry;}
+      const file = createControlledFile(join(invocation.root, `stdio-${index}`), index === 0 ? input : "");
+      invocation.files.push(file);
+      captures[index] = file;
+      return file.fd;
+    });
+  } catch (error) {
+    error.execution = { launched: false, quiescent: true };
+    throw error;
+  }
   const statusFd = 3 + targetFds.length;
   const config = {
     args,
@@ -549,37 +559,62 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
     killSignal: "SIGKILL",
   });
   const status = readSupervisorStatus(invocation);
+  const output = [null, null, null];
+  const captureFailures = [];
+  for (const [index, file] of captures.entries()) {
+    if (!file) {continue;}
+    try {
+      file.identity = checkedRegularDescriptor(file.fd);
+      if (status?.quiescent === true) {file.expectedHash = hashDescriptor(file.fd);}
+      if (index === 0) {continue;}
+      if (file.identity.size > maxBuffer && status) {status.error ??= "ENOBUFS";}
+      const buffer = Buffer.alloc(Math.min(file.identity.size, maxBuffer));
+      const count = readSync(file.fd, buffer, 0, buffer.length, 0);
+      output[index] = encoding ? buffer.subarray(0, count).toString(encoding) : buffer.subarray(0, count);
+    } catch (error) {captureFailures.push(error);}
+  }
+  const errorCode = status?.timedOut ? "ETIMEDOUT" : status?.error;
+  const observedError = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
+  const outcome = {
+    ...result, error: observedError, output, stdout: output[1], stderr: output[2],
+    signal: status?.signal ?? null, status: status?.status ?? null,
+    targetStatus: status ?? { quiescent: false },
+    supervisorStatus: { status: result.status, signal: result.signal, error: result.error?.code ?? null },
+  };
   if (status?.quiescent !== true) {
+    const failures = [];
     if (Number.isSafeInteger(status?.pgid) && status.pgid > 1) {
       try {
         signalGroup(status.pgid, "SIGTERM");
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TERM_GRACE_MS);
         signalGroup(status.pgid, "SIGKILL");
-      } catch {}
+      } catch (error) {failures.push(error);}
     }
-    const error = typedError("TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN", `invocation=${invocation.root}`);
+    const error = new Error(`TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN invocation=${invocation.root}`,
+      { cause: result.error ?? observedError });
     error.code = "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN";
+    // Supervisor exit/signal is distinct from the target's observed outcome.
+    // Killing the group is a fallback, not a proof that every child is gone.
+    error.result = outcome;
+    if (failures.length + captureFailures.length > 0) {
+      const failure = new AggregateError([error, ...failures, ...captureFailures], error.message, { cause: error });
+      failure.result = outcome;
+      throw failure;
+    }
     throw error;
   }
-  const output = [null, null, null];
-  for (const [index, file] of captures.entries()) {
-    if (!file) {continue;}
-    file.identity = checkedRegularDescriptor(file.fd);
-    file.expectedHash = hashDescriptor(file.fd);
-    if (index === 0) {continue;}
-    if (file.identity.size > maxBuffer) {status.error ??= "ENOBUFS";}
-    const buffer = Buffer.alloc(Math.min(file.identity.size, maxBuffer));
-    readSync(file.fd, buffer, 0, buffer.length, 0);
-    output[index] = encoding ? buffer.toString(encoding) : buffer;
+  if (captureFailures.length > 0) {
+    const failure = new AggregateError(captureFailures, "TOOLCHAIN_CAPTURE_FAILED", { cause: captureFailures[0] });
+    failure.result = outcome;
+    throw failure;
   }
-  const errorCode = status.timedOut ? "ETIMEDOUT" : status.error;
-  const error = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
-  return { ...result, error, output, stdout: output[1], stderr: output[2], signal: status.signal,
-    status: status.status, targetStatus: status };
+  return outcome;
 }
 
 // Rollback supplies its own trusted environment and log descriptors; verified
 // toolchain entrypoints retain their descriptor binding and private environment.
+// maxBuffer bounds each captured "pipe". As with Node's spawnSync, inherited
+// streams and caller-supplied FDs are not captured or bounded by this option.
 export function executeSupervisedCommand({ command, args = [], cwd, env, input, encoding = "utf8",
   stdio = [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   maxBuffer = 1024 * 1024, timeoutMs = 600_000 }) {
@@ -604,7 +639,13 @@ function checkedSpawn(result) {
 }
 
 function withInvocation(entries, platform, execute) {
-  const invocation = createInvocation(entries, platform);
+  let invocation;
+  try {invocation = createInvocation(entries, platform);} catch (error) {
+    // This boundary has not invoked a supervisor or target. Preserve the real
+    // acquisition error (including all closes), without inventing a result.
+    error.execution = { launched: false, quiescent: true };
+    throw error;
+  }
   let quiescent = false;
   let outcome;
   const failures = [];
@@ -625,6 +666,9 @@ function withInvocation(entries, platform, execute) {
     outcome = execute({ invocation, targets });
     quiescent = outcome.targetStatus.quiescent;
   } catch (error) {
+    outcome = error.result;
+    quiescent = outcome?.targetStatus.quiescent === true
+      || (error.execution?.launched === false && error.execution.quiescent === true);
     failures.push(error);
   }
   try {validateTargets();} catch (error) {failures.push(error);}
@@ -647,6 +691,7 @@ function withInvocation(entries, platform, execute) {
     // Cleanup uncertainty cannot erase an already observed process result.
     // Callers still reject the failure; rollback can record the separate facts.
     if (outcome !== undefined) {failure.result = outcome;}
+    else if (failures[0].execution !== undefined) {failure.execution = failures[0].execution;}
     throw failure;
   }
   return outcome;

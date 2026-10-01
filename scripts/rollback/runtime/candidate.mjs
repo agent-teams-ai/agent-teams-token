@@ -33,51 +33,40 @@ export function gitExecutable() {
   throw new Error("ROLLBACK_GIT_EXECUTABLE_UNAVAILABLE path=" + candidate);
 }
 
-export function basicRun(command, arguments_, options = {}) {
+function runCandidateCommand(command, arguments_, options, encoding, maxBuffer) {
   const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
     workingDirectory: options.cwd,
   });
-  const result = executeSupervisedCommand({
-    command,
-    args: invocation.arguments,
-    cwd: options.cwd,
-    encoding: "utf8",
-    env: invocation.environment,
-    input: options.input,
-    maxBuffer: 128 * 1024 * 1024,
-    timeoutMs: options.timeout ?? 600_000,
-  });
-  if (result.error || result.status !== 0) {
-    const output = String(result.stdout ?? "") + "\n" + String(result.stderr ?? "");
-    throw new Error(
+  let result;
+  let failure;
+  try {
+    result = executeSupervisedCommand({
+      command, args: invocation.arguments, cwd: options.cwd, encoding,
+      env: invocation.environment, input: options.input, maxBuffer,
+      timeoutMs: options.timeout ?? 600_000,
+    });
+  } catch (error) {failure = error; result = error.result;}
+  if (failure !== undefined || result.error || result.status !== 0) {
+    const output = String(result?.stdout ?? "") + "\n" + String(result?.stderr ?? "");
+    const error = new Error(
       "ROLLBACK_COMMAND_FAILED command=" + command + " " + arguments_.join(" ")
-      + " status=" + String(result.status) + "\n" + tail(output, 80),
-      { cause: result.error },
+      + " status=" + (result === undefined ? "unknown" : String(result.status))
+      + " signal=" + (result === undefined ? "unknown" : String(result.signal))
+      + "\n" + tail(output, 80),
+      { cause: failure ?? result.error },
     );
+    if (result !== undefined) {error.result = result;}
+    throw error;
   }
-  return result.stdout;
+  return result;
+}
+
+export function basicRun(command, arguments_, options = {}) {
+  return runCandidateCommand(command, arguments_, options, "utf8", 128 * 1024 * 1024).stdout;
 }
 
 function basicRunBuffer(command, arguments_, options = {}) {
-  const invocation = trustedChildInvocation(command, arguments_, options.env ?? process.env, {
-    workingDirectory: options.cwd,
-  });
-  const result = executeSupervisedCommand({
-    command,
-    args: invocation.arguments,
-    cwd: options.cwd,
-    encoding: null,
-    env: invocation.environment,
-    maxBuffer: 256 * 1024 * 1024,
-    timeoutMs: options.timeout ?? 600_000,
-  });
-  if (result.error || result.status !== 0) {
-    throw new Error(
-      "ROLLBACK_COMMAND_FAILED command=" + command + " " + arguments_.join(" ")
-      + " status=" + String(result.status),
-      { cause: result.error },
-    );
-  }
+  const result = runCandidateCommand(command, arguments_, options, null, 256 * 1024 * 1024);
   return Buffer.from(result.stdout ?? Buffer.alloc(0));
 }
 

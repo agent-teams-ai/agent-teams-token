@@ -207,9 +207,12 @@ export class EvidenceRecorder {
   get processesQuiescent() {return this.#processesQuiescent;}
 
   #recordInvocationFailure(error, failures) {
-    if (error.result !== undefined) {failures.push(error); return error.result;}
-    this.#processesQuiescent = false;
-    return { error, status: null, signal: null, targetStatus: { quiescent: false } };
+    if (error.result !== undefined) {
+      if (error.result.targetStatus.quiescent === true) {failures.push(error); return error.result;}
+      return { ...error.result, error };
+    }
+    const quiescent = error.execution?.launched === false && error.execution.quiescent === true;
+    return { error, status: null, signal: null, targetStatus: { quiescent }, execution: error.execution };
   }
 
   prepareSurvivorDirectory(survivor) {
@@ -311,7 +314,8 @@ export class EvidenceRecorder {
     if (primaryFailure !== undefined) {
       throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
     }
-    const commandPassed = !result.error && result.status === 0;
+    if (result.targetStatus.quiescent !== true) {this.#processesQuiescent = false;}
+    const commandPassed = !result.error && result.status === 0 && result.targetStatus.quiescent === true;
     if (!commandPassed) {
       primaryFailure = new Error(
         "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
@@ -340,8 +344,11 @@ export class EvidenceRecorder {
         durationMs: Date.now() - started,
         exitCode: result.status,
         signal: result.signal,
-        timedOut: result.error?.code === "ETIMEDOUT",
+        timedOut: result.targetStatus.timedOut === true || result.error?.code === "ETIMEDOUT"
+          || result.supervisorStatus?.error === "ETIMEDOUT",
         processesQuiescent: result.targetStatus.quiescent,
+        supervisor: result.supervisorStatus,
+        execution: result.execution,
         spawnError: result.error?.code ?? null,
         status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
         stdout: { path: stdoutRelative, byteLength: stdout.length, sha256: sha256(stdout) },
