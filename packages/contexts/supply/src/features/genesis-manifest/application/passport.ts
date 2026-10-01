@@ -148,7 +148,7 @@ function observedAssemblyPassport(manifest: ObservedAssemblyManifest, observatio
       `- ${escape(c.id)}: predicted \`${c.predictedAddress}\`; observed \`${c.observed.address}\`; \`${c.fullyQualifiedName}\`; compiler input \`${c.compilerInputSha256}\`; materialized runtime \`${c.materializedRuntimeHash}\`.`),
     "", "Nested founder creation uses its parent receipt and child nonce 1; its gas is included in the parent. No explorer submission or source-verification claim.",
     "", "## Authority registry", "",
-    "Expected authorities come from immutable construction; observed values are owned synthetic local evidence. Actual production authority is unavailable.", "",
+    "Expected authorities come from immutable construction and separately authenticated Safe setup; observed values are owned synthetic local evidence. Actual production authority is unavailable.", "",
     ...entries.map(e => `- ${escape(e.capability)} on ${escape(e.chain)}: power ${escape(e.power)}; expected ${escape(e.expected ?? "unresolved")}; observed ${escape(e.observed ?? "unresolved")}; ${escape(e.limitation)}.`),
     "", "## Assembly gas (wei; local fees)", "", "| Operation | Estimate | Limit | Base fee | Priority | Max fee | Gas used | Effective price | Cost |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...manifest.gas.map(g => `| ${g.id} | ${g.gasEstimate} | ${g.gasLimit} | ${g.baseFeePerGas} | ${g.maxPriorityFeePerGas} | ${g.maxFeePerGas} | ${g.gasUsed} | ${g.effectiveGasPrice} | ${g.observedCostWei} |`), "",

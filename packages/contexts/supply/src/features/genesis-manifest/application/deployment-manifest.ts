@@ -255,8 +255,9 @@ function verifyObservedOperationCost(actual: AssemblyOperationObservation, prepa
   return { limit, fee, used, price };
 }
 function observedReceiptPrice(actual: AssemblyOperationObservation, maxFee: bigint): bigint {
-  const price = uint(actual.effectiveGasPrice);
-  if (!price || price > maxFee || price < uint(actual.receiptBaseFeePerGas)) { refuse("ASSEMBLY_COST"); }
+  const price = uint(actual.effectiveGasPrice), baseFee = uint(actual.receiptBaseFeePerGas);
+  const basePlusPriority = baseFee + uint(actual.maxPriorityFeePerGas);
+  if (!price || baseFee > maxFee || price !== (maxFee < basePlusPriority ? maxFee : basePlusPriority)) { refuse("ASSEMBLY_COST"); }
   return price;
 }
 function verifyObservedAssemblyOperations(prepared: PreparedLocalPurposeGenesis, observation: LocalAssemblyObservation, ports: LocalPurposePorts) {

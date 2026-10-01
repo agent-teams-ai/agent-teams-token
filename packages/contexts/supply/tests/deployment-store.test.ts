@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { renameSync, symlinkSync, type Stats } from "node:fs";
+import { existsSync, renameSync, statSync, symlinkSync, writeFileSync, type Stats } from "node:fs";
 import { link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile, type FileHandle } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import test from "node:test";
@@ -119,6 +119,122 @@ test("substituted publication lock is preserved and cannot acknowledge READY", a
   assert.equal(await readFile(held, "utf8"), "");
   await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
   await assert.rejects(verifyDeploymentFiles(output), /INVENTORY_FILES/);
+});
+
+test("late release substitution preserves the captured foreign inode and rejects both acknowledgements", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const output = join(root, "bundle"), lockPath = join(output, ".publication-lock"), held = join(root, "held-lock");
+  const probe = await open(join(root, "probe"), "wx"), prototype = Object.getPrototypeOf(probe);
+  const descriptorStat = probe.stat; await probe.close();
+  const statsPrototype = Object.getPrototypeOf(statSync(root)), isFile = statsPrototype.isFile;
+  let owned: Stats | undefined, foreign: Stats | undefined, closed = false, attacked = false;
+  const statMock = context.mock.method(prototype, "stat", async function (this: FileHandle) {
+    const info = await descriptorStat.call(this);
+    if (!owned && isFile.call(info) && existsSync(lockPath)) {
+      const named = statSync(lockPath);
+      if (named.dev === info.dev && named.ino === info.ino) {
+        owned = named;
+        const close = this.close;
+        context.mock.method(this, "close", async () => { await close.call(this); closed = true; });
+      }
+    }
+    return info;
+  });
+  // The natural boundary is descriptor close, followed by the final named stat.
+  // Return the real owned snapshot after a real rename/create at that boundary.
+  const predicateMock = context.mock.method(statsPrototype, "isFile", function (this: Stats) {
+    const result = isFile.call(this);
+    if (closed && !attacked && this.dev === owned?.dev && this.ino === owned.ino) {
+      attacked = true;
+      renameSync(lockPath, held);
+      writeFileSync(lockPath, "foreign-live-lock", { flag: "wx", mode: 0o600 });
+      foreign = statSync(lockPath);
+    }
+    return result;
+  });
+  let failure: unknown;
+  try { failure = await publishDeploymentFiles(output, { "result.json": deploymentBytes({ broadcastAllowed: false }) }, false, true).then(() => null, error => error); }
+  finally { statMock.mock.restore(); predicateMock.mock.restore(); }
+  const stages = (await readdir(output)).filter(name => name.startsWith(".publication-release-"));
+  const preserved = [lockPath, ...stages.map(name => join(output, name, ".publication-lock"))].filter(existsSync);
+  const verification = await verifyDeploymentFiles(output, true).then(() => null, error => error);
+  context.diagnostic(JSON.stringify({ attacked, publisherReturnedSuccess: failure === null, publicReadyVerificationPassed: verification === null, foreignPaths: preserved }));
+  assert.equal(attacked, true);
+  assert.equal(preserved.length, 1, "foreign lock must survive release");
+  const captured = statSync(preserved[0]!);
+  assert.equal(captured.dev, foreign?.dev); assert.equal(captured.ino, foreign?.ino);
+  assert.equal(await readFile(preserved[0]!, "utf8"), "foreign-live-lock");
+  assert.equal(statSync(held).ino, owned?.ino);
+  assert.match(String(failure), /PUBLICATION_LOCK_IDENTITY/);
+  assert.match(String(verification), /INVENTORY_FILES/);
+});
+
+test("private release fsync and descriptor-close failures retain exclusion diagnostics", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const probe = await open(join(root, "probe"), "wx"), prototype = Object.getPrototypeOf(probe);
+  const descriptorStat = probe.stat; await probe.close();
+  for (const fault of ["sync", "close"] as const) {
+    const output = join(root, fault);
+    let injected = false;
+    const statMock = context.mock.method(prototype, "stat", async function (this: FileHandle) {
+      const info = await descriptorStat.call(this);
+      if (!injected && info.isDirectory()) {
+        const stages = (await readdir(output)).filter(name => name.startsWith(".publication-release-"));
+        for (const name of stages) {
+          const named = await stat(join(output, name));
+          if (named.dev !== info.dev || named.ino !== info.ino) { continue; }
+          injected = true;
+          const close = this.close;
+          context.mock.method(this, fault, async () => {
+            if (fault === "close") { await close.call(this); }
+            await assert.rejects(verifyDeploymentFiles(output, true), /INVENTORY_FILES/);
+            throw new Error(`TEST_RELEASE_${fault}`);
+          });
+        }
+      }
+      return info;
+    });
+    try {
+      await assert.rejects(publishDeploymentFiles(output, { "result.json": deploymentBytes({ broadcastAllowed: false }) }, false, true), new RegExp(`TEST_RELEASE_${fault}`));
+    } finally { statMock.mock.restore(); }
+    assert.equal(injected, true);
+    const stages = (await readdir(output)).filter(name => name.startsWith(".publication-release-"));
+    assert.equal(stages.length, 1);
+    assert.equal((await stat(join(output, stages[0]!))).mode & 0o777, 0o700);
+    assert.deepEqual(await readdir(join(output, stages[0]!)), fault === "sync" ? [".publication-lock"] : []);
+    await assert.rejects(verifyDeploymentFiles(output, true), /INVENTORY_FILES/);
+  }
+});
+
+test("a compatible contender during private release cannot publish and leaves normal resume available", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const output = join(root, "bundle"), files = { "result.json": deploymentBytes({ broadcastAllowed: false }) };
+  const probe = await open(join(root, "probe"), "wx"), prototype = Object.getPrototypeOf(probe);
+  const descriptorStat = probe.stat, sync = probe.sync; await probe.close();
+  let attempted = false;
+  const syncMock = context.mock.method(prototype, "sync", async function (this: FileHandle) {
+    const info = await descriptorStat.call(this);
+    if (!attempted && info.isDirectory()) {
+      const entries = await readdir(output), stages = entries.filter(name => name.startsWith(".publication-release-"));
+      for (const name of stages) {
+        const named = await stat(join(output, name));
+        if (named.dev !== info.dev || named.ino !== info.ino) { continue; }
+        attempted = true;
+        assert.equal(entries.includes(".publication-lock"), false);
+        await assert.rejects(verifyDeploymentFiles(output, true), /INVENTORY_FILES/);
+        await assert.rejects(publishDeploymentFiles(output, files, true, true), /UNEXPECTED_FILE/);
+        assert.deepEqual((await readdir(output)).toSorted(), entries.toSorted());
+      }
+    }
+    return sync.call(this);
+  });
+  let inventory;
+  try { inventory = await publishDeploymentFiles(output, files, false, true); }
+  finally { syncMock.mock.restore(); }
+  assert.equal(attempted, true);
+  assert.deepEqual((await readdir(output)).toSorted(), ["READY", "inventory.json", "result.json"].toSorted());
+  assert.deepEqual(await verifyDeploymentFiles(output, true), inventory);
+  assert.deepEqual(await publishDeploymentFiles(output, files, true, true), inventory);
 });
 
 test("present READY rejects malformed, inventory-drifted, symlink and hardlinked markers even when optional", async context => {

@@ -1,4 +1,4 @@
-import { constants, lstat, mkdir, open, readdir, unlink, type FileHandle } from "node:fs/promises";
+import { constants, lstat, mkdir, mkdtemp, open, readdir, rename, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { deploymentBytes } from "../application/compile-deployment.js";
 import type { Hex } from "../domain/deployment.js";
@@ -92,6 +92,33 @@ async function verifyOwnedPublication(directory: string, requireReady: boolean, 
   await verifyPublicationLock(directory, lockIdentity);
   return inventory;
 }
+async function releasePublicationLock(directory: string, owned: PublicationLockIdentity): Promise<void> {
+  if (process.platform !== "linux") { io("DESCRIPTOR_TRAVERSAL_UNAVAILABLE"); }
+  // Exclusive 0700 staging stays inside the inventory: either the original
+  // lock or this directory excludes consumers, including across the rename.
+  const staging = await mkdtemp(join(directory, ".publication-release-"));
+  const stage = await open(staging, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  let identity;
+  try {
+    identity = await stage.stat();
+    if (!identity.isDirectory() || identity.uid !== process.getuid?.() || (identity.mode & 0o777) !== 0o700) { io("PUBLICATION_RELEASE_IDENTITY"); }
+    const privateDirectory = `/proc/self/fd/${stage.fd}`;
+    // Destination is absent in our new private namespace. Authenticate what
+    // rename actually captured, never authorize deletion from a public stat.
+    await rename(join(directory, ".publication-lock"), join(privateDirectory, ".publication-lock"));
+    await verifyPublicationLock(privateDirectory, owned);
+    await stage.sync();
+    await unlink(join(privateDirectory, ".publication-lock"));
+    await stage.sync();
+  } finally { await stage.close(); }
+  await syncDirectory(directory);
+  const named = await lstat(staging);
+  if (!named.isDirectory() || named.isSymbolicLink() || named.dev !== identity.dev || named.ino !== identity.ino
+    || named.uid !== identity.uid || named.mode !== identity.mode) { io("PUBLICATION_RELEASE_IDENTITY"); }
+  // All fallible descriptor closes/fsyncs precede this exclusion commit.
+  // A crash may retain staging; retry never deletes that diagnostic residue.
+  await rmdir(staging);
+}
 
 /** READY commits under exclusion; consumers accept it only after the publication descriptors close and the owned lock is removed. Retry never repeats transactions. */
 export async function publishDeploymentFiles(directory: string, files: Readonly<Record<string, Uint8Array>>, resume = false, ready = false): Promise<DeliveryInventory> {
@@ -126,10 +153,10 @@ export async function publishDeploymentFiles(directory: string, files: Readonly<
     }
   } finally {
     await lock.close();
-    await verifyPublicationLock(target, lockIdentity ?? io("PUBLICATION_LOCK_IDENTITY"));
-    // Preserve a crash lock; only a normal completion/error releases our live-process lock.
-    await unlink(lockPath);
-    await syncDirectory(target);
+    const identity = lockIdentity ?? io("PUBLICATION_LOCK_IDENTITY");
+    await verifyPublicationLock(target, identity);
+    // Preserve a crash lock; only an authenticated private claim can be removed.
+    await releasePublicationLock(target, identity);
   }
   return inventory;
 }

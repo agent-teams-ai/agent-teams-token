@@ -308,6 +308,26 @@ test("effective receipt price cannot understate the receipt block fee after cohe
   assert.throws(() => materializeObservedAssemblyManifest(prepared, changed, ports), /DEPLOYMENT_EVIDENCE_ASSEMBLY_COST/);
 });
 
+test("effective receipt price must equal the EIP-1559 tuple even with coherent costs", () => {
+  const { prepared, observation, ports } = syntheticAssemblyReport();
+  for (const [price, cost, total] of [["10", "1000", "9100"], ["8", "800", "8900"]]) {
+    const changed = structuredClone(observation);
+    Object.assign(changed.operations[0]!, { effectiveGasPrice: price, observedCostWei: cost });
+    Object.assign(changed, { observedWei: total });
+    assert.throws(() => materializeObservedAssemblyManifest(prepared, changed, ports), /DEPLOYMENT_EVIDENCE_ASSEMBLY_COST/, `forged price ${price}`);
+  }
+});
+
+test("receipt fee admission accepts genuine priority, max-fee clipping and zero tips", () => {
+  const { prepared, observation, ports } = syntheticAssemblyReport();
+  for (const [priority, price, cost, total] of [["1", "9", "900", "9000"], ["3", "10", "1000", "9100"], ["0", "8", "800", "8900"]]) {
+    const changed = structuredClone(observation);
+    Object.assign(changed.operations[0]!, { maxPriorityFeePerGas: priority, effectiveGasPrice: price, observedCostWei: cost });
+    Object.assign(changed, { observedWei: total });
+    assert.equal(materializeObservedAssemblyManifest(prepared, changed, ports).observedWei, total);
+  }
+});
+
 test("receipt fee admission preserves a legitimate EIP-1559 decrease from the estimation predecessor", () => {
   const { prepared, observation, ports } = syntheticAssemblyReport();
   const changed = structuredClone(observation);

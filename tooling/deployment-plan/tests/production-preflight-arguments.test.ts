@@ -21,10 +21,13 @@ function check(args: readonly string[], reason = "PREFLIGHT_ARGUMENTS"): void {
 
 test("preflight rejects every four-pair subset missing a base flag", () => {
   const flags = [...base, ...candidate];
+  const baseFlags = new Set(base);
   for (let first = 0; first < flags.length; first++) {
     for (let second = first + 1; second < flags.length; second++) {
-      if (first === 4 && second === 5) { continue; }
-      check(pairs(flags.filter((_, index) => index !== first && index !== second)));
+      const remaining = flags.filter((_, index) => index !== first && index !== second);
+      const remainingFlags = new Set(remaining);
+      if (remainingFlags.size === baseFlags.size && remaining.every(flag => baseFlags.has(flag))) { continue; }
+      check(pairs(remaining));
     }
   }
 });
