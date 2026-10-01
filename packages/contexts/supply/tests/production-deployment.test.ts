@@ -8,7 +8,8 @@ import { validateProductionDeployment } from "../src/features/genesis-manifest/d
 import { sha256 as digestBytes } from "../src/features/genesis-manifest/adapters/digest.js";
 import { syntheticProductionEnvelope } from "./production-fixture.js";
 import { projectAssemblyFacts } from "../src/features/genesis-manifest/application/reserve-facts.js";
-import { generatePassport, checkPassport, type DeploymentManifest } from "../src/features/genesis-manifest/deployment.js";
+import { generatePassport, checkPassport } from "../src/features/genesis-manifest/application/passport.js";
+import type { DeploymentManifest } from "../src/features/genesis-manifest/application/deployment-manifest.js";
 import { renderPassport } from "../src/features/genesis-manifest/adapters/passport-render.js";
 
 const syntheticEnvelope = syntheticProductionEnvelope;
