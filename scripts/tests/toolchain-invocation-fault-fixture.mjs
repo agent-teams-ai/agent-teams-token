@@ -11,10 +11,13 @@ export function invocationFault({ cleanup = false, close, acquisition, acquisiti
   const originalChmod = fs.fchmodSync;
   const fillers = [];
   const files = [];
+  const acquisitions = [];
+  const active = new Map();
   const calls = [];
   const failures = [];
   let root;
   let reused;
+  let uncertain;
   let injected = false;
   function fail(label) {
     const error = Object.assign(new Error(`injected ${label}`), { code: "EIO" });
@@ -28,11 +31,13 @@ export function invocationFault({ cleanup = false, close, acquisition, acquisiti
     }
     if (acquisition && String(path).endsWith(`/${acquisition}`)) { fail(`${acquisition} acquisition`); }
     const fd = originalOpen(path, flags, ...args);
-    if (typeof path === "string" && /\/agtmai-toolchain-exec-[^/]+\/[^/]+$/u.test(path)
-      && (flags & fs.constants.O_CREAT) !== 0) {
+    if (typeof path === "string" && /\/agtmai-toolchain-exec-[^/]+\/[^/]+$/u.test(path)) {
       root = dirname(path);
-      files.push({ fd, path, identity: fs.fstatSync(fd) });
-      if (exhaust && path.endsWith("/npmrc")) {
+      const acquired = { fd, path, flags, identity: fs.fstatSync(fd) };
+      acquisitions.push(acquired);
+      active.set(fd, acquired);
+      if ((flags & fs.constants.O_CREAT) !== 0) { files.push(acquired); }
+      if (exhaust && path.endsWith("/npmrc") && (flags & fs.constants.O_CREAT) !== 0) {
         try { while (true) { fillers.push(originalOpen("/dev/null", fs.constants.O_RDONLY)); } }
         catch (error) { assert.equal(error.code, "EMFILE"); }
       }
@@ -49,14 +54,16 @@ export function invocationFault({ cleanup = false, close, acquisition, acquisiti
     const current = fs.fstatSync(fd);
     const file = files.find((entry) => entry.fd === fd
       && entry.identity.dev === current.dev && entry.identity.ino === current.ino);
-    if (file || fd === reused) { calls.push(fd); }
+    if (active.has(fd) || fd === reused) { calls.push(active.get(fd)); }
     if (close && !injected && file?.path.endsWith(`/${closeLeaf}`)) {
       injected = true;
+      uncertain = active.get(fd);
       if (!cleanup && !acquisition && !acquisitionWrite && !exhaust) {
-        assert.match(fs.readlinkSync(`/proc/self/fd/${fd}`), /\/supervisor-status \(deleted\)$/u);
+        assert.equal(current.nlink, 0, "owned status file was unlinked before close");
       }
       if (close === "after") {
         originalClose(fd);
+        active.delete(fd);
         // Fill lower holes so reuse is proven for this exact descriptor.
         const lower = [];
         do {
@@ -68,16 +75,22 @@ export function invocationFault({ cleanup = false, close, acquisition, acquisiti
       }
       fail(`status close ${close}`);
     }
-    return originalClose(fd);
+    const result = originalClose(fd);
+    active.delete(fd);
+    return result;
   };
   syncBuiltinESMExports();
   return {
-    files, calls, failures,
+    files, acquisitions, calls, failures,
     get root() { return root; },
     assertCloses() {
-      assert.deepEqual(calls, files.map(({ fd }) => fd), "attempt every owned close exactly once");
-      for (const file of files) {
-        if (close && file.path.endsWith(`/${closeLeaf}`)) {
+      assert.equal(calls.length, acquisitions.length, "no close of a consumed/reused FD");
+      for (const acquired of acquisitions) {
+        assert.equal(calls.filter((called) => called === acquired).length, 1,
+          `attempt each owned acquisition close exactly once: ${acquired.path}`);
+      }
+      for (const file of acquisitions) {
+        if (file === uncertain) {
           const current = fs.fstatSync(file.fd);
           if (close === "before") {
             assert.equal(current.ino, file.identity.ino, "failed close left the original FD open");
@@ -86,7 +99,12 @@ export function invocationFault({ cleanup = false, close, acquisition, acquisiti
             assert.ok(current.isCharacterDevice(), "uncertain close must not retry the reused FD");
           }
         } else {
-          assert.throws(() => fs.fstatSync(file.fd), { code: "EBADF" });
+          assert.notEqual(active.get(file.fd), file, "successful close released this acquisition");
+          let current;
+          try { current = fs.fstatSync(file.fd); }
+          catch (error) { assert.equal(error.code, "EBADF"); continue; }
+          assert.ok(current.dev !== file.identity.dev || current.ino !== file.identity.ino,
+            "closed acquisition must not retain its original file identity");
         }
       }
     },
@@ -97,7 +115,7 @@ export function invocationFault({ cleanup = false, close, acquisition, acquisiti
       syncBuiltinESMExports();
       for (const fd of fillers) { originalClose(fd); }
       // Fixture-only recovery: close only the independently verified identity.
-      for (const file of files) {
+      for (const file of acquisitions) {
         let current;
         try { current = fs.fstatSync(file.fd); } catch { continue; }
         if (current.dev === file.identity.dev && current.ino === file.identity.ino) {

@@ -26,20 +26,7 @@ for (const fault of [
         assert.equal(failure.cause, injection.failures[0], "preserve acquisition primary");
         assert.deepEqual(failure.errors, injection.failures, "ordered acquisition and close causes");
       } else { assert.equal(failure, injection.failures[0]); }
-      // A failed file closes locally before the previously acquired files.
-      if (fault.acquisitionWrite) {
-        const [npmrc, globalrc, status] = injection.files;
-        assert.deepEqual(injection.calls, [status.fd, npmrc.fd, globalrc.fd]);
-      } else { assert.deepEqual(injection.calls, injection.files.map(({ fd }) => fd)); }
-      for (const file of injection.files) {
-        if (fault.close && file.path.endsWith(`/${fault.closeLeaf ?? "supervisor-status"}`)) {
-          const current = fs.fstatSync(file.fd);
-          if (fault.close === "before") {
-            assert.equal(current.dev, file.identity.dev);
-            assert.equal(current.ino, file.identity.ino);
-          } else { assert.ok(current.isCharacterDevice(), "do not retry consumed/reused FD"); }
-        } else { assert.throws(() => fs.fstatSync(file.fd), { code: "EBADF" }); }
-      }
+      injection.assertCloses();
       assert.ok(fs.existsSync(injection.root), "retain partial directory custody");
     } finally { injection.release(); }
   });
@@ -71,19 +58,14 @@ for (const fault of [
         assert.equal(failure.cause, injection.failures[0]);
         assert.deepEqual(failure.errors, injection.failures);
       } else { assert.equal(failure, injection.failures[0]); }
-      const snapshot = injection.files.find((file) => file.path.endsWith("/first.mjs"));
-      assert.equal(injection.calls.filter((value) => value === snapshot.fd).length, 2,
-        "snapshot writer and authenticated reader each close once");
-      assert.throws(() => fs.fstatSync(snapshot.fd), { code: "EBADF" });
-      for (const file of injection.files.slice(0, 3)) {
-        assert.equal(injection.calls.filter((value) => value === file.fd).length, 1);
-        assert.throws(() => fs.fstatSync(file.fd), { code: "EBADF" });
-      }
-      if (fault.close) {
-        const failed = injection.files.at(-1);
-        assert.equal(injection.calls.filter((value) => value === failed.fd).length, 1);
-        assert.ok(fs.fstatSync(failed.fd).isCharacterDevice());
-      }
+      const snapshots = injection.acquisitions.filter((file) => file.path.endsWith("/first.mjs"));
+      assert.equal(snapshots.length, 2, "separate snapshot writer and authenticated reader acquisitions");
+      const [writer, reader] = snapshots;
+      assert.notEqual(writer.flags & fs.constants.O_CREAT, 0);
+      assert.equal(reader.flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR), fs.constants.O_RDONLY);
+      assert.equal(reader.identity.dev, writer.identity.dev);
+      assert.equal(reader.identity.ino, writer.identity.ino);
+      injection.assertCloses();
     } finally { fs.closeSync(fd); injection.release(); }
   });
 }

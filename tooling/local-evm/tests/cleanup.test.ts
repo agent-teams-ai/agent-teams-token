@@ -9,7 +9,7 @@ import {compileFunction} from "node:vm";
 import {fileURLToPath} from "node:url";
 import {syntheticAnvil} from "./fixtures/synthetic-anvil.ts";
 import {loadFinalizer, startupCustodyProbe} from "./fixtures/startup-custody.ts";
-import {authenticateProcess, processStartIdentity, startOwnedAnvil} from "../process.ts";
+import {authenticateProcess, processStartIdentity, redact, startOwnedAnvil} from "../process.ts";
 import {createProvisionalRunDirectory, createRunLease, reclaimStaleRuns, registerRunAnvil} from "../run-lease.ts";
 import {
   cleanupFailures,
@@ -211,7 +211,24 @@ const functions = source.slice(source.indexOf("export async function startOwnedA
 // Real protocol pipes and exit status; replace only the spawn boundary to
 // supply a failing supervisor without a production-only injection hook.
 const evaluateParentStart = compileFunction(`${stripTypeScriptTypes(functions.replaceAll("export ", "").replace("import.meta.url", JSON.stringify(import.meta.url)))}\nreturn startOwnedAnvil;`,
-  ["spawn", "process", "fileURLToPath", "LocalEvmError", "authenticateProcess", "finishWithCleanup"]);
+  ["spawn", "process", "fileURLToPath", "LocalEvmError", "authenticateProcess", "finishWithCleanup", "redact"]);
+
+test("parent owned-Anvil API preserves a redacted early protocol exit", {timeout: 10_000}, async () => {
+  const syntheticValue = `0x${"11".repeat(32)}`;
+  const supervisor = spawn(process.execPath, ["--eval", `process.stderr.write("fixture ${syntheticValue}"); process.exitCode = 17;`],
+    {stdio: ["pipe", "pipe", "pipe"]});
+  const closed = new Promise<void>((resolve) => {supervisor.once("close", () => resolve());});
+  const start = evaluateParentStart(() => supervisor, process, fileURLToPath, LocalEvmError, authenticateProcess, finishWithCleanup, redact) as typeof startOwnedAnvil;
+  try {
+    await assert.rejects(start("synthetic", "0x7000000000000000000000000000000000000001"), (cause: unknown) => {
+      assert(cause instanceof LocalEvmError);
+      assert.equal(cause.code, "LOCAL_EVM_ANVIL_EARLY_EXIT");
+      assert.match(cause.message, /exited 17: fixture \[REDACTED_32_BYTE_VALUE\]/u);
+      assert.equal(cause.message.includes(syntheticValue), false);
+      return true;
+    });
+  } finally {await reapSyntheticChild(supervisor, closed);}
+});
 
 for (const scenario of ["failed-live", "failed-stopped", "already-failed-live", "signal-live", "zero-live", "zero-stopped", "startup-failed-live"] as const) {
   test(`parent owned-Anvil API validates supervisor termination: ${scenario}`, {timeout: 10_000}, async (context) => {
@@ -231,7 +248,7 @@ for (const scenario of ["failed-live", "failed-stopped", "already-failed-live", 
     ].join("\n"));
     const supervisor = spawn(process.execPath, [supervisorPath], {stdio: ["pipe", "pipe", "pipe"]});
     const supervisorClosed = new Promise<void>((resolve) => {supervisor.once("close", () => resolve());});
-    const start = evaluateParentStart(() => supervisor, process, fileURLToPath, LocalEvmError, authenticateProcess, finishWithCleanup) as typeof startOwnedAnvil;
+    const start = evaluateParentStart(() => supervisor, process, fileURLToPath, LocalEvmError, authenticateProcess, finishWithCleanup, redact) as typeof startOwnedAnvil;
     const primary = new Error("registration failed");
     const stopPayload = async (): Promise<void> => {await reapSyntheticChild(payload, payloadClosed);};
     try {

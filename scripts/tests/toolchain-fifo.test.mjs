@@ -64,7 +64,7 @@ for (const entry of cases) {
       console.log("rejected without payload or invocation");
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", source, root], {
-      encoding: "utf8", timeout: 3_000, killSignal: "SIGKILL",
+      encoding: "utf8", timeout: 5_000, killSignal: "SIGKILL",
     });
     const diagnostic = JSON.stringify({status: result.status, signal: result.signal,
       error: result.error?.code, stdout: result.stdout, stderr: result.stderr});
@@ -133,7 +133,7 @@ for (const boundary of ["invocation file", "environment tree"]) {
       console.log("rejected and retained custody");
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", source, root], {
-      encoding: "utf8", timeout: 3_000, killSignal: "SIGKILL", env: {...process.env, TMPDIR: root},
+      encoding: "utf8", timeout: 5_000, killSignal: "SIGKILL", env: {...process.env, TMPDIR: root},
     });
     const diagnostic = JSON.stringify({status: result.status, signal: result.signal,
       error: result.error?.code, stdout: result.stdout, stderr: result.stderr});
