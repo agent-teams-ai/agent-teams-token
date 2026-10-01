@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -331,3 +332,61 @@ for (const consumer of ["verified file", "opened node"]) {
     });
   }
 }
+
+// Observed failure: real EMFILE on npm-globalrc left npmrc open with no close
+// attempt while the actual EvidenceRecorder correctly rejected before launch.
+test("partial acquisition EMFILE releases the real EvidenceRecorder invocation FD", {
+  skip: process.platform !== "linux",
+}, (context) => {
+  const value = fixture(context);
+  const program = `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs';
+    import childProcess from 'node:child_process';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { EvidenceRecorder } from ${JSON.stringify(new URL("../rollback/runtime/evidence.mjs", import.meta.url).href)};
+    import { invocationFault } from ${JSON.stringify(new URL("./toolchain-invocation-fault-fixture.mjs", import.meta.url).href)};
+    const root = process.argv[1];
+    const recorder = new EvidenceRecorder(root, {});
+    const injection = invocationFault({ exhaust: true });
+    const originalSpawn = childProcess.spawnSync;
+    let launches = 0;
+    childProcess.spawnSync = (...args) => { launches++; return originalSpawn(...args); };
+    syncBuiltinESMExports();
+    try {
+      let failure;
+      try {
+        recorder.run('test', 'emfile', process.execPath,
+          ['-e', 'require("node:fs").writeFileSync(' + JSON.stringify(root + '/launched') + ', "child")'],
+          { env: {}, timeout: 5000 });
+      } catch (error) { failure = error; }
+      assert.equal(failure.cause.code, 'EMFILE');
+      assert.ok(failure.cause.path.endsWith('/npm-globalrc'));
+      assert.equal(injection.files.length, 1);
+      injection.assertCloses();
+      assert.equal(launches, 0);
+      assert.equal(recorder.document.commands[0].status, 'failed');
+    } finally {
+      childProcess.spawnSync = originalSpawn;
+      syncBuiltinESMExports();
+      injection.release();
+    }
+    assert.equal(fs.existsSync(root + '/launched'), false);
+    assert.equal(fs.existsSync(root + '/READY'), false);
+    const [entry] = JSON.parse(fs.readFileSync(root + '/diagnostics.json', 'utf8')).commands;
+    assert.equal(entry.status, 'failed');
+    assert.equal(entry.spawnError, 'EMFILE');
+    assert.equal(entry.exitCode, null);
+    for (const stream of ['stdout', 'stderr']) {
+      assert.equal(entry[stream].byteLength, 0);
+      assert.equal(fs.readFileSync(root + '/' + entry[stream].path).length, 0);
+    }
+    console.log('real EMFILE; npmrc EBADF; one close; zero launches; failed evidence; empty logs');
+  `;
+  const result = spawnSync("/bin/bash", ["-c", 'ulimit -n 128; exec "$@"', "emfile-test",
+    process.execPath, "--input-type=module", "-e", program, value.root], {
+    encoding: "utf8", timeout: 10_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  context.diagnostic(result.stdout.trim());
+});

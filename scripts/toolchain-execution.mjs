@@ -117,7 +117,11 @@ function createControlledFile(path, contents = "") {
     const identity = checkedRegularDescriptor(fd);
     return { expectedHash: hashDescriptor(fd), fd, identity, path };
   } catch (error) {
-    closeSync(fd);
+    const failures = [error];
+    try {closeSync(fd);} catch (closeError) {failures.push(closeError);}
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "TOOLCHAIN_FILE_ACQUISITION_FAILED", { cause: error });
+    }
     throw error;
   }
 }
@@ -143,7 +147,11 @@ function writeAuthenticatedSnapshot(root, opened, leaf) {
     checkedRegularDescriptor(fd);
     if (hashDescriptor(fd) !== opened.expectedHash) {throw typedError("TOOLCHAIN_SNAPSHOT_FILE_INVALID");}
   } catch (error) {
-    closeSync(fd);
+    const failures = [error];
+    try {closeSync(fd);} catch (closeError) {failures.push(closeError);}
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "TOOLCHAIN_FILE_ACQUISITION_FAILED", { cause: error });
+    }
     throw error;
   }
   closeSync(fd);
@@ -168,15 +176,20 @@ function createInvocation(entries, platform) {
     const corepackHome = createPrivateDirectory(join(root, "corepack-home"));
     directories.push(home, config, cache, data, state, runtime, pnpmHome, corepackHome);
     const npmrc = createControlledFile(join(root, "npmrc"));
+    files.push(npmrc);
     const npmGlobalrc = createControlledFile(join(root, "npm-globalrc"));
+    files.push(npmGlobalrc);
     const status = createControlledFile(join(root, "supervisor-status"));
-    files.push(npmrc, npmGlobalrc, status);
+    files.push(status);
     const snapshots = platform === "darwin"
-      ? entries.map((entry) => entry.snapshotOnDarwin
-        ? writeAuthenticatedSnapshot(root, entry.opened, entry.leaf)
-        : undefined)
+      ? entries.map((entry) => {
+        const snapshot = entry.snapshotOnDarwin
+          ? writeAuthenticatedSnapshot(root, entry.opened, entry.leaf)
+          : undefined;
+        if (snapshot) {files.push(snapshot);}
+        return snapshot;
+      })
       : [];
-    files.push(...snapshots.filter(Boolean));
     for (const [index, snapshot] of snapshots.entries()) {
       if (!snapshot) {continue;}
       if (snapshot.expectedHash !== entries[index].expectedHash
@@ -213,7 +226,15 @@ function createInvocation(entries, platform) {
       status,
     };
   } catch (error) {
-    for (const file of files) {try {closeSync(file.fd);} catch {}}
+    const failures = [error];
+    // Each successful acquisition is registered immediately. Attempt every
+    // owner once, even if an earlier close consumed its FD and then threw.
+    for (const file of files) {
+      try {closeSync(file.fd);} catch (closeError) {failures.push(closeError);}
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, `TOOLCHAIN_INVOCATION_ACQUISITION_FAILED invocation=${root}`, { cause: error });
+    }
     throw error;
   }
 }
