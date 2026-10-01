@@ -1,9 +1,7 @@
 import { encodeAllocationId, normalizeAllocationSet, parseCanonicalUint } from "./model.js";
 import { validateGrantSchedule, type GrantSchedule } from "./grant-schedule.js";
 
-export interface ReserveGenesis {
-  readonly schema: "agtmai-reserve-genesis-v1";
-  readonly status: "accepted";
+export interface ReservePolicyBody {
   readonly initialSupplyBaseUnits: string;
   readonly allocations: readonly {
     readonly id: string; readonly recipient: string; readonly amountBaseUnits: string; readonly bps: number;
@@ -16,6 +14,10 @@ export interface ReserveGenesis {
     readonly controller: string; readonly purpose: string;
     readonly rollingCapBaseUnits: string; readonly perGrantCapBaseUnits: string;
   };
+}
+export interface ReserveGenesis extends ReservePolicyBody {
+  readonly schema: "agtmai-reserve-genesis-v1";
+  readonly status: "accepted";
 }
 
 // ADR-0008: 100,000,000 AGTMAI at 9 decimals; the contributor 20% is split 3%/17%.
@@ -30,7 +32,12 @@ function object(value: unknown, keys: readonly string[]): Record<string, unknown
   if (value === null || typeof value !== "object" || Array.isArray(value)
     || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) { return reject(); }
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).length !== keys.length || keys.some(key => !Object.hasOwn(record, key))) { return reject(); }
+  const ownKeys = Reflect.ownKeys(record);
+  if (ownKeys.length !== keys.length || ownKeys.some(key => typeof key !== "string" || !keys.includes(key))
+    || keys.some(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(record, key);
+      return descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, "value");
+    })) { return reject(); }
   return record;
 }
 function address(value: unknown): void {
@@ -46,7 +53,12 @@ function positive(value: unknown): bigint {
 }
 
 function validateAllocations(allocations: unknown, supply: bigint): void {
-  if (!Array.isArray(allocations) || allocations.length !== 8) { reject(); }
+  if (!Array.isArray(allocations) || Object.getPrototypeOf(allocations) !== Array.prototype
+    || allocations.length !== 8 || Reflect.ownKeys(allocations).length !== 9) { reject(); }
+  for (let index = 0; index < allocations.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(allocations, String(index));
+    if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) { reject(); }
+  }
   for (const value of allocations) {
     const allocation = object(value, ["id", "recipient", "amountBaseUnits", "bps"]);
     if (!encodeAllocationId(allocation.id) || !Number.isInteger(allocation.bps)
@@ -64,10 +76,18 @@ function validateAllocations(allocations: unknown, supply: bigint): void {
 export function validateReserveGenesis(input: unknown): ReserveGenesis {
   const root = object(input, ["schema", "status", "initialSupplyBaseUnits", "allocations", "founder", "contributors"]);
   if (root.schema !== "agtmai-reserve-genesis-v1" || root.status !== "accepted") { reject(); }
+  const body = validateReservePolicyBody({ initialSupplyBaseUnits: root.initialSupplyBaseUnits,
+    allocations: root.allocations, founder: root.founder, contributors: root.contributors });
+  return { ...structuredClone(input as ReserveGenesis), allocations: body.allocations };
+}
+
+/** Validate the shared economic policy without granting production status. */
+export function validateReservePolicyBody(input: unknown): ReservePolicyBody {
+  const root = object(input, ["initialSupplyBaseUnits", "allocations", "founder", "contributors"]);
   const supply = positive(root.initialSupplyBaseUnits);
   if (supply !== APPROVED_SUPPLY_BASE_UNITS) { reject(); }
   validateAllocations(root.allocations, supply);
-  const typed = input as ReserveGenesis;
+  const typed = input as ReservePolicyBody;
   const normalized = normalizeAllocationSet(typed.initialSupplyBaseUnits, typed.allocations, "deployment");
   if (normalized.diagnostics.length || !normalized.allocations) { reject(); }
   const contributorAllocation = typed.allocations.find(a => a.id === "contributors");
