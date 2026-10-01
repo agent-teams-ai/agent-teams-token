@@ -4,7 +4,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, w
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { stripTypeScriptTypes } from "node:module";
@@ -168,6 +168,108 @@ test("control-channel EOF before registration acknowledgement terminates Anvil",
   await runner.kill();
   await assertPayloadStopped(payload.pid);
   assert.notEqual(await authenticateProcess(identity), "owned");
+});
+
+for (const payload of ["synthetic", "real-Anvil"] as const) {
+  test(`${payload} durable supervised custody survives runner death before acknowledgement and requires actual child exit`, {timeout: 20_000}, async (context) => {
+    const fixture = await syntheticAnvil(context, "stubborn");
+    const executable = payload === "synthetic" ? fixture.executable : pinnedFoundryBinaries(repositoryRoot).anvil;
+    const identityPath = join(fixture.directory, "identity.json");
+    const root = join(fixture.directory, "runs");
+    await mkdir(root, {mode: 0o700});
+    const runner = await fixture.runner([
+      `import {writeFile} from "node:fs/promises";`,
+      `import {startOwnedAnvil} from ${JSON.stringify(new URL("../process.ts", import.meta.url).href)};`,
+      `import {createProvisionalRunDirectory, createRunLease} from ${JSON.stringify(new URL("../run-lease.ts", import.meta.url).href)};`,
+      `const directory = await createProvisionalRunDirectory(${JSON.stringify(root)}, "crash");`,
+      `await createRunLease(directory);`,
+      `await startOwnedAnvil(${JSON.stringify(executable)}, ${JSON.stringify(firstAddress)}, async identity => {`,
+      `  await writeFile(${JSON.stringify(identityPath)}, JSON.stringify({directory, identity}));`,
+      `  await new Promise(() => {});`,
+      `}, {}, directory);`,
+    ].join("\n"));
+    const {directory, identity} = await waitForJson<{directory: string; identity: {pid: number; processStart: string}}>(identityPath);
+    const bytes = await readFile(join(directory, "lease.v1.json"));
+    try {
+      if (payload === "synthetic") {assert.equal(identity.pid, (await fixture.payload()).pid);}
+      else if (process.platform === "linux") {
+        assert.equal(await realpath(`/proc/${identity.pid}/exe`), executable, "independently observed child runs the pinned Anvil");
+      }
+      assert.equal(await authenticateProcess(identity), "owned");
+      await runner.kill();
+      if (payload === "synthetic") {
+        await waitForJson(fixture.signalPath);
+        assert.equal(await authenticateProcess(identity), "owned", "the child really ignores SIGTERM");
+        await assert.rejects(reclaimStaleRuns(root), {code: "LOCAL_EVM_RUN_ANVIL_STILL_OWNED"});
+        assert.deepEqual(await readFile(join(directory, "lease.v1.json")), bytes);
+      }
+      await assertPayloadStopped(identity.pid);
+      assert.equal(await authenticateProcess(identity), "absent");
+      context.diagnostic(`${payload}: actual child ${identity.pid} exited; pre-ack lease child=${JSON.stringify(JSON.parse(bytes.toString()).anvil)}`);
+      assert.equal(await reclaimStaleRuns(root), 1);
+      assert.deepEqual(JSON.parse(bytes.toString()).anvil, identity,
+        "supervisor must durably register the actual child before exposing identity to the runner");
+      assert.deepEqual(await readdir(root), []);
+    } finally {
+      await runner.kill();
+      await assertPayloadStopped(identity.pid);
+    }
+  });
+}
+
+test("supervisor registration rejects a foreign runner lease and reaps its actual child", {timeout: 20_000}, async context => {
+  const fixture = await syntheticAnvil(context);
+  const directory = await createProvisionalRunDirectory(fixture.directory, "foreign-owner");
+  await createRunLease(directory);
+  const bytes = await readFile(join(directory, "lease.v1.json"));
+  const resultPath = join(fixture.directory, "result.json");
+  const childPath = join(fixture.directory, "spawned-child.json");
+  const observer = join(fixture.directory, "observe-spawn.mjs");
+  await writeFile(observer, [
+    `import childProcess from "node:child_process";`,
+    `import {writeFileSync} from "node:fs";`,
+    `import {syncBuiltinESMExports} from "node:module";`,
+    `const spawn = childProcess.spawn;`,
+    `childProcess.spawn = (...args) => {`,
+    `  const child = spawn(...args);`,
+    `  writeFileSync(${JSON.stringify(childPath)}, JSON.stringify({pid: child.pid}));`,
+    `  return child;`,
+    `};`,
+    `syncBuiltinESMExports();`,
+  ].join("\n"));
+  await fixture.runner([
+    `import {writeFile} from "node:fs/promises";`,
+    `import {startOwnedAnvil} from ${JSON.stringify(new URL("../process.ts", import.meta.url).href)};`,
+    `process.env.NODE_OPTIONS = ${JSON.stringify(`--import=${pathToFileURL(observer).href}`)};`,
+    `let exposed = false;`,
+    `const failure = await startOwnedAnvil(${JSON.stringify(fixture.executable)}, ${JSON.stringify(firstAddress)}, async () => {exposed = true;}, {}, ${JSON.stringify(directory)})`,
+    `  .then(() => {throw new Error("foreign lease accepted");}, cause => cause);`,
+    `await writeFile(${JSON.stringify(resultPath)}, JSON.stringify({exposed, message: failure.message}));`,
+  ].join("\n"));
+  const result = await waitForJson<{exposed: boolean; message: string}>(resultPath);
+  assert.equal(result.exposed, false, "failed durable registration must expose no child identity or ready message");
+  assert.match(result.message, /run lease cannot register this Anvil identity/);
+  const {pid} = await waitForJson<{pid: number}>(childPath);
+  assert(Number.isSafeInteger(pid) && pid > 0);
+  await assertPayloadStopped(pid);
+  assert.deepEqual(await readFile(join(directory, "lease.v1.json")), bytes);
+});
+
+test("runner confirms only the durably registered supervisor child before acknowledgement", {timeout: 20_000}, async context => {
+  const {confirmRunAnvilRegistration} = await import("../run-lease.ts");
+  const fixture = await syntheticAnvil(context);
+  const directory = await createProvisionalRunDirectory(fixture.directory, "confirm");
+  await createRunLease(directory);
+  const anvil = await startOwnedAnvil(fixture.executable, firstAddress, async identity => {
+    await confirmRunAnvilRegistration(directory, identity);
+    const bytes = await readFile(join(directory, "lease.v1.json"));
+    await assert.rejects(confirmRunAnvilRegistration(directory, {...identity, pid: process.pid}),
+      {code: "LOCAL_EVM_RUN_LEASE_OWNER"});
+    assert.deepEqual(await readFile(join(directory, "lease.v1.json")), bytes);
+  }, {}, directory);
+  try {assert.equal(anvil.pid, (await fixture.payload()).pid);}
+  finally {await anvil.stop();}
+  await assertPayloadStopped(anvil.pid);
 });
 
 for (const outputMode of ["file", "pipe"] as const) {

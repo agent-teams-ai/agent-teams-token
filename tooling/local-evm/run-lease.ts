@@ -60,10 +60,44 @@ export async function registerRunAnvil(
   anvil: OwnedProcessIdentity,
   hooks: PublicationHooks = {},
 ): Promise<void> {
-  const observed = await readLease(directory);
-  const lease = observed.lease;
+  await registerAnvilForRunner(directory, anvil,
+    {pid: process.pid, processStart: await processStartIdentity(process.pid)}, hooks);
+}
+
+// The supervisor publishes its direct child's identity before sending it over
+// the control pipe. Runner death cannot erase this recovery authority. This is
+// registration, never a completion claim: reclamation still observes child exit.
+export async function registerSupervisedRunAnvil(
+  directory: string,
+  runner: OwnedProcessIdentity,
+  anvil: OwnedProcessIdentity,
+): Promise<void> {
+  if (!isIdentity(runner) || !isIdentity(anvil)
+    || await authenticateProcess(anvil) !== "owned") {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "supervised child identity is unavailable");
+  }
+  await registerAnvilForRunner(directory, anvil, runner, {});
+}
+
+export async function confirmRunAnvilRegistration(directory: string, anvil: OwnedProcessIdentity): Promise<void> {
+  const {lease} = await readLease(directory);
   if (lease.runner.pid !== process.pid
     || lease.runner.processStart !== await processStartIdentity(process.pid)
+    || lease.anvil?.pid !== anvil.pid || lease.anvil?.processStart !== anvil.processStart) {
+    throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "supervised child registration does not match this runner");
+  }
+}
+
+async function registerAnvilForRunner(
+  directory: string,
+  anvil: OwnedProcessIdentity,
+  runner: OwnedProcessIdentity,
+  hooks: PublicationHooks,
+): Promise<void> {
+  const observed = await readLease(directory);
+  const lease = observed.lease;
+  if (lease.runner.pid !== runner.pid
+    || lease.runner.processStart !== runner.processStart
     || lease.anvil !== null) {
     throw new LocalEvmError("LOCAL_EVM_RUN_LEASE_OWNER", "run lease cannot register this Anvil identity");
   }
@@ -137,8 +171,8 @@ async function reclaimLeasedEntry(directory: string, expectedDirectory: string, 
   if (runnerState === "ambiguous") {
     throw new LocalEvmError("LOCAL_EVM_RUN_OWNER_AMBIGUOUS", "stale-run owner identity is unavailable; preserving its directory");
   }
-  // Only the live owner can confirm cleanup of an unregistered startup child.
-  // Once it exits, a null identity proves neither no spawn nor successful stop.
+  // Legacy/failed publication can still leave unknown startup custody. A null
+  // identity proves neither no spawn nor successful supervisor cleanup.
   if (lease.anvil === null) {
     throw new LocalEvmError("LOCAL_EVM_RUN_ANVIL_STILL_OWNED", "unregistered Anvil termination is unconfirmed; preserving its run directory and lease");
   }

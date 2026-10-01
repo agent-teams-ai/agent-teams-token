@@ -23,6 +23,18 @@ test("stale reclamation retains an unregistered failed-start child after its act
   assert.equal(await authenticateProcess(identity), "owned");
 });
 
+test("stale reclamation retains unknown custody even when the unregistered child independently exited", {timeout: 20_000}, async context => {
+  const {root, directory, identity} = await startupCustodyProbe(context, "startup-only", false);
+  const bytes = await fs.readFile(join(directory, "lease.v1.json"));
+  const lease = JSON.parse(bytes.toString());
+  assert.equal(lease.anvil, null);
+  assert.equal(await authenticateProcess(lease.runner), "absent");
+  assert.equal(await authenticateProcess(identity), "absent", "independent observer knows exit; lease does not");
+  await assert.rejects(reclaimStaleRuns(root), {code: "LOCAL_EVM_RUN_ANVIL_STILL_OWNED"});
+  assert.deepEqual(await fs.readFile(join(directory, "lease.v1.json")), bytes);
+  assert.equal(await fs.readFile(join(directory, "custody-sentinel"), "utf8"), "retain");
+});
+
 for (const owner of ["runner", "stale-reclaimer"] as const) {
   test(`scanner overlaps ${owner} deleting a still-present claim`, {timeout: 10_000}, async (context) => {
     const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "evm-delete-overlap-")));

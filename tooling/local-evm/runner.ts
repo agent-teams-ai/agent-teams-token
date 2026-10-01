@@ -8,7 +8,7 @@ import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_CONTRACT_SOURCE, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
 import { checkedCommand, command, CommandExitError, CommandSpawnError, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
-import { createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
+import { confirmRunAnvilRegistration, createRunLease, reclaimStaleRuns, removeOwnedRunDirectory } from "./run-lease.ts";
 import { createInitializingRunDirectory, publishInitializedRun } from "./run-initialization.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
 import {
@@ -76,8 +76,10 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
         if (process.env.AGTMAI_LOCAL_EVM_FAULT === "after-anvil-spawn-before-registration") {
           await faultPause("after-anvil-spawn-before-registration", {childIdentity: identity});
         }
-        await registerRunAnvil(runDirectory, identity);
+        await confirmRunAnvilRegistration(runDirectory, identity);
       },
+      {},
+      runDirectory,
     );
     await publishProcessId(runDirectory, "anvil.pid", anvil.pid);
     if (interruptedSignal) {throw new LocalEvmError("LOCAL_EVM_INTERRUPTED", `interrupted by ${interruptedSignal}`);}

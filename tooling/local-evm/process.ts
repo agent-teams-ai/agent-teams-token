@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
 import { LocalEvmError } from "./model.ts";
 import { finishWithCleanup } from "./cleanup.ts";
+import { registerSupervisedRunAnvil } from "./run-lease.ts";
 
 export interface CommandResult {
   readonly stdout: string;
@@ -143,8 +144,13 @@ export async function startOwnedAnvil(
   fundedAddress: string,
   registerIdentity?: (identity: OwnedProcessIdentity) => Promise<void>,
   options: OwnedAnvilOptions = {},
+  runDirectory?: string,
 ): Promise<OwnedAnvil> {
-  const supervisor = spawn(process.execPath, [fileURLToPath(import.meta.url), "--supervise-anvil", executable, fundedAddress, JSON.stringify(options)], {
+  const custody = runDirectory === undefined ? undefined : {
+    directory: runDirectory,
+    runner: {pid: process.pid, processStart: await processStartIdentity(process.pid)},
+  };
+  const supervisor = spawn(process.execPath, [fileURLToPath(import.meta.url), "--supervise-anvil", executable, fundedAddress, JSON.stringify(options), ...(custody === undefined ? [] : [JSON.stringify(custody)])], {
     stdio: ["pipe", "pipe", "pipe"], env: process.env,
   });
   supervisor.stdin.on("error", () => {});
@@ -178,7 +184,7 @@ export async function startOwnedAnvil(
   }
 }
 
-async function superviseAnvil(executable: string, fundedAddress: string, options: OwnedAnvilOptions = {}): Promise<void> {
+async function superviseAnvil(executable: string, fundedAddress: string, options: OwnedAnvilOptions = {}, custody?: {directory: string; runner: OwnedProcessIdentity}): Promise<void> {
   const control = supervisorControl();
   let failure: {cause: unknown} | undefined;
   let cleanupFailure: {cause: unknown} | undefined;
@@ -206,6 +212,9 @@ async function superviseAnvil(executable: string, fundedAddress: string, options
         throw cause;
       }
       const identity = {pid: child.pid, processStart};
+      if (custody !== undefined) {
+        await registerSupervisedRunAnvil(custody.directory, custody.runner, identity);
+      }
       await control.write({ type: "identity", ...identity });
       if (await control.acknowledged) {
         const outcome = await Promise.race([startup, control.terminated]);
@@ -483,7 +492,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === "-
   else {
     try {
       const options = process.argv[5] ? JSON.parse(process.argv[5]) as OwnedAnvilOptions : {};
-      superviseAnvil(executable, fundedAddress, options).catch((cause: unknown) => {
+      const custody = process.argv[6] ? JSON.parse(process.argv[6]) as {directory: string; runner: OwnedProcessIdentity} : undefined;
+      superviseAnvil(executable, fundedAddress, options, custody).catch((cause: unknown) => {
         process.stderr.write(`${redact(cause instanceof Error ? cause.message : String(cause))}\n`);
         process.exitCode = 1;
       });
