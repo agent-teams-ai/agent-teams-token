@@ -1,5 +1,37 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Full Ethereum assembly correction, 2026-10-01
+
+The owner accepted the exact-base critic's two-checkpoint implementation plan.
+PR1 now implements Supply preparation of an explicitly versioned, unsigned
+production v2 package with six mandatory purpose policies, nine deployer CREATEs,
+the founder reserve's nested CREATE at nonce 1, and founder funding. Production
+v1 retains its four-operation `token-and-reserves-only` meaning. All eight
+allocations go directly to their predicted reserves; a purpose vault's controller
+is the Project Controller Safe. Production inputs remain explicitly selected,
+accepted and committed in full, with `bridge: null` for this Ethereum-first path.
+
+Production v2 and synthetic preparation share one construction kernel. V2
+artifact admission and package reconstruction reuse authenticated clean Git,
+vendor inventory and fresh pinned compiler checks. Prepared runtimes are labelled
+templates; selected immutable bindings produce complete expected runtime bytes.
+Supply semantics and tests must survive deployment-plan rollback without whole
+historical-file restoration. Official rollback ownership/hash maintenance follows the
+orchestrator's clean candidate commit.
+
+Focused unsigned-package, constructor, runtime-binding and rejection tests pass
+on the worktree. Clean-candidate qualification and native rollback gates remain
+pending; this checkpoint does not qualify local execution or release readiness.
+
+PR2 remains pending: one owned loopback Anvil execution with synthetic chain ID
+1, actual nonce observations, both official Safes, predecessor-state estimates,
+exact runtime/getter observations and observed manifest/passport/cost reporting.
+There is no calibration chain, snapshot/revert or second deployment. Genuine
+execution, exact-SHA review, CI and sealed Linux rollback proof remain required.
+ADR-0011 stays proposed; accepted decisions and founder/contributor terms are
+unchanged. No production numbers, identities, approvals or Mainnet broadcast
+are supplied by this plan; every output has `broadcastAllowed: false`.
+
 ## Independent review correction, 2026-10-01
 
 Rollback qualification must preserve the independent Local EVM custody contract.
@@ -54,10 +86,10 @@ must never be supplied to an agent.
 
 ### Ethereum-only genesis preparation, 2026-09-27
 
-The production deployment candidate is `AGTMAICCIPToken`: it has the fixed
+The v1 production deployment candidate is `AGTMAICCIPToken`: it has the fixed
 100,000,000 AGTMAI supply and an immutable `getCCIPAdmin()` address for a
 possible later standard CCIP registration, but grants no mint authority. The
-existing production preparer pins this contract together with
+existing v1 production preparer pins this contract together with
 `FounderGrantReserve` and `ReserveController`. Its four unsigned operations are
 token creation, founder reserve creation, contributor controller creation and
 founder grant funding. This candidate and its exact bytecode still need final
@@ -89,9 +121,9 @@ costs are recomputed against pinned creation bytecode and fresh Ethereum block
 fees after the exact constructor inputs, deployer and nonce are known. The
 prepared package remains unsigned and `broadcastAllowed: false`.
 
-The six other allocation destinations are purpose-labeled at genesis, but the
-current production preparer does not route them through the new local-only
-`PurposeReserveVault` implementation. Do not advertise the production
+In v1, the six other allocation destinations are purpose-labeled at genesis;
+the v1 preparer does not route them through `PurposeReserveVault`. The full v2
+route is described in the October 1 correction above. Do not advertise v1
 destinations as contract-locked reserves. Selecting exact custody and caps for
 those buckets is an explicit release decision, not an excuse to add a generic
 treasury or prebuild the later market/bridge.

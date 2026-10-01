@@ -69,6 +69,50 @@ registries never become a second editable fact source.
   references and RPC settings remain private. A file-hash inventory is written
   last, excludes its own digest, and rejects changed/missing files.
 
+## Full unsigned assembly checkpoint
+
+Production `agtmai-production-deployment-v2` requires exactly six `purposeVaults`
+records: long-term, users, operations, ecosystem, financing and liquidity. Each
+selects canonical positive `opensAt`, `windowSeconds` and `rollingCapBaseUnits`;
+the cap cannot exceed that allocation, and execution must finish before opening.
+Deployment and reserve configuration must be accepted, generic grants empty,
+two explicitly referenced 2-of-3 Safes qualified in configuration, and bridge
+null. No dates, real identities or cap amounts are supplied as defaults.
+
+Select v2 approval, expectations and artifact-pins records together. The retained
+two configuration hashes keep their v1 meanings; `assemblyConfigurationSha256`
+commits the complete normalized v2 envelope, including Safe references and all
+policies. Approval references and matching hashes identify selected inputs;
+they do not authenticate an approving human. V1 remains four unsigned operations
+with `token-and-reserves-only` coverage.
+
+`compile-production` accepts `--repository-root` and `--candidate-revision` for
+v2 in addition to its existing config/artifacts/approval/expectations/output
+arguments. The candidate must be clean. Artifact admission authenticates Git
+objects, complete vendor inventory, compiler executable and fresh compiler
+output. `loadPreparedProductionPackage(directory, candidate)` repeats that
+admission and reconstructs the exact inventory; omitting candidate fails v2.
+The compiler-input digest binds both sources and settings.
+
+The package describes nine predicted CREATEs, the nested founder GrantVault at
+CREATE(founder reserve, 1), and the funding CALL. The child's constructor derives
+from parent inputs; no child transaction or receipt is invented. Prepared runtime
+templates and fully materialized immutable expectations are separate fields.
+`prepareAssemblyManifest` and the existing passport renderer project unsigned
+facts and ten offline source-verification inputs, with observed fields null.
+Production deployment and explorer verification are unavailable. All exports
+keep `broadcastAllowed: false`.
+
+Synthetic local-purpose v2 uses the same construction kernel, chain ID 1,
+test-only authority and null approval; it never manufactures production
+acceptance. PR2 owns actual loopback execution, both official Safes, genuine
+estimates against predecessor state, runtime/getter evidence and observed costs.
+The unsigned projection does not prove that execution.
+
+A full purpose cap can leave at opening; the Safe selects recipients and
+downstream transfers are unrestricted. Refunds do not restore gross capacity;
+expiry restores rolling capacity. There is no lifetime cap.
+
 ## Grant custody boundaries
 
 The [current qualification slice](../PLAN.md#grant-custody-qualification-2026-09-16)
@@ -250,7 +294,7 @@ pnpm deployment:config materialize --prepared "$PREPARED/prepared-deployment.jso
 pnpm deployment:config verify --manifest "$DEPLOYMENT/deployment-manifest.json"
 ```
 
-Production preparation uses the separate `agtmai-production-deployment-v1`
+Production v1 preparation uses the separate `agtmai-production-deployment-v1`
 envelope: `deployment` (`schemaVersion: 1`), `reserveGenesis`
 (`agtmai-reserve-genesis-v1`), `projectControllerSafeId` and
 `founderBeneficiarySafeId`. Both embedded configurations must be `accepted` and
@@ -285,7 +329,7 @@ nested vault address. Funding binds the exact `fund()` calldata. Unknown fields
 and mismatched identities, artifacts or policy limits are rejected.
 
 The local/testnet `agtmai-artifact-pins-v1` input has exactly two entries:
-`AGTMAICCIPToken` and `GrantVault`. Production instead requires
+`AGTMAICCIPToken` and `GrantVault`. Production v1 instead requires
 `agtmai-production-artifact-pins-v1` with exactly three: `AGTMAICCIPToken`,
 `FounderGrantReserve` and `ReserveController`. Both pin schemas record the
 contract-source `sourceRevision`; each entry has `contract`, `artifactPath`,
@@ -302,7 +346,7 @@ Reads traverse each parent through held Linux directory descriptors and recheck
 their identities before returning bytes. Platforms without that traversal fail
 closed with `DEPLOYMENT_IO_DESCRIPTOR_TRAVERSAL_UNAVAILABLE`.
 
-Production compilation publishes `prepared-production-deployment.json` with
+Production v1 compilation publishes `prepared-production-deployment.json` with
 coverage `token-and-reserves-only`, canonical configuration, approval,
 expectations and authenticated artifact/build-info files. It prepares four
 unsigned operations; it does not sign, deploy or establish live Safe authority.

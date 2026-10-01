@@ -94,31 +94,6 @@
       "afterSha256": "ad95df2917a510dc7b4ffa62f7be50bd15ad54820f16645eb7d88c8fedc11263"
     },
     {
-      "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-      "beforeSha256": "f51080c3ad2c7babe38665d962e2109c719765b19b3ea53508e34233dc65d6ab",
-      "afterSha256": "e4e9c5e8109a8658217ed9c8be565ab5820a76818f92ad8ae34783ee519be226"
-    },
-    {
-      "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
-      "beforeSha256": "30b7ab175fd2134173cae1aeae144a5dabca9c6dc02429c1b254548ebfed36ab",
-      "afterSha256": "ed2aced7a31e8e30ebcf5fe46722effae0af6fbdbe75ef3ecdc727133e636c22"
-    },
-    {
-      "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-      "beforeSha256": "50a166071320c7ee470095d7fe813b05a7b00738bab7d670bd41fd3f636d568a",
-      "afterSha256": "bbd3aed0f0efb9609cdeffeb1bab6dd88097dd416c05806b4c63228dd14f383a"
-    },
-    {
-      "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
-      "beforeSha256": "bb6de39043dcc923ef1336c24b5240f34835652c8b0b305a8099a258db117c24",
-      "afterSha256": "f731b5370a5b3f98895d0e74c5f8e55bdf5a2296b71d5db3d1791d02b274326d"
-    },
-    {
-      "path": "packages/contexts/supply/tests/production-deployment.test.ts",
-      "beforeSha256": "f7516def6f9751689865c3df0bbbd431f0d9e599deb5fae83d692b593233d9ff",
-      "afterSha256": "b8938b47ebd49c7eb944cbd8d6f98e3b1fedbcb60d881f825f3b2ac15ef3a1a4"
-    },
-    {
       "path": "scripts/deployment/estimate-local.ts",
       "beforeSha256": "e0311b72412dc6af1adba470cb4145ea1f08bdd94d3983ae97717a8c85abdbdd",
       "afterSha256": "absent"
@@ -153,11 +128,6 @@
     ".github/workflows/ci.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
-    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-    "packages/contexts/supply/tests/deployment-cli.test.ts",
-    "packages/contexts/supply/tests/production-deployment.test.ts",
     "scripts/deployment/estimate-local.ts",
     "scripts/deployment/local-execution-proof.ts",
     "scripts/tests/workflow.test.mjs",
@@ -185,6 +155,31 @@
       "path": "tooling/local-evm/toolchain.ts",
       "reason": "Independent Local EVM toolchain admission: authenticate the pinned Foundry archive as well as installed binaries for surviving runner and tests. No dependency on the removed deployment planner.",
       "sha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e"
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+      "sha256": "a7571f4d3367dad5e3b93390362a5ad56255161ac66f3ca9700314966829b618",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+      "sha256": "b0f70abdd4379f96c88c8232a9e7fa6b7dddd55910b6c612d900d4fb0fbfa341",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+      "sha256": "ee1178d9c0b914125d228507c0da7b956aaa77a56571ea702c6727cbf6a3340a",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
+      "sha256": "bb6de39043dcc923ef1336c24b5240f34835652c8b0b305a8099a258db117c24",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/tests/production-deployment.test.ts",
+      "sha256": "f7516def6f9751689865c3df0bbbd431f0d9e599deb5fae83d692b593233d9ff",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     }
   ],
   "survivingGates": [

@@ -7,7 +7,7 @@ test("preflight requires exactly one own dense account observation for every top
   const targets = Array.from({ length: 10 }, (_, index) => `0x${String(index + 1).padStart(40, "0")}` as Hex);
   const sender = `0x${"f".repeat(40)}` as Hex;
   // Narrow boundary fixture; no compiler, hash, address-derivation or chain-execution claim.
-  const prepared = { configuration: { execution: { sender, startingNonce: "8", fundingDeadline: "100" } },
+  const prepared = { configuration: { chainId: "31337", execution: { sender, startingNonce: "8", fundingDeadline: "100" } },
     operations: [...targets.slice(0, 9).map((expectedAddress, index) => ({ kind: "create", expectedAddress,
       ...(index === 1 ? { nestedAddress: targets[9]! } : {}) })), { kind: "call" }] } as unknown as PreparedLocalPurposeGenesis;
   const observed: LocalPurposePreflight = { chainId: "31337", blockHash: `0x${"a".repeat(64)}`,

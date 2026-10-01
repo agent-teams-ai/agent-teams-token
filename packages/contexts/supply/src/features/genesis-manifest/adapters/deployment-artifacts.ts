@@ -35,11 +35,15 @@ export async function readArtifactPins(path: string): Promise<{ readonly sourceR
 }
 
 /** Read and re-open the closed production artifact set, including the two reserve contracts. */
-export async function readProductionArtifactPins(path: string): Promise<{ readonly sourceRevision: string; readonly artifacts: readonly ProductionArtifactPin[]; readonly files: Readonly<Record<string, Uint8Array>> }> {
+export async function readProductionArtifactPins(path: string, candidate?: LocalPurposeCandidate): Promise<{ readonly sourceRevision: string; readonly artifacts: readonly ProductionArtifactPin[]; readonly files: Readonly<Record<string, Uint8Array>> }> {
   const parsed = parseStrict(new TextDecoder().decode(await readDeploymentFile(path, 1_048_576)));
   if (parsed.diagnostics.length) { return refuse(); }
   const pins = record(parsed.value);
   exact(pins, ["schema", "sourceRevision", "artifacts"]);
+  if (pins.schema === "agtmai-production-artifact-pins-v2") {
+    if (!candidate) { return refuse(); }
+    return readAuthenticatedAssemblyPins(path, candidate, "agtmai-production-artifact-pins-v2");
+  }
   if (pins.schema !== "agtmai-production-artifact-pins-v1" || typeof pins.sourceRevision !== "string" || !/^[0-9a-f]{40}$/.test(pins.sourceRevision) || !Array.isArray(pins.artifacts) || pins.artifacts.length !== 3) { return refuse(); }
   const artifacts: ProductionArtifactPin[] = [];
   const files: Record<string, Uint8Array> = {};
@@ -53,12 +57,17 @@ export async function readProductionArtifactPins(path: string): Promise<{ readon
 
 /** Closed local-only inventory; the historic v1 and production inventories retain their schemas. */
 export async function readLocalPurposeArtifactPins(path: string, candidate: LocalPurposeCandidate): Promise<{ readonly sourceRevision: string; readonly artifacts: readonly LocalPurposeArtifact[]; readonly files: Readonly<Record<string, Uint8Array>> }> {
+  return readAuthenticatedAssemblyPins(path, candidate, "agtmai-local-purpose-artifact-pins-v1");
+}
+
+/** One admission path for both complete inventories, including repeated Git and fresh compiler authentication. */
+async function readAuthenticatedAssemblyPins(path: string, candidate: LocalPurposeCandidate, schema: string): Promise<{ readonly sourceRevision: string; readonly artifacts: readonly LocalPurposeArtifact[]; readonly files: Readonly<Record<string, Uint8Array>> }> {
   const parsed = parseStrict(new TextDecoder().decode(await readDeploymentFile(path, 1_048_576)));
   if (parsed.diagnostics.length) { return refuse(); }
   const pins = record(parsed.value);
   exact(pins, ["schema", "sourceRevision", "artifacts"]);
   const names: readonly LocalPurposeContract[] = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", "PurposeReserveVault", "GrantVault"];
-  if (pins.schema !== "agtmai-local-purpose-artifact-pins-v1" || typeof pins.sourceRevision !== "string"
+  if (pins.schema !== schema || typeof pins.sourceRevision !== "string"
     || !/^[0-9a-f]{40}$/.test(pins.sourceRevision) || !Array.isArray(pins.artifacts) || pins.artifacts.length !== names.length) { return refuse(); }
   if (!candidate || candidate.revision !== pins.sourceRevision) { return refuse(); }
   await readLocalPurposeGitSources(candidate);
