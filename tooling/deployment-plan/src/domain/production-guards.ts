@@ -107,12 +107,14 @@ function validateContext(expectations: ProductionExpectations, observations: Pro
 }
 
 function validateExecutionTiming(observations: ProductionObservation, policy: ApprovedProductionPolicy, reasons: string[]): void {
+  const observedAt = parseUint(observations.observedAt, "observedAt");
   const executionDeadline = parseUint(policy.executionDeadline, "policy.executionDeadline");
   const fundingDeadline = parseUint(policy.fundingDeadline, "policy.fundingDeadline");
   const founderStart = parseUint(policy.founderStart, "policy.founderStart");
   const fundingLead = parseUint(policy.fundingLeadSeconds, "policy.fundingLeadSeconds");
   for (const operation of observations.operations) {
     const timestamp = parseUint(operation.timestamp, `${operation.id}.timestamp`);
+    if (timestamp > observedAt) {fail(reasons, `execution-${operation.id}-observation-time-mismatch`);}
     if (timestamp > executionDeadline) {fail(reasons, `execution-${operation.id}-deadline-mismatch`);}
     if ((operation.id === "founder-reserve-create" || operation.id === "founder-fund") && timestamp > founderStart) {fail(reasons, `execution-${operation.id}-founder-start-mismatch`);}
     if (operation.id === "founder-fund") {

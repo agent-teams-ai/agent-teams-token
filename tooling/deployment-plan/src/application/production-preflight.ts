@@ -102,7 +102,7 @@ function validateExecutionOperations(expectations: ProductionExpectations, obser
     if (previousBlock !== undefined && block !== previousBlock + 1n) {reasons.push("execution-block-sequence-mismatch");}
     previousBlock = block;
     const timestamp = BigInt(seen.timestamp!);
-    if (previousTimestamp !== undefined && timestamp < previousTimestamp) {reasons.push("execution-timestamp-sequence-mismatch");}
+    if (previousTimestamp !== undefined && timestamp <= previousTimestamp) {reasons.push("execution-timestamp-sequence-mismatch");}
     previousTimestamp = timestamp;
     if (index === expectations.operations.length - 1 && (observations.blockNumber !== seen.blockNumber || observations.blockHash !== seen.blockHash)) {reasons.push("execution-final-block-mismatch");}
   }

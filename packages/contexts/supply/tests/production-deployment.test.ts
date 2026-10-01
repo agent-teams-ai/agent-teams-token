@@ -216,3 +216,21 @@ test("production rejects generic grant instructions before preparation even with
   assert.deepEqual(admission.diagnostics, result.diagnostics);
   assert.match(admission.diagnostics[0]!.message, /deployment.grants must be empty.*reserveGenesis/);
 });
+
+
+test("unsupported raw grants retain their diagnostic when generic deployment validation fails", () => {
+  const value = syntheticEnvelope() as { deployment: { grants: unknown[]; token: { symbol: string } } };
+  value.deployment.grants = [{}];
+  value.deployment.token.symbol = "INVALID";
+  const generic = validateDeployment(value.deployment);
+  assert.equal(generic.value, undefined);
+  assert.ok(generic.diagnostics.length > 0);
+  const result = validateProductionDeployment(value);
+  assert.equal(result.value, undefined);
+  const unsupported = result.diagnostics.filter(diagnostic => diagnostic.code === "PRODUCTION_GRANTS_UNSUPPORTED");
+  assert.equal(unsupported.length, 1);
+  assert.equal(unsupported[0]!.pointer, "/deployment/grants");
+  assert.match(unsupported[0]!.message, /deployment.grants must be empty.*reserveGenesis/);
+  assert.deepEqual(result.diagnostics.filter(diagnostic => diagnostic.code !== "PRODUCTION_GRANTS_UNSUPPORTED"),
+    generic.diagnostics.map(diagnostic => ({ ...diagnostic, code: `PRODUCTION_DEPLOYMENT_${diagnostic.code}` })));
+});

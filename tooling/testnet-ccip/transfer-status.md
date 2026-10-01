@@ -123,7 +123,7 @@ replayed after a forward transfer.
 | --- | --- | --- |
 | 1. Ethereum token | `node tooling/testnet-ccip/src/composition/deploy-token.ts /absolute/private/token-settings.json` | `testOnly`, `administrator`, `nonce`, `artifactFile`, `artifactSha256`, `journalFile`, `signer` |
 | 2. Ethereum pool | `node tooling/testnet-ccip/src/composition/deploy-pool.ts /absolute/private/pool-settings.json` | `testOnly`, `tokenSettingsFile` referencing step 1, `artifactFile`, `journalFile`, `nonce`, `signer` |
-| 3. Ethereum registry | `node tooling/testnet-ccip/src/composition/register-token.ts /absolute/private/registry-settings.json` | `testOnly`, `token`, `pool`, `administrator`, `signer`; `tokenDeployment` and `poolDeployment`, each with original `journalFile` and full `intent`; `steps` keyed by `register-admin`, `accept-admin`, `set-pool`, each with distinct `journalFile` and `nonce` |
+| 3. Ethereum registry | `node tooling/testnet-ccip/src/composition/register-token.ts /absolute/private/registry-settings.json` | `testOnly`, `token`, `pool`, `administrator`, `signer`; `tokenDeployment` and `poolDeployment`, each with original `journalFile` and full `intent`; `poolDeployment.artifactFile` pointing to the same pinned official pool artifact used in step 2; `steps` keyed by `register-admin`, `accept-admin`, `set-pool`, each with distinct `journalFile` and `nonce` |
 | 4. Solana mint | `node tooling/testnet-ccip/src/composition/create-solana-mint.mjs /absolute/private/mint-settings.json` | `testOnly`, `providerDirectory`, `payerFile`, `mintFile`, `journalFile`; `expected` containing `testOnly`, `cluster: "solana-devnet"`, `payer`, `mint`, `rentLamports` |
 | 5. Solana pool | `node tooling/testnet-ccip/src/composition/initialize-solana-pool.mjs /absolute/private/solana-pool-settings.json` | `testOnly`, `providerDirectory`, `payerFile`, `journalFile`; `expected` containing `testOnly`, `cluster: "solana-devnet"`, `payer`, `mint`, `pool` |
 | 6. Solana registry | `node tooling/testnet-ccip/src/composition/register-solana-pool.mjs /absolute/private/solana-registration-settings.json` | Settings and four ordered `expected.operation` values in [registration checkpoints](SOLANA-REGISTRATION.md) |
@@ -131,6 +131,10 @@ replayed after a forward transfer.
 | 8. Ethereum remote | `node tooling/testnet-ccip/src/composition/configure-evm-remote.ts /absolute/private/ethereum-remote-settings.json` | `testOnly`, `token`, `pool`, `administrator`, `signer`, `journalFile`, `nonce` |
 
 All `testOnly` fields above are `true`; quantities/nonces are decimal strings.
+Retain `poolDeployment.artifactFile` in the original registry settings together
+with the deployment journals and intents. It must reference the same pinned
+official `@chainlink/contracts-ccip@1.6.1/LockReleaseTokenPool` artifact used
+for deployment; recovery verifies that artifact before reconciling registration.
 Ethereum registration advances one bounded step per invocation and reconciles
 previous journals. Solana registration/configuration selects one explicit
 operation per invocation; do not advance until its predecessor is successfully
