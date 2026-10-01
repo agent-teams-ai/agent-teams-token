@@ -47,7 +47,7 @@ test("authenticated Anvil executes the four prepared operations and existing pre
   assert.deepEqual(expectations.operations.map(operation => operation.nonce), ["7", "8", "9", "10"]);
   const observation = parseProductionObservation(JSON.parse(raw));
   const report = assessProductionPreflight({ prepared, expectations, observations: observation, attempt: parseProductionAttempt(JSON.parse(attemptSource)), nowSeconds: BigInt(observation.observedAt), preparedConfigurationSha256: prepared.configurationSha256, preparedReserveConfigurationSha256: prepared.reserveConfigurationSha256, preparedArtifactPinsSha256: expectations.artifactPinsSha256, expectedGenesisAllocationHash: allocationHash });
-  assert.equal(report.status, "checks-passed-offline");
+  assert.equal(report.status, "checks-passed-offline", JSON.stringify(report));
   assert.equal(report.broadcastAllowed, false);
   assert.deepEqual(report.reasons, []);
   assert.equal(observation.operations.map(operation => operation.id).join(","), "token-create,founder-reserve-create,controller-create,founder-fund");

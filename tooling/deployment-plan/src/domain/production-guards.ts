@@ -79,6 +79,7 @@ function evaluateProductionGuardsUnchecked(expectations: ProductionExpectations,
   const reasons: string[] = [];
   if (expectations?.schema !== "agtmai-production-expectations-v1" || expectations.chainId !== "1" || !address(expectations.sender) || !address(expectations.deployer) || expectations.sender !== expectations.deployer || !digest(expectations.configurationSha256) || !digest(expectations.reserveConfigurationSha256) || !digest(expectations.artifactPinsSha256) || !/^[0-9a-f]{40}$/.test(expectations.sourceRevision)) {return { status: "invalid", broadcastAllowed: false, reasons: ["expectations-invalid"] };}
   validateContext(expectations, observations, nowSeconds, policy, reasons);
+  if (observations.schema === "agtmai-production-observation-v2") {validateExecutionTiming(observations, policy, reasons);}
   const operations = [...expectations.operations];
   const total = evaluateOperations(expectations, observations, policy, operations, reasons);
   const expectedTotalCeiling = parseUint(expectations.maxTotalCostWei, "maxTotalCostWei"), approvedTotalCeiling = parseUint(policy.evmMaxTotalFeeWei, "policy.evmMaxTotalFeeWei");
@@ -103,6 +104,22 @@ function validateContext(expectations: ProductionExpectations, observations: Pro
   if (maxObservationAge > parseUint(policy.observationMaxAgeSeconds, "policy.observationMaxAgeSeconds") || maxObservationAge > parseUint(policy.estimateValiditySeconds, "policy.estimateValiditySeconds")) {fail(reasons, "observation-policy-relaxed");}
   if (nowSeconds > parseUint(policy.executionDeadline, "policy.executionDeadline") || nowSeconds > parseUint(policy.fundingDeadline, "policy.fundingDeadline") || parseUint(policy.fundingDeadline, "policy.fundingDeadline") > parseUint(policy.executionDeadline, "policy.executionDeadline") || parseUint(policy.fundingDeadline, "policy.fundingDeadline") > parseUint(policy.founderStart, "policy.founderStart") - parseUint(policy.fundingLeadSeconds, "policy.fundingLeadSeconds")) {fail(reasons, "production-deadline-policy-mismatch");}
   if (parseUint(policy.tokenExpenditureBaseUnits, "policy.tokenExpenditureBaseUnits") > parseUint(policy.tokenExpenditureCeilingBaseUnits, "policy.tokenExpenditureCeilingBaseUnits")) {fail(reasons, "token-expenditure-exceeded");}
+}
+
+function validateExecutionTiming(observations: ProductionObservation, policy: ApprovedProductionPolicy, reasons: string[]): void {
+  const executionDeadline = parseUint(policy.executionDeadline, "policy.executionDeadline");
+  const fundingDeadline = parseUint(policy.fundingDeadline, "policy.fundingDeadline");
+  const founderStart = parseUint(policy.founderStart, "policy.founderStart");
+  const fundingLead = parseUint(policy.fundingLeadSeconds, "policy.fundingLeadSeconds");
+  for (const operation of observations.operations) {
+    const timestamp = parseUint(operation.timestamp, `${operation.id}.timestamp`);
+    if (timestamp > executionDeadline) {fail(reasons, `execution-${operation.id}-deadline-mismatch`);}
+    if ((operation.id === "founder-reserve-create" || operation.id === "founder-fund") && timestamp > founderStart) {fail(reasons, `execution-${operation.id}-founder-start-mismatch`);}
+    if (operation.id === "founder-fund") {
+      if (timestamp > fundingDeadline) {fail(reasons, "execution-founder-fund-deadline-mismatch");}
+      if (timestamp + fundingLead > founderStart) {fail(reasons, "execution-founder-fund-lead-time-mismatch");}
+    }
+  }
 }
 
 function validateAuthority(expectations: ProductionExpectations, observations: ProductionObservation, reasons: string[]): void {

@@ -89,3 +89,75 @@ test("every execution identity, state and cleanup mutation fails closed", () => 
   ];
   for (const [label, mutate] of cases) {const fixture = structuredClone(executionFixture()) as MutableRequest; mutate(fixture); const result = assessProductionPreflight(fixture as ProductionPreflightRequest); assert.notEqual(result.status, "checks-passed-offline", label); assert.equal(result.broadcastAllowed, false, label);}
 });
+
+
+test("observed founder funding after the accepted deadline is blocked despite an early verifier clock", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  fixture.observations.operations[3]!.timestamp = "901";
+  const observations = parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations)));
+  const result = assessProductionPreflight({ ...fixture, observations });
+  assert.equal(result.status, "blocked", JSON.stringify(result));
+  assert.equal(result.broadcastAllowed, false);
+  assert.ok(result.reasons.includes("execution-founder-fund-deadline-mismatch"));
+});
+
+
+test("observed execution enforces the funding lead and contract start boundaries", () => {
+  type PreparedTiming = { configuration: { deployment: { policy: { fundingDeadline: string; fundingLeadSeconds: string; executionDeadline: string } }; reserveGenesis: { founder: { schedule: { start: string } } } } };
+  const fixtureAt = (timestamp: string, start: string, deadline = "900", lead = "100") => {
+    const fixture = structuredClone(executionFixture()) as MutableRequest;
+    const configuration = (fixture.prepared as PreparedTiming).configuration;
+    configuration.reserveGenesis.founder.schedule.start = start;
+    configuration.deployment.policy.fundingDeadline = deadline;
+    configuration.deployment.policy.fundingLeadSeconds = lead;
+    configuration.deployment.policy.executionDeadline = "1100";
+    fixture.observations.state!.founderVault.terms.start = start;
+    fixture.observations.operations[3]!.timestamp = timestamp;
+    return fixture;
+  };
+  for (const [timestamp, start, deadline, lead, reason] of [
+    ["901", "1000", "900", "100", "execution-founder-fund-lead-time-mismatch"],
+    ["1001", "1000", "1000", "0", "execution-founder-fund-founder-start-mismatch"],
+  ]) {
+    const fixture = fixtureAt(timestamp!, start!, deadline!, lead!);
+    const result = assessProductionPreflight({ ...fixture, observations: parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations))) });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.broadcastAllowed, false);
+    assert.ok(result.reasons.includes(reason!), JSON.stringify(result));
+  }
+  for (const fixture of [fixtureAt("900", "1000"), fixtureAt("1000", "1000", "1000", "0")]) {
+    const result = assessProductionPreflight(fixture);
+    assert.equal(result.status, "checks-passed-offline", JSON.stringify(result));
+    assert.equal(result.broadcastAllowed, false);
+  }
+  const creation = fixtureAt("1000", "1000", "1000", "0");
+  for (const operation of creation.observations.operations) { operation.timestamp = "1000"; }
+  assert.equal(assessProductionPreflight(creation).status, "checks-passed-offline");
+  for (const operation of creation.observations.operations) { operation.timestamp = "1001"; }
+  const lateCreation = assessProductionPreflight(creation);
+  assert.equal(lateCreation.status, "blocked");
+  assert.ok(lateCreation.reasons.includes("execution-founder-reserve-create-founder-start-mismatch"));
+});
+
+test("every executed operation is bound to the execution deadline", () => {
+  const fixture = structuredClone(executionFixture()) as MutableRequest;
+  for (const operation of fixture.observations.operations) { operation.timestamp = "1001"; }
+  const result = assessProductionPreflight(fixture);
+  assert.equal(result.status, "blocked");
+  assert.equal(result.broadcastAllowed, false);
+  for (const id of ["token-create", "founder-reserve-create", "controller-create", "founder-fund"]) {
+    assert.ok(result.reasons.includes(`execution-${id}-deadline-mismatch`), id);
+  }
+});
+
+test("increasing receipt blocks cannot carry backward operation timestamps", () => {
+  for (const index of [1, 2, 3]) {
+    const fixture = structuredClone(executionFixture()) as MutableRequest;
+    fixture.observations.operations[index]!.timestamp = String(99 + index - 1);
+    const observations = parseProductionObservation(JSON.parse(JSON.stringify(fixture.observations)));
+    const result = assessProductionPreflight({ ...fixture, observations });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.broadcastAllowed, false);
+    assert.deepEqual(result.reasons, ["execution-timestamp-sequence-mismatch"]);
+  }
+});
