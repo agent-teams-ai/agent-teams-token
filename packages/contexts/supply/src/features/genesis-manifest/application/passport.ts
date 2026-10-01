@@ -104,12 +104,18 @@ function preparedAssemblyPassport(manifest: PreparedAssemblyManifest, observatio
       limitation: "Predicted unsigned construction; deployed runtime, getters and Safe authority are unavailable", evidence: null })));
   const markdown = ["# AGTMAI token passport", "", "- Deployment status: `unsigned-preparation`", "- Broadcast allowed: `false`",
     `- Manifest digest: \`${manifestSha256}\``, "- Selected and accepted production configuration; deployment-unverified.",
+    "", "## Readiness", "", `- Observation interval: ${observations.observedAt}–${observations.validUntil}`,
+    ...(observations.unresolved ?? []).toSorted().map(x => `- Unresolved: ${escape(x)}`),
     "- Synthetic local observation: pending. Actual production deployment: unavailable.", "", ...allocationDisclosure(c),
     "## Purpose policies", "", ...manifest.facts.purposeVaults.map(p =>
       `- ${escape(p.allocationId)}: recipient \`${p.recipient}\`; opens ${p.opensAt}; window ${p.windowSeconds}; gross cap ${p.rollingCapBaseUnits}.`),
     "", manifest.facts.disclosure, "", "## Offline source-verification inputs", "", ...manifest.contracts.map(r =>
       `- ${escape(r.id)}: predicted \`${r.predictedAddress}\`; \`${r.fullyQualifiedName}\`; compiler input \`${r.compilerInputSha256}\`; runtime template \`${r.runtimeTemplateHash}\`; materialized expectation \`${r.materializedRuntimeHash}\`.`),
     "", "No deployment receipts or explorer verification are available. The nested founder vault belongs to its parent CREATE at child nonce 1.",
+    "", "## Authority registry", "",
+    "Expected authorities come from immutable construction and remain unobserved until deployment.", "",
+    ...entries.map(e => `- ${escape(e.capability)} on ${escape(e.chain)}: power ${escape(e.power)}; expected ${escape(e.expected ?? "unresolved")}; observed ${escape(e.observed ?? "unresolved")}; ${escape(e.limitation)}.`),
+    "",
     `Worst-case unsigned assembly cost: ${manifest.worstCaseWei} wei. Observed costs, live Ethereum fees and ETH/USD: unavailable.`, ""].join("\n");
   return { schema: "agtmai-token-passport-v1", manifestSha256, observationsSha256, generated: { observedAt: observations.observedAt, validUntil: observations.validUntil },
     markdown, authorityRegistry: { schema: "agtmai-authority-registry-v1", manifestSha256, observationsSha256, entries } };

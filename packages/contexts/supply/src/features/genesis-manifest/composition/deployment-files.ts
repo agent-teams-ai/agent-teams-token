@@ -46,7 +46,7 @@ export async function loadPreparedProductionPackage(directory: string, candidate
   const selected = resolve(directory);
   const inventory = await verifyDeploymentFiles(selected);
   const configuration = productionSource(await text(join(selected, "canonical-production-configuration.json")));
-  const v2 = (configuration as { schema?: unknown }).schema === "agtmai-production-deployment-v2";
+  const v2 = configuration.schema === "agtmai-production-deployment-v2";
   const requiredFiles = [
     "agtmaicciptoken.artifact.json", "agtmaicciptoken.build-info.json",
     "canonical-production-configuration.json", "foundergrantreserve.artifact.json", "foundergrantreserve.build-info.json",
@@ -65,10 +65,10 @@ export async function loadPreparedProductionPackage(directory: string, candidate
   return result.prepared;
 }
 
-function productionSource(source: string): unknown {
+function productionSource(source: string): Record<string, unknown> {
   const parsed = parseStrict(source);
-  if (parsed.diagnostics.length || parsed.value === undefined) {throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");}
-  return parsed.value;
+  if (parsed.diagnostics.length || parsed.value === null || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");}
+  return parsed.value as Record<string, unknown>;
 }
 
 function exactObject(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -79,13 +79,13 @@ function exactObject(value: unknown, fields: readonly string[]): Record<string, 
 }
 
 export function parseProductionApproval(source: string): ProductionApproval {
-  const value = productionSource(source) as { schema?: unknown };
+  const value = productionSource(source);
   if (value.schema !== "agtmai-production-approval-v1" && value.schema !== "agtmai-production-approval-v2") { throw new Error("DEPLOYMENT_PRODUCTION_SOURCE"); }
   return exactObject(value, ["configurationSha256", "reference", "reserveConfigurationSha256", "schema", ...(value.schema === "agtmai-production-approval-v2" ? ["assemblyConfigurationSha256"] : [])]) as unknown as ProductionApproval;
 }
 
 export function parseProductionExpectations(source: string): ProductionExpectation {
-  const value = productionSource(source) as { schema?: unknown };
+  const value = productionSource(source);
   if (value.schema !== "agtmai-production-expectations-v1" && value.schema !== "agtmai-production-expectations-v2") { throw new Error("DEPLOYMENT_PRODUCTION_SOURCE"); }
   const v2 = value.schema === "agtmai-production-expectations-v2";
   const root = exactObject(value, ["artifactPinsSha256", "attemptIdentity", "authority", "chainId", "configurationSha256", "deployer", "maxObservationAgeSeconds", "maxTotalCostWei", "operations", "reserveConfigurationSha256", "schema", "sender", "sourceRevision", "startingNonce", ...(v2 ? ["assemblyConfigurationSha256", "coverage"] : [])]);

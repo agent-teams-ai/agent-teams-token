@@ -9,8 +9,10 @@ production v2 package with six mandatory purpose policies, nine deployer CREATEs
 the founder reserve's nested CREATE at nonce 1, and founder funding. Production
 v1 retains its four-operation `token-and-reserves-only` meaning. All eight
 allocations go directly to their predicted reserves; a purpose vault's controller
-is the Project Controller Safe. Production inputs remain explicitly selected,
-accepted and committed in full, with `bridge: null` for this Ethereum-first path.
+is the Project Controller Safe. The v2 configuration structure binds all inputs,
+with `bridge: null` for this Ethereum-first path. Exact production values remain
+open release decisions; preparation requires explicitly selected, accepted and
+canonically hashed configuration.
 
 Production v2 and synthetic preparation share one construction kernel. V2
 artifact admission and package reconstruction reuse authenticated clean Git,

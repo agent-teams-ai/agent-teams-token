@@ -52,7 +52,7 @@ for (const treePath of ["contracts", "contracts/evm", "contracts/evm/src", "cont
     // so this pins rejection to source authentication, before compilation.
     await assert.rejects(compileLocalPurposeBuild(candidate, input), invalid);
     await assert.rejects(readLocalPurposeGitSources(candidate), invalid);
-  await rejectProductionSource(candidate);
+    await rejectProductionSource(candidate);
   });
 }
 

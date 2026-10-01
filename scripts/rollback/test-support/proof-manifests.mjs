@@ -21,13 +21,18 @@ test("precise deployment-plan reversal preserves independently edited Supply byt
   let workspaceHandle;
   try {
     cloneRepository(repositoryRoot, checkout, boundary);
-    for (const path of supplySurvivors) { copyFileSync(join(repositoryRoot, path), join(checkout, path)); }
+    const edited = new Map(supplySurvivors.map(path => {
+      const original = readFileSync(join(repositoryRoot, path));
+      const bytes = Buffer.concat([original, Buffer.from(`\n// Independent survivor edit: ${path}\n`)]);
+      assert.notDeepEqual(bytes, original, path);
+      writeFileSync(join(checkout, path), bytes); return [path, bytes];
+    }));
     mkdirSync(quarantineRoot, { mode: 0o700 });
     workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
     const sharedPlan = snapshotRollbackSharedPaths(checkout, deploymentPlanSharedEditBaseline.paths, workspaceHandle);
     restoreDeploymentPlanSharedEdits(checkout, sharedPlan, workspaceHandle);
     for (const path of supplySurvivors) {
-      assert.deepEqual(readFileSync(join(checkout, path)), readFileSync(join(repositoryRoot, path)), path);
+      assert.deepEqual(readFileSync(join(checkout, path)), edited.get(path), path);
     }
   } finally {
     closeRollbackWorkspaceHandle(workspaceHandle);

@@ -28,10 +28,13 @@ export function verifyReserveFacts(input: unknown, approvedConfigurationSha256: 
 
 /** Projection of admitted v2 inputs. Approval digests identify inputs, not the approving human. */
 export function projectAssemblyFacts(config: ValidatedProductionDeployment, assemblyConfigurationSha256: string) {
+  if (config.schema !== "agtmai-production-deployment-v2" || config.purposeVaults === undefined) {
+    throw new Error("PRODUCTION_ASSEMBLY_V2_REQUIRED");
+  }
   return { broadcastAllowed: false as const, evidence: "unsigned-preparation" as const, deploymentVerified: false as const,
     configuration: "accepted-production-configuration" as const, assemblyConfigurationSha256,
     actualProductionDeployment: "unavailable" as const, syntheticLocalObservation: "pending" as const,
-    reserve: config.reserveGenesis, purposeVaults: config.purposeVaults!.map(policy => ({ ...policy,
+    reserve: config.reserveGenesis, purposeVaults: config.purposeVaults.map(policy => ({ ...policy,
       recipient: config.reserveGenesis.allocations.find(a => a.id === policy.allocationId)!.recipient,
       controller: config.reserveGenesis.contributors.controller })),
     disclosure: "A full cap can leave at opening. The controller selects recipients; downstream transfers are unrestricted. Refunds do not restore gross capacity; expiry restores rolling capacity. No lifetime cap exists." };

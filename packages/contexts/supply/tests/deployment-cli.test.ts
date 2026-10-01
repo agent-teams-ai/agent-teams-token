@@ -8,13 +8,21 @@ import { canonicalJson, type JsonValue } from "../src/features/genesis-manifest/
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 import { encodeDeploymentToken, encodeProductionFounderReserve, encodeProductionReserveController } from "../src/features/genesis-manifest/adapters/deployment-abi.js";
 import { deploymentCreateAddress, keccakBytes } from "../src/features/genesis-manifest/adapters/deployment-observations.js";
-import { loadPreparedProductionPackage } from "../src/features/genesis-manifest/composition/deployment-files.js";
+import { loadPreparedProductionPackage, parseProductionApproval, parseProductionExpectations } from "../src/features/genesis-manifest/composition/deployment-files.js";
 import type { Hex } from "../src/features/genesis-manifest/domain/deployment.js";
 import { encodeAllocationId } from "../src/features/genesis-manifest/domain/model.js";
 import { validateProductionDeployment } from "../src/features/genesis-manifest/domain/production-deployment.js";
 import { syntheticProductionEnvelope } from "./production-fixture.js";
 
 const run = (args: string[]) => spawnSync(process.execPath, [resolve("dist/features/genesis-manifest/composition/cli.js"), "deployment", ...args], { encoding: "utf8" });
+
+test("production record parsers reject non-object roots through the invalid-source path", () => {
+  for (const parse of [parseProductionApproval, parseProductionExpectations]) {
+    for (const source of ["null", "[]", "1", '"string"']) {
+      assert.throws(() => parse(source), { message: "DEPLOYMENT_PRODUCTION_SOURCE" });
+    }
+  }
+});
 
 test("deployment CLI validates explicit configuration, rejects execution flags and redacts I/O paths", () => {
   const valid = run(["validate", "--config", "tests/fixtures/deployment/local-test.json"]);
@@ -136,6 +144,7 @@ test("production package reconstruction rejects authenticated tampering and inve
     return output;
   };
   const tampering: readonly [string, (directory: string) => Promise<void>][] = [
+    ["null-configuration", async directory => { await writeFile(join(directory, "canonical-production-configuration.json"), "null"); }],
     ["canonical-production-configuration.json", async directory => { const value = JSON.parse(await readFile(join(directory, "canonical-production-configuration.json"), "utf8")); value.deployment.policy.evmMaxFeePerGasWei = "3"; await writeFile(join(directory, "canonical-production-configuration.json"), bytes(value)); }],
     ["agtmaicciptoken.artifact.json", async directory => { const value = JSON.parse(await readFile(join(directory, "agtmaicciptoken.artifact.json"), "utf8")); value.bytecode.object = "0x6002"; await writeFile(join(directory, "agtmaicciptoken.artifact.json"), bytes(value)); }],
     ["production-approval.json", async directory => { const value = JSON.parse(await readFile(join(directory, "production-approval.json"), "utf8")); value.reference = "tampered-review"; await writeFile(join(directory, "production-approval.json"), bytes(value)); }],
@@ -143,7 +152,7 @@ test("production package reconstruction rejects authenticated tampering and inve
   ];
   for (const [name, mutate] of tampering) {
     const output = await compile(`tamper-${name}`); await mutate(output); await replaceInventory(output);
-    await assert.rejects(loadPreparedProductionPackage(output), /DEPLOYMENT_(ARTIFACT_PINS_INVALID|PRODUCTION_RECONSTRUCTION|PRODUCTION_PREPARED_MISMATCH)/, name);
+    await assert.rejects(loadPreparedProductionPackage(output), name === "null-configuration" ? /^Error: DEPLOYMENT_PRODUCTION_SOURCE$/ : /DEPLOYMENT_(ARTIFACT_PINS_INVALID|PRODUCTION_RECONSTRUCTION|PRODUCTION_PREPARED_MISMATCH)/, name);
   }
   const extra = await compile("extra"); await writeFile(join(extra, "unexpected.json"), bytes({ synthetic: true })); await replaceInventory(extra);
   await assert.rejects(loadPreparedProductionPackage(extra), /DEPLOYMENT_PRODUCTION_PACKAGE_INVENTORY/);

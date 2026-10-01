@@ -153,17 +153,17 @@
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-      "sha256": "ee1178d9c0b914125d228507c0da7b956aaa77a56571ea702c6727cbf6a3340a",
+      "sha256": "cefb97b1bb96dc66376831adc3c14cbc9a2bcbd4880dde8ffc32d2e354482617",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {
       "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
-      "sha256": "bb6de39043dcc923ef1336c24b5240f34835652c8b0b305a8099a258db117c24",
+      "sha256": "4f539a44c456a9a79fef15b6ad955d57e2f28780a98ca3e5f34d7492920b852a",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {
       "path": "packages/contexts/supply/tests/production-deployment.test.ts",
-      "sha256": "f7516def6f9751689865c3df0bbbd431f0d9e599deb5fae83d692b593233d9ff",
+      "sha256": "6f15fb0e5437bea03522c86f23e4b90f4231d2d880535b89120c4a9c3114612e",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {

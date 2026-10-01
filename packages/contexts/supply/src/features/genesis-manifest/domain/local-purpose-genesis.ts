@@ -6,10 +6,11 @@ export { PURPOSE_ALLOCATION_IDS } from "./purpose-policy.js";
 export type { PurposeAllocationId, PurposePolicy as LocalPurposePolicy } from "./purpose-policy.js";
 import { PURPOSE_ALLOCATION_IDS, validatePurposePolicies, type PurposePolicy as LocalPurposePolicy } from "./purpose-policy.js";
 
-export interface LocalPurposeGenesis {
-  readonly schema: "agtmai-local-purpose-genesis-v1" | "agtmai-local-purpose-genesis-v2";
+export type LocalPurposeGenesis = (
+  | { readonly schema: "agtmai-local-purpose-genesis-v1"; readonly chainId: "31337" }
+  | { readonly schema: "agtmai-local-purpose-genesis-v2"; readonly chainId: "1" }
+) & {
   readonly status: "test-only";
-  readonly chainId: "31337" | "1";
   readonly tokenContract: "AGTMAICCIPToken";
   readonly reserve: ReservePolicyBody;
   readonly custodySafes: readonly DeploymentSafe[];
@@ -28,7 +29,7 @@ export interface LocalPurposeGenesis {
     readonly maxGasPerTransaction: string;
     readonly maxTotalFeeWei: string;
   };
-}
+};
 
 function reject(): never { throw new Error("LOCAL_PURPOSE_GENESIS_INVALID"); }
 function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {

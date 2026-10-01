@@ -7,8 +7,15 @@ import type { Hex } from "../src/features/genesis-manifest/domain/deployment.js"
 import { validateProductionDeployment } from "../src/features/genesis-manifest/domain/production-deployment.js";
 import { sha256 as digestBytes } from "../src/features/genesis-manifest/adapters/digest.js";
 import { syntheticProductionEnvelope } from "./production-fixture.js";
+import { projectAssemblyFacts } from "../src/features/genesis-manifest/application/reserve-facts.js";
 
 const syntheticEnvelope = syntheticProductionEnvelope;
+
+test("v2 facts projection intentionally rejects an admitted v1 configuration", () => {
+  const config = validateProductionDeployment(syntheticEnvelope()).value;
+  assert.ok(config);
+  assert.throws(() => projectAssemblyFacts(config, `0x${"1".repeat(64)}`), /PRODUCTION_ASSEMBLY_V2_REQUIRED/);
+});
 
 test("synthetic accepted production envelope binds supply, allocations, Safe roles and reserve controllers", () => {
   const result = validateProductionDeployment(syntheticEnvelope());

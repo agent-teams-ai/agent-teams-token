@@ -154,7 +154,10 @@ test("full v2 package binds independent CREATE topology, constructor words, appr
   const { candidate, input, inputs } = await buildFixture();
   context.after(() => rm(candidate.repositoryRoot, { recursive: true, force: true }));
   let repository = import.meta.dirname;
-  while (!existsSync(join(repository, "pnpm-workspace.yaml"))) { repository = dirname(repository); }
+  while (!existsSync(join(repository, "pnpm-workspace.yaml"))) {
+    assert.notEqual(repository, dirname(repository), "repository workspace not found");
+    repository = dirname(repository);
+  }
   const install = join(candidate.repositoryRoot, ".tools/solc-v0.8.36-linux-x64");
   await mkdir(install, { recursive: true });
   await writeFile(join(install, "solc"), await readFile(join(repository, ".tools/solc-v0.8.36-linux-x64/solc")), { mode: 0o500 });
@@ -254,9 +257,7 @@ test("full v2 package binds independent CREATE topology, constructor words, appr
   ]) { const changed = structuredClone(expectations); mutate(changed); assert.equal(prepare(config, { ...selected, expectations: changed }).prepared, undefined); }
   const manifest = prepareAssemblyManifest(prepared, { ...productionCompilerPorts, sha256 });
   assert.equal(manifest.worstCaseWei, "23000000"); assert.equal(manifest.evidenceSha256, null); assert.equal(manifest.observedWei, null);
-  const passport = generateTokenPassport(manifest, { schema: "agtmai-deployment-observations-v1", observedAt: "1", validUntil: "2" }, { sha256 });
-  assert.match(passport.markdown, /unsigned-preparation/); assert.match(passport.markdown, /Actual production deployment: unavailable/);
-  assert.equal(passport.authorityRegistry.entries.every(e => e.observed === null), true);
+  assertPassportDisclosure(manifest);
   const reserve = structuredClone(config.reserveGenesis); delete reserve.schema; delete reserve.status;
   const local = { schema: "agtmai-local-purpose-genesis-v2", status: "test-only", chainId: "1", tokenContract: "AGTMAICCIPToken", reserve,
     custodySafes: config.deployment.custodySafes, projectControllerSafeId: config.projectControllerSafeId, founderBeneficiarySafeId: config.founderBeneficiarySafeId,
@@ -293,6 +294,22 @@ test("full v2 package binds independent CREATE topology, constructor words, appr
   execFileSync("/usr/bin/git", ["-C", candidate.repositoryRoot, "update-index", "--assume-unchanged", "contracts/evm/src/features/purpose-reserves/PurposeReserveVault.sol"]);
   await assert.rejects(loadPreparedProductionPackage(pkg, candidate), /DEPLOYMENT_ARTIFACT_PINS_INVALID/);
 });
+
+function assertPassportDisclosure(manifest: ReturnType<typeof prepareAssemblyManifest>): void {
+  const passport = generateTokenPassport(manifest, { schema: "agtmai-deployment-observations-v1", observedAt: "1", validUntil: "2",
+    unresolved: ["z expiry", "a `blocker`\nnext"] }, { sha256 });
+  assert.match(passport.markdown, /unsigned-preparation/); assert.match(passport.markdown, /Actual production deployment: unavailable/);
+  assert.ok(passport.markdown.includes("- Observation interval: 1–2"));
+  assert.ok(passport.markdown.includes("- Unresolved: a \\`blocker\\` next\n- Unresolved: z expiry"));
+  const refreshed = generateTokenPassport(manifest, { schema: "agtmai-deployment-observations-v1", observedAt: "3", validUntil: "4", unresolved: ["new blocker"] }, { sha256 });
+  assert.ok(refreshed.markdown.includes("- Observation interval: 3–4"));
+  assert.ok(refreshed.markdown.includes("- Unresolved: new blocker"));
+  assert.ok(passport.authorityRegistry.entries.length > 0);
+  for (const entry of passport.authorityRegistry.entries) {
+    assert.ok(passport.markdown.includes(`- ${entry.capability} on ${entry.chain}: power ${entry.power}; expected ${entry.expected}; observed unresolved; ${entry.limitation}.`), entry.capability);
+  }
+  assert.equal(passport.authorityRegistry.entries.every(e => e.observed === null), true);
+}
 
 function assertConstructorTopology(prepared: PreparedProductionDeployment, config: Record<string, any>,
   topology: { addresses: Hex[]; nested: Hex; recipients: ReadonlyMap<string, Hex>; ids: string[] }): void {
