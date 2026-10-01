@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { renameSync, symlinkSync, type Stats } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import test from "node:test";
 import { publishDeploymentFiles, readDeploymentFile, verifyDeploymentFiles } from "../src/features/genesis-manifest/adapters/deployment-store.js";
+import { deploymentBytes } from "../src/features/genesis-manifest/application/compile-deployment.js";
+import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 
 async function temporary(): Promise<string> {
   const parent = resolve("../../../.local/deployment-store-tests");
@@ -17,6 +19,8 @@ test("exclusive durable publication and hash inventory detect altered, missing, 
   const files = { "result.json": bytes };
   const inventory = await publishDeploymentFiles(output, files);
   assert.deepEqual(await verifyDeploymentFiles(output), inventory);
+  await assert.rejects(verifyDeploymentFiles(output, true), /READY_MISSING/);
+  await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
   assert.equal(inventory.files.some(f => f.name === "inventory.json"), false);
   await assert.rejects(publishDeploymentFiles(output, files));
   assert.deepEqual(await publishDeploymentFiles(output, files, true), inventory);
@@ -29,6 +33,43 @@ test("exclusive durable publication and hash inventory detect altered, missing, 
   await symlink(join(root, "external.json"), join(output, "result.json"));
   await assert.rejects(verifyDeploymentFiles(output));
   await assert.rejects(readDeploymentFile(join(output, "result.json")));
+});
+
+test("final READY binds the complete inventory, reopens and resumes without changing ordinary publication", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const output = join(root, "ready"), files = { "result.json": deploymentBytes({ broadcastAllowed: false }) };
+  const inventory = await publishDeploymentFiles(output, files, false, true);
+  assert.equal(await readFile(join(output, "READY"), "utf8"), `${sha256(await readFile(join(output, "inventory.json")))}\n`);
+  assert.deepEqual((await readdir(output)).toSorted(), ["READY", "inventory.json", "result.json"].toSorted());
+  assert.deepEqual(await verifyDeploymentFiles(output, true), inventory);
+  assert.deepEqual(await publishDeploymentFiles(output, files, true, true), inventory);
+});
+
+test("present READY rejects malformed, inventory-drifted, symlink and hardlinked markers even when optional", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  for (const fault of ["malformed", "drift", "symlink", "hardlink"] as const) {
+    const output = join(root, fault), files = { "result.json": new TextEncoder().encode("before") };
+    await publishDeploymentFiles(output, files, false, true);
+    const marker = join(output, "READY");
+    if (fault === "malformed") { await writeFile(marker, "invalid\n"); }
+    else if (fault === "drift") {
+      const replacement = new TextEncoder().encode("after"); await writeFile(join(output, "result.json"), replacement);
+      await writeFile(join(output, "inventory.json"), deploymentBytes({ schema: "agtmai-delivery-inventory-v1", files: [{ name: "result.json", sha256: sha256(replacement), bytes: replacement.length }] }));
+    } else {
+      const external = join(root, `${fault}-marker`); await writeFile(external, await readFile(marker)); await rm(marker);
+      if (fault === "symlink") { await symlink(external, marker); } else { await link(external, marker); }
+    }
+    for (const required of [false, true]) { await assert.rejects(verifyDeploymentFiles(output, required)); }
+    await assert.rejects(publishDeploymentFiles(output, files, true, true));
+  }
+});
+
+test("failed partial delivery cannot publish READY", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const output = join(root, "partial"); await mkdir(output, { mode: 0o700 });
+  await writeFile(join(output, "second.json"), "unexpected");
+  await assert.rejects(publishDeploymentFiles(output, { "first.json": new Uint8Array(), "second.json": new Uint8Array() }, true, true), /RESUME_MISMATCH/);
+  await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
 });
 
 test("partial publication can resume without overwriting inputs or repeating external work", async context => {

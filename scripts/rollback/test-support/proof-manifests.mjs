@@ -7,12 +7,18 @@ export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync,
 const { cloneRepository, assertRegisteredLocalEvmCustody } = proofSupport;
 
 const supplySurvivors = [
+  "packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/application/passport.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/deployment.ts",
   "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
   "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
   "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
   "packages/contexts/supply/tests/deployment-cli.test.ts",
   "packages/contexts/supply/tests/production-deployment.test.ts",
 ];
+
+const passiveSafeSurvivors = ["tooling/testnet-ccip/src/adapters/local-safe.ts", "tooling/testnet-ccip/src/adapters/safe-custody.ts"];
 
 test("precise deployment-plan reversal preserves independently edited Supply bytes", () => {
   const boundary = temporaryDirectory("agtmai-rollback-supply-survivor-");
@@ -21,7 +27,7 @@ test("precise deployment-plan reversal preserves independently edited Supply byt
   let workspaceHandle;
   try {
     cloneRepository(repositoryRoot, checkout, boundary);
-    const edited = new Map(supplySurvivors.map(path => {
+    const edited = new Map([...supplySurvivors, ...passiveSafeSurvivors].map(path => {
       const original = readFileSync(join(repositoryRoot, path));
       const bytes = Buffer.concat([original, Buffer.from(`\n// Independent survivor edit: ${path}\n`)]);
       assert.notDeepEqual(bytes, original, path);
@@ -31,7 +37,7 @@ test("precise deployment-plan reversal preserves independently edited Supply byt
     workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
     const sharedPlan = snapshotRollbackSharedPaths(checkout, deploymentPlanSharedEditBaseline.paths, workspaceHandle);
     restoreDeploymentPlanSharedEdits(checkout, sharedPlan, workspaceHandle);
-    for (const path of supplySurvivors) {
+    for (const path of [...supplySurvivors, ...passiveSafeSurvivors]) {
       assert.deepEqual(readFileSync(join(checkout, path)), edited.get(path), path);
     }
   } finally {
@@ -66,30 +72,13 @@ test("every production manifest verifies declared hashes through the default app
         manifest.sliceId,
       );
       if (manifest.sliceId === "deployment-plan") {
-        const adapterPath = "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts";
-        const current = readFileSync(join(repositoryRoot, adapterPath), "utf8");
-        const applied = readFileSync(join(checkout, adapterPath), "utf8");
-        // Rehashed manifests must not silently restore a pre-purpose reader:
-        // the independent Supply test and its complete reader still survive.
-        const localReader = current.slice(
-          current.indexOf("export async function readLocalPurposeArtifactPins("),
-          current.indexOf("async function readProductionPinnedArtifact("),
-        );
-        assert.ok(localReader.startsWith("export async function readLocalPurposeArtifactPins("));
-        assert.ok(applied.includes(localReader), "retain local reader's Git/compiler checks unchanged");
-        const namedSlots = current.slice(
-          current.indexOf("function productionImmutableReferences("),
-          current.indexOf("/** Reopen the actual pinned inputs;"),
-        );
-        assert.ok(namedSlots.startsWith("function productionImmutableReferences("));
-        assert.ok(applied.includes(namedSlots), "retain local named immutable validation unchanged");
-        for (const line of current.split("\n").filter((value) =>
-          value.startsWith("import ") && /local-purpose/u.test(value))) {
-          assert.ok(applied.includes(line), "retain local reader's imports");
+        // Real applied bytes must retain independent report/authentication semantics;
+        // historical source fragments cannot qualify the surviving implementation.
+        for (const path of [...supplySurvivors, ...passiveSafeSurvivors,
+          "packages/contexts/supply/tests/local-purpose-artifacts.test.ts",
+          "packages/contexts/supply/tests/local-purpose-planner.test.ts"]) {
+          assert.deepEqual(readFileSync(join(checkout, path)), readFileSync(join(repositoryRoot, path)), path);
         }
-        const survivor = "packages/contexts/supply/tests/local-purpose-artifacts.test.ts";
-        assert.deepEqual(readFileSync(join(checkout, survivor)), readFileSync(join(repositoryRoot, survivor)));
-        assert.equal(applied, current, "retain the complete admitted Supply artifact reader byte-for-byte");
         // The complete sequential suite must allow its slow per-case timeout budgets (~280s).
         const cleanup = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "tooling/local-evm/tests/cleanup.test.ts"], { cwd: checkout, env: {TMPDIR: tmpdir(), PATH: process.env.PATH}, encoding: "utf8", timeout: 360_000 });
         assert.equal(existsSync(join(checkout, "scripts/deployment/local-execution-proof.ts")), false); assert.equal(cleanup.error, undefined); assert.equal(cleanup.signal, null); assert.equal(cleanup.status, 0, cleanup.stdout + cleanup.stderr);
@@ -227,11 +216,13 @@ void ports;
     basicRun(process.execPath, ["--input-type=module", "--eval", `
 import assert from "node:assert/strict";
 import { productionCompilerPorts, readProductionArtifactPins } from "@agent-teams/supply/deployment-files";
-import { constructProductionAssembly, prepareAssemblyManifest } from "@agent-teams/supply/deployment";
+import { constructProductionAssembly, prepareAssemblyManifest, materializeObservedAssemblyManifest, generatePassport } from "@agent-teams/supply/deployment";
 assert.equal(typeof productionCompilerPorts.encodePurposeVault, "function");
 assert.equal(typeof readProductionArtifactPins, "function");
 assert.equal(typeof constructProductionAssembly, "function");
 assert.equal(typeof prepareAssemblyManifest, "function");
+assert.equal(typeof materializeObservedAssemblyManifest, "function");
+assert.equal(typeof generatePassport, "function");
 `], { cwd: supply });
   } finally {
     closeRollbackWorkspaceHandle(workspaceHandle);
@@ -239,10 +230,10 @@ assert.equal(typeof prepareAssemblyManifest, "function");
   }
 });
 
-test("deployment-plan retains every Supply assembly source and regression byte", () => {
+test("deployment-plan retains every Supply assembly and passive Safe custody byte", () => {
   const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
 
-  for (const path of supplySurvivors) {
+  for (const path of [...supplySurvivors, ...passiveSafeSurvivors]) {
     assert.ok(!manifest.sharedPaths.includes(path));
     assert.ok(!manifest.reverseEdits.some(edit => edit.path === path));
     assert.equal(manifest.retainedSharedPaths.find(entry => entry.path === path)?.sha256,

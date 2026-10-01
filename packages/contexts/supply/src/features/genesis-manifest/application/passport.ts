@@ -1,6 +1,6 @@
 import { canonicalJson } from "./canonical.js";
 import { deploymentBytes } from "./compile-deployment.js";
-import type { DeploymentManifest, PreparedAssemblyManifest } from "./deployment-manifest.js";
+import type { DeploymentManifest, PreparedAssemblyManifest, ObservedAssemblyManifest } from "./deployment-manifest.js";
 import type { JsonValue } from "./canonical.js";
 export interface PassportHashPort { readonly sha256: (bytes: Uint8Array) => `0x${string}`; }
 
@@ -13,14 +13,14 @@ export interface PassportObservation {
   readonly unresolved?: readonly string[]; readonly [key: string]: unknown;
 }
 export interface AuthorityRegistryEntry { readonly capability: string; readonly chain: string; readonly controlled: string; readonly expected: string | null; readonly observed: string | null; readonly pending: string | null; readonly mechanism: "immutable" | "safe" | "pda" | "protocol" | "unknown"; readonly power: string; readonly limitation: string; readonly evidence: string | null; }
-export interface TokenPassport { readonly schema: "agtmai-token-passport-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly generated: { readonly observedAt: string; readonly validUntil: string }; readonly markdown: string; readonly authorityRegistry: { readonly schema: "agtmai-authority-registry-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly entries: readonly AuthorityRegistryEntry[] }; }
+export interface TokenPassport { readonly broadcastAllowed?: false; readonly schema: "agtmai-token-passport-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly generated: { readonly observedAt: string; readonly validUntil: string }; readonly markdown: string; readonly authorityRegistry: { readonly broadcastAllowed?: false; readonly schema: "agtmai-authority-registry-v1"; readonly manifestSha256: `0x${string}`; readonly observationsSha256: `0x${string}`; readonly entries: readonly AuthorityRegistryEntry[] }; }
 const fail = (reason: string): never => { throw new Error(`PASSPORT_${reason}`); };
 const validTime = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
 // Flatten lines; encode ampersands first so entity-looking input stays literal.
 const escape = (value: string): string => value.replace(/\r\n?|\n/g, " ")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
   .replaceAll("\\", "\\\\").replaceAll("`", "\\`").replace(/([*_[\]~])/g, "\\$1");
-function validateInputs(manifest: DeploymentManifest | PreparedAssemblyManifest, observations: PassportObservation): void {
+function validateInputs(manifest: DeploymentManifest | PreparedAssemblyManifest | ObservedAssemblyManifest, observations: PassportObservation): void {
   if ((manifest.schema !== "agtmai-deployment-manifest-v1" && manifest.schema !== "agtmai-deployment-manifest-v2") || manifest.broadcastAllowed !== false) {fail("MANIFEST_REQUIRED");}
   if (observations.schema !== "agtmai-deployment-observations-v1" || !validTime(observations.observedAt) || !validTime(observations.validUntil) || BigInt(observations.validUntil) < BigInt(observations.observedAt)) {fail("OBSERVATIONS_INVALID");}
   if (/private|secret|password|keystore|seed|mnemonic|privatekey/i.test(JSON.stringify(observations))) {fail("PRIVATE_FIELD");}
@@ -84,17 +84,17 @@ function registryEntries(manifest: DeploymentManifest, observations: PassportObs
   for (const a of observations.authorities ?? []) { if (!result.some(e => e.capability === a.capability)) { result.push({ capability: a.capability, chain: a.chain, controlled: a.controlled, expected: null, observed: a.observed ?? null, pending: a.pending ?? null, mechanism: mechanism(a.capability, null), power: "unresolved", limitation: "No expected value is configured", evidence: a.evidence ?? null }); } }
   return result.toSorted((a, b) => a.capability.localeCompare(b.capability));
 }
-export function generatePassport(manifest: DeploymentManifest | PreparedAssemblyManifest, observations: PassportObservation, hashes: PassportHashPort): TokenPassport {
+export function generatePassport(manifest: DeploymentManifest | PreparedAssemblyManifest | ObservedAssemblyManifest, observations: PassportObservation, hashes: PassportHashPort): TokenPassport {
   validateInputs(manifest, observations);
-  if (manifest.schema === "agtmai-deployment-manifest-v2") { return preparedAssemblyPassport(manifest, observations, hashes); }
+  if (manifest.schema === "agtmai-deployment-manifest-v2") { return manifest.status === "synthetic-local-observation" ? observedAssemblyPassport(manifest, observations, hashes) : preparedAssemblyPassport(manifest, observations, hashes); }
   const manifestSha256 = hashes.sha256(deploymentBytes(manifest)), observationsSha256 = hashes.sha256(deploymentBytes(observations)), entries = registryEntries(manifest, observations), registry = { schema: "agtmai-authority-registry-v1" as const, manifestSha256, observationsSha256, entries }, c = manifest.configuration;
   const lines = ["# AGTMAI token passport", "", `- Environment: \`${escape(c.environment.mode)}\``, `- Deployment status: \`${escape(manifest.status)}\``, `- Manifest digest: \`${manifestSha256}\``, `- Observation digest: \`${observationsSha256}\``, "- Broadcast allowed: `false`", "", "## Token", "", `- Name: ${escape(c.token.name)}`, `- Symbol: ${escape(c.token.symbol)}`, `- Decimals: ${c.token.decimals}`, `- Fixed issuance: ${c.token.initialSupplyBaseUnits} base units`, `- Ethereum token: \`${manifest.token?.address ?? "unresolved"}\``, "", ...allocationDisclosure(c), "## Grants", "", ...c.grants.map(cfg => { const deployed = manifest.grants.find(g => g.grantId === cfg.id); return `- ${escape(cfg.id)} (${cfg.kind}): ${cfg.amountBaseUnits} base units to \`${cfg.beneficiary}\`; schedule ${cfg.schedule.start}–${cfg.schedule.end}; vault \`${deployed?.address ?? "unresolved"}\`.`; }), "", ...deploymentTransactions(manifest), "## Readiness", "", `- Observation interval: ${observations.observedAt}–${observations.validUntil}`, `- Reconciliation: ${escape(observations.reconciliation?.status ?? "unresolved")}`, `- Estimates: ${escape(observations.estimates?.status ?? "unresolved")}`, ...(observations.unresolved ?? []).toSorted().map(x => `- Unresolved: ${escape(x)}`), "", "## Authority registry", "", "Expected authorities come from configuration. Observed values require separate live evidence; unresolved entries are not safety claims.", "", ...entries.map(e => `- ${escape(e.capability)} on ${escape(e.chain)}: power ${escape(e.power)}; expected ${escape(e.expected ?? "unresolved")}; observed ${escape(e.observed ?? "unresolved")}; ${escape(e.limitation)}.`)];
   return { schema: "agtmai-token-passport-v1", manifestSha256, observationsSha256, generated: { observedAt: observations.observedAt, validUntil: observations.validUntil }, markdown: `${lines.join("\n")}\n`, authorityRegistry: registry };
 }
-export function checkPassport(manifest: DeploymentManifest | PreparedAssemblyManifest, observations: PassportObservation, passport: TokenPassport, hashes: PassportHashPort, now?: string): void { const expected = generatePassport(manifest, observations, hashes); if (now !== undefined && (!validTime(now) || BigInt(now) < BigInt(observations.observedAt) || BigInt(now) > BigInt(observations.validUntil))) { fail("OBSERVATIONS_EXPIRED"); } if (passport.schema !== expected.schema || passport.manifestSha256 !== expected.manifestSha256 || passport.observationsSha256 !== expected.observationsSha256 || passport.markdown !== expected.markdown || canonicalJson(passport.authorityRegistry as unknown as JsonValue) !== canonicalJson(expected.authorityRegistry as unknown as JsonValue)) {fail("MISMATCH");} }
+export function checkPassport(manifest: DeploymentManifest | PreparedAssemblyManifest | ObservedAssemblyManifest, observations: PassportObservation, passport: TokenPassport, hashes: PassportHashPort, now?: string): void { const expected = generatePassport(manifest, observations, hashes); if (now !== undefined && (!validTime(now) || BigInt(now) < BigInt(observations.observedAt) || BigInt(now) > BigInt(observations.validUntil))) { fail("OBSERVATIONS_EXPIRED"); } if (passport.broadcastAllowed !== expected.broadcastAllowed || passport.schema !== expected.schema || passport.manifestSha256 !== expected.manifestSha256 || passport.observationsSha256 !== expected.observationsSha256 || passport.markdown !== expected.markdown || canonicalJson(passport.authorityRegistry as unknown as JsonValue) !== canonicalJson(expected.authorityRegistry as unknown as JsonValue)) {fail("MISMATCH");} }
 export function checkPassportFreshness(observations: PassportObservation, now: string): void { if (!validTime(now) || !validTime(observations.observedAt) || !validTime(observations.validUntil) || BigInt(now) < BigInt(observations.observedAt) || BigInt(now) > BigInt(observations.validUntil)) { fail("OBSERVATIONS_EXPIRED"); } }
 export const generateTokenPassport = generatePassport;
-export const deriveAuthorityRegistry = (manifest: DeploymentManifest | PreparedAssemblyManifest, observations: PassportObservation, hashes: PassportHashPort): TokenPassport["authorityRegistry"] => generatePassport(manifest, observations, hashes).authorityRegistry;
+export const deriveAuthorityRegistry = (manifest: DeploymentManifest | PreparedAssemblyManifest | ObservedAssemblyManifest, observations: PassportObservation, hashes: PassportHashPort): TokenPassport["authorityRegistry"] => generatePassport(manifest, observations, hashes).authorityRegistry;
 
 function preparedAssemblyPassport(manifest: PreparedAssemblyManifest, observations: PassportObservation, hashes: PassportHashPort): TokenPassport {
   if (Object.keys(observations).some(k => !["schema", "observedAt", "validUntil", "unresolved"].includes(k))) { fail("ASSEMBLY_OBSERVATIONS_PENDING"); }
@@ -122,4 +122,32 @@ function preparedAssemblyPassport(manifest: PreparedAssemblyManifest, observatio
     `Worst-case unsigned assembly cost: ${manifest.worstCaseWei} wei. Observed costs, live Ethereum fees and ETH/USD: unavailable.`, ""].join("\n");
   return { schema: "agtmai-token-passport-v1", manifestSha256, observationsSha256, generated: { observedAt: observations.observedAt, validUntil: observations.validUntil },
     markdown, authorityRegistry: { schema: "agtmai-authority-registry-v1", manifestSha256, observationsSha256, entries } };
+}
+
+function observedAssemblyPassport(manifest: ObservedAssemblyManifest, observations: PassportObservation, hashes: PassportHashPort): TokenPassport {
+  const manifestSha256 = hashes.sha256(deploymentBytes(manifest)), observationsSha256 = hashes.sha256(deploymentBytes(observations));
+  const entries: AuthorityRegistryEntry[] = manifest.contracts.flatMap(contract => ["CONTROLLER", "BENEFICIARY", "INITIAL_CCIP_ADMIN"]
+    .filter(name => contract.immutableValues[name] !== undefined).map(name => ({ capability: `${contract.id}.${name.toLowerCase()}`, chain: "1 (synthetic loopback)",
+      controlled: contract.predictedAddress, expected: `0x${contract.immutableValues[name]!.slice(-40)}`,
+      observed: `0x${contract.observed.getters[name === "INITIAL_CCIP_ADMIN" ? "getCCIPAdmin" : name]!.slice(-40)}`, pending: null,
+      mechanism: "immutable" as const, power: name === "BENEFICIARY" ? "claim vested entitlement" : "configured immutable control",
+      limitation: "Owned synthetic local observation; actual production deployment unavailable", evidence: manifest.evidenceSha256 })));
+  for (const safe of manifest.authority) {
+    entries.push({ capability: `custody.safe.${manifest.configuration.custodySafes.find(c => c.address === safe.address)!.id}`, chain: "1 (synthetic loopback)",
+      controlled: safe.address, expected: safe.address, observed: safe.address, pending: null, mechanism: "safe", power: "Safe CALL control",
+      limitation: `Actual local threshold ${safe.threshold} of ${safe.owners.length}; nonce ${safe.nonce}; empty modules, guard and fallback; production authority unavailable`, evidence: safe.setupProvenance });
+  }
+  const markdown = ["# AGTMAI token passport", "", "- Deployment status: `synthetic-local-observation`", "- Broadcast allowed: `false`",
+    `- Manifest digest: \`${manifestSha256}\``, "- Selected test-only policy; production configuration and approval unavailable.",
+    "- Chain ID 1 is synthetic owned loopback evidence. Actual production deployment unavailable.", "", manifest.packageTiming, "",
+    "## Purpose policies", "", ...manifest.facts.purposeVaults.map(p => `- ${escape(p.allocationId)}: recipient \`${p.recipient}\`; opens ${p.opensAt}; window ${p.windowSeconds}; gross cap ${p.rollingCapBaseUnits}.`),
+    "", manifest.facts.disclosure, "", "## Offline source-verification inputs", "", ...manifest.contracts.map(c =>
+      `- ${escape(c.id)}: predicted \`${c.predictedAddress}\`; observed \`${c.observed.address}\`; \`${c.fullyQualifiedName}\`; compiler input \`${c.compilerInputSha256}\`; materialized runtime \`${c.materializedRuntimeHash}\`.`),
+    "", "Nested founder creation uses its parent receipt and child nonce 1; its gas is included in the parent. No explorer submission or source-verification claim.",
+    "", "## Assembly gas (wei; local fees)", "", "| Operation | Estimate | Limit | Base fee | Priority | Max fee | Gas used | Effective price | Cost |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ...manifest.gas.map(g => `| ${g.id} | ${g.gasEstimate} | ${g.gasLimit} | ${g.baseFeePerGas} | ${g.maxPriorityFeePerGas} | ${g.maxFeePerGas} | ${g.gasUsed} | ${g.effectiveGasPrice} | ${g.observedCostWei} |`), "",
+    `Worst-case assembly: ${manifest.worstCaseWei} wei. Observed assembly: ${manifest.observedWei} wei.`,
+    "Bootstrap, gas funding and scenario costs are separate. Live Ethereum fees and ETH/USD unavailable.", ""].join("\n");
+  return { broadcastAllowed: false, schema: "agtmai-token-passport-v1", manifestSha256, observationsSha256, generated: { observedAt: observations.observedAt, validUntil: observations.validUntil },
+    markdown, authorityRegistry: { broadcastAllowed: false, schema: "agtmai-authority-registry-v1", manifestSha256, observationsSha256, entries } };
 }

@@ -4,6 +4,7 @@ import { checkedAdd, checkedMul, parseUint } from "./model.ts";
 export interface ProductionOperation {
   readonly id: string; readonly kind: "create" | "call"; readonly intentHash: string; readonly expectedAddress?: string; readonly nestedAddress?: string; readonly nonce?: string;
   readonly initcode?: string; readonly initcodeHash?: string; readonly runtime?: string; readonly runtimeHash?: string;
+  readonly runtimeTemplate?: string; readonly runtimeTemplateHash?: string;
   readonly calldata?: string; readonly gasEstimate?: string; readonly gasLimit?: string; readonly baseFeePerGas?: string; readonly maxPriorityFeePerGas?: string; readonly maxFeePerGas?: string; readonly blockGasLimit?: string; readonly value?: string;
 }
 export interface SafeState {
@@ -12,7 +13,8 @@ export interface SafeState {
   readonly modules: readonly string[]; readonly guard: string | null; readonly fallbackHandler: string | null; readonly setupProvenance: string;
 }
 export interface ProductionExpectations {
-  readonly schema: "agtmai-production-expectations-v1"; readonly chainId: "1"; readonly sender: string; readonly deployer: string;
+  readonly schema: "agtmai-production-expectations-v1" | "agtmai-production-expectations-v2";
+  readonly assemblyConfigurationSha256?: string; readonly coverage?: "full-ethereum-reserve-assembly"; readonly chainId: "1"; readonly sender: string; readonly deployer: string;
   readonly configurationSha256: string; readonly reserveConfigurationSha256: string; readonly sourceRevision: string; readonly artifactPinsSha256: string; readonly startingNonce: string; readonly maxObservationAgeSeconds: string;
   readonly operations: readonly ProductionOperation[]; readonly maxTotalCostWei: string; readonly attemptIdentity: string;
   readonly authority: readonly SafeState[];
@@ -77,7 +79,9 @@ export function evaluateProductionGuards(expectations: ProductionExpectations, o
 
 function evaluateProductionGuardsUnchecked(expectations: ProductionExpectations, observations: ProductionObservation, attempt: ProductionAttempt, nowSeconds: bigint, policy: ApprovedProductionPolicy): ProductionGuardReport {
   const reasons: string[] = [];
-  if (expectations?.schema !== "agtmai-production-expectations-v1" || expectations.chainId !== "1" || !address(expectations.sender) || !address(expectations.deployer) || expectations.sender !== expectations.deployer || !digest(expectations.configurationSha256) || !digest(expectations.reserveConfigurationSha256) || !digest(expectations.artifactPinsSha256) || !/^[0-9a-f]{40}$/.test(expectations.sourceRevision)) {return { status: "invalid", broadcastAllowed: false, reasons: ["expectations-invalid"] };}
+  if (!validExpectationIdentity(expectations)) { return { status: "invalid", broadcastAllowed: false, reasons: ["expectations-invalid"] }; }
+  const full = expectations.schema === "agtmai-production-expectations-v2";
+  if (full && observations.schema !== undefined) {return { status: "blocked", broadcastAllowed: false, reasons: ["full-production-execution-unavailable"] };}
   validateContext(expectations, observations, nowSeconds, policy, reasons);
   if (observations.schema === "agtmai-production-observation-v2") {validateExecutionTiming(observations, policy, reasons);}
   const operations = [...expectations.operations];
@@ -154,10 +158,10 @@ function validateAttempt(attempt: ProductionAttempt, operations: readonly Produc
 }
 
 function evaluateOperations(expectations: ProductionExpectations, observations: ProductionObservation, policy: ApprovedProductionPolicy, operations: ProductionOperation[], reasons: string[]): bigint {
-  const requiredOrder = ["token-create", "founder-reserve-create", "controller-create", "founder-fund"];
+  const requiredOrder = productionOperationOrder(expectations.schema);
   if (operations.length !== requiredOrder.length || new Set(operations.map(operation => operation.id)).size !== operations.length) {fail(reasons, "operation-inventory-invalid");}
   if (operations.some((operation, index) => operation.id !== requiredOrder[index])) {fail(reasons, "operation-order-mismatch");}
-  if (operations.some((operation, index) => operation.kind !== (index < 3 ? "create" : "call") || !digest(operation.intentHash))) {fail(reasons, "operation-kind-mismatch");}
+  if (operations.some((operation, index) => operation.kind !== (index < requiredOrder.length - 1 ? "create" : "call") || !digest(operation.intentHash))) {fail(reasons, "operation-kind-mismatch");}
   if (observations.operations.some((operation, index) => operation.id !== requiredOrder[index])) {fail(reasons, "observation-order-mismatch");}
   if (new Set(observations.operations.map(operation => operation.id)).size !== observations.operations.length || observations.operations.some(operation => !operations.some(expected => expected.id === operation.id))) {fail(reasons, "observation-inventory-invalid");}
   const observed = new Map(observations.operations.map(operation => [operation.id, operation]));
@@ -170,7 +174,7 @@ function evaluateOperations(expectations: ProductionExpectations, observations: 
     validateOperationShape(expectations, observations, operation, nonce, reasons);
     const seen = observed.get(operation.id);
     if (!seen) {fail(reasons, "observation-missing"); continue;}
-    validateObservedOperation(operation, seen, nonce, reasons, observations.schema === "agtmai-production-observation-v2");
+    validateObservedOperation(expectations.schema === "agtmai-production-expectations-v2" ? { ...operation, runtime: operation.runtimeTemplate, runtimeHash: operation.runtimeTemplateHash } : operation, seen, nonce, reasons, observations.schema === "agtmai-production-observation-v2");
     total = evaluateGas(operation, policy, reasons, total);
   }
   if (observations.checkedAddresses && operations.some(operation => operation.expectedAddress !== undefined && !observations.checkedAddresses.includes(operation.expectedAddress) || operation.nestedAddress !== undefined && !observations.checkedAddresses.includes(operation.nestedAddress))) {fail(reasons, "address-observation-missing");}
@@ -183,7 +187,7 @@ function validateOperationShape(expectations: ProductionExpectations, observatio
   else if (deriveCreateAddress(expectations.sender, nonce) !== operation.expectedAddress) {fail(reasons, "create-address-mismatch");}
   if (!hex(operation.initcode)) {fail(reasons, "creation-bytes-missing");}
   else if (!digest(operation.initcodeHash) || keccak256(Buffer.from(operation.initcode.slice(2), "hex")) !== operation.initcodeHash) {fail(reasons, "creation-hash-mismatch");}
-  if (!hex(operation.runtime) || !digest(operation.runtimeHash)) {fail(reasons, "runtime-expectation-missing");}
+  validateOperationRuntimeTemplate(expectations, operation, reasons);
   if (operation.id === "founder-reserve-create" && (!address(operation.nestedAddress) || deriveCreateAddress(operation.expectedAddress!, 1n) !== operation.nestedAddress)) {fail(reasons, "nested-create-address-mismatch");}
   if (operation.id !== "founder-reserve-create" && operation.nestedAddress !== undefined) {fail(reasons, "unexpected-nested-create");}
   if (operation.expectedAddress && observations.occupiedAddresses.includes(operation.expectedAddress) || operation.nestedAddress && observations.occupiedAddresses.includes(operation.nestedAddress)) {fail(reasons, "target-address-occupied");}
@@ -211,4 +215,41 @@ function evaluateGas(operation: ProductionOperation, policy: ApprovedProductionP
   if (limit !== buffered || limit > blockGasLimit || limit > parseUint(policy.evmMaxGasPerTransaction, "policy.evmMaxGasPerTransaction", false) || priorityFee > parseUint(policy.evmMaxPriorityFeePerGasWei, "policy.evmMaxPriorityFeePerGasWei") || fee > parseUint(policy.evmMaxFeePerGasWei, "policy.evmMaxFeePerGasWei", false) || fee < baseFee || priorityFee > fee) {fail(reasons, "gas-fee-policy-mismatch");}
   const value = parseUint(operation.value ?? "0", `${operation.id}.value`);
   return checkedAdd(total, checkedAdd(checkedMul(limit, fee, `${operation.id}.cost`), value, `${operation.id}.cost`), "aggregate-cost");
+}
+
+export function productionOperationOrder(schema: ProductionExpectations["schema"]): readonly string[] {
+  return ["token-create", "founder-reserve-create", "controller-create", ...(schema === "agtmai-production-expectations-v2"
+    ? ["long-term", "users", "operations", "ecosystem", "financing", "liquidity"].map(id => `purpose-${id}-create`) : []), "founder-fund"];
+}
+
+/** Shared checked gas admission for selected offline fields and actual local pre-send estimates. */
+export function checkedOperationGas(operation: ProductionOperation, policy: ApprovedProductionPolicy): bigint {
+  if (!Number.isSafeInteger(policy.gasBufferBps) || policy.gasBufferBps < 0 || policy.gasBufferBps > 10000) {throw new Error("ASSEMBLY_GAS_POLICY");}
+  const reasons: string[] = [];
+  const cost = evaluateGas(operation, policy, reasons, 0n);
+  if (reasons.length) {throw new Error("ASSEMBLY_GAS_POLICY");}
+  return cost;
+}
+
+/** Reserve every still-unestimated operation at its configured maximum before any mint/send. */
+export function reserveAssemblyCost(policy: ApprovedProductionPolicy, committed: bigint, remaining: number, available: bigint): bigint {
+  if (!Number.isSafeInteger(remaining) || remaining < 0 || remaining > 10) {throw new Error("ASSEMBLY_RESERVATION");}
+  const reservation = checkedMul(BigInt(remaining), checkedMul(parseUint(policy.evmMaxGasPerTransaction, "maxGas", false), parseUint(policy.evmMaxFeePerGasWei, "maxFee", false), "reservation"), "reservation");
+  const total = checkedAdd(committed, reservation, "reservation");
+  if (total > parseUint(policy.evmMaxTotalFeeWei, "maxTotal", false) || reservation > available) {throw new Error("ASSEMBLY_RESERVATION");}
+  return total;
+}
+
+function validExpectationIdentity(e: ProductionExpectations): boolean {
+  const full = e?.schema === "agtmai-production-expectations-v2";
+  const version = full ? evidenceDigest(e.assemblyConfigurationSha256) && e.coverage === "full-ethereum-reserve-assembly"
+    : e?.schema === "agtmai-production-expectations-v1" && e.assemblyConfigurationSha256 === undefined && e.coverage === undefined;
+  return version && e.chainId === "1" && address(e.sender) && address(e.deployer) && e.sender === e.deployer && digest(e.configurationSha256)
+    && digest(e.reserveConfigurationSha256) && digest(e.artifactPinsSha256) && /^[0-9a-f]{40}$/.test(e.sourceRevision);
+}
+
+function validateOperationRuntimeTemplate(e: ProductionExpectations, op: ProductionOperation, reasons: string[]): void {
+  const template = e.schema === "agtmai-production-expectations-v2" ? op.runtimeTemplate : op.runtime;
+  const hash = e.schema === "agtmai-production-expectations-v2" ? op.runtimeTemplateHash : op.runtimeHash;
+  if (!hex(template) || !digest(hash) || keccak256(Buffer.from(template.slice(2), "hex")) !== hash) { fail(reasons, "runtime-expectation-missing"); }
 }

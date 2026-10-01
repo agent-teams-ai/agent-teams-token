@@ -105,9 +105,64 @@ keep `broadcastAllowed: false`.
 
 Synthetic local-purpose v2 uses the same construction kernel, chain ID 1,
 test-only authority and null approval; it never manufactures production
-acceptance. PR2 owns actual loopback execution, both official Safes, genuine
-estimates against predecessor state, runtime/getter evidence and observed costs.
+acceptance. PR2 implements actual loopback execution, both official Safes, genuine
+estimates against predecessor state, runtime/getter evidence and observed costs;
+native qualification remains pending.
 The unsigned projection does not prove that execution.
+
+### Native full-assembly qualification
+
+Run on a clean committed candidate after the accepted PR1 rebase, outside the
+provider sandbox. Keep the pinned tools/dependencies and official Safe archive
+available. The existing provisioning authority is:
+
+```sh
+bash scripts/prepare-safe-artifacts.sh
+```
+
+Export its printed `AGTMAI_SAFE_ARTIFACT_DIRECTORY` and
+`AGTMAI_SAFE_PINS_SHA256` assignments. If the archive is absent, its explicit
+`--fetch` provisioning mode is a separate native preparation step. The proof
+checks those pins against the existing reviewed repository authority.
+
+Focused native execution uses the existing canonical test file:
+
+```sh
+pnpm build
+.tools/bin/node --test tooling/deployment-plan/tests/purpose-reserves.integration.test.ts tooling/deployment-plan/tests/contributor-safe-execution.integration.test.ts
+```
+
+`pnpm test:deployment-plan` includes the same mandatory full E2E, the preserved
+v1 execution and contributor-intent suites, mined CREATE failure and custody
+regressions. This is not an optional alternate workflow. Success outputs persist
+under `.local/full-assembly-*/observed/`: `local-purpose-proof-v2.json`,
+`deployment-manifest-v2.json`, `prepared-local-purpose-genesis.json`, the canonical
+local configuration and artifact inputs, `reserve-facts.json`,
+`token-passport.json`, `token-passport.md`, `authority-registry.json`, inventory
+and READY. Failure directories contain public `diagnostics.json` without READY;
+never infer absence of effects from timeout or resubmit a pending operation.
+
+The proof freezes construction before the first mint, estimates each operation
+against its actual predecessor and reserves all remaining unestimated operations
+at configured maximum gas/fee. The complete gas-bearing local package is
+reconstructed after execution, before scenario outflows. Genesis stays bound to
+the funding block; scenario costs/effects and bootstrap/funder costs are separate.
+Synthetic chain ID 1, null approval and test-only authority cannot serve as
+production evidence. Production still requires its complete selected offline
+expectations before publication. Live Ethereum fees and ETH/USD are unavailable.
+
+Deployment-plan removal retains Supply construction, observed manifest/passport
+semantics and tests, and the passive Safe custody adapter. It reverses only its
+Local EVM transport additions while preserving independent process/toolchain
+bytes. Integration must add exact retained ownership for the four Supply report
+surfaces (`application/deployment-manifest.ts`, `application/passport.ts`,
+`application/reserve-facts.ts`, `deployment.ts` within this feature) and
+`tooling/testnet-ccip/src/adapters/local-safe.ts` and `safe-custody.ts`. The precise
+reversal and survivor regressions are in the patch; official manifest hashes are
+computed by orchestration after the clean commit, never guessed here.
+Then run the documented maintenance command and final `pnpm check:linux` proof,
+including actual applied-state Supply tests and Local EVM survivors. Neither
+focused tests nor maintenance are sealed rollback evidence.
 
 A full purpose cap can leave at opening; the Safe selects recipients and
 downstream transfers are unrestricted. Refunds do not restore gross capacity;
@@ -578,15 +633,15 @@ technical adapters, and the disposable Anvil harness remains dev-only
 composition. This does not add an Assembly graph node, adoption profile or
 general deployment framework.
 
-After the offline preflight is accepted, implementation stays limited to two
-reviewable slices. The first emits one deterministic unsigned package for the
-token, contributor reserve, founder reserve with its nested vault, and founder
-funding call. It binds predicted addresses to genesis recipients and records
-artifact, constructor, source and operation provenance. The second executes
-that exact package only against the existing disposable Anvil environment and
-verifies code, immutable terms, reserve balances, the nested founder vault,
-permissionless founder funding, fixed supply and the 3% founder, 17%
-contributors and 80% remaining allocations.
+The retained v1 path prepares four top-level operations with
+`token-and-reserves-only` coverage. Full v2 preparation adds the six purpose
+reserves through the same construction kernel, with nine top-level CREATEs,
+one nested founder vault and a funding CALL. Its unsigned production package
+requires every selected gas expectation before publication. The PR2 rehearsal
+freezes synthetic construction before mint, estimates each send against the
+actual predecessor, then reconstructs the complete gas-bearing package after
+execution. Native qualification above checks all ten instances and the same-chain
+Safe scenarios; a runnable patch alone supplies no observed success.
 
 Both slices remain non-broadcasting and use one fixed topology. Mainnet forks,
 generic deployment platforms, generic Solana observation tooling, utility

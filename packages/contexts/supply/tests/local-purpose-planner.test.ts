@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareLocalPurposeGenesis, verifyPreparedLocalPurposeGenesis, verifyLocalPurposePreflight, type LocalPurposeArtifact, type LocalPurposePreflight } from "../src/features/genesis-manifest/application/prepare-local-purpose-genesis.js";
-import { encodeLocalPurposeToken, encodeLocalPurposeVault, encodeProductionFounderReserve, encodeProductionReserveController, encodeDeploymentToken } from "../src/features/genesis-manifest/adapters/deployment-abi.js";
+import { encodeLocalPurposeToken, encodeLocalPurposeVault, encodeProductionFounderReserve, encodeProductionFounderVault, encodeProductionReserveController, encodeDeploymentToken } from "../src/features/genesis-manifest/adapters/deployment-abi.js";
+import { materializeObservedAssemblyManifest, type LocalAssemblyObservation } from "../src/features/genesis-manifest/application/deployment-manifest.js";
+import { checkPassport, generatePassport } from "../src/features/genesis-manifest/application/passport.js";
 import { deploymentCreateAddress, keccakBytes } from "../src/features/genesis-manifest/adapters/deployment-observations.js";
 import { sha256 } from "../src/features/genesis-manifest/adapters/digest.js";
 import { validateProductionDeployment } from "../src/features/genesis-manifest/domain/production-deployment.js";
@@ -175,4 +177,77 @@ test("selected plan reconstruction rejects reordered or altered published operat
   const wrongFunding = { ...prepared, operations: prepared.operations.map((operation, i) =>
     i === 9 ? { ...operation, to: prepared.operations[2]!.expectedAddress! } : operation) };
   assert.throws(() => verifyPreparedLocalPurposeGenesis(source, revision, pins, wrongFunding, localPurposeCompilerPorts), /LOCAL_PURPOSE_PLAN_INVALID/);
+});
+
+/** Simulated report records only: fake artifact/code/provenance bytes cannot qualify an EVM or a Safe. */
+function syntheticAssemblyReport() {
+  const input = fixture(); input.schema = "agtmai-local-purpose-genesis-v2"; input.chainId = "1";
+  const ports = { ...localPurposeCompilerPorts, encodeFounderVault: encodeProductionFounderVault };
+  const prepared = prepareLocalPurposeGenesis(input, revision, { sourceRevision: revision, artifacts }, ports);
+  const block = (i: number) => ({ number: String(20 + i), hash: `0x${word(BigInt(100 + i))}` as Hex, timestamp: String(1799999900 + i) });
+  const abi = (v: string): Hex => `0x${word(BigInt(v))}`;
+  const founder = prepared.configuration.reserve.founder, founderAmount = "3000000000000000";
+  const terms = [founderAmount, founder.schedule.start, founder.schedule.cliff, founder.schedule.end, "0"].map(v => word(BigInt(v))).join("") + founder.purpose.slice(2);
+  const operations: LocalAssemblyObservation["operations"] = prepared.operations.map((op, i) => ({ id: op.id, nonce: op.nonce, sender, chainId: "1", input: (op.initcode ?? op.calldata)!, value: "0",
+    gasEstimate: "101", gasLimit: "122", baseFeePerGas: "8", blockGasLimit: "6000000", maxPriorityFeePerGas: "1", maxFeePerGas: "10", gasUsed: "100", effectiveGasPrice: "9", observedCostWei: "900",
+    predecessor: block(i), block: block(i + 1), parentHash: block(i).hash, transactionHash: `0x${word(BigInt(i + 200))}` as Hex, status: "1", actualAddress: (op.expectedAddress ?? op.to)!,
+    logs: i === 1 ? [{ address: prepared.constructors![9]!.predictedAddress,
+      topics: [keccakBytes(new TextEncoder().encode("GrantConfigured(address,address,address,address,(uint256,uint64,uint64,uint64,uint8,bytes32))")), abi(prepared.constructors![0]!.predictedAddress), abi(founder.beneficiary), abi(prepared.constructors![1]!.predictedAddress)],
+      data: `0x${word(BigInt(founder.controller))}${terms}`, removed: false, logIndex: "0" }] : [] }));
+  const contracts: LocalAssemblyObservation["contracts"] = prepared.constructors!.map(c => {
+    const getters: Record<string, Hex> = Object.fromEntries(Object.entries(c.immutableValues).map(([name, value]) => [name === "INITIAL_CCIP_ADMIN" ? "getCCIPAdmin" : name, value]));
+    if (c.contract === "AGTMAICCIPToken") { Object.assign(getters, { totalSupply: abi("100000000000000000"), decimals: abi("9") }); }
+    if (c.contract === "ReserveController") { Object.assign(getters, { WINDOW: abi("31536000"), grossCommitted: abi("0"), rollingCommitted: abi("0") }); }
+    if (c.contract === "PurposeReserveVault") { Object.assign(getters, { grossOutflow: abi("0"), rollingOutflow: abi("0") }); }
+    if (c.contract === "GrantVault") { Object.assign(getters, { funded: abi("1"), grant: `0x${terms}${[0n, 0n, 0n, 1n, 0n].map(word).join("")}` }); }
+    return { id: c.id, address: c.predictedAddress, runtime: c.materializedRuntime, nonce: c.contract === "FounderGrantReserve" ? "2" : "1", getters,
+      balance: c.id === "founder-vault" ? founderAmount : c.id === "founder-reserve-create" ? "0" : prepared.configuration.reserve.allocations.find(a => a.recipient === c.predictedAddress)?.amountBaseUnits ?? "0" };
+  });
+  const authority = prepared.configuration.custodySafes.map(s => ({ address: s.address, owners: s.owners, threshold: 2 as const, nonce: "0", proxyCodeHash: block(0).hash, singletonCodeHash: block(1).hash,
+    singletonAddress: `0x${"a".repeat(40)}` as Hex, singletonSlot: abi(`0x${"a".repeat(40)}`), modules: [], guard: null, fallbackHandler: null, setupProvenance: block(2).hash }));
+  const observation: LocalAssemblyObservation = { operations, contracts, authority, gasBufferBps: 2000, observedWei: "9000", genesis: block(10),
+    fundingBefore: { block: block(9), reserveBalance: founderAmount, vaultBalance: "0", allowance: "0", funded: abi("0") },
+    fundingAfter: { allowance: "0", repeatCallRevert: keccakBytes(new TextEncoder().encode("AlreadyFunded()")).slice(0, 10) as Hex } };
+  return { prepared, observation, ports };
+}
+
+test("synthetic full report preserves nested provenance, integer sums and non-production facts", () => {
+  const { prepared, observation, ports } = syntheticAssemblyReport();
+  const manifest = materializeObservedAssemblyManifest(prepared, observation, ports);
+  assert.equal(manifest.observedWei, "9000"); assert.equal(manifest.worstCaseWei, "12200");
+  assert.equal(manifest.contracts.length, 10); assert.equal(manifest.gas.length, 10);
+  const child = manifest.contracts[9]!.observed;
+  assert.ok("parentTransactionHash" in child);
+  assert.equal(child.parentTransactionHash, observation.operations[1]!.transactionHash);
+  assert.equal(Object.hasOwn(manifest.contracts[9]!.observed, "transactionHash"), false);
+  assert.equal(manifest.approval, null); assert.equal(manifest.broadcastAllowed, false);
+  assert.equal(manifest.facts.approval, null); assert.equal(manifest.actualProductionDeployment, "unavailable");
+  const interval = { schema: "agtmai-deployment-observations-v1" as const, observedAt: observation.genesis.timestamp, validUntil: observation.genesis.timestamp };
+  const passport = generatePassport(manifest, interval, { sha256 });
+  assert.match(passport.markdown, /after execution of pre-frozen inventory/);
+  assert.match(passport.markdown, /Live Ethereum fees and ETH\/USD unavailable/);
+  assert.equal(passport.authorityRegistry.entries.filter(e => e.mechanism === "safe").length, 2);
+  const tampered = { ...passport }; delete tampered.broadcastAllowed;
+  assert.throws(() => checkPassport(manifest, interval, tampered, { sha256 }), /PASSPORT_MISMATCH/);
+});
+
+test("synthetic full report rejects contradictory parent, funding, cost and genesis records", () => {
+  const { prepared, observation, ports } = syntheticAssemblyReport();
+  const mutations: readonly ((o: any) => void)[] = [
+    o => { o.operations[1].parentHash = o.operations[1].block.hash; },
+    o => { o.operations[0].observedCostWei = "901"; },
+    o => { o.observedWei = "8999"; },
+    o => { o.operations[0].gasLimit = "121"; },
+    o => { o.contracts[9].transactionHash = o.operations[1].transactionHash; },
+    o => { o.operations[1].logs = []; },
+    o => { o.fundingBefore.reserveBalance = "0"; },
+    o => { o.fundingAfter.allowance = "1"; },
+    o => { o.contracts[3].balance = "0"; },
+    o => { o.contracts[9].getters.grant = "0x"; },
+    o => { o.genesis = o.operations[8].block; },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(observation); mutate(changed);
+    assert.throws(() => materializeObservedAssemblyManifest(prepared, changed, ports), /DEPLOYMENT_EVIDENCE_ASSEMBLY_/);
+  }
 });
