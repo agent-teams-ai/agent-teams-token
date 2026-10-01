@@ -236,6 +236,13 @@ be replayed as new transfers.
 
 ## Deployment configuration commands
 
+The legacy `validate`/`compile` route uses deployment `schemaVersion: 1` for
+`local-test` or `owned-testnet` inputs; validation alone is not production
+admission. `compile` rejects `mainnet-dry-run` with
+`DEPLOYMENT_PRODUCTION_ENVELOPE_REQUIRED`, even with a legacy `--approval`.
+The following materialization and verification commands consume the legacy
+prepared package, not `prepared-production-deployment.json`.
+
 ```bash
 pnpm deployment:config validate --config "$CONFIG"
 pnpm deployment:config compile --config "$CONFIG" --artifacts "$ARTIFACT_PINS" --output "$PREPARED"
@@ -243,15 +250,47 @@ pnpm deployment:config materialize --prepared "$PREPARED/prepared-deployment.jso
 pnpm deployment:config verify --manifest "$DEPLOYMENT/deployment-manifest.json"
 ```
 
-For production compilation, also supply `--approval "$APPROVAL"`. The standalone
-approval record has schema `agtmai-deployment-approval-v1`, a public `reference`
-and the independently selected `configurationSha256`. There is no execution or
-RPC option on these commands.
+Production preparation uses the separate `agtmai-production-deployment-v1`
+envelope: `deployment` (`schemaVersion: 1`), `reserveGenesis`
+(`agtmai-reserve-genesis-v1`), `projectControllerSafeId` and
+`founderBeneficiarySafeId`. Both embedded configurations must be `accepted` and
+strictly validated; deployment mode is `mainnet-dry-run`, Ethereum chain ID `"1"`.
+Ethereum-only genesis may use `deployment.bridge: null` under
+[ADR-0010](../decisions/0010-ethereum-first-launch-sequence.md).
 
-The `agtmai-artifact-pins-v1` input records the contract-source `sourceRevision`
-and exactly two artifact entries (`AGTMAICCIPToken`, `GrantVault`), each with
-`artifactPath`, `artifactSha256`, `buildInfoPath` and `buildInfoSha256`. Hashes
-cover the actual bytes. Paths must stay below the trusted pins directory, with
+```bash
+pnpm deployment:config validate-production --config "$PRODUCTION_CONFIG"
+pnpm deployment:config compile-production --config "$PRODUCTION_CONFIG" --artifacts "$PRODUCTION_ARTIFACT_PINS" --approval "$PRODUCTION_APPROVAL" --expectations "$PRODUCTION_EXPECTATIONS" --output "$PRODUCTION_PREPARED"
+```
+
+All five `compile-production` options are required. The approval has schema
+`agtmai-production-approval-v1`, a public `reference`, `configurationSha256`
+(the canonical validated `deployment` digest) and `reserveConfigurationSha256`
+(the canonical validated `reserveGenesis` digest). Independently select both
+approval digests; a self-declared status or legacy single-digest approval is
+insufficient.
+
+The required `agtmai-production-expectations-v1` record binds chain ID `"1"`,
+`sourceRevision`, both configuration digests, `artifactPinsSha256` (the canonical
+resolved artifact set, not the raw pins file), `attemptIdentity`, matching
+`sender`/`deployer`, `startingNonce`, `maxObservationAgeSeconds` and
+`maxTotalCostWei`. It includes exactly two Safe authority records with public
+owners, threshold, nonce, proxy/singleton code hashes, singleton address/slot,
+modules, guard, fallback handler and setup provenance. Its four operations are
+`token-create`, `founder-reserve-create`, `controller-create` and `founder-fund`;
+each binds kind, intent hash, nonce, expected address, zero value, gas estimate,
+buffered gas limit, block gas limit and base/priority/max fee values. Creates
+also bind initcode/runtime bytes and hashes; founder reserve creation binds its
+nested vault address. Funding binds the exact `fund()` calldata. Unknown fields
+and mismatched identities, artifacts or policy limits are rejected.
+
+The local/testnet `agtmai-artifact-pins-v1` input has exactly two entries:
+`AGTMAICCIPToken` and `GrantVault`. Production instead requires
+`agtmai-production-artifact-pins-v1` with exactly three: `AGTMAICCIPToken`,
+`FounderGrantReserve` and `ReserveController`. Both pin schemas record the
+contract-source `sourceRevision`; each entry has `contract`, `artifactPath`,
+`artifactSha256`, `buildInfoPath` and `buildInfoSha256`. Hashes cover the actual
+bytes. Paths must stay below the trusted pins directory, with
 no absolute paths, traversal or linked files/directories. Artifact leaves are
 `<Contract>.json` or `<contract-lowercase>.artifact.json`; build-info leaves are
 Foundry's 16-hex-digit `.json` names or `<contract-lowercase>.build-info.json`.
@@ -263,7 +302,16 @@ Reads traverse each parent through held Linux directory descriptors and recheck
 their identities before returning bytes. Platforms without that traversal fail
 closed with `DEPLOYMENT_IO_DESCRIPTOR_TRAVERSAL_UNAVAILABLE`.
 
-Materialization requires bounded native creation evidence for each present
+Production compilation publishes `prepared-production-deployment.json` with
+coverage `token-and-reserves-only`, canonical configuration, approval,
+expectations and authenticated artifact/build-info files. It prepares four
+unsigned operations; it does not sign, deploy or establish live Safe authority.
+Unresolved runtime immutables require deterministic local execution before
+qualification. Neither route offers execution or RPC options; both report
+`broadcastAllowed: false`. Production preflight and fresh per-broadcast owner
+approval remain separate gates.
+
+Legacy materialization requires bounded native creation evidence for each present
 contract: transaction identity/input, receipt/events, canonical block observations,
 finality, runtime and all required getters at the same block. It emits
 `not-deployed`, `partial` or `deployed` without inventing missing observations.

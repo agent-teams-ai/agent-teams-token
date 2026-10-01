@@ -171,7 +171,8 @@ real consumers prove identical invariants and failure semantics.
 - `scripts`: thin repeatable entrypoints into application use cases, not a home
   for business rules.
 
-Engineering Foundation `0.20.0` validates real source edges, dependency
+Engineering Foundation `1.4.0`, pinned in [package.json](../package.json) and
+[tooling/toolchain.lock.json](../tooling/toolchain.lock.json), validates real source edges, dependency
 declarations, documentation links, ADR lifecycle, suppressions and quality gates.
 It is an exact dev dependency and is never imported by production code. Its
 scaffolding and public-API capabilities are enabled only with their first real
