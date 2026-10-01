@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { registerToolchainFifoTests } from "./toolchain-fifo.test.mjs";
-import "./toolchain-execution.test.mjs";
 
 import {
   cleanupPreparedPayload,
