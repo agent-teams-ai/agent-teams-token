@@ -2,7 +2,7 @@ import { prepareLocalPurposeGenesis, verifyPreparedLocalPurposeGenesis, verifyLo
 import { loadPreparedProductionPackage, readDeploymentFile, readLocalPurposeArtifactPins, localPurposeCompilerPorts, publishDeploymentFiles, verifyDeploymentFiles } from "@agent-teams/supply/deployment-files";
 import { sha256 } from "@agent-teams/supply/genesis-manifest";
 import { provisionLocalSafes, settleOwnedSignerWork, type LocalSafe, type LocalSafePorts, type executeLocalSafe } from "../../tooling/testnet-ccip/src/adapters/local-safe.ts";
-import type { SafeArtifactPins } from "../../tooling/testnet-ccip/src/adapters/safe-artifacts.ts";
+import { qualifySafeArtifacts, type SafeArtifactPins } from "../../tooling/testnet-ccip/src/adapters/safe-artifacts.ts";
 import { checkedOperationGas, reserveAssemblyCost, type ApprovedProductionPolicy, type ProductionStateObservation } from "../../tooling/deployment-plan/src/domain/production-guards.ts";
 import { randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
@@ -363,6 +363,11 @@ export async function runLocalAssemblyProof(options: LocalAssemblyProofOptions):
       sign: async (owner, hash) => await run(["wallet", "sign", "--no-hash", hash, ...signerFlags(owners.find(o => o.address === owner)!)]) as Hex,
       verifySignature: async (owner, hash, signature) => { await run(["wallet", "verify", "--address", owner, "--no-hash", hash, signature]); return true; },
     }, { pins, selected, bytes }, [owners.slice(0, 3).map(o => o.address as Hex), owners.slice(3).map(o => o.address as Hex)]);
+    const safeProfile = qualifySafeArtifacts(pins, selected, bytes, passive.singleton);
+    const authenticatedSafe = Object.freeze({ singletonAddress: safeProfile.singleton,
+      proxyCodeHash: safeProfile.proxyRuntimeKeccak256, singletonCodeHash: safeProfile.singletonRuntimeKeccak256,
+      deployments: Object.freeze(passive.safes.map(s => Object.freeze({ address: s.safe, setupTransactionHash: s.setup.transactionHash }))) });
+    const observedPorts = { ...localPurposeCompilerPorts, authenticatedSafe };
     const gasFundingWei = options.gasFundingWei;
     const gasFunding = await transportSend(funder, sender.address as Hex, "0x", { ...auxiliaryGas, gasLimit: "21000" }, { value: gasFundingWei });
     if (gasFunding.receipt.status !== "0x1") { throw new Error("ASSEMBLY_GAS_FUNDING"); }
@@ -432,7 +437,7 @@ export async function runLocalAssemblyProof(options: LocalAssemblyProofOptions):
           if (await rpc("eth_getCode", [c.predictedAddress, receipt.blockNumber]) !== c.materializedRuntime) { throw new Error("ASSEMBLY_RUNTIME"); }
         }));
         assembly.push({ id: op.id, sender: sender.address as Hex, chainId: "1", nonce: op.nonce, input, value: "0", status: "1", actualAddress: (op.expectedAddress ?? op.to)!, transactionHash: receipt.transactionHash,
-          ...gas, ...fees, parentHash: block.parentHash, predecessor: blockIdentity(predecessor), block: blockIdentity(block), logs: receipt.logs.map((l: any) => ({ address: l.address, topics: l.topics, data: l.data, removed: l.removed, logIndex: BigInt(l.logIndex).toString() })) });
+          ...gas, ...fees, receiptBaseFeePerGas: BigInt(block.baseFeePerGas).toString(), parentHash: block.parentHash, predecessor: blockIdentity(predecessor), block: blockIdentity(block), logs: receipt.logs.map((l: any) => ({ address: l.address, topics: l.topics, data: l.data, removed: l.removed, logIndex: BigInt(l.logIndex).toString() })) });
         committed += cost; state.state = "finalized-success";
       } catch (cause) { if (state.state === "pending") { state.state = "uncertain"; } throw cause; }
     };
@@ -454,11 +459,12 @@ export async function runLocalAssemblyProof(options: LocalAssemblyProofOptions):
     if (!repeatCallRevert) { throw new Error("ASSEMBLY_FUNDING_NOT_ONE_SHOT"); }
     const fundingAfter = { repeatCallRevert, allowance: BigInt(await localCall(token, "allowance(address,address)", [prepared.constructors![1]!.predictedAddress, prepared.constructors![9]!.predictedAddress], { block: genesisBlock.number })).toString() };
     const evidence = { fundingAfter, gasBufferBps: policy.gasBufferBps, authority, fundingBefore, operations: assembly, contracts, genesis: blockIdentity(genesisBlock), observedWei: assembly.reduce((n, o) => n + BigInt(o.observedCostWei), 0n).toString() };
-    const manifest = materializeObservedAssemblyManifest(prepared, evidence, localPurposeCompilerPorts);
+    const manifest = materializeObservedAssemblyManifest(prepared, evidence, observedPorts);
     const packageDirectory = join(staging, "reconstructed");
     const packageFiles = { ...loaded.files, "artifact-pins.json": await readDeploymentFile(join(staging, "artifacts/pins.json")), "canonical-local-configuration.json": deploymentBytes(configured), "prepared-local-purpose-genesis.json": deploymentBytes(prepared), "deployment-manifest-v2.json": deploymentBytes(manifest) };
     await publishDeploymentFiles(packageDirectory, packageFiles); await verifyDeploymentFiles(packageDirectory);
-    await reconstructLocalAssemblyPackage(packageDirectory, candidate, prepared, manifest, false);
+    await reconstructLocalAssemblyPackage(packageDirectory, candidate, prepared, manifest, { authenticatedSafe, requireReady: false });
+    // Frozen historical genesis evidence: later freshness checks deliberately expire it; no live-readiness window is asserted.
     const passport = generatePassport(manifest, { schema: "agtmai-deployment-observations-v1", observedAt: manifest.genesis.timestamp, validUntil: manifest.genesis.timestamp }, { sha256 });
     auxiliary = scenarioCosts;
     const scenarios = await options.scenarios({ ...context, prepared, receipts: assembly, executor: { owner: funder.address as Hex }, singleton: passive.singleton, pins, rpc, call: localCall, send, encode, safeExec: passive.safeExec });
@@ -485,8 +491,8 @@ function signerFlags(s: EphemeralSignerCapability): string[] { return ["--keysto
 function blockIdentity(b: { number: string; hash: Hex; timestamp: string }): DeploymentBlock { return { number: BigInt(b.number).toString(), hash: b.hash, timestamp: BigInt(b.timestamp).toString() }; }
 
 /** Final output requires READY; the runner explicitly admits its unready intermediate reconstruction. */
-export async function reconstructLocalAssemblyPackage(directory: string, candidate: { repositoryRoot: string; revision: string }, prepared: PreparedLocalPurposeGenesis, manifest: ObservedAssemblyManifest, requireReady = true): Promise<void> {
-  await verifyDeploymentFiles(directory, requireReady);
+export async function reconstructLocalAssemblyPackage(directory: string, candidate: { repositoryRoot: string; revision: string }, prepared: PreparedLocalPurposeGenesis, manifest: ObservedAssemblyManifest, admission: { readonly authenticatedSafe: Parameters<typeof materializeObservedAssemblyManifest>[2]["authenticatedSafe"]; readonly requireReady?: boolean }): Promise<void> {
+  await verifyDeploymentFiles(directory, admission.requireReady ?? true);
   const pins = await readLocalPurposeArtifactPins(join(directory, "artifact-pins.json"), candidate);
   const read = async (name: string) => JSON.parse(Buffer.from(await readDeploymentFile(join(directory, name))).toString());
   const reopened = await read("prepared-local-purpose-genesis.json");
@@ -496,7 +502,7 @@ export async function reconstructLocalAssemblyPackage(directory: string, candida
   const evidence: LocalAssemblyObservation = { gasBufferBps: published.gasBufferBps, authority: published.authority, fundingBefore: published.funding.before, fundingAfter: published.funding.after,
     operations: published.gas, genesis: published.genesis, observedWei: published.observedWei,
     contracts: published.contracts.map(c => ({ id: c.observed.id, address: c.observed.address, runtime: c.observed.runtime, nonce: c.observed.nonce, getters: c.observed.getters, balance: c.observed.balance })) };
-  const rebuilt = materializeObservedAssemblyManifest(reopened, evidence, localPurposeCompilerPorts);
+  const rebuilt = materializeObservedAssemblyManifest(reopened, evidence, { ...localPurposeCompilerPorts, authenticatedSafe: admission.authenticatedSafe });
   if (canonicalJson(rebuilt) !== canonicalJson(published) || canonicalJson(rebuilt) !== canonicalJson(manifest)) { throw new Error("ASSEMBLY_RECONSTRUCTION_MANIFEST"); }
 }
 

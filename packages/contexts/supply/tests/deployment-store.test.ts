@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { renameSync, symlinkSync, type Stats } from "node:fs";
-import { link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile, type FileHandle } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import test from "node:test";
 import { publishDeploymentFiles, readDeploymentFile, verifyDeploymentFiles } from "../src/features/genesis-manifest/adapters/deployment-store.js";
@@ -43,6 +43,82 @@ test("final READY binds the complete inventory, reopens and resumes without chan
   assert.deepEqual((await readdir(output)).toSorted(), ["READY", "inventory.json", "result.json"].toSorted());
   assert.deepEqual(await verifyDeploymentFiles(output, true), inventory);
   assert.deepEqual(await publishDeploymentFiles(output, files, true, true), inventory);
+});
+
+test("READY finalization excludes a real compatible resumer and public verification rejects the live publication", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const output = join(root, "ready"), files = { "result.json": deploymentBytes({ broadcastAllowed: false }) };
+  const inventory = await publishDeploymentFiles(join(root, "ordinary"), files);
+  const probe = await open(join(root, "probe"), "wx"), prototype = Object.getPrototypeOf(probe);
+  const descriptorStat = probe.stat, sync = probe.sync; await probe.close();
+  const parked = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
+  let attempted = false, scheduling = false, directory: Stats | undefined;
+  let contender: Promise<unknown> | undefined;
+  // Start another actual publisher at the inventory read, parking it only if
+  // it acquires the lock. No filesystem result or publication is fabricated.
+  const statMock = context.mock.method(prototype, "stat", async function (this: FileHandle) {
+    const info = await descriptorStat.call(this);
+    const inventoryFile = !attempted && info.isFile() ? await stat(join(output, "inventory.json")).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { throw error; }
+      return null;
+    }) : undefined;
+    if (inventoryFile && info.dev === inventoryFile.dev && info.ino === inventoryFile.ino) {
+      directory = await stat(output);
+      attempted = true; scheduling = true;
+      contender = publishDeploymentFiles(output, files, true, true).then(() => null, error => error);
+      await Promise.race([parked.promise, contender]);
+      scheduling = false;
+      await assert.rejects(verifyDeploymentFiles(output), /INVENTORY_FILES/);
+    }
+    return info;
+  });
+  const syncMock = context.mock.method(prototype, "sync", async function (this: FileHandle) {
+    const info = await descriptorStat.call(this);
+    if (scheduling && info.dev === directory?.dev && info.ino === directory.ino) {
+      parked.resolve(); await released.promise;
+    }
+    return sync.call(this);
+  });
+  try {
+    assert.deepEqual(await publishDeploymentFiles(output, files, false, true), inventory);
+    assert.equal(attempted, true);
+    released.resolve();
+    assert.equal((await contender as NodeJS.ErrnoException | null)?.code, "EEXIST");
+  } finally {
+    released.resolve(); await contender;
+    statMock.mock.restore(); syncMock.mock.restore();
+  }
+  assert.deepEqual(await verifyDeploymentFiles(output, true), inventory);
+  assert.equal((await readdir(output)).includes(".publication-lock"), false);
+});
+
+test("substituted publication lock is preserved and cannot acknowledge READY", async context => {
+  const root = await temporary(); context.after(() => rm(root, { recursive: true, force: true }));
+  const output = join(root, "bundle"), lockPath = join(output, ".publication-lock"), held = join(root, "held-lock");
+  const probe = await open(join(root, "probe"), "wx"), prototype = Object.getPrototypeOf(probe);
+  const sync = probe.sync, descriptorStat = probe.stat; await probe.close();
+  let attacked = false;
+  const syncMock = context.mock.method(prototype, "sync", async function (this: FileHandle) {
+    const info = await descriptorStat.call(this);
+    const inventory = !attacked && info.isFile() ? await stat(join(output, "inventory.json")).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { throw error; }
+      return null;
+    }) : undefined;
+    if (inventory && info.dev === inventory.dev && info.ino === inventory.ino) {
+      attacked = true;
+      renameSync(lockPath, held);
+      await writeFile(lockPath, "foreign lock", { flag: "wx", mode: 0o600 });
+    }
+    return sync.call(this);
+  });
+  try {
+    await assert.rejects(publishDeploymentFiles(output, { "result.json": deploymentBytes({ broadcastAllowed: false }) }, false, true), /PUBLICATION_LOCK_IDENTITY/);
+    assert.equal(attacked, true);
+  } finally { syncMock.mock.restore(); }
+  assert.equal(await readFile(lockPath, "utf8"), "foreign lock");
+  assert.equal(await readFile(held, "utf8"), "");
+  await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
+  await assert.rejects(verifyDeploymentFiles(output), /INVENTORY_FILES/);
 });
 
 test("present READY rejects malformed, inventory-drifted, symlink and hardlinked markers even when optional", async context => {

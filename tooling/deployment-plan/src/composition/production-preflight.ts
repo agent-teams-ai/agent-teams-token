@@ -7,10 +7,12 @@ import { parseProductionAttempt, parseProductionExpectations, parseProductionObs
 
 function parse(value: string): unknown { return parseProductionJsonWithoutDuplicates(new TextEncoder().encode(value)); }
 function options(args: readonly string[]): Map<string, string> | undefined {
-  const allowed = ["--prepared", "--expectations", "--observations", "--attempt-state", "--candidate-revision", "--repository-root"];
+  const required = ["--prepared", "--expectations", "--observations", "--attempt-state"];
+  const allowed = [...required, "--candidate-revision", "--repository-root"];
   if (args.length !== 8 && args.length !== 12) {return undefined;}
   const result = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) { if (!allowed.includes(args[i]!) || !args[i + 1] || result.has(args[i]!)) {return undefined;} result.set(args[i]!, args[i + 1]!); }
+  if (!required.every(flag => result.has(flag))) {return undefined;}
   return result.size === 4 || (result.size === 6 && result.has("--candidate-revision") && result.has("--repository-root")) ? result : undefined;
 }
 const output = (value: unknown, code: number): void => { process.stdout.write(`${JSON.stringify(value)}\n`); process.exitCode = code; };

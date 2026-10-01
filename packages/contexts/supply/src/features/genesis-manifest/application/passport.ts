@@ -130,7 +130,7 @@ function observedAssemblyPassport(manifest: ObservedAssemblyManifest, observatio
     .filter(name => contract.immutableValues[name] !== undefined).map(name => ({ capability: `${contract.id}.${name.toLowerCase()}`, chain: "1 (synthetic loopback)",
       controlled: contract.predictedAddress, expected: `0x${contract.immutableValues[name]!.slice(-40)}`,
       observed: `0x${contract.observed.getters[name === "INITIAL_CCIP_ADMIN" ? "getCCIPAdmin" : name]!.slice(-40)}`, pending: null,
-      mechanism: "immutable" as const, power: name === "BENEFICIARY" ? "claim vested entitlement" : "configured immutable control",
+      mechanism: "immutable" as const, power: name === "BENEFICIARY" ? "claim vested entitlement" : name === "INITIAL_CCIP_ADMIN" ? "initial CCIP administration" : "configured immutable control",
       limitation: "Owned synthetic local observation; actual production deployment unavailable", evidence: manifest.evidenceSha256 })));
   for (const safe of manifest.authority) {
     entries.push({ capability: `custody.safe.${manifest.configuration.custodySafes.find(c => c.address === safe.address)!.id}`, chain: "1 (synthetic loopback)",
@@ -140,10 +140,16 @@ function observedAssemblyPassport(manifest: ObservedAssemblyManifest, observatio
   const markdown = ["# AGTMAI token passport", "", "- Deployment status: `synthetic-local-observation`", "- Broadcast allowed: `false`",
     `- Manifest digest: \`${manifestSha256}\``, "- Selected test-only policy; production configuration and approval unavailable.",
     "- Chain ID 1 is synthetic owned loopback evidence. Actual production deployment unavailable.", "", manifest.packageTiming, "",
+    "## Readiness", "", `- Observation interval: ${observations.observedAt}–${observations.validUntil}`,
+    ...(observations.unresolved ?? []).toSorted().map(x => `- Unresolved: ${escape(x)}`),
+    "- Synthetic local observation: observed owned loopback. Actual production deployment: unavailable.", "",
     "## Purpose policies", "", ...manifest.facts.purposeVaults.map(p => `- ${escape(p.allocationId)}: recipient \`${p.recipient}\`; opens ${p.opensAt}; window ${p.windowSeconds}; gross cap ${p.rollingCapBaseUnits}.`),
     "", manifest.facts.disclosure, "", "## Offline source-verification inputs", "", ...manifest.contracts.map(c =>
       `- ${escape(c.id)}: predicted \`${c.predictedAddress}\`; observed \`${c.observed.address}\`; \`${c.fullyQualifiedName}\`; compiler input \`${c.compilerInputSha256}\`; materialized runtime \`${c.materializedRuntimeHash}\`.`),
     "", "Nested founder creation uses its parent receipt and child nonce 1; its gas is included in the parent. No explorer submission or source-verification claim.",
+    "", "## Authority registry", "",
+    "Expected authorities come from immutable construction; observed values are owned synthetic local evidence. Actual production authority is unavailable.", "",
+    ...entries.map(e => `- ${escape(e.capability)} on ${escape(e.chain)}: power ${escape(e.power)}; expected ${escape(e.expected ?? "unresolved")}; observed ${escape(e.observed ?? "unresolved")}; ${escape(e.limitation)}.`),
     "", "## Assembly gas (wei; local fees)", "", "| Operation | Estimate | Limit | Base fee | Priority | Max fee | Gas used | Effective price | Cost |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...manifest.gas.map(g => `| ${g.id} | ${g.gasEstimate} | ${g.gasLimit} | ${g.baseFeePerGas} | ${g.maxPriorityFeePerGas} | ${g.maxFeePerGas} | ${g.gasUsed} | ${g.effectiveGasPrice} | ${g.observedCostWei} |`), "",
     `Worst-case assembly: ${manifest.worstCaseWei} wei. Observed assembly: ${manifest.observedWei} wei.`,

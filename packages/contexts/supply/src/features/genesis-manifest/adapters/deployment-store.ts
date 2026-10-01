@@ -80,8 +80,20 @@ async function exclusiveOrMatch(path: string, bytes: Uint8Array, resume: boolean
     if (sha256(await readDeploymentFile(path)) !== sha256(bytes)) { integrity("RESUME_MISMATCH"); }
   }
 }
+type PublicationLockIdentity = { readonly dev: number; readonly ino: number };
+async function verifyPublicationLock(directory: string, owned: PublicationLockIdentity): Promise<void> {
+  const named = await lstat(join(directory, ".publication-lock"));
+  if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1 || named.uid !== process.getuid?.()
+    || (named.mode & 0o777) !== 0o600 || named.dev !== owned.dev || named.ino !== owned.ino) { io("PUBLICATION_LOCK_IDENTITY"); }
+}
+async function verifyOwnedPublication(directory: string, requireReady: boolean, lockIdentity: PublicationLockIdentity): Promise<DeliveryInventory> {
+  await verifyPublicationLock(directory, lockIdentity);
+  const inventory = await verifyDeploymentInventory(directory, requireReady, lockIdentity);
+  await verifyPublicationLock(directory, lockIdentity);
+  return inventory;
+}
 
-/** Inventory binds the payload; optional READY binds the verified inventory after publication cleanup. Retry never repeats transactions. */
+/** READY commits under exclusion; consumers accept it only after the publication descriptors close and the owned lock is removed. Retry never repeats transactions. */
 export async function publishDeploymentFiles(directory: string, files: Readonly<Record<string, Uint8Array>>, resume = false, ready = false): Promise<DeliveryInventory> {
   const names = Object.keys(files).toSorted();
   if (!names.length || names.length > 64 || names.some(name => !leaf(name) || name === "inventory.json" || files[name]!.length > FILE_LIMIT)) { io("PUBLICATION_FILES"); }
@@ -95,7 +107,9 @@ export async function publishDeploymentFiles(directory: string, files: Readonly<
   const lockPath = join(target, ".publication-lock");
   const inventory: DeliveryInventory = { schema: "agtmai-delivery-inventory-v1", files: names.map(name => ({ name, sha256: sha256(files[name]!), bytes: files[name]!.length })) };
   const lock = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  let lockIdentity: PublicationLockIdentity | undefined;
   try {
+    lockIdentity = await lock.stat();
     const existing = await readdir(target);
     if (existing.some(name => !names.includes(name) && name !== "inventory.json" && name !== ".publication-lock" && !(ready && name === "READY"))) { integrity("UNEXPECTED_FILE"); }
     for (const name of [...names, "inventory.json"]) {
@@ -104,23 +118,27 @@ export async function publishDeploymentFiles(directory: string, files: Readonly<
       await syncDirectory(target);
     }
     await syncDirectory(dirname(target));
+    if (ready) {
+      await verifyOwnedPublication(target, false, lockIdentity);
+      await exclusiveOrMatch(join(target, "READY"), new TextEncoder().encode(`${sha256(deploymentBytes(inventory))}\n`), resume);
+      await syncDirectory(target);
+      await verifyOwnedPublication(target, true, lockIdentity);
+    }
   } finally {
     await lock.close();
+    await verifyPublicationLock(target, lockIdentity ?? io("PUBLICATION_LOCK_IDENTITY"));
     // Preserve a crash lock; only a normal completion/error releases our live-process lock.
     await unlink(lockPath);
     await syncDirectory(target);
-  }
-  if (ready) {
-    await verifyDeploymentFiles(target);
-    await exclusiveOrMatch(join(target, "READY"), new TextEncoder().encode(`${sha256(deploymentBytes(inventory))}\n`), resume);
-    await syncDirectory(target);
-    await verifyDeploymentFiles(target, true);
   }
   return inventory;
 }
 
 /** A present READY must always validate; final-success consumers additionally require it. */
 export async function verifyDeploymentFiles(directory: string, requireReady = false): Promise<DeliveryInventory> {
+  return verifyDeploymentInventory(directory, requireReady);
+}
+async function verifyDeploymentInventory(directory: string, requireReady: boolean, lockIdentity?: PublicationLockIdentity): Promise<DeliveryInventory> {
   const bytes = await readDeploymentFile(join(directory, "inventory.json"));
   let inventory: DeliveryInventory;
   try { inventory = JSON.parse(new TextDecoder().decode(bytes)) as DeliveryInventory; } catch { return integrity("INVENTORY_INVALID"); }
@@ -131,7 +149,7 @@ export async function verifyDeploymentFiles(directory: string, requireReady = fa
   const names = inventory.files.map(f => f.name).toSorted();
   const entries = (await readdir(directory)).toSorted(), ready = entries.includes("READY");
   if (requireReady && !ready) { integrity("READY_MISSING"); }
-  if (JSON.stringify(entries) !== JSON.stringify([...names, "inventory.json", ...(ready ? ["READY"] : [])].toSorted())) { io("INVENTORY_FILES"); }
+  if (JSON.stringify(entries) !== JSON.stringify([...names, "inventory.json", ...(ready ? ["READY"] : []), ...(lockIdentity ? [".publication-lock"] : [])].toSorted())) { io("INVENTORY_FILES"); }
   if (sha256(bytes) !== sha256(deploymentBytes(inventory))) { integrity("INVENTORY_NONCANONICAL"); }
   for (const file of inventory.files) {
     const content = await readDeploymentFile(join(directory, file.name));

@@ -148,12 +148,12 @@
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts",
-      "sha256": "0e6724642cd1c75a477fc4d14281a2efad465adc644ca5a3b782348dbaff119a",
+      "sha256": "b99be4491166232946b54478f8fb379ac0058251d0ae6be8ba63ad196a13f047",
       "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
     },
     {
       "path": "packages/contexts/supply/src/features/genesis-manifest/application/passport.ts",
-      "sha256": "0c43e365c7fe7a54d03f1bbae342075073cf47e72af801e10a9a7e16c1ce839b",
+      "sha256": "d4fbc56ee473bdeb99ffd991014f90b72893646c55aad130ec305a52bab2eaa4",
       "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
     },
     {

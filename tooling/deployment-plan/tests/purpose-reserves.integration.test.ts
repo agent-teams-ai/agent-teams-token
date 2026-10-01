@@ -8,7 +8,8 @@ import { localPurposeCompilerPorts, readLocalPurposeArtifactPins, verifyDeployme
 import { encodeAllocationId, sha256 } from "@agent-teams/supply/genesis-manifest";
 import { deriveCreateAddress } from "../src/domain/identity.ts";
 import { parseProductionObservation } from "../src/adapters/production-inputs.ts";
-import { custodySelector, custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
+import { qualifySafeArtifacts, type SafeArtifactPins } from "../../testnet-ccip/src/adapters/safe-artifacts.ts";
+import { custodySafeSetupOwners, verifyCustodySafeSetupEvent, custodySelector, custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
 import { setupLocalSafes, word } from "./helpers/local-safe.ts";
 import { runLocalAssemblyProof, reconstructLocalAssemblyPackage, type LocalAssemblyScenarioContext } from "../../../scripts/deployment/local-execution-proof.ts";
 import { removeOwnedRunDirectory } from "../../local-evm/run-lease.ts";
@@ -361,8 +362,54 @@ test(cleanupUncertain ? "completed full assembly with unresolved custody cleanup
   assert.equal(Object.hasOwn(manifest.contracts[9].observed, "transactionHash"), false);
   assert.equal(manifest.approval, null);
   assert.match(passport.markdown, /synthetic owned loopback/);
+  const publishedPassport = await readFile(join(output, "token-passport.md"), "utf8");
+  assert.equal(publishedPassport, passport.markdown);
+  assert.ok(publishedPassport.includes(`## Readiness\n\n- Observation interval: ${manifest.genesis.timestamp}–${manifest.genesis.timestamp}`));
+  assert.match(publishedPassport, /## Authority registry/);
+  assert.match(publishedPassport, /actual production deployment unavailable/);
+  assert.deepEqual(passport.authorityRegistry.entries.map((e: { capability: string }) => e.capability).toSorted(), [
+    "token-create.initial_ccip_admin", "controller-create.controller", "founder-vault.beneficiary", "founder-vault.controller",
+    ...purposes.map(id => `purpose-${id}-create.controller`), "custody.safe.project-controller", "custody.safe.founder-beneficiary",
+  ].toSorted());
+  const project = report.authority[0].address, beneficiary = report.authority[1].address;
+  assert.ok(publishedPassport.includes(`token-create.initial\\_ccip\\_admin on 1 (synthetic loopback): power initial CCIP administration; expected ${project}; observed ${project};`));
+  assert.ok(publishedPassport.includes(`founder-vault.beneficiary on 1 (synthetic loopback): power claim vested entitlement; expected ${beneficiary}; observed ${beneficiary};`));
+  for (const id of ["controller-create", "founder-vault", ...purposes.map(p => `purpose-${p}-create`)]) {
+    assert.ok(publishedPassport.includes(`${id}.controller on 1 (synthetic loopback): power configured immutable control; expected ${project}; observed ${project};`), id);
+  }
+  for (const [index, id] of ["project-controller", "founder-beneficiary"].entries()) {
+    const safe = report.authority[index];
+    assert.ok(publishedPassport.includes(`custody.safe.${id} on 1 (synthetic loopback): power Safe CALL control; expected ${safe.address}; observed ${safe.address}; Actual local threshold 2 of 3; nonce ${safe.nonce}; empty modules, guard and fallback; production authority unavailable.`), id);
+  }
   const prepared = JSON.parse(await readFile(join(output, "prepared-local-purpose-genesis.json"), "utf8"));
+  assert.equal(prepared.genesisAllocationHash.length, 66);
+  assert.equal(manifest.contracts[0].immutableValues.GENESIS_ALLOCATION_HASH, prepared.genesisAllocationHash);
+  assert.equal(manifest.contracts[0].observed.getters.GENESIS_ALLOCATION_HASH, prepared.genesisAllocationHash);
   assert.throws(() => parseProductionObservation(report), /PREFLIGHT_/);
+  // Admit official bytes separately; derive deployment/setup provenance from actual bootstrap captures, never from authority observations.
+  const safeDirectory = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY!, selectedSafe = process.env.AGTMAI_SAFE_PINS_SHA256 as Hex;
+  assert.equal(sha256(await readFile("tooling/testnet-ccip/artifacts/safe-1.4.1-pins.json")), selectedSafe);
+  const safePins = JSON.parse(await readFile(join(safeDirectory, "pins.json"), "utf8")) as SafeArtifactPins;
+  const safeBytes = { proxy: await readFile(join(safeDirectory, "SafeProxy.json")), singleton: await readFile(join(safeDirectory, "Safe.json")), buildInfo: await readFile(join(safeDirectory, "build-info.json")) };
+  const singletonInitcode = JSON.parse(safeBytes.singleton.toString()).bytecode as Hex;
+  const singletonCreates = report.bootstrap.filter((tx: { to: Hex | null; input: Hex }) => tx.to === null && tx.input === singletonInitcode);
+  assert.equal(singletonCreates.length, 1);
+  const singletonCreate = singletonCreates[0];
+  assert.equal(singletonCreate.status, "0x1"); assert.equal(singletonCreate.sender, report.roles.bootstrapFunderRelayer); assert.equal(singletonCreate.chainId, "1");
+  const singletonAddress = deriveCreateAddress(singletonCreate.sender, BigInt(singletonCreate.nonce));
+  const safeProfile = qualifySafeArtifacts(safePins, selectedSafe, safeBytes, singletonAddress);
+  const proxyInitcode = `${JSON.parse(safeBytes.proxy.toString()).bytecode}${word(BigInt(singletonAddress))}`;
+  const safeDeployments = prepared.configuration.custodySafes.map((configured: { address: Hex; owners: Hex[] }) => {
+    const creates = report.bootstrap.filter((tx: { to: Hex | null; input: Hex; sender: Hex; nonce: string }) => tx.to === null && tx.input === proxyInitcode && deriveCreateAddress(tx.sender, BigInt(tx.nonce)) === configured.address);
+    assert.equal(creates.length, 1); assert.equal(creates[0].status, "0x1"); assert.equal(creates[0].sender, report.roles.bootstrapFunderRelayer); assert.equal(creates[0].chainId, "1");
+    const setups = report.bootstrap.filter((tx: { to: Hex | null; input: Hex }) => tx.to === configured.address && tx.input.startsWith(custodySelector("setup(address[],uint256,address,bytes,address,address,uint256,address)")));
+    assert.equal(setups.length, 1); const setup = setups[0];
+    assert.equal(setup.status, "0x1"); assert.equal(setup.sender, report.roles.bootstrapFunderRelayer); assert.equal(setup.chainId, "1");
+    assert.deepEqual(custodySafeSetupOwners(configured.address, setup.input).toSorted(), configured.owners.toSorted());
+    verifyCustodySafeSetupEvent(configured.address, setup.sender, configured.owners, setup.logs);
+    return { address: configured.address, setupTransactionHash: setup.transactionHash as Hex };
+  });
+  const authenticatedSafe = { singletonAddress, proxyCodeHash: safeProfile.proxyRuntimeKeccak256, singletonCodeHash: safeProfile.singletonRuntimeKeccak256, deployments: safeDeployments };
   for (const change of [
     (o: typeof report.genesis) => { o.operations[0].observedCostWei = (BigInt(o.operations[0].observedCostWei) + 1n).toString(); },
     (o: typeof report.genesis) => { o.contracts[9].runtime = o.contracts[9].runtime.slice(0, -2) + (o.contracts[9].runtime.endsWith("00") ? "11" : "00"); },
@@ -370,13 +417,13 @@ test(cleanupUncertain ? "completed full assembly with unresolved custody cleanup
     (o: typeof report.genesis) => { o.contracts[9].transactionHash = o.operations[1].transactionHash; },
   ]) {
     const observation = structuredClone(report.genesis); change(observation);
-    assert.throws(() => materializeObservedAssemblyManifest(prepared, observation, localPurposeCompilerPorts), /DEPLOYMENT_EVIDENCE_ASSEMBLY_/);
+    assert.throws(() => materializeObservedAssemblyManifest(prepared, observation, { ...localPurposeCompilerPorts, authenticatedSafe }), /DEPLOYMENT_EVIDENCE_ASSEMBLY_/);
   }
   const candidate = { repositoryRoot: resolve("."), revision: report.candidateRevision };
   const ready = await readFile(join(output, "READY")); await rm(join(output, "READY"));
-  try { await assert.rejects(reconstructLocalAssemblyPackage(output, candidate, prepared, manifest), /READY_MISSING/); }
+  try { await assert.rejects(reconstructLocalAssemblyPackage(output, candidate, prepared, manifest, { authenticatedSafe }), /READY_MISSING/); }
   finally { await writeFile(join(output, "READY"), ready, { flag: "wx", mode: 0o600 }); }
-  await reconstructLocalAssemblyPackage(output, candidate, prepared, manifest);
+  await reconstructLocalAssemblyPackage(output, candidate, prepared, manifest, { authenticatedSafe });
   const observations = { schema: "agtmai-deployment-observations-v1" as const, observedAt: manifest.genesis.timestamp, validUntil: manifest.genesis.timestamp };
   checkPassport(manifest, observations, passport, { sha256 });
   const tampered = structuredClone(passport); tampered.markdown = tampered.markdown.replace(manifest.observedWei, "0");
