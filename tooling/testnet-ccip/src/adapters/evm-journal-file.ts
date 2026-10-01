@@ -38,7 +38,7 @@ export function createJournalFile<RecordType extends object = EvmJournalRecord>(
     async read(): Promise<RecordType | null> {
       assertHeld();
       let handle;
-      try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
+      try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") { return null; }
         throw error;

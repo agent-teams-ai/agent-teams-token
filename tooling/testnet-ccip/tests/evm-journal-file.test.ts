@@ -3,8 +3,41 @@ import { test } from "node:test";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createJournalFile } from "../src/adapters/evm-journal-file.ts";
 import type { EvmJournalRecord } from "../src/application/evm-journal.ts";
+
+test("writerless private FIFO is rejected promptly and releases the journal lock", {
+  skip: process.platform === "win32",
+}, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agtmai-journal-fifo-test-"));
+  const run = promisify(execFile);
+  try {
+    const path = join(dir, "tx.json");
+    await run("mkfifo", ["-m", "600", path], { timeout: 5_000, killSignal: "SIGKILL" });
+    const fifo = await stat(path);
+    assert.equal(fifo.isFIFO(), true);
+    assert.equal(fifo.mode & 0o777, 0o600);
+    // Isolate the open: the old blocking reader must be killed externally, since
+    // an in-process timeout cannot cancel its pending filesystem operation.
+    await run(process.execPath, ["--input-type=module", "--eval", `
+      import assert from "node:assert/strict";
+      import { stat } from "node:fs/promises";
+      const { createJournalFile } = await import(process.argv[1]);
+      const path = process.argv[2];
+      const store = createJournalFile(path);
+      await assert.rejects(store.exclusive(() => store.read()), /private regular file/);
+      await assert.rejects(stat(path + ".lock"), { code: "ENOENT" });
+      await store.exclusive(async () => {});
+      await createJournalFile(path).exclusive(async () => {});
+    `, new URL("../src/adapters/evm-journal-file.ts", import.meta.url).href, path], {
+      timeout: 5_000, killSignal: "SIGKILL",
+    });
+    assert.equal((await stat(path)).isFIFO(), true);
+    await assert.rejects(stat(`${path}.lock`), { code: "ENOENT" });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 
 test("durable private journal survives reopen and excludes a second writer", async () => {
   const dir = await mkdtemp(join(tmpdir(), "agtmai-journal-test-"));
