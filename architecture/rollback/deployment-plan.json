@@ -60,6 +60,7 @@
     "tooling/deployment-plan/tests/production-execution.test.ts",
     "tooling/deployment-plan/tests/production-guards.test.ts",
     "tooling/deployment-plan/tests/production-native-policy.test.ts",
+    "tooling/deployment-plan/tests/production-preflight-arguments.test.ts",
     "tooling/deployment-plan/tests/proof-custody.test.ts",
     "tooling/deployment-plan/tests/purpose-reserves.integration.test.ts",
     "tooling/deployment-plan/tests/raw-artifact-fixture.ts",
