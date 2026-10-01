@@ -206,6 +206,12 @@ export class EvidenceRecorder {
 
   get processesQuiescent() {return this.#processesQuiescent;}
 
+  #recordInvocationFailure(error, failures) {
+    if (error.result !== undefined) {failures.push(error); return error.result;}
+    this.#processesQuiescent = false;
+    return { error, status: null, signal: null, targetStatus: { quiescent: false } };
+  }
+
   prepareSurvivorDirectory(survivor) {
     if (survivor !== "slither" && survivor !== "local-solana") {
       throw new Error("ROLLBACK_EVIDENCE_SURVIVOR_INVALID");
@@ -267,6 +273,7 @@ export class EvidenceRecorder {
     let result;
     let invocation;
     let primaryFailure;
+    const invocationFailures = [];
     try {
       stdoutDescriptor = mutateEvidenceDirectory(
         this.target,
@@ -291,10 +298,7 @@ export class EvidenceRecorder {
           stdio: [options.input === undefined ? "ignore" : "pipe", stdoutDescriptor, stderrDescriptor],
           timeoutMs: options.timeout ?? 600_000,
         });
-      } catch (error) {
-        this.#processesQuiescent = false;
-        result = { error, status: null, signal: null, targetStatus: { quiescent: false } };
-      }
+      } catch (error) {result = this.#recordInvocationFailure(error, invocationFailures);}
     } catch (error) {
       primaryFailure = error;
     }
@@ -303,7 +307,7 @@ export class EvidenceRecorder {
     const descriptors = [stdoutDescriptor, stderrDescriptor];
     stdoutDescriptor = undefined;
     stderrDescriptor = undefined;
-    const finalizationFailures = closeCommandLogDescriptors(descriptors);
+    const finalizationFailures = [...invocationFailures, ...closeCommandLogDescriptors(descriptors)];
     if (primaryFailure !== undefined) {
       throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
     }

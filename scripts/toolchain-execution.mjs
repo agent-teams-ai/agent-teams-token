@@ -344,8 +344,8 @@ function removeInvocation(invocation, quiescent) {
     assertPrivateDirectory(invocation.root, invocation.rootIdentity);
     rmdirSync(invocation.root);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    throw new Error(`TOOLCHAIN_INVOCATION_CLEANUP_UNCERTAIN invocation=${invocation.root}`, { cause: error });
   }
 }
 
@@ -586,7 +586,7 @@ function withInvocation(entries, platform, execute) {
   const invocation = createInvocation(entries, platform);
   let quiescent = false;
   let outcome;
-  let failure;
+  const failures = [];
   const validateTargets = () => {
     for (const entry of entries) {
       assertOpenedFileStillMatches(entry.opened, entry.expectedHash, "TOOLCHAIN_FILE_IDENTITY_CHANGED");
@@ -604,15 +604,30 @@ function withInvocation(entries, platform, execute) {
     outcome = execute({ invocation, targets });
     quiescent = outcome.targetStatus.quiescent;
   } catch (error) {
-    failure = error;
+    failures.push(error);
   }
-  try {validateTargets();} catch (error) {failure = error;}
-  const removed = removeInvocation(invocation, quiescent);
-  for (const file of invocation.files) {try {closeSync(file.fd);} catch {}}
-  if (quiescent && !removed) {
-    throw typedError("TOOLCHAIN_INVOCATION_CLEANUP_UNCERTAIN", `invocation=${invocation.root}`);
+  try {validateTargets();} catch (error) {failures.push(error);}
+  try {
+    if (!removeInvocation(invocation, quiescent) && quiescent) {
+      throw typedError("TOOLCHAIN_INVOCATION_CLEANUP_UNCERTAIN", `invocation=${invocation.root}`);
+    }
+  } catch (error) {failures.push(error);}
+  // A rejected close may have consumed/reused the FD. Disarm all owners
+  // before attempting every close once; never retry an uncertain number.
+  const files = invocation.files;
+  invocation.files = [];
+  for (const file of files) {
+    try {closeSync(file.fd);} catch (error) {failures.push(error);}
   }
-  if (failure) {throw failure;}
+  if (failures.length > 0) {
+    const failure = failures.length === 1 ? failures[0] : new AggregateError(
+      failures, `TOOLCHAIN_INVOCATION_FINALIZATION_FAILED invocation=${invocation.root}`, { cause: failures[0] },
+    );
+    // Cleanup uncertainty cannot erase an already observed process result.
+    // Callers still reject the failure; rollback can record the separate facts.
+    if (outcome !== undefined) {failure.result = outcome;}
+    throw failure;
+  }
   return outcome;
 }
 

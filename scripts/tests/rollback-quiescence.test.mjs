@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +11,9 @@ import { captureCleanupTreeSnapshot, createCleanupHandle } from "../rollback/run
 import { finalizeRollbackTemporaryParent } from "../rollback/slices/gate-execution.mjs";
 import { createRollbackWorkspaceHandle } from "../rollback/slices/workspace-handle.mjs";
 import * as execution from "../toolchain-execution.mjs";
+import { containsFailure, invocationFault } from "./toolchain-invocation-fault-fixture.mjs";
+import { digest } from "./toolchain-fixtures.mjs";
+import { injectedUncertainClose } from "./rollback-descriptor-close-fixture.mjs";
 
 function fixture(context) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agtmai-quiescence-test-")));
@@ -178,3 +182,152 @@ test("stopped supervisor with captured pipes returns within its outer kill bound
   });
   assert.ok(Date.now() - start < 6000, "captured streams held the outer wait open");
 });
+
+const lifecycleCases = [
+  { name: "success", script: "process.exit(0)", exitCode: 0, signal: null, spawnError: null },
+  { name: "exit23", script: "process.exit(23)", exitCode: 23, signal: null, spawnError: null },
+  { name: "signal", script: "process.kill(process.pid, 'SIGTERM')", exitCode: null, signal: "SIGTERM", spawnError: null },
+  { name: "timeout", script: "setInterval(() => {}, 1000)", exitCode: null, signal: "SIGTERM", spawnError: "ETIMEDOUT" },
+  { name: "spawn error", exitCode: null, signal: null, spawnError: "ENOENT" },
+];
+
+function assertObserved(entry, expected) {
+  assert.equal(entry.exitCode, expected.exitCode);
+  assert.equal(entry.signal, expected.signal);
+  assert.equal(entry.spawnError, expected.spawnError);
+  assert.equal(entry.timedOut, expected.spawnError === "ETIMEDOUT");
+  assert.equal(entry.processesQuiescent, true);
+  assert.equal(entry.status, "failed");
+}
+
+for (const fault of [
+  { name: "close before", close: "before" },
+  { name: "close after consumption and reuse", close: "after" },
+  { name: "cleanup npmrc open", cleanup: true },
+  { name: "cleanup plus close", cleanup: true, close: "before" },
+]) {
+  for (const expected of lifecycleCases.filter((entry) => fault.cleanup || entry.script?.includes("process.exit"))) {
+    test(`invocation finalization ${fault.name}: evidence preserves ${expected.name}`, (context) => {
+      const value = fixture(context);
+      const injection = invocationFault(fault);
+      try {
+        let failure;
+        try {
+          value.recorder.run("test", "command", expected.script ? process.execPath : join(value.root, "missing"),
+            expected.script ? ["-e", "process.stdout.write('out'); process.stderr.write('err'); " + expected.script] : [],
+            { cwd: value.root, env: {}, timeout: expected.name === "timeout" ? 300 : 5000 });
+        } catch (error) { failure = error; }
+        assert.equal(injection.failures.length, fault.cleanup && fault.close ? 2 : 1);
+        injection.assertCloses();
+        const [entry] = value.recorder.document.commands;
+        context.diagnostic(`observed exit=${entry.exitCode} quiescent=${entry.processesQuiescent} status=${entry.status}; all owned closes attempted once`);
+        assertObserved(entry, expected);
+        assert.ok(failure, "cleanup failure must reject even a successful command");
+        assert.equal(failure.message, "ROLLBACK_COMMAND_FINALIZATION_FAILED");
+        for (const error of injection.failures) { assert.ok(containsFailure(failure, error)); }
+        if (expected.name !== "success") {
+          assert.equal(failure.cause, failure.errors[0]);
+          assert.match(failure.cause.message, /ROLLBACK_COMMAND_FAILED/u);
+          assert.match(failure.cause.message, new RegExp(`status=${expected.exitCode}`, "u"));
+        }
+        if (fault.cleanup && fault.close) {
+          const finalization = failure.errors[expected.name === "success" ? 0 : 1];
+          assert.equal(finalization.errors[0].cause, injection.failures[0], "cleanup failure precedes close failure");
+          assert.equal(finalization.errors[1], injection.failures[1]);
+        }
+        assert.equal(value.recorder.processesQuiescent, true, "filesystem uncertainty cannot erase proven quiescence");
+        const persisted = JSON.parse(readFileSync(join(value.root, "diagnostics.json"), "utf8"));
+        assertObserved(persisted.commands[0], expected);
+        const out = expected.script ? "out" : "";
+        const err = expected.script ? "err" : "";
+        assert.equal(readFileSync(join(value.root, entry.stdout.path), "utf8"), out);
+        assert.equal(readFileSync(join(value.root, entry.stderr.path), "utf8"), err);
+        assert.equal(entry.stdout.sha256, createHash("sha256").update(out).digest("hex"));
+        assert.equal(entry.stderr.sha256, createHash("sha256").update(err).digest("hex"));
+        assert.equal(existsSync(injection.root), Boolean(fault.cleanup), "retain uncertain filesystem custody");
+      } finally { injection.release(); }
+    });
+  }
+}
+
+test("invocation finalization preserves shared capture bytes and observed result", (context) => {
+  const value = fixture(context);
+  const injection = invocationFault({ cleanup: true, close: "after" });
+  const bytes = Buffer.from([0, 255, 128, 13, 10]);
+  try {
+    assert.throws(() => execution.executeSupervisedCommand({
+      command: process.execPath,
+      args: ["-e", "const b=require('node:fs').readFileSync(0); process.stdout.write(b); process.stderr.write(b); process.exit(23)"],
+      cwd: value.root, env: {}, input: bytes, encoding: null, timeoutMs: 5000,
+    }), (error) => {
+      assert.equal(error.result.status, 23);
+      assert.equal(error.result.signal, null);
+      assert.equal(error.result.error, undefined);
+      assert.equal(error.result.targetStatus.quiescent, true);
+      assert.deepEqual(error.result.stdout, bytes);
+      assert.deepEqual(error.result.stderr, bytes);
+      assert.ok(containsFailure(error, injection.failures[0]));
+      assert.ok(containsFailure(error, injection.failures[1]));
+      return true;
+    });
+    injection.assertCloses();
+  } finally { injection.release(); }
+});
+
+test("invocation finalization orders command, invocation, log close and reporting failures", (context) => {
+  const value = fixture(context);
+  const reporting = new Error("injected reporting failure");
+  value.recorder.flush = () => { throw reporting; };
+  const injection = invocationFault({ cleanup: true, close: "before" });
+  const logClose = injectedUncertainClose(0);
+  try {
+    assert.throws(() => run("evidence", value,
+      "process.stdout.write('out'); process.stderr.write('err'); process.exit(23)", { timeout: 5000 }), (error) => {
+      assert.equal(error.message, "ROLLBACK_COMMAND_FINALIZATION_FAILED");
+      assert.equal(error.errors.length, 4);
+      assert.equal(error.cause, error.errors[0]);
+      assert.match(error.cause.message, /ROLLBACK_COMMAND_FAILED.*status=23/u);
+      assert.match(error.cause.message, /out\nerr/u);
+      assert.equal(error.errors[1].errors[0].cause, injection.failures[0]);
+      assert.equal(error.errors[1].errors[1], injection.failures[1]);
+      assert.equal(error.errors[2].code, "EINTR");
+      assert.equal(error.errors[3], reporting);
+      return true;
+    });
+    injection.assertCloses();
+    assert.equal(logClose.calls.length, 2, "both log closes attempted once despite invocation failures");
+    assert.equal(new Set(logClose.calls).size, 2);
+    assert.ok(fstatSync(logClose.reusedDescriptor()).isCharacterDevice());
+    assert.throws(() => fstatSync(logClose.calls[1]), { code: "EBADF" });
+    assertObserved(value.recorder.document.commands[0], lifecycleCases[1]);
+  } finally {
+    logClose.restore();
+    injection.release();
+    closeSync(logClose.reusedDescriptor());
+  }
+});
+
+for (const consumer of ["verified file", "opened node"]) {
+  for (const fault of [{ cleanup: true }, { close: "before" }, { close: "after" }]) {
+    test(`invocation finalization ${consumer} rejects ${JSON.stringify(fault)}`, (context) => {
+      const value = fixture(context);
+      const script = join(value.root, "tool");
+      writeFileSync(script, consumer === "verified file" ? "#!/bin/sh\nprintf verified\n" : "process.stdout.write('verified')",
+        { mode: 0o700 });
+      const scriptHash = digest(script);
+      const nodeHash = digest(process.execPath);
+      const injection = invocationFault(fault);
+      try {
+        assert.throws(() => consumer === "verified file"
+          ? execution.executeVerifiedFile({ path: script, expectedSha256: scriptHash })
+          : execution.executeOpenedNode({ node: { path: process.execPath, sha256: nodeHash },
+            script: { path: script, sha256: scriptHash }, args: [], timeoutMs: 5000 }), (error) => {
+          assert.ok(containsFailure(error, injection.failures[0]));
+          return true;
+        });
+        injection.assertCloses();
+        assert.equal(existsSync(injection.root), Boolean(fault.cleanup));
+      } finally { injection.release(); }
+    });
+  }
+}
