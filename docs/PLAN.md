@@ -2,7 +2,8 @@
 
 ## Full Ethereum assembly correction, 2026-10-01
 
-The owner accepted the exact-base critic's two-checkpoint implementation plan.
+The owner authorized the scoped E2E work. Implementation follows the exact-base
+critic's amended two-checkpoint plan; this does not approve production inputs.
 PR1 now implements Supply preparation of an explicitly versioned, unsigned
 production v2 package with six mandatory purpose policies, nine deployer CREATEs,
 the founder reserve's nested CREATE at nonce 1, and founder funding. Production

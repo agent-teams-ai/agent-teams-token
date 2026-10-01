@@ -147,16 +147,6 @@
       "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"
     },
     {
-      "path": "tooling/local-evm/process.ts",
-      "reason": "Independent Local EVM supervisor custody: durably register the actual Anvil child in its run lease before exposing identity or accepting parent acknowledgement; retain the five-argument surviving runner API and authenticated stop confirmation. No dependency on the removed deployment planner.",
-      "sha256": "fe71c2570ba7ba2457df33e82037e3af254e58dc85c5c5cca6fcebe2e6b83497"
-    },
-    {
-      "path": "tooling/local-evm/toolchain.ts",
-      "reason": "Independent Local EVM toolchain admission: authenticate the pinned Foundry archive as well as installed binaries for surviving runner and tests. No dependency on the removed deployment planner.",
-      "sha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e"
-    },
-    {
       "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
       "sha256": "a7571f4d3367dad5e3b93390362a5ad56255161ac66f3ca9700314966829b618",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
@@ -180,6 +170,16 @@
       "path": "packages/contexts/supply/tests/production-deployment.test.ts",
       "sha256": "f7516def6f9751689865c3df0bbbd431f0d9e599deb5fae83d692b593233d9ff",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "tooling/local-evm/process.ts",
+      "reason": "Independent Local EVM supervisor custody: durably register the actual Anvil child in its run lease before exposing identity or accepting parent acknowledgement; retain the five-argument surviving runner API and authenticated stop confirmation. No dependency on the removed deployment planner.",
+      "sha256": "fe71c2570ba7ba2457df33e82037e3af254e58dc85c5c5cca6fcebe2e6b83497"
+    },
+    {
+      "path": "tooling/local-evm/toolchain.ts",
+      "reason": "Independent Local EVM toolchain admission: authenticate the pinned Foundry archive as well as installed binaries for surviving runner and tests. No dependency on the removed deployment planner.",
+      "sha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e"
     }
   ],
   "survivingGates": [
