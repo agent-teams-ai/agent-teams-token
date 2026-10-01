@@ -138,7 +138,7 @@
     },
     {
       "path": "tooling/local-evm/process.ts",
-      "beforeSha256": "68adf527db058a8fbc153a5efb4f6488e20822577b38cac0d37dd9c63630eac5",
+      "beforeSha256": "fe71c2570ba7ba2457df33e82037e3af254e58dc85c5c5cca6fcebe2e6b83497",
       "afterSha256": "74c901f9b039f185bd306efa31d1fff566ab46ec98b7a75dd133ce1b83063bff"
     },
     {
