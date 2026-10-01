@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { syncBuiltinESMExports } from "node:module";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { EvidenceRecorder } from "../rollback/runtime/evidence.mjs";
 import * as execution from "../toolchain-execution.mjs";
@@ -18,6 +18,23 @@ function run(value, script) {
   return value.recorder.run("test", "command", process.execPath, ["-e", script], {cwd: value.root, env: {}, timeout: 200});
 }
 
+function registerInvocationCleanup(context, error) {
+  const path = / invocation=(.+)$/u.exec(error.message)?.[1];
+  assert.equal(typeof path, "string", "real failure must identify its retained invocation");
+  assert.equal(realpathSync(dirname(path)), realpathSync(tmpdir()));
+  assert.match(basename(path), /^agtmai-toolchain-exec-[A-Za-z0-9]+$/u);
+  const identity = lstatSync(path, { bigint: true });
+  assert.equal(identity.isDirectory(), true);
+  context.after(() => {
+    const current = lstatSync(path, { bigint: true });
+    assert.equal(current.isDirectory(), true);
+    assert.equal(current.dev, identity.dev);
+    assert.equal(current.ino, identity.ino);
+    rmSync(path, { recursive: true });
+    assert.equal(existsSync(path), false);
+  });
+}
+
 // Launch the real supervisor with a preload that causes an actual filesystem
 // exception, or kills it before it can write status. Never fabricate a result.
 function supervisorFault(value, source) {
@@ -30,7 +47,9 @@ function supervisorFault(value, source) {
   return () => { childProcess.spawnSync = original; syncBuiltinESMExports(); };
 }
 
-test("observed deadline survives a real post-timeout inspection exception", (context) => {
+test("observed deadline survives a real post-timeout inspection exception", {
+  skip: process.platform !== "linux" && "fault injects the Linux /proc inspection syscall",
+}, (context) => {
   const value = fixture(context);
   const restore = supervisorFault(value, `
     import fs from 'node:fs';
@@ -42,16 +61,19 @@ test("observed deadline survives a real post-timeout inspection exception", (con
   try {
     assert.throws(() => run(value,
       "process.stdout.write('out'); process.stderr.write('err'); setInterval(() => {}, 1000)"), (error) => {
+      registerInvocationCleanup(context, error.cause);
+      assert.match(error.message, /ROLLBACK_COMMAND_FAILED/u);
+      assert.equal(error.cause.code, "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN");
       const result = error.cause.result;
       assert.equal(result.targetStatus.timedOut, true);
       assert.equal(result.targetStatus.error, "ENOENT");
       assert.equal(result.targetStatus.signal, "SIGTERM");
       assert.equal(result.targetStatus.quiescent, false);
-      context.after(() => rmSync(error.cause.message.split("invocation=")[1], { recursive: true, force: true }));
       return true;
     });
     const [entry] = JSON.parse(readFileSync(join(value.root, "diagnostics.json"), "utf8")).commands;
     assert.equal(entry.timedOut, true);
+    assert.equal(entry.spawnError, "ETIMEDOUT");
     assert.equal(entry.processesQuiescent, false);
     assert.equal(value.recorder.processesQuiescent, false);
     assert.equal(entry.status, "failed");
@@ -69,6 +91,7 @@ test("missing supervisor status preserves real signal and bounded captures", (co
     assert.throws(() => execution.executeSupervisedCommand({
       command: process.execPath, cwd: value.root, env: {}, maxBuffer: 7, timeoutMs: 5000,
     }), (error) => {
+      registerInvocationCleanup(context, error);
       assert.equal(error.code, "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN");
       assert.equal(error.result.supervisorStatus.signal, "SIGKILL");
       assert.equal(error.result.supervisorStatus.status, null);
@@ -77,7 +100,6 @@ test("missing supervisor status preserves real signal and bounded captures", (co
       assert.equal(error.result.signal, null);
       assert.equal(error.result.stdout, "startup");
       assert.equal(error.result.stderr, "startup");
-      context.after(() => rmSync(error.message.split("invocation=")[1], { recursive: true, force: true }));
       return true;
     });
   } finally { restore(); }
