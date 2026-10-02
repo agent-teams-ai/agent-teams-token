@@ -1,5 +1,51 @@
 # AGTMAI release status
 
+## Current release status, 2026-10-02
+
+The full DEV-only local Ethereum assembly is complete for the merged source
+below. Mainnet is intentionally deferred by the owner; `broadcastAllowed: false`.
+The dated checkpoints below retain historical evidence and anchors. Their pending
+local implementation/review/CI/rollback statements are historical and superseded
+by this section; production release gates remain open.
+
+- [PR #53](https://github.com/agent-teams-ai/agent-teams-token/pull/53) merged as
+  `2273bd6f992ba553ad0e64de641c065e24533962`.
+- [PR #54](https://github.com/agent-teams-ai/agent-teams-token/pull/54) merged as
+  `824f7e9ba00728db1b2459a9dde2e6a200d65ca1`.
+- Final reviewed candidate
+  [6fb7947934b5cdaa682ca87e60a8c0030bfb6e46](https://github.com/agent-teams-ai/agent-teams-token/commit/6fb7947934b5cdaa682ca87e60a8c0030bfb6e46)
+  and merged PR #54 have the same Git tree
+  `e0dea4a6cf65927b17bfeac8b580eda52ebc6ac1`.
+- Independent source review: **ACCEPT, P0-P3=0**. Canonical
+  [CI run 36936630048](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/36936630048)
+  passed all six jobs.
+
+Supplied immutable host-only receipts record the sealed Linux rollback proof
+`b7085682f2573ef941ce563e2a3fb827348069005937a470654e32e1ae36cef7`
+and seal `c5b2339a32c38ea0d567bd7da73ae3f4dee10dfccf8220aca685f06fbd7802ba`.
+The GitHub links identify reviewer-accessible source/CI evidence; host receipts
+are not externally readable. These results qualify the reviewed source/tree,
+not a later documentation-only commit.
+
+Qualification uses owned loopback Anvil, synthetic chain ID 1 and official Safe
+1.4.1: ten contract instances and ten deployer operations; all six vault outflows
+and opening/cap/expiry/refund/denial boundaries; founder release/non-cancellation;
+team unvested refund with vested-but-unclaimed debt; and 100,000,000-token supply
+conservation. Intermediate source gas/cost observations below are neither current
+fees nor a production estimate. Real Mainnet/Safe input qualification, a fresh
+fee quote, deployment approval and broadcast remain absent.
+
+`PurposeReserveVault` is implemented and locally qualified, while
+[ADR-0011](decisions/0011-purpose-reserve-vaults.md) remains **PROPOSED**. Real
+immutable caps and opening policy are unapproved. The October 2 report is not
+public; its proposed caps/openings remain discussion-only. Vaults enforce rolling
+gross outflow windows, not purpose after transfer, a global cap, LP locking or
+investor vesting. Existing external security, legal and market gates remain
+unclosed; local proof does not waive them or add a new wait requirement.
+Solana/CCIP is a later release; the existing Fee Quoter provenance gap in
+[issue #43](https://github.com/agent-teams-ai/agent-teams-token/issues/43) is not an
+Ethereum-only blocker.
+
 ## Full local Ethereum assembly PR2, 2026-10-01
 
 The existing execution proof now has one synthetic chain-1 assembly path using

@@ -1,5 +1,30 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Current release plan, 2026-10-02
+
+The full DEV-only Ethereum assembly, final reviewed-source qualification,
+canonical CI and sealed Linux rollback proof are complete; exact source and
+evidence anchors are in [current STATUS](STATUS.md#current-release-status-2026-10-02).
+The dated checkpoints below retain the historical ledger and anchors. Their
+pending local implementation/review/CI/rollback statements are historical and
+superseded by that current section; production gates remain open.
+Mainnet is intentionally deferred by the owner; `broadcastAllowed: false`.
+
+Remaining work uses existing release requirements and actual owner inputs:
+
+- Select and qualify real public Safe/recipient/beneficiary addresses and Safe
+  state, exact UTC grant inputs, immutable caps, openings and other policy values.
+  [ADR-0011](decisions/0011-purpose-reserve-vaults.md) remains **PROPOSED**;
+  the October 2 report and proposed parameters are discussion-only, unapproved.
+- Bind the selected token/bytecode and all real inputs to a strictly validated,
+  canonically hashed `accepted` configuration; independently check the unsigned
+  production plan with exact gas expectations, fresh fees and cost limits.
+- Complete existing external security, legal and applicable market gates.
+  Deployment and each Mainnet broadcast still require fresh owner approval.
+
+Solana/CCIP remains a later release under ADR-0010. Its existing Fee Quoter
+provenance gap in issue #43 does not block Ethereum-only preparation.
+
 ## Full Ethereum assembly correction, 2026-10-01
 
 The owner authorized the scoped E2E work. Implementation follows the exact-base
