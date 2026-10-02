@@ -1,18 +1,25 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { calendarSchedule, deploymentBytes, prepareLocalPurposeGenesis, verifyLocalPurposePreflight, type Hex, type LocalPurposeArtifact, type LocalPurposeGenesis, type PreparedLocalPurposeGenesis } from "@agent-teams/supply/deployment";
-import { localPurposeCompilerPorts, readLocalPurposeArtifactPins } from "@agent-teams/supply/deployment-files";
+import { calendarSchedule, deploymentBytes, type Hex, type LocalPurposeArtifact, type LocalPurposeGenesis, type PreparedLocalPurposeGenesis, materializeObservedAssemblyManifest, checkPassport, generatePassport } from "@agent-teams/supply/deployment";
+import { localPurposeCompilerPorts, readLocalPurposeArtifactPins, verifyDeploymentFiles } from "@agent-teams/supply/deployment-files";
 import { encodeAllocationId, sha256 } from "@agent-teams/supply/genesis-manifest";
-import { custodySelector, custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
-import { setupLocalSafes, ZERO, word } from "./helpers/local-safe.ts";
+import { deriveCreateAddress } from "../src/domain/identity.ts";
+import { parseProductionObservation } from "../src/adapters/production-inputs.ts";
+import { qualifySafeArtifacts, type SafeArtifactPins } from "../../testnet-ccip/src/adapters/safe-artifacts.ts";
+import { custodySafeSetupOwners, verifyCustodySafeSetupEvent, custodySelector, custodyTopic } from "../../testnet-ccip/src/adapters/safe-custody.ts";
+import { setupLocalSafes, word } from "./helpers/local-safe.ts";
+import { runLocalAssemblyProof, reconstructLocalAssemblyPackage, type LocalAssemblyScenarioContext } from "../../../scripts/deployment/local-execution-proof.ts";
+import { removeOwnedRunDirectory } from "../../local-evm/run-lease.ts";
 
 const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", "PurposeReserveVault", "GrantVault"] as const;
 const paths = contracts.map(name => name === "AGTMAICCIPToken" ? `src/features/token-genesis/${name}.sol` : name === "PurposeReserveVault" ? `src/features/purpose-reserves/${name}.sol` : `src/features/contributor-grants/${name}.sol`);
 const purposes = ["long-term", "users", "operations", "ecosystem", "financing", "liquidity"] as const;
 const unit = 1_000_000_000n;
+const syntheticExecution = { initialTimestamp: "1799999800", gasBufferBps: 2000, gasFundingWei: "700000000000000000",
+  bootstrapGas: { gasLimit: "6000000", maxFeePerGas: "10000000000", maxPriorityFeePerGas: "1000000000" } };
 const asAddress = (value: Hex) => `0x${value.slice(-40)}` as Hex;
 const blockIdentity = (block: { hash: Hex; number: Hex; timestamp: Hex }) => ({ blockHash: block.hash, blockNumber: BigInt(block.number).toString(), timestamp: BigInt(block.timestamp).toString() });
 
@@ -51,7 +58,7 @@ async function buildCandidateArtifacts(root: string, temporary: string) {
 }
 
 // Catch misrouted genesis balances, altered runtime/immutables and unenforced six-vault policy.
-async function assertGenesis(local: Awaited<ReturnType<typeof setupLocalSafes>>, prepared: PreparedLocalPurposeGenesis, expectations: {
+async function assertGenesis(local: Pick<LocalAssemblyScenarioContext, "rpc" | "call" | "safes" | "executor" | "safeExec" | "encode">, prepared: PreparedLocalPurposeGenesis, expectations: {
   tokenTransactionHash: Hex; predicted: readonly Hex[]; caps: readonly bigint[];
   config: Pick<LocalPurposeGenesis, "reserve" | "purposeVaults">; artifacts: readonly LocalPurposeArtifact[];
 }) {
@@ -124,7 +131,7 @@ async function assertGenesis(local: Awaited<ReturnType<typeof setupLocalSafes>>,
   return { token, controller, nested, vaults, balance };
 }
 
-async function assertFounderIrrevocable(local: Awaited<ReturnType<typeof setupLocalSafes>>, token: Hex, vault: Hex, reserve: Hex) {
+async function assertFounderIrrevocable(local: Pick<LocalAssemblyScenarioContext, "rpc" | "call" | "safes" | "executor" | "safeExec" | "encode">, token: Hex, vault: Hex, reserve: Hex) {
   const { call, safes, safeExec, encode } = local;
   const founderState = async () => ({
     grant: await call(vault, "grant()"), funded: await call(vault, "funded()"),
@@ -139,7 +146,7 @@ async function assertFounderIrrevocable(local: Awaited<ReturnType<typeof setupLo
   return cancelled;
 }
 
-async function assertOpeningBoundary(local: Awaited<ReturnType<typeof setupLocalSafes>>, vault: Hex, opensAt: bigint, outflow: (vault: Hex, value: bigint) => ReturnType<typeof local.safeExec>) {
+async function assertOpeningBoundary(local: Pick<LocalAssemblyScenarioContext, "rpc" | "call" | "safes" | "executor" | "safeExec" | "encode">, vault: Hex, opensAt: bigint, outflow: (vault: Hex, value: bigint) => ReturnType<typeof local.safeExec>) {
   const { rpc, call } = local;
   await rpc("evm_setNextBlockTimestamp", [Number(opensAt - 1n)]);
   const beforeOpening = await outflow(vault, 1n);
@@ -157,60 +164,22 @@ async function assertOpeningBoundary(local: Awaited<ReturnType<typeof setupLocal
   return atOpening;
 }
 
-test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 300_000 }, async t => {
-  const local = await setupLocalSafes(t, 2);
-  const { root, temporary, executor, rpc, call, send, safes, safeExec, encode } = local;
-  const nonce = BigInt(await rpc("eth_getTransactionCount", [executor.owner, "latest"]));
-  const { candidateRevision, loaded } = await buildCandidateArtifacts(root, temporary);
-  const predicted = Array.from({ length: 9 }, (_, i) => localPurposeCompilerPorts.createAddress(executor.owner, (nonce + BigInt(i)).toString()));
-  const recipients = new Map<string, Hex>([["founder", predicted[1]!], ["contributors", predicted[2]!], ...purposes.map((id, i): [string, Hex] => [id, predicted[i + 3]!])]);
-  const allocationShares = [["long-term", 3000], ["users", 3000], ["founder", 300], ["contributors", 1700], ["operations", 900], ["ecosystem", 500], ["financing", 500], ["liquidity", 100]] as const;
-  const reserve = { initialSupplyBaseUnits: String(100_000_000n * unit), allocations: allocationShares.map(([id, bps]) => ({ id, recipient: recipients.get(id)!, amountBaseUnits: String(BigInt(bps) * 10_000n * unit), bps })), founder: { beneficiary: safes[1]!.safe, controller: safes[0]!.safe, purpose: encodeAllocationId("founder")!, schedule: calendarSchedule("1800000000") }, contributors: { controller: safes[0]!.safe, purpose: encodeAllocationId("contributors")!, rollingCapBaseUnits: String(16_000_000n * unit), perGrantCapBaseUnits: String(5_000_000n * unit) } };
-  const custodySafes = safes.map((safe, i) => ({ id: i === 0 ? "project-controller" : "founder-beneficiary", address: safe.safe, owners: safe.owners, threshold: 2, beneficialControl: "solo-founder", disclosure: "Disposable synthetic test owners." }));
-  const aliases = [
-    { address: safes[0]!.safe, roles: ["safe.project-controller.address", "token.initialCCIPAdmin", "founder.controller", "contributors.controller"] },
-    { address: safes[1]!.safe, roles: ["safe.founder-beneficiary.address", "founder.beneficiary"] },
-  ];
-  const caps = [3_000_000n, 2_000_000n, 1_000_000n, 4_000_000n, 5_000_000n, 500_000n];
-  const config = { schema: "agtmai-local-purpose-genesis-v1", status: "test-only", chainId: "31337", tokenContract: "AGTMAICCIPToken", reserve, custodySafes, roleAliases: aliases, projectControllerSafeId: "project-controller", founderBeneficiarySafeId: "founder-beneficiary", purposeVaults: purposes.map((allocationId, i) => ({ allocationId, opensAt: String(1800000100 + i * 10), windowSeconds: String(100 + i * 10), rollingCapBaseUnits: String(caps[i]! * unit) })), execution: { sender: executor.owner, startingNonce: nonce.toString(), fundingDeadline: "1799999950", fundingLeadSeconds: "20", executionDeadline: "1799999990", maxFeePerGasWei: "10000000000", maxPriorityFeePerGasWei: "1000000000", maxGasPerTransaction: "6000000", maxTotalFeeWei: "1000000000000000000" } };
-  const prepared = prepareLocalPurposeGenesis(config, candidateRevision, loaded, localPurposeCompilerPorts);
-  const observe = async () => {
-    const block = await rpc("eth_getBlockByNumber", ["latest", false]);
-    const addresses = [...prepared.operations.filter(op => op.kind === "create").map(op => op.expectedAddress!), prepared.operations[1]!.nestedAddress!];
-    return { chainId: "31337" as const, blockHash: block.hash as Hex, blockNumber: BigInt(block.number).toString(), timestamp: BigInt(block.timestamp).toString(), sender: executor.owner, nextNonce: BigInt(await rpc("eth_getTransactionCount", [executor.owner, "latest"])).toString(), accounts: await Promise.all(addresses.map(async address => ({ address, code: await rpc("eth_getCode", [address, "latest"]) as Hex, nonce: BigInt(await rpc("eth_getTransactionCount", [address, "latest"])).toString() }))) };
-  };
-  verifyLocalPurposePreflight(prepared, await observe());
-  const receipts = [];
-  let totalFees = 0n;
-  for (const operation of prepared.operations) {
-    const latest = await rpc("eth_getBlockByNumber", ["latest", false]);
-    assert.ok(BigInt(latest.timestamp) <= BigInt(operation.id === "founder-fund" ? config.execution.fundingDeadline : config.execution.executionDeadline));
-    if (operation.id === "founder-fund") {
-      assert.equal(BigInt(await call(operation.to!, "VAULT()")), BigInt(operation.nestedAddress ?? prepared.operations[1]!.nestedAddress!));
-      assert.equal(BigInt(await call(prepared.operations[1]!.nestedAddress!, "funded()")), 0n, "founder vault must not be funded by another caller");
-    }
-    const receipt = await send(operation.kind === "create" ? null : operation.to!, operation.kind === "create" ? operation.initcode! : operation.calldata!);
-    assert.equal(receipt.status, "0x1", operation.id);
-    assert.equal(receipt.contractAddress?.toLowerCase() ?? null, operation.expectedAddress ?? null);
-    assert.ok(BigInt(receipt.gasUsed) <= BigInt(config.execution.maxGasPerTransaction));
-    assert.ok(BigInt(receipt.effectiveGasPrice) <= BigInt(config.execution.maxFeePerGasWei));
-    totalFees += BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice);
-    assert.ok(totalFees <= BigInt(config.execution.maxTotalFeeWei));
-    const block = await rpc("eth_getBlockByHash", [receipt.blockHash, false]);
-    assert.ok(BigInt(block.timestamp) <= BigInt(operation.id === "founder-fund" ? config.execution.fundingDeadline : config.execution.executionDeadline));
-    receipts.push({ id: operation.id, hash: receipt.transactionHash, blockHash: receipt.blockHash, blockNumber: receipt.blockNumber, timestamp: block.timestamp, status: receipt.status, contractAddress: receipt.contractAddress });
-  }
+async function exerciseAssemblyScenarios(local: LocalAssemblyScenarioContext, caps: readonly bigint[]) {
+
+  const { prepared, receipts, rpc, call, send, safes, safeExec, encode, executor } = local;
+  const config = prepared.configuration, reserve = config.reserve;
+  const predicted = prepared.operations.filter(op => op.kind === "create").map(op => op.expectedAddress!);
   const genesisBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
-  const { token, controller, nested, vaults, balance } = await assertGenesis(local, prepared, { tokenTransactionHash: receipts[0]!.hash, predicted, caps, config, artifacts: loaded.artifacts });
+  const { token, controller, nested, vaults, balance } = await assertGenesis(local, prepared, { tokenTransactionHash: receipts[0]!.transactionHash, predicted, caps, config, artifacts: prepared.artifacts });
   assert.equal((await rpc("eth_getBlockByNumber", ["latest", false])).hash, genesisBlock.hash);
   const vaultStatesAt = (block: Hex) => Promise.all(vaults.map(async (vault, i) => ({ allocationId: purposes[i], address: vault, balance: (await balance(vault, block)).toString(), grossOutflow: BigInt(await call(vault, "grossOutflow()", [], { block })).toString(), rollingOutflow: BigInt(await call(vault, "rollingOutflow()", [], { block })).toString() })));
   const genesisVaultStates = await vaultStatesAt(genesisBlock.number);
   const recipient = executor.owner;
-  const scenarioReceipts: { scenario: string; transactionHash: Hex; blockHash: Hex; blockNumber: string; timestamp: string; innerSuccess: boolean }[] = [];
+  const scenarioReceipts: { scenario: string; transactionHash: Hex; blockHash: Hex; blockNumber: string; timestamp: string; innerSuccess: boolean; safeTransactionHash: Hex; safeNonce: string }[] = [];
   const recordSafe = async (scenario: string, result: Awaited<ReturnType<typeof safeExec>>) => {
     if (result.receipt) {
       const block = await rpc("eth_getBlockByHash", [result.receipt.blockHash, false]);
-      scenarioReceipts.push({ scenario, transactionHash: result.receipt.transactionHash, blockHash: result.receipt.blockHash, blockNumber: BigInt(result.receipt.blockNumber).toString(), timestamp: BigInt(block.timestamp).toString(), innerSuccess: result.success });
+      scenarioReceipts.push({ scenario, transactionHash: result.receipt.transactionHash, blockHash: result.receipt.blockHash, blockNumber: BigInt(result.receipt.blockNumber).toString(), timestamp: BigInt(block.timestamp).toString(), innerSuccess: result.success, safeTransactionHash: result.transactionHash, safeNonce: result.nonce });
     }
     return result;
   };
@@ -274,6 +243,8 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   const grantLogs = grantResult.receipt!.logs.filter((log: { address: Hex; topics: Hex[] }) => log.address.toLowerCase() === controller && log.topics[0] === custodyTopic("GrantCommitted(address,address,uint256)"));
   assert.equal(grantLogs.length, 1);
   const grantVault = asAddress(grantLogs[0]!.topics[1]);
+  assert.equal(asAddress(await call(grantVault, "ORIGINAL_RESERVE()")), controller);
+  assert.equal(asAddress(await call(grantVault, "BENEFICIARY()")), safes[1]!.safe);
   assert.equal(await balance(grantVault), unit);
   assert.equal(BigInt(await call(grantVault, "funded()")), 1n);
   assert.equal(BigInt(await call(controller, "rollingCommitted()")), unit);
@@ -283,26 +254,186 @@ test("disposable 31337 six-vault genesis and 2-of-3 Safe outflows", { timeout: 3
   assert.equal(cancelled.success, true, "contributor cancellation through actual Safe signatures");
   const refundLog = cancelled.receipt!.logs.find((log: { address: Hex; topics: Hex[] }) => log.address.toLowerCase() === grantVault && log.topics[0] === custodyTopic("TeamGrantCancelled(bytes32,uint256,uint256,uint64)"));
   assert.ok(refundLog);
-  const refundAmount = BigInt(`0x${refundLog.data.slice(66, 130)}`);
-  assert.ok(refundAmount > 0n && refundAmount < unit);
+  const cancelledAt = BigInt((await rpc("eth_getBlockByHash", [cancelled.receipt!.blockHash, false])).timestamp);
+  const vested = unit * (cancelledAt - BigInt(grantSchedule.cliff)) / (BigInt(grantSchedule.end) - BigInt(grantSchedule.cliff));
+  const refundAmount = unit - vested;
+  assert.equal(BigInt(`0x${refundLog.data.slice(2, 66)}`), vested, "independent curve freezes vested unclaimed debt");
+  assert.equal(BigInt(`0x${refundLog.data.slice(66, 130)}`), refundAmount);
+  assert.ok(vested > 0n && refundAmount > 0n);
   assert.equal(await balance(controller) - beforeGrantRefund, refundAmount);
-  assert.equal(await balance(grantVault), unit - refundAmount);
+  assert.equal(await balance(grantVault), vested);
+  assert.equal(BigInt(await call(grantVault, "available()")), vested);
   assert.equal(BigInt(await call(controller, "grossCommitted()")), unit);
+  // Actual founder beneficiary Safe signs release; compute entitlement from its receipt timestamp.
+  const founderBalanceBefore = await balance(nested), beneficiaryBefore = await balance(safes[1]!.safe);
+  const released = await recordSafe("founder-beneficiary-release", await safeExec(safes[1]!, nested, await encode("release()", [])));
+  assert.equal(released.success, true);
+  const releaseAt = BigInt((await rpc("eth_getBlockByHash", [released.receipt!.blockHash, false])).timestamp);
+  const founderTerms = reserve.founder.schedule;
+  const founderEntitlement = 3_000_000n * unit * (releaseAt - BigInt(founderTerms.cliff)) / (BigInt(founderTerms.end) - BigInt(founderTerms.cliff));
+  assert.ok(founderEntitlement > 0n && founderEntitlement < founderBalanceBefore);
+  assert.equal(await balance(nested), founderBalanceBefore - founderEntitlement);
+  assert.equal(await balance(safes[1]!.safe), beneficiaryBefore + founderEntitlement);
+  assert.equal(BigInt(await call(grantVault, "available()")), vested, "cancelled vested debt remains frozen and owed after later founder release");
   assert.equal(receipts.length, 10);
-  assert.equal((await Promise.all([controller, nested, grantVault, ...vaults, recipient].map(address => balance(address)))).reduce((a, b) => a + b), 100_000_000n * unit);
+  const conservation = (await Promise.all([controller, nested, grantVault, ...vaults, recipient, safes[1]!.safe].map(address => balance(address)))).reduce((a, b) => a + b);
+  assert.equal(conservation, 100_000_000n * unit);
   const finalBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
   const finalVaultStates = await vaultStatesAt(finalBlock.number);
-  const report = { schema: "agtmai-local-purpose-proof-v1", evidenceClass: "observed-disposable-local-execution", status: "success", qualification: "disposable-local-only", candidateRevision, configuration: prepared.configuration, configurationSha256: prepared.configurationSha256, planSha256: prepared.planSha256, artifacts: prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactSha256: artifact.artifactSha256, buildInfoSha256: artifact.buildInfoSha256, compilerInputSha256: artifact.compilerInputSha256 })), safes: safes.map(safe => ({ address: safe.safe, owners: safe.owners, threshold: 2, singleton: local.singleton, proxyCodeHash: local.pins.proxy.runtimeKeccak256, singletonCodeHash: local.pins.singleton.runtimeKeccak256, setupTransaction: safe.setup.transactionHash, guard: ZERO, fallbackHandler: ZERO, modules: [] })), genesis: { ...blockIdentity(genesisBlock), allocations: reserve.allocations, founderVault: nested, vaultStates: genesisVaultStates }, finalState: { ...blockIdentity(finalBlock), vaultStates: finalVaultStates }, receipts, scenarioReceipts, scenarios: { sixSafeOutflows: true, preOpeningDenied: true, exactOpeningSpend: true, capSaturated: true, refundDidNotReplenishCap: true, exactExpirySpend: true, unauthorizedDenied: true, oneSignatureDenied: true, founderFunded: true, founderCancellationDenied: true, contributorGrantRefunded: true }, conservation: "100000000000000000", cleanup: "complete" };
-  // Validate the serialized snapshot labels against the chain before disposing it.
-  for (const snapshot of [report.genesis, report.finalState]) {
+  for (const snapshot of [{ ...blockIdentity(genesisBlock), vaultStates: genesisVaultStates }, { ...blockIdentity(finalBlock), vaultStates: finalVaultStates }]) {
     const block = await rpc("eth_getBlockByHash", [snapshot.blockHash, false]);
     assert.equal(BigInt(block.number).toString(), snapshot.blockNumber);
     assert.equal(BigInt(block.timestamp).toString(), snapshot.timestamp);
-    assert.deepEqual(snapshot.vaultStates, await vaultStatesAt(block.number), "reported vault state belongs to its labeled block");
+    assert.deepEqual(snapshot.vaultStates, await vaultStatesAt(block.number), "reported state belongs to labelled block");
   }
-  await local.cleanup();
-  t.diagnostic(`LOCAL_PURPOSE_E2E_SUCCESS ${JSON.stringify(report)}`);
+  return { genesisVaultStates, finalState: { ...blockIdentity(finalBlock), vaultStates: finalVaultStates }, scenarioReceipts,
+    sixSafeOutflows: true, preOpeningDenied: true, exactOpeningSpend: true, capSaturated: true, refundDidNotReplenishCap: true,
+    exactExpirySpend: true, unauthorizedDenied: true, oneSignatureDenied: true, founderCancellationDenied: true,
+    founderBeneficiaryReleased: founderEntitlement.toString(), contributorRefund: refundAmount.toString(), contributorOwed: vested.toString(), conservation: conservation.toString() };
+}
+
+for (const cleanupUncertain of [false, true]) {
+test(cleanupUncertain ? "completed full assembly with unresolved custody cleanup cannot publish READY" : "same-path synthetic chain-1 full assembly, official 2-of-3 Safes and observed reports", { timeout: 300_000 }, async t => {
+  await mkdir(resolve(".local"), { recursive: true, mode: 0o700 });
+  const outputRoot = await mkdtemp(resolve(".local/full-assembly-"));
+  const output = join(outputRoot, "observed");
+  const caps = [3_000_000n, 2_000_000n, 1_000_000n, 4_000_000n, 5_000_000n, 500_000n];
+  let privateDirectory = "";
+  const proof = runLocalAssemblyProof({ repositoryRoot: ".", outputDirectory: output, ...syntheticExecution,
+    prepareAssembly: async ({ root, temporary, signerAddress, startingNonce, safes }) => {
+      privateDirectory = temporary;
+      await buildCandidateArtifacts(root, temporary);
+      const predicted = Array.from({ length: 9 }, (_, i) => localPurposeCompilerPorts.createAddress(signerAddress, (BigInt(startingNonce) + BigInt(i)).toString()));
+  const recipients = new Map<string, Hex>([["founder", predicted[1]!], ["contributors", predicted[2]!], ...purposes.map((id, i): [string, Hex] => [id, predicted[i + 3]!])]);
+  const allocationShares = [["long-term", 3000], ["users", 3000], ["founder", 300], ["contributors", 1700], ["operations", 900], ["ecosystem", 500], ["financing", 500], ["liquidity", 100]] as const;
+  const reserve = { initialSupplyBaseUnits: String(100_000_000n * unit), allocations: allocationShares.map(([id, bps]) => ({ id, recipient: recipients.get(id)!, amountBaseUnits: String(BigInt(bps) * 10_000n * unit), bps })), founder: { beneficiary: safes[1]!.safe, controller: safes[0]!.safe, purpose: encodeAllocationId("founder")!, schedule: calendarSchedule("1800000000") }, contributors: { controller: safes[0]!.safe, purpose: encodeAllocationId("contributors")!, rollingCapBaseUnits: String(16_000_000n * unit), perGrantCapBaseUnits: String(5_000_000n * unit) } };
+  const custodySafes = safes.map((safe, i) => ({ id: i === 0 ? "project-controller" : "founder-beneficiary", address: safe.safe, owners: safe.owners, threshold: 2, beneficialControl: "solo-founder", disclosure: "Disposable synthetic test owners." }));
+  const aliases = [
+    { address: safes[0]!.safe, roles: ["safe.project-controller.address", "token.initialCCIPAdmin", "founder.controller", "contributors.controller"] },
+    { address: safes[1]!.safe, roles: ["safe.founder-beneficiary.address", "founder.beneficiary"] },
+  ];
+  return { schema: "agtmai-local-purpose-genesis-v2", status: "test-only", chainId: "1", tokenContract: "AGTMAICCIPToken", reserve, custodySafes, roleAliases: aliases, projectControllerSafeId: "project-controller", founderBeneficiarySafeId: "founder-beneficiary", purposeVaults: purposes.map((allocationId, i) => ({ allocationId, opensAt: String(1800000100 + i * 10), windowSeconds: String(100 + i * 10), rollingCapBaseUnits: String(caps[i]! * unit) })), execution: { sender: signerAddress, startingNonce: startingNonce, fundingDeadline: "1799999950", fundingLeadSeconds: "20", executionDeadline: "1799999990", maxFeePerGasWei: "10000000000", maxPriorityFeePerGasWei: "1000000000", maxGasPerTransaction: "6000000", maxTotalFeeWei: "1000000000000000000" } };
+    },
+    scenarios: async local => {
+      await verifyDeploymentFiles(join(privateDirectory, "reconstructed"));
+      await assert.rejects(verifyDeploymentFiles(join(privateDirectory, "reconstructed"), true), /READY_MISSING/);
+      await assert.rejects(readFile(join(privateDirectory, "reconstructed/READY")), { code: "ENOENT" });
+      const result = await exerciseAssemblyScenarios(local, caps);
+      // Real filesystem custody rejection after successful execution; no replacement cleanup adapter.
+      if (cleanupUncertain) { await chmod(dirname(privateDirectory), 0o710); }
+      return result;
+    },
+  });
+  if (cleanupUncertain) {
+    try {
+      await assert.rejects(proof, /ASSEMBLY_PROOF_FAILED/);
+      const diagnostic = JSON.parse(await readFile(join(output, "diagnostics.json"), "utf8"));
+      assert.equal(diagnostic.status, "failed"); assert.equal(diagnostic.temporaryRootRemoved, false); assert.equal(diagnostic.cleanupUncertain, true);
+      assert.equal(diagnostic.operations.length, 10);
+      await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
+      await readdir(privateDirectory);
+    } finally { if (privateDirectory) { await chmod(dirname(privateDirectory), 0o700); await removeOwnedRunDirectory(dirname(privateDirectory)); } }
+    return;
+  }
+  const proofResult = await proof;
+  assert.equal(proofResult.operationCount, 10);
+  const inventory = await verifyDeploymentFiles(output, true);
+  assert.equal(await readFile(join(output, "READY"), "utf8"), `${sha256(await readFile(join(output, "inventory.json")))}\n`);
+  assert.deepEqual((await readdir(output)).toSorted(), [...inventory.files.map(f => f.name), "inventory.json", "READY"].toSorted());
+  assert.ok(privateDirectory);
+  await assert.rejects(readdir(privateDirectory), { code: "ENOENT" });
+  await assert.rejects(readdir(dirname(privateDirectory)), { code: "ENOENT" });
+  const report = JSON.parse(await readFile(join(output, "local-purpose-proof-v2.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(join(output, "deployment-manifest-v2.json"), "utf8"));
+  const passport = JSON.parse(await readFile(join(output, "token-passport.json"), "utf8"));
+  assert.equal(report.cleanup.temporaryRootRemoved, true);
+  assert.equal(report.authority.length, 2);
+  assert.equal(manifest.contracts.length, 10);
+  const deployer = report.roles.assemblyDeployer, firstNonce = BigInt(report.preflight.nextNonce);
+  assert.deepEqual(report.senderNonces, { confirmed: firstNonce.toString(), pending: firstNonce.toString() });
+  assert.notEqual(deployer, report.roles.bootstrapFunderRelayer);
+  for (let i = 0; i < 9; i++) { assert.equal(manifest.contracts[i].observed.address, deriveCreateAddress(deployer, firstNonce + BigInt(i))); }
+  assert.equal(manifest.contracts[9].observed.address, deriveCreateAddress(manifest.contracts[1].observed.address, 1n));
+  assert.ok(report.bootstrap.every((tx: { sender: string }) => tx.sender !== deployer));
+  assert.ok(report.genesis.operations.every((op: { nonce: string }, i: number) => BigInt(op.nonce) === firstNonce + BigInt(i)));
+  assert.equal(manifest.observedWei, manifest.gas.reduce((n: bigint, g: { gasUsed: string; effectiveGasPrice: string }) => n + BigInt(g.gasUsed) * BigInt(g.effectiveGasPrice), 0n).toString());
+  assert.equal(manifest.contracts[9].observed.childCreateNonce, "1");
+  assert.equal(manifest.contracts[9].observed.parentTransactionHash, report.genesis.operations[1].transactionHash);
+  assert.equal(Object.hasOwn(manifest.contracts[9].observed, "transactionHash"), false);
+  assert.equal(manifest.approval, null);
+  assert.match(passport.markdown, /synthetic owned loopback/);
+  const publishedPassport = await readFile(join(output, "token-passport.md"), "utf8");
+  assert.equal(publishedPassport, passport.markdown);
+  assert.ok(publishedPassport.includes(`## Readiness\n\n- Observation interval: ${manifest.genesis.timestamp}–${manifest.genesis.timestamp}`));
+  assert.match(publishedPassport, /## Authority registry/);
+  assert.match(publishedPassport, /actual production deployment unavailable/);
+  assert.deepEqual(passport.authorityRegistry.entries.map((e: { capability: string }) => e.capability).toSorted(), [
+    "token-create.initial_ccip_admin", "controller-create.controller", "founder-vault.beneficiary", "founder-vault.controller",
+    ...purposes.map(id => `purpose-${id}-create.controller`), "custody.safe.project-controller", "custody.safe.founder-beneficiary",
+  ].toSorted());
+  const project = report.authority[0].address, beneficiary = report.authority[1].address;
+  assert.ok(publishedPassport.includes(`token-create.initial\\_ccip\\_admin on 1 (synthetic loopback): power initial CCIP administration; expected ${project}; observed ${project};`));
+  assert.ok(publishedPassport.includes(`founder-vault.beneficiary on 1 (synthetic loopback): power claim vested entitlement; expected ${beneficiary}; observed ${beneficiary};`));
+  for (const id of ["controller-create", "founder-vault", ...purposes.map(p => `purpose-${p}-create`)]) {
+    assert.ok(publishedPassport.includes(`${id}.controller on 1 (synthetic loopback): power configured immutable control; expected ${project}; observed ${project};`), id);
+  }
+  for (const [index, id] of ["project-controller", "founder-beneficiary"].entries()) {
+    const safe = report.authority[index];
+    assert.ok(publishedPassport.includes(`custody.safe.${id} on 1 (synthetic loopback): power Safe CALL control; expected ${safe.address}; observed ${safe.address}; Actual local threshold 2 of 3; nonce ${safe.nonce}; empty modules, guard and fallback; production authority unavailable.`), id);
+  }
+  const prepared = JSON.parse(await readFile(join(output, "prepared-local-purpose-genesis.json"), "utf8"));
+  assert.equal(prepared.genesisAllocationHash.length, 66);
+  assert.equal(manifest.contracts[0].immutableValues.GENESIS_ALLOCATION_HASH, prepared.genesisAllocationHash);
+  assert.equal(manifest.contracts[0].observed.getters.GENESIS_ALLOCATION_HASH, prepared.genesisAllocationHash);
+  assert.throws(() => parseProductionObservation(report), /PREFLIGHT_/);
+  // Admit official bytes separately; derive deployment/setup provenance from actual bootstrap captures, never from authority observations.
+  const safeDirectory = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY!, selectedSafe = process.env.AGTMAI_SAFE_PINS_SHA256 as Hex;
+  assert.equal(sha256(await readFile("tooling/testnet-ccip/artifacts/safe-1.4.1-pins.json")), selectedSafe);
+  const safePins = JSON.parse(await readFile(join(safeDirectory, "pins.json"), "utf8")) as SafeArtifactPins;
+  const safeBytes = { proxy: await readFile(join(safeDirectory, "SafeProxy.json")), singleton: await readFile(join(safeDirectory, "Safe.json")), buildInfo: await readFile(join(safeDirectory, "build-info.json")) };
+  const singletonInitcode = JSON.parse(safeBytes.singleton.toString()).bytecode as Hex;
+  const singletonCreates = report.bootstrap.filter((tx: { to: Hex | null; input: Hex }) => tx.to === null && tx.input === singletonInitcode);
+  assert.equal(singletonCreates.length, 1);
+  const singletonCreate = singletonCreates[0];
+  assert.equal(singletonCreate.status, "0x1"); assert.equal(singletonCreate.sender, report.roles.bootstrapFunderRelayer); assert.equal(singletonCreate.chainId, "1");
+  const singletonAddress = deriveCreateAddress(singletonCreate.sender, BigInt(singletonCreate.nonce));
+  const safeProfile = qualifySafeArtifacts(safePins, selectedSafe, safeBytes, singletonAddress);
+  const proxyInitcode = `${JSON.parse(safeBytes.proxy.toString()).bytecode}${word(BigInt(singletonAddress))}`;
+  const safeDeployments = prepared.configuration.custodySafes.map((configured: { address: Hex; owners: Hex[] }) => {
+    const creates = report.bootstrap.filter((tx: { to: Hex | null; input: Hex; sender: Hex; nonce: string }) => tx.to === null && tx.input === proxyInitcode && deriveCreateAddress(tx.sender, BigInt(tx.nonce)) === configured.address);
+    assert.equal(creates.length, 1); assert.equal(creates[0].status, "0x1"); assert.equal(creates[0].sender, report.roles.bootstrapFunderRelayer); assert.equal(creates[0].chainId, "1");
+    const setups = report.bootstrap.filter((tx: { to: Hex | null; input: Hex }) => tx.to === configured.address && tx.input.startsWith(custodySelector("setup(address[],uint256,address,bytes,address,address,uint256,address)")));
+    assert.equal(setups.length, 1); const setup = setups[0];
+    assert.equal(setup.status, "0x1"); assert.equal(setup.sender, report.roles.bootstrapFunderRelayer); assert.equal(setup.chainId, "1");
+    const setupOwners = custodySafeSetupOwners(configured.address, setup.input);
+    assert.deepEqual(setupOwners.toSorted(), configured.owners.toSorted());
+    verifyCustodySafeSetupEvent(configured.address, setup.sender, setupOwners, setup.logs);
+    return { address: configured.address, setupTransactionHash: setup.transactionHash as Hex };
+  });
+  const authenticatedSafe = { singletonAddress, proxyCodeHash: safeProfile.proxyRuntimeKeccak256, singletonCodeHash: safeProfile.singletonRuntimeKeccak256, deployments: safeDeployments };
+  for (const change of [
+    (o: typeof report.genesis) => { o.operations[0].observedCostWei = (BigInt(o.operations[0].observedCostWei) + 1n).toString(); },
+    (o: typeof report.genesis) => { o.contracts[9].runtime = o.contracts[9].runtime.slice(0, -2) + (o.contracts[9].runtime.endsWith("00") ? "11" : "00"); },
+    (o: typeof report.genesis) => { o.contracts[3].getters.CONTROLLER = `0x${"0".repeat(64)}`; },
+    (o: typeof report.genesis) => { o.contracts[9].transactionHash = o.operations[1].transactionHash; },
+  ]) {
+    const observation = structuredClone(report.genesis); change(observation);
+    assert.throws(() => materializeObservedAssemblyManifest(prepared, observation, { ...localPurposeCompilerPorts, authenticatedSafe }), /DEPLOYMENT_EVIDENCE_ASSEMBLY_/);
+  }
+  const candidate = { repositoryRoot: resolve("."), revision: report.candidateRevision };
+  const ready = await readFile(join(output, "READY")); await rm(join(output, "READY"));
+  try { await assert.rejects(reconstructLocalAssemblyPackage(output, candidate, prepared, manifest, { authenticatedSafe }), /READY_MISSING/); }
+  finally { await writeFile(join(output, "READY"), ready, { flag: "wx", mode: 0o600 }); }
+  await reconstructLocalAssemblyPackage(output, candidate, prepared, manifest, { authenticatedSafe });
+  const observations = { schema: "agtmai-deployment-observations-v1" as const, observedAt: manifest.genesis.timestamp, validUntil: manifest.genesis.timestamp };
+  checkPassport(manifest, observations, passport, { sha256 });
+  const tampered = structuredClone(passport); tampered.markdown = tampered.markdown.replace(manifest.observedWei, "0");
+  assert.throws(() => checkPassport(manifest, observations, tampered, { sha256 }), /PASSPORT_MISMATCH/);
+  assert.deepEqual(generatePassport(manifest, observations, { sha256 }), passport);
+  t.diagnostic(`LOCAL_ASSEMBLY_E2E_SUCCESS output=${output}`);
+
 });
+}
 
 test("mint before a mined CREATE failure leaves the predicted recipient funded without code", { timeout: 240_000 }, async t => {
   const local = await setupLocalSafes(t);
@@ -329,4 +460,21 @@ test("mint before a mined CREATE failure leaves the predicted recipient funded w
   assert.equal(BigInt(await call(token, "balanceOf(address)", [failedTarget])), 3_000_000n * unit);
   assert.equal(BigInt(await rpc("eth_getTransactionCount", [executor.owner, "latest"])), nonce + 2n);
   await local.cleanup();
+});
+
+test("owned full-proof preparation failure disposes custody and publishes diagnostics without READY", { timeout: 120_000 }, async () => {
+  await mkdir(resolve(".local"), { recursive: true, mode: 0o700 });
+  const output = join(await mkdtemp(resolve(".local/full-assembly-denied-")), "diagnostic");
+  let privateDirectory = "";
+  await assert.rejects(runLocalAssemblyProof({ repositoryRoot: ".", outputDirectory: output, ...syntheticExecution,
+    prepareAssembly: async context => { privateDirectory = context.temporary; throw new Error("EXPLICIT_SYNTHETIC_PREPARATION_FAILURE"); },
+    scenarios: async () => { throw new Error("SCENARIO_MUST_NOT_RUN"); },
+  }), /ASSEMBLY_PROOF_FAILED/);
+  const report = JSON.parse(await readFile(join(output, "diagnostics.json"), "utf8"));
+  assert.ok(privateDirectory); assert.equal(report.reason, "EXPLICIT_SYNTHETIC_PREPARATION_FAILURE");
+  assert.equal(report.status, "failed"); assert.equal(report.temporaryRootRemoved, true);
+  assert.deepEqual(report.operations, []); assert.deepEqual(report.journal, []);
+  await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
+  await assert.rejects(readdir(privateDirectory), { code: "ENOENT" });
+  await assert.rejects(readdir(dirname(privateDirectory)), { code: "ENOENT" });
 });

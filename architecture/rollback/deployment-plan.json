@@ -60,6 +60,7 @@
     "tooling/deployment-plan/tests/production-execution.test.ts",
     "tooling/deployment-plan/tests/production-guards.test.ts",
     "tooling/deployment-plan/tests/production-native-policy.test.ts",
+    "tooling/deployment-plan/tests/production-preflight-arguments.test.ts",
     "tooling/deployment-plan/tests/proof-custody.test.ts",
     "tooling/deployment-plan/tests/purpose-reserves.integration.test.ts",
     "tooling/deployment-plan/tests/raw-artifact-fixture.ts",
@@ -100,7 +101,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "7edcd03b5fbf62dece785ecd63b52b448a4f83a2768eff5358011b48d88d7a0b",
+      "beforeSha256": "e45c4c73c3dad09957eee5306a8299083d00990ba00db373a4c93ec60ea84466",
       "afterSha256": "absent"
     },
     {
@@ -115,12 +116,12 @@
     },
     {
       "path": "tooling/local-evm/rpc.ts",
-      "beforeSha256": "659e2862a146e4ade666f2a269f1e02a33e557f7d31c7d7c88a2a23af9d464db",
+      "beforeSha256": "6335a386841840e5dee7c4f922f03d0efd41c74cf32de48a887e04e3df1b7c8a",
       "afterSha256": "4e8c3fe1ec97161ef7e0ad05b604915cc1aa15e19734984af7c2339e6b30e4bb"
     },
     {
       "path": "tooling/local-evm/tests/rpc.test.ts",
-      "beforeSha256": "ceb80de2b96fb86629be2e8a56be2a5d5ebc72a62d62aa9de2ed4b81096dc391",
+      "beforeSha256": "544adcbeab38790eca7e2a77442571a75af5da9d11d03374eb5889defc5392b9",
       "afterSha256": "731bf0f8f357ba62505e49ac52d2724be1bc674c9f8f2a07980aa5f200459f39"
     }
   ],
@@ -147,14 +148,34 @@
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts",
+      "sha256": "c2724bb916953560ec47e9bb10fb45fac6ad41f228233dbb4d540c0d1ab663c2",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/passport.ts",
+      "sha256": "a7d56942538c61e219810d5e37d7a64e89d9ad9f6488fd8d86765be0bac95b52",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
       "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
       "sha256": "b0f70abdd4379f96c88c8232a9e7fa6b7dddd55910b6c612d900d4fb0fbfa341",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts",
+      "sha256": "967f65f7b10d0bb48a477717beb82637d68851ab382b0803305cbc1d6a1e216a",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
       "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
       "sha256": "cefb97b1bb96dc66376831adc3c14cbc9a2bcbd4880dde8ffc32d2e354482617",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/deployment.ts",
+      "sha256": "da1a8303915c030d737b37b03a4427032e46a7dfdeb121fbac0a472bb592b5b3",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
     },
     {
       "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
@@ -180,6 +201,16 @@
       "path": "tooling/local-evm/toolchain.ts",
       "reason": "Independent Local EVM toolchain admission: authenticate the pinned Foundry archive as well as installed binaries for surviving runner and tests. No dependency on the removed deployment planner.",
       "sha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e"
+    },
+    {
+      "path": "tooling/testnet-ccip/src/adapters/local-safe.ts",
+      "sha256": "cbd3e27d8e8cfc6f55e9e3b097dcaa664202004a7e6d27e3c4fbf2cebbe7625c",
+      "reason": "Passive official Safe artifact, setup, hash, signature and inner-event semantics serve independent custody consumers after planner removal; this adapter owns no process or key lifecycle."
+    },
+    {
+      "path": "tooling/testnet-ccip/src/adapters/safe-custody.ts",
+      "sha256": "456b250552316483523c9180b2f4133662a035b6c8a00830de176c5df435c4ce",
+      "reason": "Passive official Safe artifact, setup, hash, signature and inner-event semantics serve independent custody consumers after planner removal; this adapter owns no process or key lifecycle."
     }
   ],
   "survivingGates": [

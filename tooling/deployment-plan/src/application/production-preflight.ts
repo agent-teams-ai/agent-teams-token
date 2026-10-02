@@ -26,7 +26,8 @@ function assessProductionPreflightUnchecked(request: ProductionPreflightRequest)
   const preparedExpectations = prepared?.expectations as Record<string, unknown> | null;
   const approval = prepared?.approval as Record<string, unknown> | null;
   const artifacts = Array.isArray(prepared?.artifacts) ? prepared.artifacts as Record<string, unknown>[] : [];
-  const artifactsValid = validArtifacts(artifacts);
+  const full = prepared?.schema === "agtmai-prepared-production-deployment-v2";
+  const artifactsValid = validArtifacts(artifacts, full);
   const approvalValid = validApproval(approval, prepared);
   if (!validEnvelope({ request, prepared, expectations: preparedExpectations, operations: preparedOperations, approval: approvalValid, artifacts: artifactsValid })) {
     return { status: "invalid", broadcastAllowed: false, reasons: ["prepared-deployment-invalid"] };
@@ -42,11 +43,13 @@ function assessProductionPreflightUnchecked(request: ProductionPreflightRequest)
   if (reasons.length) {return { status: "blocked", broadcastAllowed: false, reasons };}
   const runtimeVerification = preparedRecord.runtimeVerification as Record<string, unknown> | undefined;
   const runtimeContracts = runtimeVerification?.contracts;
-  const runtimeState = runtimeStatus(runtimeVerification, runtimeContracts, artifacts);
+  const runtimeState = runtimeStatus(runtimeVerification, runtimeContracts, artifacts, full);
   const hasImmutables = runtimeState.hasImmutables;
   const runtimeValid = runtimeState.valid;
   if (!runtimeValid) {return { status: "invalid", broadcastAllowed: false, reasons: ["prepared-runtime-verification-invalid"] };}
-  if (hasImmutables && request.observations.schema !== "agtmai-production-observation-v2") {return { status: "blocked", broadcastAllowed: false, reasons: ["runtime-immutables-require-deterministic-local-execution"] };}
+  if (runtimeNeedsObservation(full, hasImmutables, request.observations)) {return { status: "blocked", broadcastAllowed: false, reasons: ["runtime-immutables-require-deterministic-local-execution"] };}
+  const fullUnobserved = unsupportedFullObservation(full, request.observations);
+  if (fullUnobserved) {return { status: "blocked", broadcastAllowed: false, reasons: ["full-production-execution-unavailable"] };}
   if (request.observations.schema === "agtmai-production-observation-v2") {
     const evidenceReasons = validateExecutionEvidence(preparedRecord, request.expectations, request.observations, artifacts, request.expectedGenesisAllocationHash ?? "");
     if (evidenceReasons.length) {return { status: "blocked", broadcastAllowed: false, reasons: evidenceReasons };}
@@ -154,17 +157,22 @@ function unique(values: readonly string[]): string[] {return [...new Set(values)
 function validEnvelope(input: { request: ProductionPreflightRequest; prepared: Record<string, unknown> | null; expectations: Record<string, unknown> | null; operations: unknown; approval: boolean; artifacts: boolean }): boolean {
   const { request, prepared, expectations, operations, approval, artifacts } = input;
   const allocationHashValid = request.observations.schema !== "agtmai-production-observation-v2" || /^0x[0-9a-f]{64}$/.test(request.expectedGenesisAllocationHash ?? "");
-  return prepared !== null && prepared.schema === "agtmai-prepared-production-deployment-v1" && prepared.broadcastAllowed === false && prepared.coverage === "token-and-reserves-only" && allocationHashValid && prepared.configurationSha256 === request.preparedConfigurationSha256 && prepared.reserveConfigurationSha256 === request.preparedReserveConfigurationSha256 && request.preparedArtifactPinsSha256 === request.expectations.artifactPinsSha256 && prepared.configurationSha256 === request.expectations.configurationSha256 && prepared.reserveConfigurationSha256 === request.expectations.reserveConfigurationSha256 && expectations !== null && Array.isArray(operations) && approval && artifacts;
+  return prepared !== null && preparedVersionMatches(prepared, request.expectations) && prepared.broadcastAllowed === false && allocationHashValid && prepared.configurationSha256 === request.preparedConfigurationSha256 && prepared.reserveConfigurationSha256 === request.preparedReserveConfigurationSha256 && request.preparedArtifactPinsSha256 === request.expectations.artifactPinsSha256 && prepared.configurationSha256 === request.expectations.configurationSha256 && prepared.reserveConfigurationSha256 === request.expectations.reserveConfigurationSha256 && expectations !== null && Array.isArray(operations) && approval && artifacts;
 }
 
 function validApproval(approval: Record<string, unknown> | null, prepared: Record<string, unknown> | null): boolean {
-  return approval !== null && approval !== undefined && prepared !== null && prepared !== undefined && Object.keys(approval).toSorted().join() === "configurationSha256,reference,reserveConfigurationSha256,schema" && approval.schema === "agtmai-production-approval-v1" && typeof approval.reference === "string" && approval.configurationSha256 === prepared.configurationSha256 && approval.reserveConfigurationSha256 === prepared.reserveConfigurationSha256;
+  const full = prepared?.schema === "agtmai-prepared-production-deployment-v2";
+  return approval !== null && approval !== undefined && prepared !== null && prepared !== undefined
+    && Object.keys(approval).toSorted().join() === (full ? "assemblyConfigurationSha256,configurationSha256,reference,reserveConfigurationSha256,schema" : "configurationSha256,reference,reserveConfigurationSha256,schema")
+    && approval.schema === (full ? "agtmai-production-approval-v2" : "agtmai-production-approval-v1")
+    && (!full || approval.assemblyConfigurationSha256 === prepared.assemblyConfigurationSha256)
+    && typeof approval.reference === "string" && approval.configurationSha256 === prepared.configurationSha256 && approval.reserveConfigurationSha256 === prepared.reserveConfigurationSha256;
 }
 
-function runtimeStatus(runtime: Record<string, unknown> | undefined, contracts: unknown, artifacts: Record<string, unknown>[]): { valid: boolean; hasImmutables: boolean } {
+function runtimeStatus(runtime: Record<string, unknown> | undefined, contracts: unknown, artifacts: Record<string, unknown>[], full: boolean): { valid: boolean; hasImmutables: boolean } {
   const identities = artifacts.map(value => ({ contract: value.contract, compilerVersion: value.compilerVersion, compilerInputSha256: value.compilerInputSha256, immutableReferences: value.immutableReferences }));
   const hasImmutables = identities.some(identity => Array.isArray(identity.immutableReferences) && identity.immutableReferences.length > 0);
-  return { valid: validRuntime(runtime, contracts, identities, hasImmutables), hasImmutables };
+  return { valid: full ? runtime?.status === "templates-and-materialized-expectations" && runtime.reason === null && canonicalJson(contracts) === canonicalJson(identities) : validRuntime(runtime, contracts, identities, hasImmutables), hasImmutables };
 }
 
 function approvedPolicy(prepared: Record<string, unknown>): ApprovedProductionPolicy | undefined {
@@ -178,15 +186,15 @@ function approvedPolicy(prepared: Record<string, unknown>): ApprovedProductionPo
   return policy && typeof schedule?.start === "string" && typeof founderAllocation?.amountBaseUnits === "string" ? { ...policy, founderStart: schedule.start, tokenExpenditureBaseUnits: founderAllocation.amountBaseUnits } as unknown as ApprovedProductionPolicy : undefined;
 }
 
-function validArtifacts(artifacts: unknown): boolean {
-  if (!Array.isArray(artifacts) || artifacts.length !== 3) {return false;}
+function validArtifacts(artifacts: unknown, full: boolean): boolean {
+  if (!Array.isArray(artifacts) || artifacts.length !== (full ? 5 : 3)) {return false;}
   return artifacts.every(artifact => {
     if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {return false;}
     const value = artifact as Record<string, unknown>;
     const hashes = [value.artifactSha256, value.buildInfoSha256, value.compilerInputSha256].every(item => typeof item === "string" && /^0x[0-9a-f]{64}$/.test(item));
     const references = Array.isArray(value.immutableReferences) ? value.immutableReferences as Record<string, unknown>[] : [];
     const refs = references.every((reference, index) => reference !== null && typeof reference === "object" && !Array.isArray(reference) && Object.keys(reference).toSorted().join() === "length,name,start" && typeof reference.name === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(reference.name) && Number.isSafeInteger(reference.start) && (reference.start as number) >= 0 && reference.length === 32 && (index === 0 || (reference.start as number) >= (references[index - 1]!.start as number) + 32));
-    return Object.keys(value).toSorted().join() === "artifactSha256,buildInfoSha256,compilerInputSha256,compilerVersion,contract,creationBytecode,immutableReferences,runtimeBytecode" && ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"].includes(value.contract as string) && value.compilerVersion === "0.8.36" && hashes && typeof value.creationBytecode === "string" && typeof value.runtimeBytecode === "string" && refs;
+    return Object.keys(value).toSorted().join() === "artifactSha256,buildInfoSha256,compilerInputSha256,compilerVersion,contract,creationBytecode,immutableReferences,runtimeBytecode" && ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", ...(full ? ["PurposeReserveVault", "GrantVault"] : [])].includes(value.contract as string) && value.compilerVersion === "0.8.36" && hashes && typeof value.creationBytecode === "string" && typeof value.runtimeBytecode === "string" && refs;
   });
 }
 
@@ -211,3 +219,11 @@ function validRuntime(runtime: Record<string, unknown> | undefined, contracts: u
   if (!runtime || !Array.isArray(contracts) || canonicalJson(contracts) !== canonicalJson(identities)) {return false;}
   return hasImmutables ? runtime.status === "unresolved-immutables" && runtime.reason === "PRODUCTION_RUNTIME_IMMUTABLES_REQUIRE_DETERMINISTIC_LOCAL_EXECUTION" : runtime.status === "exact-static-runtime" && runtime.reason === null;
 }
+
+function preparedVersionMatches(prepared: Record<string, unknown>, expectations: ProductionExpectations): boolean {
+  return ((prepared.schema === "agtmai-prepared-production-deployment-v1" && prepared.coverage === "token-and-reserves-only" && expectations.schema === "agtmai-production-expectations-v1") || (prepared.schema === "agtmai-prepared-production-deployment-v2" && prepared.coverage === "full-ethereum-reserve-assembly" && expectations.schema === "agtmai-production-expectations-v2" && prepared.assemblyConfigurationSha256 === expectations.assemblyConfigurationSha256));
+}
+
+function runtimeNeedsObservation(full: boolean, immutable: boolean, observations: ProductionObservation): boolean { return !full && immutable && observations.schema !== "agtmai-production-observation-v2"; }
+
+function unsupportedFullObservation(full: boolean, observations: ProductionObservation): boolean { return full && observations.schema !== undefined; }

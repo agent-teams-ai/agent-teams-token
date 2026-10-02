@@ -31,7 +31,7 @@ export const safeInspectionCalls = {
   guardSlot: custodyTopic("guard_manager.guard.address"), fallbackSlot: custodyTopic("fallback_manager.handler.address"),
 };
 /** Caller authenticates the independently selected profile and its official artifacts before this read check. */
-export function verifyCustodySafe(expected: DeploymentSafe, profile: SafeProfile, observation: SafeInspection): { readonly nonce: string; readonly owners: readonly Hex[] } {
+export function verifyCustodySafe(expected: Pick<DeploymentSafe, "address" | "owners" | "threshold">, profile: SafeProfile, observation: SafeInspection): { readonly nonce: string; readonly owners: readonly Hex[] } {
   verifySafeProfile(profile);
   if (observation.address !== expected.address || !isDigest(observation.blockHash) || observation.singletonStorage !== `0x${addr(profile.singleton)}`
     || custodyKeccak(fromHex(observation.proxyCode)) !== profile.proxyRuntimeKeccak256 || custodyKeccak(fromHex(observation.singletonCode)) !== profile.singletonRuntimeKeccak256) { fail("CODE_IDENTITY"); }

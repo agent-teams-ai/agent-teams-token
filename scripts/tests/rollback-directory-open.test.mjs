@@ -113,8 +113,7 @@ for (const boundary of ["fstat-before", "fstat-after", "realpath-before", "realp
         assert.ok(Number.isInteger(fault.descriptor()));
         if (injection !== undefined) {
           assert.deepEqual(injection.calls, [fault.descriptor()]);
-          assert.equal(injection.reusedDescriptor(), fault.descriptor());
-          assert.doesNotThrow(() => fs.fstatSync(injection.reusedDescriptor()));
+          assert.equal(fs.fstatSync(injection.reusedDescriptor()).isCharacterDevice(), true);
         } else {
           assert.throws(() => fs.fstatSync(fault.descriptor()), { code: "EBADF" });
         }
@@ -127,6 +126,55 @@ for (const boundary of ["fstat-before", "fstat-after", "realpath-before", "realp
     });
   }
 }
+
+test("directory acquisition preserves EINTR when a competing acquisition occupies the released slot", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "agtmai-directory-open-competing-")));
+  const competingPath = join(root, "competing.txt");
+  fs.writeFileSync(competingPath, "competing descriptor\n");
+  const fault = installAcquisitionFault(root, "fstat-after");
+  const competingDescriptors = [];
+  const injection = injectedUncertainClose((_index, descriptor) => {
+    // The selector runs after the real close. Hold only descriptors we open;
+    // a runtime acquisition may already own the released numeric slot.
+    let competing;
+    do {
+      competing = fs.openSync(competingPath, fs.constants.O_RDONLY);
+      competingDescriptors.push(competing);
+    } while (competing < descriptor);
+    return true;
+  });
+  let released = false;
+  try {
+    assert.throws(() => openDirectoryDescriptor(root), (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.message, "ROLLBACK_DIRECTORY_OPEN_CLOSE_FAILED");
+      assert.equal(error.cause, fault.failure);
+      assert.equal(error.errors.length, 2);
+      assert.equal(error.errors[0], fault.failure);
+      assert.equal(error.errors[1].code, "EINTR");
+      return true;
+    });
+    fault.restore();
+    assert.equal(fault.injected(), true);
+    assert.deepEqual(injection.calls, [fault.descriptor()]);
+    assert.ok(injection.reusedDescriptor() > fault.descriptor());
+    assert.equal(fs.fstatSync(injection.reusedDescriptor()).isCharacterDevice(), true);
+    assert.throws(() => assertCustodyDescriptor(fault.descriptor()), {
+      message: "ROLLBACK_CUSTODY_DESCRIPTOR_UNREGISTERED",
+    });
+    releaseDirectoryFixture(root, fault, injection);
+    released = true;
+    for (const descriptor of competingDescriptors) {
+      assert.equal(fs.readFileSync(descriptor, "utf8"), "competing descriptor\n");
+    }
+  } finally {
+    try {
+      if (!released) { releaseDirectoryFixture(root, fault, injection); }
+    } finally {
+      for (const descriptor of competingDescriptors) { fs.closeSync(descriptor); }
+    }
+  }
+});
 
 test("successful directory acquisition transfers a registered open descriptor", () => {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "agtmai-directory-open-success-")));

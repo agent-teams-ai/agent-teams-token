@@ -70,6 +70,8 @@ export function restoreArchitectureBoundarySource(source, baseline, sliceId) {
   return current;
 }
 
+// Reverse only the slice-owned transport additions. Supply construction, observed
+// manifest/passport semantics and passive Safe custody decoding remain exact survivors.
 export function restoreDeploymentPlanSharedEdits(root, sharedPlan, workspaceHandle) {
   for (const path of deploymentPlanSharedEditBaseline.paths) {
     const content = run("git", [

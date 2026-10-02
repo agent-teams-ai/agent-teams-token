@@ -26,11 +26,19 @@ Focused unsigned-package, constructor, runtime-binding and rejection tests pass
 on the worktree. Clean-candidate qualification and native rollback gates remain
 pending; this checkpoint does not qualify local execution or release readiness.
 
-PR2 remains pending: one owned loopback Anvil execution with synthetic chain ID
-1, actual nonce observations, both official Safes, predecessor-state estimates,
-exact runtime/getter observations and observed manifest/passport/cost reporting.
+PR2 now implements the runnable stacked checkpoint: one owned
+loopback Anvil execution with synthetic chain ID 1, actual nonce observations,
+both official Safes, predecessor-state estimates, exact runtime/getter
+observations and observed manifest/passport/cost reporting. Focused compilation,
+integer admission and retained Supply regressions pass. Orchestration observed
+the real owned Anvil/Safe E2E at `ccd775583729f65e76a7a35c45132d3d41cebf38`: all
+four success/failure tests passed without skips, including READY after verified
+cleanup and rejection of unresolved cleanup. Concurrent owned signer operations
+are drained before failure propagates; both behavioral regressions pass. The gas-bearing rehearsal package is reconstructed after execution of the pre-frozen inventory;
+production preparation still requires complete selected gas expectations.
 There is no calibration chain, snapshot/revert or second deployment. Genuine
-execution, exact-SHA review, CI and sealed Linux rollback proof remain required.
+final-head execution, exact-SHA review, CI and sealed Linux rollback proof remain
+required.
 ADR-0011 stays proposed; accepted decisions and founder/contributor terms are
 unchanged. No production numbers, identities, approvals or Mainnet broadcast
 are supplied by this plan; every output has `broadcastAllowed: false`.

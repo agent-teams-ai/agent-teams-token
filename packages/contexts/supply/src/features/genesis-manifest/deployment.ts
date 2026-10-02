@@ -24,3 +24,6 @@ export type { PassportHashPort, PassportObservation, PassportAuthorityObservatio
 export type { AssemblyConstructor } from "./application/prepare-local-purpose-genesis.js";
 export { materializeAssemblyRuntime, verifyAssemblyRuntime } from "./application/prepare-local-purpose-genesis.js";
 export { projectAssemblyFacts } from "./application/reserve-facts.js";
+
+export { materializeObservedAssemblyManifest } from "./application/deployment-manifest.js";
+export type { ObservedAssemblyManifest, LocalAssemblyObservation, AssemblyOperationObservation, AssemblyContractObservation } from "./application/deployment-manifest.js";

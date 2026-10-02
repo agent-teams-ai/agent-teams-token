@@ -1,5 +1,43 @@
 # AGTMAI release status
 
+## Full local Ethereum assembly PR2, 2026-10-01
+
+The existing execution proof now has one synthetic chain-1 assembly path using
+PR1's common construction and exact materialized runtime expectations. It owns
+internal keystore/password custody, distinct bootstrap and assembly EOAs, actual
+nonce observations, both independently inspected official Safe 1.4.1 instances,
+predecessor-state estimates, conservative remaining-operation reservations and
+one send per operation. Pending/uncertain/reverted attempts stop continuation;
+public diagnostics survive while success waits for process/key cleanup.
+
+The canonical deployment-plan purpose E2E exercises all six Safe outflows,
+opening/cap/refund/expiry and denial boundaries, founder non-cancellation and
+beneficiary release, contributor refund/debt arithmetic and conservation. Supply's
+existing v2 manifest/passport/facts now project actual ten-instance observations,
+parent receipt plus child nonce 1, offline source inputs and checked costs.
+The complete gas-bearing rehearsal package is reconstructed after execution of
+the pre-frozen inventory. Production preparation still requires all selected gas
+expectations before publication; synthetic evidence cannot approve deployment.
+
+Focused build/typechecks, integer guards and existing Supply regressions pass.
+Orchestration observed actual native Anvil/Safe E2E at
+`ccd775583729f65e76a7a35c45132d3d41cebf38`: all four assembly success/failure tests passed with zero skips,
+including successful final READY/reopening after cleanup and refusal to publish
+READY when custody cleanup remains unresolved. The ten contract instances and
+ten deployer operations used 10,048,115 gas, with observed costs summing exactly to
+13,370,912,386,247,258 wei. These are synthetic local observations, not live
+Mainnet fee estimates. Prior broader regressions passed 190 deployment-plan tests
+(two unrelated native skips) and 172 local-EVM tests with zero skips.
+Process exit, descriptor closure and removal of temporary key custody were
+observed before success. Owned concurrent signer work now drains before any
+failure/cleanup continuation; two behavioral regressions pass without skips.
+An initial duplicate Anvil registration failure was fixed with the existing
+confirmation API; protected RunLease code was unchanged.
+Final-source qualification, independent review, canonical CI and sealed Linux
+rollback proof remain required.
+No Mainnet or public testnet broadcast, real key, explorer submission, production
+policy value or human approval is supplied; `broadcastAllowed` remains false.
+
 ## Full unsigned Ethereum assembly PR1, 2026-10-01
 
 Supply now prepares explicit production v2 with six mandatory immutable purpose
@@ -12,8 +50,9 @@ actual deployment, runtime/getter observations and costs remain unavailable.
 
 Production v1 and local-purpose v1 retain their existing meanings. Synthetic
 local-purpose v2 uses chain ID 1 with test-only authority and no approval; it
-cannot enter production admission. PR2 execution/scenarios and observed reports,
-clean-SHA review, CI and sealed Linux rollback proof are pending. The precise
+cannot enter production admission. PR2 implements execution/scenarios and observed
+reporting; native qualification, clean-SHA review, CI and sealed Linux rollback
+proof remain pending. The precise
 rollback transform preserves Supply bytes; manifest ownership migration and
 official hash maintenance follow the orchestrator's candidate commit. Mainnet is excluded,
 all output is unsigned, and `broadcastAllowed` remains `false`.
