@@ -405,8 +405,16 @@ export function finalizeRollbackTemporaryParent({
   cleanupHandle,
   workspaceHandle,
   primaryFailure,
+  processesQuiescent = true,
 }) {
   let effectivePrimaryFailure = primaryFailure;
+  if (processesQuiescent !== true) {
+    effectivePrimaryFailure = combineRollbackFailures(
+      effectivePrimaryFailure,
+      new Error("ROLLBACK_PROCESS_QUIESCENCE_UNCERTAIN"),
+      "rollback proof and process termination both uncertain",
+    );
+  }
   let cleanupFailure;
   let cleanup;
   if (workspaceHandle !== undefined) {

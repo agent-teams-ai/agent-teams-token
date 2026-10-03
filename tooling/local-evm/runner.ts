@@ -2,13 +2,13 @@ import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
-import { finishWithCleanup } from "./cleanup.ts";
+import { cleanupFailures, finishWithCleanup } from "./cleanup.ts";
 import { canonicalJson, sha256, sha256HexBytes, strip0x } from "./crypto.ts";
 import { reconstructCreationInput } from "./constructor.ts";
 import { constructorInputsFromManifest, readApprovedManifest } from "./manifest.ts";
 import { APPROVED_ABI_SHA256, APPROVED_CONTRACT_ARTIFACT_SHA256, APPROVED_CONTRACT_SOURCE, APPROVED_LOCAL_FIXTURE_ARTIFACT_SHA256, LocalEvmError, type DeploymentReport, type VerificationInput } from "./model.ts";
 import { checkedCommand, command, CommandExitError, CommandSpawnError, startOwnedAnvil, type OwnedAnvil } from "./process.ts";
-import { createRunLease, reclaimStaleRuns, registerRunAnvil, removeOwnedRunDirectory } from "./run-lease.ts";
+import { confirmRunAnvilRegistration, createRunLease, reclaimStaleRuns, removeOwnedRunDirectory } from "./run-lease.ts";
 import { createInitializingRunDirectory, publishInitializedRun } from "./run-initialization.ts";
 import { bootstrapRpcRequest } from "./rpc.ts";
 import {
@@ -51,7 +51,8 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
   const interrupt = (signal: NodeJS.Signals): void => {
     interruptedSignal = signal;
     commandAbort.abort();
-    void anvil?.stop();
+    // Finalization observes the shared stop promise and reports its failure.
+    void anvil?.stop().catch(() => {});
   };
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
@@ -75,8 +76,10 @@ export async function runLocalEvm(options: RunnerOptions): Promise<Record<string
         if (process.env.AGTMAI_LOCAL_EVM_FAULT === "after-anvil-spawn-before-registration") {
           await faultPause("after-anvil-spawn-before-registration", {childIdentity: identity});
         }
-        await registerRunAnvil(runDirectory, identity);
+        await confirmRunAnvilRegistration(runDirectory, identity);
       },
+      {},
+      runDirectory,
     );
     await publishProcessId(runDirectory, "anvil.pid", anvil.pid);
     if (interruptedSignal) {throw new LocalEvmError("LOCAL_EVM_INTERRUPTED", `interrupted by ${interruptedSignal}`);}
@@ -236,12 +239,18 @@ async function finalizeLocalRun(state: {
   readonly runDirectory: string;
   readonly interruptedSignal?: NodeJS.Signals;
 }): Promise<void> {
+  let stopped = false;
   await finishWithCleanup(state.primary, [
     () => {process.removeListener("SIGINT", state.interrupt);},
     () => {process.removeListener("SIGTERM", state.interrupt);},
     () => state.solc?.close(),
-    async () => await state.anvil?.stop(),
-    async () => await removeOwnedRunDirectory(state.runDirectory),
+    async () => {
+      await state.anvil?.stop();
+      // Rejected startup returns no handle, but can leave a live child before
+      // identity registration. Keep that cleanup debt in custody.
+      stopped = state.anvil !== undefined || cleanupFailures(state.primary).length === 0;
+    },
+    async () => {if (stopped) {await removeOwnedRunDirectory(state.runDirectory);}},
     () => {
       if (state.interruptedSignal) {
         process.exitCode = state.interruptedSignal === "SIGINT" ? 130 : 143;

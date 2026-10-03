@@ -1,4 +1,4 @@
-import { loadDeploymentManifest, parseProductionApproval, parseProductionExpectations } from "./deployment-files.js";
+import { loadDeploymentManifest, productionCompilerPorts, parseProductionApproval, parseProductionExpectations } from "./deployment-files.js";
 import { dirname, resolve } from "node:path";
 import { compileDeployment, deploymentBytes, type DeploymentApproval } from "../application/compile-deployment.js";
 import { materializeDeploymentManifest } from "../application/deployment-manifest.js";
@@ -31,19 +31,20 @@ export async function deploymentCli(args: readonly string[]): Promise<number> {
     if (command === "validate-production") {
       const value = parseProductionSource(await text(required("--config")));
       const result = validateProductionDeployment(value);
-      return result.value ? report({ status: "valid", schema: "agtmai-production-deployment-v1", broadcastAllowed: false }) : report({ status: "invalid", diagnostics: result.diagnostics, broadcastAllowed: false }, 2);
+      return result.value ? report({ status: "valid", schema: result.value.schema, broadcastAllowed: false }) : report({ status: "invalid", diagnostics: result.diagnostics, broadcastAllowed: false }, 2);
     }
     if (command === "compile-production") {
       const value = parseProductionSource(await text(required("--config")));
-      const artifacts = await readProductionArtifactPins(required("--artifacts"));
+      const candidate = selectedCandidate(options);
+      const artifacts = await readProductionArtifactPins(required("--artifacts"), candidate);
       const approval = parseProductionApproval(await text(required("--approval")));
       const expectations = parseProductionExpectations(await text(required("--expectations")));
-      const result = prepareProductionDeployment(value, { artifactSourceRevision: artifacts.sourceRevision, artifacts: artifacts.artifacts, approval: approval as ProductionApproval, expectations: expectations as ProductionExpectation }, ports, sha256);
+      const result = prepareProductionDeployment(value, { artifactSourceRevision: artifacts.sourceRevision, artifacts: artifacts.artifacts, approval: approval as ProductionApproval, expectations: expectations as ProductionExpectation }, productionCompilerPorts, sha256);
       if (!result.prepared) {return report({ status: "invalid", diagnostics: result.diagnostics, broadcastAllowed: false }, 2);}
       const output = required("--output");
-      const packagePins = { schema: "agtmai-production-artifact-pins-v1", sourceRevision: artifacts.sourceRevision, artifacts: result.prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactPath: `${artifact.contract.toLowerCase()}.artifact.json`, artifactSha256: artifact.artifactSha256, buildInfoPath: `${artifact.contract.toLowerCase()}.build-info.json`, buildInfoSha256: artifact.buildInfoSha256 })) };
+      const packagePins = { schema: productionPinsSchema(result.prepared.schema), sourceRevision: artifacts.sourceRevision, artifacts: result.prepared.artifacts.map(artifact => ({ contract: artifact.contract, artifactPath: `${artifact.contract.toLowerCase()}.artifact.json`, artifactSha256: artifact.artifactSha256, buildInfoPath: `${artifact.contract.toLowerCase()}.build-info.json`, buildInfoSha256: artifact.buildInfoSha256 })) };
       await publishDeploymentFiles(output, { ...artifacts.files,
-        "canonical-production-configuration.json": deploymentBytes(value),
+        "canonical-production-configuration.json": deploymentBytes(result.prepared.configuration),
         "production-approval.json": deploymentBytes(approval),
         "production-artifact-pins.json": deploymentBytes(packagePins),
         "production-expectations.json": deploymentBytes(expectations),
@@ -96,7 +97,7 @@ async function compileOrValidate(command: string, required: (key: string) => str
 }
 
 function parseOptions(command: string | undefined, rest: readonly string[]): Map<string, string> | undefined {
-  const allowed: Record<string, readonly string[]> = { "validate-production": ["--config"], "compile-production": ["--config", "--artifacts", "--approval", "--expectations", "--output"], validate: ["--config"], compile: ["--config", "--output", "--artifacts", "--approval"], materialize: ["--prepared", "--evidence", "--output"], verify: ["--manifest"] };
+  const allowed: Record<string, readonly string[]> = { "validate-production": ["--config"], "compile-production": ["--config", "--artifacts", "--approval", "--expectations", "--output", "--candidate-revision", "--repository-root"], validate: ["--config"], compile: ["--config", "--output", "--artifacts", "--approval"], materialize: ["--prepared", "--evidence", "--output"], verify: ["--manifest"] };
   if (!command || !Object.hasOwn(allowed, command)) { return undefined; }
   const options = new Map<string, string>();
   for (let i = 0; i < rest.length; i += 2) {
@@ -116,3 +117,11 @@ function parseProductionSource(source: string): unknown {
 }
 
 export { readDeploymentFile };
+
+function selectedCandidate(options: ReadonlyMap<string, string>) {
+  const revision = options.get("--candidate-revision"), repositoryRoot = options.get("--repository-root");
+  return revision && repositoryRoot ? { revision, repositoryRoot } : undefined;
+}
+function productionPinsSchema(schema: string): string {
+  return schema === "agtmai-prepared-production-deployment-v2" ? "agtmai-production-artifact-pins-v2" : "agtmai-production-artifact-pins-v1";
+}

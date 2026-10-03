@@ -139,14 +139,18 @@ test("supervisor closes the pre-registration SIGKILL window", {timeout: 120_000}
   const fault = await waitForFault(killed, "after-anvil-spawn-before-registration", 30_000);
   const identity = fault.childIdentity as {pid: number; processStart: string};
   assert.equal(await authenticateProcess(identity), "owned");
+  const [directory] = await runDirectories();
+  assert(directory);
+  const lease = JSON.parse(await readFile(join(privateRoot, directory, "lease.v1.json"), "utf8"));
+  assert.deepEqual(lease.anvil, identity, "supervisor durably registered the actual child before the runner fault");
   assert.equal(killed.child.kill("SIGKILL"), true);
   assert.notEqual((await killed.result).exitCode, 0);
-  await waitFor(async () => await authenticateProcess(identity) !== "owned", 15_000, "supervised Anvil termination");
+  await waitFor(async () => await authenticateProcess(identity) === "absent", 15_000, "independently observed Anvil exit");
 
   const recovered = await run();
   assert.equal(recovered.exitCode, 0, recovered.stderr);
   rememberReport(lastJson(recovered.stdout));
-  assert.notEqual(await authenticateProcess(identity), "owned");
+  assert.equal(await authenticateProcess(identity), "absent");
   await assertNoPrivateRunDirectories();
 });
 

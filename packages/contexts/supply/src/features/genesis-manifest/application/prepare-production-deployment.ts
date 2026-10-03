@@ -1,10 +1,12 @@
 import { validateProductionDeployment, type ValidatedProductionDeployment } from "../domain/production-deployment.js";
-import { normalizeAllocationSet, type Diagnostic, type NormalizedAllocation } from "../domain/model.js";
+import { normalizeAllocationSet, type Diagnostic, parseCanonicalUint, UINT64_MAX, UINT256_MAX, type NormalizedAllocation } from "../domain/model.js";
 import type { DeploymentConfig, Hex } from "../domain/deployment.js";
+import { constructReserveAssembly, type AssemblyConstructor, type LocalPurposePorts } from "./assembly-construction.js";
 import { canonicalJson, type JsonValue } from "./canonical.js";
+import { projectAssemblyFacts } from "./reserve-facts.js";
 
 export interface ProductionArtifactPin {
-  readonly contract: "AGTMAICCIPToken" | "FounderGrantReserve" | "ReserveController";
+  readonly contract: "AGTMAICCIPToken" | "FounderGrantReserve" | "ReserveController" | "PurposeReserveVault" | "GrantVault";
   readonly compilerVersion: "0.8.36";
   readonly creationBytecode: Hex;
   readonly runtimeBytecode: Hex;
@@ -14,7 +16,9 @@ export interface ProductionArtifactPin {
   readonly immutableReferences: readonly { readonly name: string; readonly start: number; readonly length: 32 }[];
 }
 export interface ProductionExpectation {
-  readonly schema: "agtmai-production-expectations-v1";
+  readonly schema: "agtmai-production-expectations-v1" | "agtmai-production-expectations-v2";
+  readonly assemblyConfigurationSha256?: Hex;
+  readonly coverage?: "full-ethereum-reserve-assembly";
   readonly chainId: "1";
   readonly sourceRevision: string;
   readonly configurationSha256: Hex;
@@ -27,16 +31,21 @@ export interface ProductionExpectation {
   readonly maxObservationAgeSeconds: string;
   readonly maxTotalCostWei: string;
   readonly authority: readonly { readonly address: Hex; readonly owners: readonly Hex[]; readonly threshold: 2; readonly nonce: string; readonly proxyCodeHash: Hex; readonly singletonCodeHash: Hex; readonly singletonAddress: Hex; readonly singletonSlot: Hex; readonly modules: readonly Hex[]; readonly guard: Hex | null; readonly fallbackHandler: Hex | null; readonly setupProvenance: string }[];
-  readonly operations: readonly { readonly id: "token-create" | "founder-reserve-create" | "controller-create" | "founder-fund"; readonly kind: "create" | "call"; readonly intentHash: Hex; readonly expectedAddress?: Hex; readonly nestedAddress?: Hex; readonly nonce?: string; readonly initcode?: Hex; readonly initcodeHash?: Hex; readonly runtime?: Hex; readonly runtimeHash?: Hex; readonly gasEstimate?: string; readonly gasLimit?: string; readonly baseFeePerGas?: string; readonly maxPriorityFeePerGas?: string; readonly maxFeePerGas?: string; readonly blockGasLimit?: string; readonly value?: string; readonly calldata?: Hex }[];
+  readonly operations: readonly { readonly id: "token-create" | "founder-reserve-create" | "controller-create" | "founder-fund" | `purpose-${string}-create`; readonly kind: "create" | "call"; readonly intentHash: Hex; readonly expectedAddress?: Hex; readonly nestedAddress?: Hex; readonly nonce?: string; readonly initcode?: Hex; readonly initcodeHash?: Hex; readonly runtime?: Hex; readonly runtimeHash?: Hex; readonly runtimeTemplate?: Hex; readonly runtimeTemplateHash?: Hex; readonly gasEstimate?: string; readonly gasLimit?: string; readonly baseFeePerGas?: string; readonly maxPriorityFeePerGas?: string; readonly maxFeePerGas?: string; readonly blockGasLimit?: string; readonly value?: string; readonly calldata?: Hex }[];
 }
 export interface ProductionApproval {
-  readonly schema: "agtmai-production-approval-v1";
+  readonly schema: "agtmai-production-approval-v1" | "agtmai-production-approval-v2";
+  readonly assemblyConfigurationSha256?: Hex;
   readonly configurationSha256: Hex;
   readonly reserveConfigurationSha256: Hex;
   readonly reference: string;
 }
 export interface PreparedProductionDeployment {
-  readonly schema: "agtmai-prepared-production-deployment-v1";
+  readonly schema: "agtmai-prepared-production-deployment-v1" | "agtmai-prepared-production-deployment-v2";
+  readonly assemblyConfigurationSha256?: Hex;
+  readonly constructors?: readonly AssemblyConstructor[];
+  readonly genesisAllocationHash?: Hex;
+  readonly facts?: ReturnType<typeof projectAssemblyFacts>;
   readonly broadcastAllowed: false;
   readonly configuration: ValidatedProductionDeployment;
   readonly configurationSha256: Hex;
@@ -45,7 +54,7 @@ export interface PreparedProductionDeployment {
   readonly expectations: ProductionExpectation;
   readonly artifacts: readonly ProductionArtifactPin[];
   readonly runtimeVerification: {
-    readonly status: "exact-static-runtime" | "unresolved-immutables";
+    readonly status: "exact-static-runtime" | "unresolved-immutables" | "templates-and-materialized-expectations";
     readonly reason: null | "PRODUCTION_RUNTIME_IMMUTABLES_REQUIRE_DETERMINISTIC_LOCAL_EXECUTION";
     readonly contracts: readonly {
       readonly contract: ProductionArtifactPin["contract"];
@@ -54,7 +63,7 @@ export interface PreparedProductionDeployment {
       readonly immutableReferences: readonly { readonly name: string; readonly start: number; readonly length: 32 }[];
     }[];
   };
-  readonly coverage: "token-and-reserves-only";
+  readonly coverage: "token-and-reserves-only" | "full-ethereum-reserve-assembly";
   readonly operations: readonly { readonly id: string; readonly kind: "create" | "call"; readonly intentHash: Hex; readonly nonce: string; readonly expectedAddress?: Hex; readonly nestedAddress?: Hex; readonly to?: Hex; readonly initcode?: Hex; readonly calldata?: Hex; readonly value: "0" }[];
 }
 
@@ -69,7 +78,9 @@ const operationCommon = ["baseFeePerGas", "blockGasLimit", "expectedAddress", "g
 const exactFields = (value: object, fields: readonly string[]): boolean => Object.keys(value).toSorted().join() === [...fields].toSorted().join();
 
 export interface ProductionPreparationPorts {
-  readonly encodeToken: (config: DeploymentConfig, allocations: readonly NormalizedAllocation[]) => { readonly constructorArgs: Hex };
+  readonly encodePurposeVault?: LocalPurposePorts["encodePurposeVault"];
+  readonly encodeFounderVault?: LocalPurposePorts["encodeFounderVault"];
+  readonly encodeToken: (config: DeploymentConfig, allocations: readonly NormalizedAllocation[]) => { readonly constructorArgs: Hex; readonly genesisAllocationHash?: Hex };
   readonly encodeFounderReserve: (input: { token: Hex; beneficiary: Hex; controller: Hex; allocation: string; start: string; cliff: string; end: string; purpose: Hex }) => Hex;
   readonly encodeReserveController: (input: { token: Hex; controller: Hex; purpose: Hex; rollingCap: string; perGrantCap: string }) => Hex;
   readonly keccak256: (bytes: Uint8Array) => Hex;
@@ -82,7 +93,8 @@ export function prepareProductionDeployment(input: unknown, pins: { readonly art
   if (!validated.value) {return { diagnostics: validated.diagnostics };}
   const context = validatePreparationInputs(validated.value, pins, sha256);
   if (context.diagnostics.length || !context.normalized.allocations) {return { diagnostics: context.diagnostics };}
-  return buildPreparedDeployment(context, pins, ports);
+  return context.value.schema === "agtmai-production-deployment-v2"
+    ? buildPreparedAssembly(context, pins, ports, sha256) : buildPreparedDeployment(context, pins, ports);
 }
 
 interface PreparationContext {
@@ -99,7 +111,7 @@ function validatePreparationInputs(value: ValidatedProductionDeployment, pins: {
   const diagnostics: Diagnostic[] = [];
   const configurationSha256 = sha256(new TextEncoder().encode(canonicalJson(value.deployment as unknown as JsonValue)));
   const reserveConfigurationSha256 = sha256(new TextEncoder().encode(canonicalJson(value.reserveGenesis as unknown as JsonValue)));
-  validateApproval(pins.approval, configurationSha256, reserveConfigurationSha256, diagnostics);
+  validateApproval(pins.approval, configurationSha256, reserveConfigurationSha256, diagnostics, value.schema === "agtmai-production-deployment-v2");
   validateExpectations(value, pins.expectations, configurationSha256, reserveConfigurationSha256, diagnostics);
   const canonicalArtifacts = pins.artifacts.toSorted((left, right) => left.contract.localeCompare(right.contract));
   validateArtifacts(pins, canonicalArtifacts, sha256, diagnostics);
@@ -110,10 +122,10 @@ function validatePreparationInputs(value: ValidatedProductionDeployment, pins: {
   return { diagnostics, value, configurationSha256, reserveConfigurationSha256, canonicalArtifacts, normalized, founderAllocation: normalized.allocations?.find(allocation => allocation.id === "founder") ?? founderAllocation as never };
 }
 
-function validateApproval(approval: ProductionApproval, configurationSha256: Hex, reserveConfigurationSha256: Hex, diagnostics: Diagnostic[]): void {
+function validateApproval(approval: ProductionApproval, configurationSha256: Hex, reserveConfigurationSha256: Hex, diagnostics: Diagnostic[], v2: boolean): void {
   if (!approval || !digest(approval.configurationSha256) || approval.configurationSha256 !== configurationSha256) {diagnostics.push(invalid("APPROVAL_CONFIGURATION", "/approval/configurationSha256"));}
   if (!approval || !digest(approval.reserveConfigurationSha256) || approval.reserveConfigurationSha256 !== reserveConfigurationSha256) {diagnostics.push(invalid("APPROVAL_RESERVE", "/approval/reserveConfigurationSha256"));}
-  if (!approval || !/^agtmai-production-approval-v1$/.test(approval.schema) || !/^[A-Za-z0-9][A-Za-z0-9./_-]{0,159}$/.test(approval.reference)) {diagnostics.push(invalid("APPROVAL", "/approval"));}
+  if (!approval || approval.schema !== (v2 ? "agtmai-production-approval-v2" : "agtmai-production-approval-v1") || !exactFields(approval, ["schema", "configurationSha256", "reserveConfigurationSha256", "reference", ...(v2 ? ["assemblyConfigurationSha256"] : [])]) || !/^[A-Za-z0-9][A-Za-z0-9./_-]{0,159}$/.test(approval.reference)) {diagnostics.push(invalid("APPROVAL", "/approval"));}
 }
 
 function validateExpectations(value: ValidatedProductionDeployment, expectations: ProductionExpectation, configurationSha256: Hex, reserveConfigurationSha256: Hex, diagnostics: Diagnostic[]): void {
@@ -122,12 +134,15 @@ function validateExpectations(value: ValidatedProductionDeployment, expectations
   const authority = Array.isArray(expectations.authority) ? expectations.authority : [];
   const authorityValid = authority.length === 2 && authority.every(validAuthority);
   const safeBound = (configured: typeof projectSafe): boolean => configured !== undefined && authority.some(safe => safe.address === configured.address && safe.threshold === configured.threshold && sameStrings(safe.owners, configured.owners));
-  const valid = expectationIdentityValid(expectations, configurationSha256, reserveConfigurationSha256) && authorityValid && projectSafe !== undefined && founderSafe !== undefined && new Set(authority.map(safe => safe.address)).size === 2 && safeBound(projectSafe) && safeBound(founderSafe) && decimal(expectations.startingNonce) && decimal(expectations.maxObservationAgeSeconds) && decimal(expectations.maxTotalCostWei);
+  const valid = expectationIdentityValid(expectations, configurationSha256, reserveConfigurationSha256, value.schema === "agtmai-production-deployment-v2") && authorityValid && projectSafe !== undefined && founderSafe !== undefined && new Set(authority.map(safe => safe.address)).size === 2 && safeBound(projectSafe) && safeBound(founderSafe) && decimal(expectations.startingNonce) && decimal(expectations.maxObservationAgeSeconds) && decimal(expectations.maxTotalCostWei);
   if (!valid) {diagnostics.push(invalid("EXPECTATIONS", "/expectations"));}
+  if (value.schema === "agtmai-production-deployment-v2" && (!parseCanonicalUint(expectations.maxObservationAgeSeconds, UINT64_MAX)
+    || !parseCanonicalUint(expectations.maxTotalCostWei, UINT256_MAX))) { diagnostics.push(invalid("EXPECTATIONS_BOUNDS", "/expectations")); }
 }
 
-function expectationIdentityValid(expectations: ProductionExpectation, configurationSha256: Hex, reserveConfigurationSha256: Hex): boolean {
-  return /^agtmai-production-expectations-v1$/.test(expectations.schema) && expectations.chainId === "1" && /^[0-9a-f]{40}$/.test(expectations.sourceRevision) && expectations.configurationSha256 === configurationSha256 && expectations.reserveConfigurationSha256 === reserveConfigurationSha256 && digest(expectations.attemptIdentity) && address(expectations.sender) && address(expectations.deployer) && expectations.sender === expectations.deployer;
+function expectationIdentityValid(expectations: ProductionExpectation, configurationSha256: Hex, reserveConfigurationSha256: Hex, v2: boolean): boolean {
+  return expectations.schema === (v2 ? "agtmai-production-expectations-v2" : "agtmai-production-expectations-v1")
+    && exactFields(expectations, ["schema", "chainId", "sourceRevision", "configurationSha256", "reserveConfigurationSha256", "artifactPinsSha256", "attemptIdentity", "sender", "deployer", "startingNonce", "maxObservationAgeSeconds", "maxTotalCostWei", "authority", "operations", ...(v2 ? ["assemblyConfigurationSha256", "coverage"] : [])]) && expectations.chainId === "1" && /^[0-9a-f]{40}$/.test(expectations.sourceRevision) && expectations.configurationSha256 === configurationSha256 && expectations.reserveConfigurationSha256 === reserveConfigurationSha256 && digest(expectations.attemptIdentity) && address(expectations.sender) && address(expectations.deployer) && expectations.sender === expectations.deployer;
 }
 
 function validAuthority(safe: ProductionExpectation["authority"][number]): boolean {
@@ -135,11 +150,11 @@ function validAuthority(safe: ProductionExpectation["authority"][number]): boole
 }
 
 function validateArtifacts(pins: { readonly artifactSourceRevision: string; readonly artifacts: readonly ProductionArtifactPin[]; readonly expectations: ProductionExpectation }, canonicalArtifacts: readonly ProductionArtifactPin[], sha256: (bytes: Uint8Array) => Hex, diagnostics: Diagnostic[]): void {
-  const selected = sha256(new TextEncoder().encode(canonicalJson({ schema: "agtmai-production-artifact-pins-v1", sourceRevision: pins.artifactSourceRevision, artifacts: canonicalArtifacts } as unknown as JsonValue)));
+  const selected = sha256(new TextEncoder().encode(canonicalJson({ schema: pins.expectations.schema === "agtmai-production-expectations-v2" ? "agtmai-production-artifact-pins-v2" : "agtmai-production-artifact-pins-v1", sourceRevision: pins.artifactSourceRevision, artifacts: canonicalArtifacts } as unknown as JsonValue)));
   if (pins.expectations.artifactPinsSha256 !== selected) {diagnostics.push(invalid("ARTIFACT_PIN_BINDING", "/expectations/artifactPinsSha256"));}
   if (pins.artifactSourceRevision !== pins.expectations.sourceRevision) {diagnostics.push(invalid("SOURCE_REVISION_BINDING", "/expectations/sourceRevision"));}
-  const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController"];
-  const valid = pins.artifacts.length === 3 && new Set(pins.artifacts.map(a => a.contract)).size === 3 && pins.artifacts.every(artifact => contracts.includes(artifact.contract) && artifact.compilerVersion === "0.8.36" && digest(artifact.artifactSha256) && digest(artifact.buildInfoSha256) && digest(artifact.compilerInputSha256) && bytes(artifact.creationBytecode) && bytes(artifact.runtimeBytecode) && Array.isArray(artifact.immutableReferences) && artifact.immutableReferences.every(reference => /^[A-Z][A-Z0-9_]{0,63}$/.test(reference.name) && Number.isSafeInteger(reference.start) && reference.start >= 0 && reference.length === 32 && (reference.start + 32) * 2 <= artifact.runtimeBytecode.length - 2));
+  const contracts = ["AGTMAICCIPToken", "FounderGrantReserve", "ReserveController", ...(pins.expectations.schema === "agtmai-production-expectations-v2" ? ["PurposeReserveVault", "GrantVault"] : [])];
+  const valid = pins.artifacts.length === contracts.length && new Set(pins.artifacts.map(a => a.contract)).size === contracts.length && pins.artifacts.every(artifact => contracts.includes(artifact.contract) && artifact.compilerVersion === "0.8.36" && digest(artifact.artifactSha256) && digest(artifact.buildInfoSha256) && digest(artifact.compilerInputSha256) && bytes(artifact.creationBytecode) && bytes(artifact.runtimeBytecode) && Array.isArray(artifact.immutableReferences) && artifact.immutableReferences.every(reference => /^[A-Z][A-Z0-9_]{0,63}$/.test(reference.name) && Number.isSafeInteger(reference.start) && reference.start >= 0 && reference.length === 32 && (reference.start + 32) * 2 <= artifact.runtimeBytecode.length - 2));
   if (!valid) {diagnostics.push(invalid("ARTIFACTS", "/artifacts"));}
 }
 
@@ -274,4 +289,87 @@ function runtimeMatchesArtifact(runtime: Hex | undefined, artifact: ProductionAr
 
 function operationIntent(ports: ProductionPreparationPorts, expectations: ProductionExpectation, operation: ProductionExpectation["operations"][number], createBytes: Hex, calldata: Hex): Hex {
   return ports.keccak256(new TextEncoder().encode(canonicalJson({ domain: "AGTMAI_PRODUCTION_OPERATION_INTENT_V1", chainId: expectations.chainId, sender: expectations.sender, nonce: operation.nonce, kind: operation.kind, target: operation.expectedAddress, createBytes, value: operation.value, calldata } as unknown as JsonValue)));
+}
+
+/** Freeze constructor/intents before gas binding. Authority admission belongs to the selected caller. */
+export function constructProductionAssembly(input: unknown, selection: { readonly sourceRevision: string; readonly artifacts: readonly ProductionArtifactPin[]; readonly sender: Hex; readonly startingNonce: string }, ports: ProductionPreparationPorts, sha256: (bytes: Uint8Array) => Hex) {
+  const { sourceRevision, artifacts, sender, startingNonce } = selection;
+  const validated = validateProductionDeployment(input);
+  const value = validated.value;
+  if (!value || value.schema !== "agtmai-production-deployment-v2" || !/^[0-9a-f]{40}$/.test(sourceRevision)
+    || !ports.encodePurposeVault || !ports.encodeFounderVault) { throw new Error("PRODUCTION_ASSEMBLY_INPUT"); }
+  const encodePurposeVault = ports.encodePurposeVault, encodeFounderVault = ports.encodeFounderVault;
+  const assembly = constructReserveAssembly({ chainId: "1", reserve: value.reserveGenesis, custodySafes: value.deployment.custodySafes,
+    projectControllerSafeId: value.projectControllerSafeId, purposeVaults: value.purposeVaults!, execution: { sender, startingNonce } }, artifacts,
+    { ...ports, sha256, encodePurposeVault, encodeFounderVault,
+      encodeToken: (_chain, _supply, _admin, allocations) => {
+        const encoded = ports.encodeToken(value.deployment, allocations);
+        if (!encoded.genesisAllocationHash) { throw new Error("PRODUCTION_ASSEMBLY_TOKEN_HASH"); }
+        return { constructorArgs: encoded.constructorArgs, genesisAllocationHash: encoded.genesisAllocationHash };
+      }, encodeReserveController: (token, controller, purpose, rollingCap, perGrantCap) => ports.encodeReserveController({ token, controller, purpose, rollingCap, perGrantCap }) });
+  const hash = (data: unknown) => sha256(new TextEncoder().encode(canonicalJson(data as JsonValue)));
+  const assemblyConfigurationSha256 = hash(value);
+  const configurationSha256 = hash(value.deployment), reserveConfigurationSha256 = hash(value.reserveGenesis);
+  const artifactPinsSha256 = hash({ schema: "agtmai-production-artifact-pins-v2", sourceRevision, artifacts: assembly.artifacts });
+  const operations = assembly.operations.map(operation => ({ ...operation, intentHash: ports.keccak256(new TextEncoder().encode(canonicalJson({
+    domain: "AGTMAI_PRODUCTION_OPERATION_INTENT_V2", chainId: "1", sender, nonce: operation.nonce, kind: operation.kind,
+    target: operation.expectedAddress ?? operation.to, createBytes: operation.initcode ?? "0x", value: operation.value,
+    calldata: operation.calldata ?? "0x" } as JsonValue))) }));
+  const attemptIdentity = ports.keccak256(new TextEncoder().encode(canonicalJson({ domain: "AGTMAI_PRODUCTION_ATTEMPT_V2", chainId: "1",
+    sender, startingNonce, sourceRevision, artifactPinsSha256, assemblyConfigurationSha256, intents: operations.map(o => o.intentHash) } as JsonValue)));
+  return { broadcastAllowed: false as const, configuration: value, configurationSha256, reserveConfigurationSha256,
+    assemblyConfigurationSha256, artifactPinsSha256, attemptIdentity, ...assembly, operations };
+}
+
+function buildPreparedAssembly(context: PreparationContext, pins: Parameters<typeof prepareProductionDeployment>[1],
+  ports: ProductionPreparationPorts, sha256: (bytes: Uint8Array) => Hex): ReturnType<typeof prepareProductionDeployment> {
+  const diagnostics = [...context.diagnostics];
+  let assembly: ReturnType<typeof constructProductionAssembly>;
+  try { assembly = constructProductionAssembly(context.value, { sourceRevision: pins.artifactSourceRevision, artifacts: pins.artifacts, sender: pins.expectations.sender,
+    startingNonce: pins.expectations.startingNonce }, ports, sha256); } catch { return { diagnostics: [invalid("ASSEMBLY_BINDING", "/configuration")] }; }
+  const e = pins.expectations;
+  if (pins.approval.assemblyConfigurationSha256 !== assembly.assemblyConfigurationSha256
+    || e.assemblyConfigurationSha256 !== assembly.assemblyConfigurationSha256 || e.coverage !== "full-ethereum-reserve-assembly") {
+    diagnostics.push(invalid("ASSEMBLY_APPROVAL_BINDING", "/assemblyConfigurationSha256"));
+  }
+  if (!Array.isArray(e.operations) || e.operations.length !== 10) { return { diagnostics: [invalid("OPERATION_INVENTORY", "/expectations/operations")] }; }
+  for (const [i, op] of assembly.operations.entries()) {
+    const selected = e.operations[i]!;
+    if (!assemblyOperationMatches(op, selected, assembly.constructors[i])) {
+      diagnostics.push(invalid("CONSTRUCTOR_BINDING", `/expectations/operations/${i}`));
+    }
+    if (!assemblyGasFieldsValid(selected)) { diagnostics.push(invalid("GAS_FIELDS", `/expectations/operations/${i}`)); }
+  }
+  if (e.attemptIdentity !== assembly.attemptIdentity) { diagnostics.push(invalid("ATTEMPT_IDENTITY", "/expectations/attemptIdentity")); }
+  if (!diagnostics.length) {
+    validateGasPolicy(e.operations, context.value.deployment.policy, diagnostics);
+    const total = e.operations.reduce((sum, op) => sum + BigInt(op.gasLimit!) * BigInt(op.maxFeePerGas!), 0n);
+    if (total > UINT256_MAX || total > BigInt(e.maxTotalCostWei)) { diagnostics.push(invalid("TOTAL_COST", "/expectations/maxTotalCostWei")); }
+  }
+  if (diagnostics.length) { return { diagnostics }; }
+  return { diagnostics: [], prepared: { schema: "agtmai-prepared-production-deployment-v2", broadcastAllowed: false,
+    configuration: context.value, configurationSha256: assembly.configurationSha256, reserveConfigurationSha256: assembly.reserveConfigurationSha256,
+    assemblyConfigurationSha256: assembly.assemblyConfigurationSha256, approval: pins.approval, expectations: e, artifacts: assembly.artifacts,
+    constructors: assembly.constructors, genesisAllocationHash: assembly.genesisAllocationHash,
+    facts: projectAssemblyFacts(context.value, assembly.assemblyConfigurationSha256), coverage: "full-ethereum-reserve-assembly", operations: assembly.operations,
+    runtimeVerification: { status: "templates-and-materialized-expectations", reason: null,
+      contracts: assembly.artifacts.map(({ contract, compilerVersion, compilerInputSha256, immutableReferences }) => ({ contract, compilerVersion, compilerInputSha256, immutableReferences })) } } };
+}
+
+function assemblyOperationMatches(op: ReturnType<typeof constructProductionAssembly>["operations"][number], selected: ProductionExpectation["operations"][number] | undefined,
+  constructor: AssemblyConstructor | undefined): boolean {
+  const fields = op.kind === "call" ? [...operationCommon, "calldata"] : [...operationCommon, "initcode", "initcodeHash", "runtimeTemplate", "runtimeTemplateHash", ...(op.nestedAddress ? ["nestedAddress"] : [])];
+  if (!selected || !exactFields(selected, fields) || selected.id !== op.id || selected.kind !== op.kind || selected.nonce !== op.nonce
+    || selected.expectedAddress !== (op.expectedAddress ?? op.to) || selected.intentHash !== op.intentHash || selected.value !== "0") { return false; }
+  return op.kind === "call" ? selected.calldata === op.calldata : constructor !== undefined && assemblyCreationMatches(selected, constructor, op.nestedAddress);
+}
+function assemblyCreationMatches(selected: ProductionExpectation["operations"][number], constructor: AssemblyConstructor, nested: Hex | undefined): boolean {
+  return selected.initcode === constructor.initcode && selected.initcodeHash === constructor.initcodeHash
+    && selected.runtimeTemplate === constructor.runtimeTemplate && selected.runtimeTemplateHash === constructor.runtimeTemplateHash
+    && selected.nestedAddress === nested;
+}
+function assemblyGasFieldsValid(selected: ProductionExpectation["operations"][number] | undefined): boolean {
+  return selected !== undefined && [selected.gasEstimate, selected.gasLimit, selected.baseFeePerGas, selected.maxPriorityFeePerGas,
+    selected.maxFeePerGas, selected.blockGasLimit].every(n => parseCanonicalUint(n, UINT256_MAX) !== undefined)
+    && selected.gasEstimate !== "0" && selected.gasLimit !== "0";
 }

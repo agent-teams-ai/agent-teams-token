@@ -2,19 +2,15 @@ import { encodeAllocationId, parseCanonicalUint, UINT64_MAX, UINT256_MAX } from 
 import { isEvmAddress, type DeploymentSafe, type Hex } from "./deployment.js";
 import { validateReservePolicyBody, type ReservePolicyBody } from "./reserve-genesis.js";
 
-export const PURPOSE_ALLOCATION_IDS = ["long-term", "users", "operations", "ecosystem", "financing", "liquidity"] as const;
-export type PurposeAllocationId = typeof PURPOSE_ALLOCATION_IDS[number];
+export { PURPOSE_ALLOCATION_IDS } from "./purpose-policy.js";
+export type { PurposeAllocationId, PurposePolicy as LocalPurposePolicy } from "./purpose-policy.js";
+import { PURPOSE_ALLOCATION_IDS, validatePurposePolicies, type PurposePolicy as LocalPurposePolicy } from "./purpose-policy.js";
 
-export interface LocalPurposePolicy {
-  readonly allocationId: PurposeAllocationId;
-  readonly opensAt: string;
-  readonly windowSeconds: string;
-  readonly rollingCapBaseUnits: string;
-}
-export interface LocalPurposeGenesis {
-  readonly schema: "agtmai-local-purpose-genesis-v1";
+export type LocalPurposeGenesis = (
+  | { readonly schema: "agtmai-local-purpose-genesis-v1"; readonly chainId: "31337" }
+  | { readonly schema: "agtmai-local-purpose-genesis-v2"; readonly chainId: "1" }
+) & {
   readonly status: "test-only";
-  readonly chainId: "31337";
   readonly tokenContract: "AGTMAICCIPToken";
   readonly reserve: ReservePolicyBody;
   readonly custodySafes: readonly DeploymentSafe[];
@@ -33,7 +29,7 @@ export interface LocalPurposeGenesis {
     readonly maxGasPerTransaction: string;
     readonly maxTotalFeeWei: string;
   };
-}
+};
 
 function reject(): never { throw new Error("LOCAL_PURPOSE_GENESIS_INVALID"); }
 function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -91,20 +87,6 @@ function validateSafes(raw: unknown, reserve: ReservePolicyBody, projectId: unkn
   return { safes, project, founder };
 }
 
-function validatePolicies(raw: unknown, reserve: ReservePolicyBody): LocalPurposePolicy[] {
-  const policies = list(raw, PURPOSE_ALLOCATION_IDS.length).map(item => {
-    const policy = exact(item, ["allocationId", "opensAt", "windowSeconds", "rollingCapBaseUnits"]);
-    if (!PURPOSE_ALLOCATION_IDS.includes(policy.allocationId as PurposeAllocationId)) { reject(); }
-    uint(policy.opensAt); uint(policy.windowSeconds);
-    const cap = uint(policy.rollingCapBaseUnits);
-    const amount = reserve.allocations.find(allocation => allocation.id === policy.allocationId)?.amountBaseUnits;
-    if (!amount || cap > BigInt(amount)) { reject(); }
-    return policy as unknown as LocalPurposePolicy;
-  });
-  if (new Set(policies.map(policy => policy.allocationId)).size !== PURPOSE_ALLOCATION_IDS.length) { reject(); }
-  return policies;
-}
-
 function validateExecution(raw: unknown, reserve: ReservePolicyBody, policies: readonly LocalPurposePolicy[]): LocalPurposeGenesis["execution"] {
   const execution = exact(raw, ["sender", "startingNonce", "fundingDeadline", "fundingLeadSeconds",
     "executionDeadline", "maxFeePerGasWei", "maxPriorityFeePerGasWei", "maxGasPerTransaction", "maxTotalFeeWei"]);
@@ -160,14 +142,15 @@ function validateAliases(raw: unknown, execution: LocalPurposeGenesis["execution
 export function validateLocalPurposeGenesis(input: unknown): LocalPurposeGenesis {
   const root = exact(input, ["schema", "status", "chainId", "tokenContract", "reserve", "custodySafes",
     "roleAliases", "projectControllerSafeId", "founderBeneficiarySafeId", "purposeVaults", "execution"]);
-  if (root.schema !== "agtmai-local-purpose-genesis-v1" || root.status !== "test-only"
-    || root.chainId !== "31337" || root.tokenContract !== "AGTMAICCIPToken") { reject(); }
+  if (!((root.schema === "agtmai-local-purpose-genesis-v1" && root.chainId === "31337")
+    || (root.schema === "agtmai-local-purpose-genesis-v2" && root.chainId === "1")) || root.status !== "test-only" || root.tokenContract !== "AGTMAICCIPToken") { reject(); }
   let reserve: ReservePolicyBody;
   try { reserve = validateReservePolicyBody(root.reserve); } catch { return reject(); }
 
   const { safes, project, founder } = validateSafes(root.custodySafes, reserve,
     root.projectControllerSafeId, root.founderBeneficiarySafeId);
-  const policies = validatePolicies(root.purposeVaults, reserve);
+  let policies: LocalPurposePolicy[];
+  try { policies = validatePurposePolicies(root.purposeVaults, reserve); } catch { return reject(); }
   const execution = validateExecution(root.execution, reserve, policies);
   const aliases = validateAliases(root.roleAliases, execution, safes, { project, founder }, reserve);
   return { ...structuredClone(input as LocalPurposeGenesis), reserve,

@@ -1,5 +1,108 @@
 # AGTMAI release status
 
+## Current release status, 2026-10-02
+
+The full DEV-only local Ethereum assembly is complete for the merged source
+below. Mainnet is intentionally deferred by the owner; `broadcastAllowed: false`.
+The dated checkpoints below retain historical evidence and anchors. Their pending
+local implementation/review/CI/rollback statements are historical and superseded
+by this section; production release gates remain open.
+
+- [PR #53](https://github.com/agent-teams-ai/agent-teams-token/pull/53) merged as
+  `2273bd6f992ba553ad0e64de641c065e24533962`.
+- [PR #54](https://github.com/agent-teams-ai/agent-teams-token/pull/54) merged as
+  `824f7e9ba00728db1b2459a9dde2e6a200d65ca1`.
+- Final reviewed candidate
+  [6fb7947934b5cdaa682ca87e60a8c0030bfb6e46](https://github.com/agent-teams-ai/agent-teams-token/commit/6fb7947934b5cdaa682ca87e60a8c0030bfb6e46)
+  and merged PR #54 have the same Git tree
+  `e0dea4a6cf65927b17bfeac8b580eda52ebc6ac1`.
+- Independent source review: **ACCEPT, P0-P3=0**. Canonical
+  [CI run 36936630048](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/36936630048)
+  passed all six jobs.
+
+Supplied immutable host-only receipts record the sealed Linux rollback proof
+`b7085682f2573ef941ce563e2a3fb827348069005937a470654e32e1ae36cef7`
+and seal `c5b2339a32c38ea0d567bd7da73ae3f4dee10dfccf8220aca685f06fbd7802ba`.
+The GitHub links identify reviewer-accessible source/CI evidence; host receipts
+are not externally readable. These results qualify the reviewed source/tree,
+not a later documentation-only commit.
+
+Qualification uses owned loopback Anvil, synthetic chain ID 1 and official Safe
+1.4.1: ten contract instances and ten deployer operations; all six vault outflows
+and opening/cap/expiry/refund/denial boundaries; founder release/non-cancellation;
+team unvested refund with vested-but-unclaimed debt; and 100,000,000-token supply
+conservation. Intermediate source gas/cost observations below are neither current
+fees nor a production estimate. Real Mainnet/Safe input qualification, a fresh
+fee quote, deployment approval and broadcast remain absent.
+
+`PurposeReserveVault` is implemented and locally qualified, while
+[ADR-0011](decisions/0011-purpose-reserve-vaults.md) remains **PROPOSED**. Real
+immutable caps and opening policy are unapproved. The October 2 report is not
+public; its proposed caps/openings remain discussion-only. Vaults enforce rolling
+gross outflow windows, not purpose after transfer, a global cap, LP locking or
+investor vesting. Existing external security, legal and market gates remain
+unclosed; local proof does not waive them or add a new wait requirement.
+Solana/CCIP is a later release; the existing Fee Quoter provenance gap in
+[issue #43](https://github.com/agent-teams-ai/agent-teams-token/issues/43) is not an
+Ethereum-only blocker.
+
+## Full local Ethereum assembly PR2, 2026-10-01
+
+The existing execution proof now has one synthetic chain-1 assembly path using
+PR1's common construction and exact materialized runtime expectations. It owns
+internal keystore/password custody, distinct bootstrap and assembly EOAs, actual
+nonce observations, both independently inspected official Safe 1.4.1 instances,
+predecessor-state estimates, conservative remaining-operation reservations and
+one send per operation. Pending/uncertain/reverted attempts stop continuation;
+public diagnostics survive while success waits for process/key cleanup.
+
+The canonical deployment-plan purpose E2E exercises all six Safe outflows,
+opening/cap/refund/expiry and denial boundaries, founder non-cancellation and
+beneficiary release, contributor refund/debt arithmetic and conservation. Supply's
+existing v2 manifest/passport/facts now project actual ten-instance observations,
+parent receipt plus child nonce 1, offline source inputs and checked costs.
+The complete gas-bearing rehearsal package is reconstructed after execution of
+the pre-frozen inventory. Production preparation still requires all selected gas
+expectations before publication; synthetic evidence cannot approve deployment.
+
+Focused build/typechecks, integer guards and existing Supply regressions pass.
+Orchestration observed actual native Anvil/Safe E2E at
+`ccd775583729f65e76a7a35c45132d3d41cebf38`: all four assembly success/failure tests passed with zero skips,
+including successful final READY/reopening after cleanup and refusal to publish
+READY when custody cleanup remains unresolved. The ten contract instances and
+ten deployer operations used 10,048,115 gas, with observed costs summing exactly to
+13,370,912,386,247,258 wei. These are synthetic local observations, not live
+Mainnet fee estimates. Prior broader regressions passed 190 deployment-plan tests
+(two unrelated native skips) and 172 local-EVM tests with zero skips.
+Process exit, descriptor closure and removal of temporary key custody were
+observed before success. Owned concurrent signer work now drains before any
+failure/cleanup continuation; two behavioral regressions pass without skips.
+An initial duplicate Anvil registration failure was fixed with the existing
+confirmation API; protected RunLease code was unchanged.
+Final-source qualification, independent review, canonical CI and sealed Linux
+rollback proof remain required.
+No Mainnet or public testnet broadcast, real key, explorer submission, production
+policy value or human approval is supplied; `broadcastAllowed` remains false.
+
+## Full unsigned Ethereum assembly PR1, 2026-10-01
+
+Supply now prepares explicit production v2 with six mandatory immutable purpose
+policies, nine top-level CREATEs, founder child CREATE at nonce 1 and founder
+funding. Complete normalized inputs bind approval, expectations and attempt
+identity. All five artifact kinds use authenticated Git/vendor/fresh pinned
+compiler admission, repeated when reopening the exact package. Offline facts,
+constructor inputs and template/materialized runtime identities are available;
+actual deployment, runtime/getter observations and costs remain unavailable.
+
+Production v1 and local-purpose v1 retain their existing meanings. Synthetic
+local-purpose v2 uses chain ID 1 with test-only authority and no approval; it
+cannot enter production admission. PR2 implements execution/scenarios and observed
+reporting; native qualification, clean-SHA review, CI and sealed Linux rollback
+proof remain pending. The precise
+rollback transform preserves Supply bytes; manifest ownership migration and
+official hash maintenance follow the orchestrator's candidate commit. Mainnet is excluded,
+all output is unsigned, and `broadcastAllowed` remains `false`.
+
 ## Local purpose-reserve qualification, 2026-09-30
 
 The six non-grant allocation buckets have a shared immutable
@@ -26,12 +129,12 @@ Quoter attribution gap is tracked in [issue #43](https://github.com/agent-teams-
 and does not block the Ethereum-only stage. Production keys stay with the owner;
 the agent only needs public addresses and unsigned transaction data.
 
-The current unsigned preparation candidate is `AGTMAICCIPToken` plus
+The v1 unsigned preparation candidate is `AGTMAICCIPToken` plus
 `FounderGrantReserve` and `ReserveController`; exact bytecode remains a release
 gate. Ethereum-only production configuration can use `bridge: null`, and the
 token-and-reserves preflight does not count CCIP setup as a prerequisite. No
 real-address accepted configuration, live gas quote or Mainnet transaction has
-been produced. Six non-grant allocation destinations still need unique public
+been produced. V1's six non-grant allocation destinations need unique public
 custody addresses and a truthful disclosure of their spending powers.
 
 ## Post-custody implementation in progress, 2026-09-15

@@ -28,6 +28,9 @@ export async function finishWithCleanup(
     );
   }
   if (failures.length === 1) {
+    // A thrown undefined primary uses the cleanup-only branch. Carry its stop
+    // debt into the caller's finalizer even when the single failure is returned.
+    attachCleanupFailures(failures[0], failures);
     throw failures[0];
   }
   if (failures.length > 1) {
@@ -43,8 +46,14 @@ export function cleanupFailures(primary: unknown): readonly unknown[] {
     || primary === null) {
     return [];
   }
-  return (primary as {[CLEANUP_ERRORS]?: readonly unknown[]})[CLEANUP_ERRORS]
-    ?? [];
+  const attached = (primary as {[CLEANUP_ERRORS]?: readonly unknown[]})[CLEANUP_ERRORS];
+  if (attached !== undefined) {return attached;}
+  // Frozen/primitive primaries cannot carry the symbol. finishWithCleanup
+  // preserves them as the aggregate's cause and first entry instead.
+  if (primary instanceof AggregateError) {
+    return primary.errors.slice(Object.hasOwn(primary, "cause") && primary.errors[0] === primary.cause ? 1 : 0);
+  }
+  return [];
 }
 
 function attachCleanupFailures(

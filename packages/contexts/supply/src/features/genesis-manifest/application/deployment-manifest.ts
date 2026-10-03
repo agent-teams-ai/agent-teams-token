@@ -1,6 +1,9 @@
+import { verifyPreparedLocalPurposeGenesis, type PreparedLocalPurposeGenesis, type LocalPurposePorts } from "./prepare-local-purpose-genesis.js";
+import { projectLocalAssemblyFacts } from "./reserve-facts.js";
 import { compileDeployment, deploymentBytes, prepareGrant, type DeploymentCompilerPorts, type PreparedDeployment, type DeploymentArtifact } from "./compile-deployment.js";
 import { isDigest, isEvmAddress, type DeploymentConfig, type DeploymentGrant, type Hex } from "../domain/deployment.js";
-import { parseCanonicalUint, UINT64_MAX } from "../domain/model.js";
+import { encodeAllocationId, parseCanonicalUint, UINT64_MAX } from "../domain/model.js";
+import { prepareProductionDeployment, type PreparedProductionDeployment, type ProductionPreparationPorts } from "./prepare-production-deployment.js";
 
 export interface DeploymentBlock { readonly number: string; readonly hash: Hex; readonly timestamp: string }
 export interface ContractDeploymentEvidence {
@@ -37,6 +40,26 @@ export interface DeploymentManifest {
 const refuse = (reason: string): never => { throw new Error(`DEPLOYMENT_EVIDENCE_${reason}`); };
 const publicBlock = (b: DeploymentBlock): DeploymentBlock => ({ number: b.number, hash: b.hash, timestamp: b.timestamp });
 const same = (a: unknown, b: unknown): boolean => new TextDecoder().decode(deploymentBytes(a)) === new TextDecoder().decode(deploymentBytes(b));
+
+/** The v2 variant describes complete unsigned construction, with every observed field unavailable. */
+export function prepareAssemblyManifest(prepared: PreparedProductionDeployment, ports: ProductionPreparationPorts & { readonly sha256: (bytes: Uint8Array) => Hex }) {
+  const rebuilt = prepareProductionDeployment(prepared.configuration, { artifactSourceRevision: prepared.expectations.sourceRevision,
+    artifacts: prepared.artifacts, approval: prepared.approval, expectations: prepared.expectations }, ports, ports.sha256).prepared;
+  if (!rebuilt || !same(rebuilt, prepared) || rebuilt.schema !== "agtmai-prepared-production-deployment-v2") { return refuse("PREPARATION_MISMATCH"); }
+  return { schema: "agtmai-deployment-manifest-v2" as const, coverage: rebuilt.coverage, broadcastAllowed: false as const,
+    status: "unsigned-preparation" as const, configurationSha256: rebuilt.configurationSha256,
+    reserveConfigurationSha256: rebuilt.reserveConfigurationSha256, assemblyConfigurationSha256: rebuilt.assemblyConfigurationSha256!,
+    artifactPinsSha256: rebuilt.expectations.artifactPinsSha256, sourceRevision: rebuilt.expectations.sourceRevision,
+    preparedSha256: ports.sha256(deploymentBytes(rebuilt)), evidenceSha256: null, attemptIdentity: rebuilt.expectations.attemptIdentity,
+    configuration: rebuilt.configuration, facts: rebuilt.facts!, contracts: rebuilt.constructors!,
+    funding: { operation: rebuilt.operations[9]!, observed: null },
+    gas: rebuilt.expectations.operations.map(o => ({ id: o.id, gasEstimate: o.gasEstimate!, gasLimit: o.gasLimit!, baseFeePerGas: o.baseFeePerGas!,
+      maxPriorityFeePerGas: o.maxPriorityFeePerGas!, maxFeePerGas: o.maxFeePerGas!, value: o.value!,
+      gasUsed: null, effectiveGasPrice: null, observedCostWei: null })),
+    worstCaseWei: rebuilt.expectations.operations.reduce((sum, op) => sum + BigInt(op.gasLimit!) * BigInt(op.maxFeePerGas!) + BigInt(op.value!), 0n).toString(),
+    observedWei: null, actualProductionDeployment: "unavailable" as const };
+}
+export type PreparedAssemblyManifest = ReturnType<typeof prepareAssemblyManifest>;
 
 /** Regenerate facts only from validated preparation and native creation/runtime/getter observations. */
 export function materializeDeploymentManifest(prepared: PreparedDeployment, evidence: DeploymentEvidence, ports: DeploymentManifestPorts): DeploymentManifest {
@@ -139,4 +162,176 @@ function validateEvidenceBinding(prepared: PreparedDeployment, evidence: Deploym
   if (evidence.schema !== "agtmai-deployment-evidence-v1" || evidence.configurationSha256 !== prepared.configurationSha256 || evidence.collector.kind !== collectorKind || !/^[0-9a-f]{40}$/.test(evidence.collector.sourceRevision)
     || !Array.isArray(evidence.grants) || evidence.grants.length > config.grants.length || new Set(evidence.grants.map(g => g.grantId)).size !== evidence.grants.length) { return refuse("BINDING"); }
   if (evidence.token === null && evidence.grants.length) { return refuse("TOKEN_PREREQUISITE"); }
+}
+
+export interface AssemblyOperationObservation {
+  readonly id: string; readonly nonce: string; readonly sender: Hex; readonly chainId: "1"; readonly input: Hex; readonly value: "0";
+  readonly gasEstimate: string; readonly gasLimit: string; readonly baseFeePerGas: string; readonly blockGasLimit: string;
+  /** Receipt-block fee; baseFeePerGas remains the predecessor-state estimation fee. */
+  readonly receiptBaseFeePerGas: string;
+  readonly maxPriorityFeePerGas: string; readonly maxFeePerGas: string; readonly gasUsed: string; readonly effectiveGasPrice: string; readonly observedCostWei: string;
+  readonly predecessor: DeploymentBlock; readonly block: DeploymentBlock; readonly parentHash: Hex; readonly transactionHash: Hex; readonly status: "1"; readonly actualAddress: Hex;
+  readonly logs: ContractDeploymentEvidence["receipt"]["logs"];
+}
+export interface AssemblyContractObservation {
+  readonly id: string; readonly address: Hex; readonly runtime: Hex; readonly nonce: string; readonly getters: Readonly<Record<string, Hex>>; readonly balance: string;
+}
+export interface LocalAssemblyObservation {
+  readonly operations: readonly AssemblyOperationObservation[]; readonly contracts: readonly AssemblyContractObservation[];
+  readonly genesis: DeploymentBlock; readonly observedWei: string; readonly gasBufferBps: number;
+  readonly authority: PreparedProductionDeployment["expectations"]["authority"];
+  readonly fundingAfter: { readonly allowance: string; readonly repeatCallRevert: Hex };
+  readonly fundingBefore: { readonly block: DeploymentBlock; readonly reserveBalance: string; readonly vaultBalance: string; readonly allowance: string; readonly funded: Hex };
+}
+export interface ObservedAssemblyPorts extends LocalPurposePorts {
+  /** Authenticated official artifact hashes and actual runner deployment/setup captures, never copied from observation.authority. */
+  readonly authenticatedSafe: {
+    readonly singletonAddress: Hex; readonly proxyCodeHash: Hex; readonly singletonCodeHash: Hex;
+    readonly deployments: readonly { readonly address: Hex; readonly setupTransactionHash: Hex }[];
+  };
+}
+
+/** Synthetic observed variant of the existing full manifest. No production approval is inferred. */
+export function materializeObservedAssemblyManifest(prepared: PreparedLocalPurposeGenesis, observation: LocalAssemblyObservation, ports: ObservedAssemblyPorts) {
+  verifyPreparedLocalPurposeGenesis(prepared.configuration, prepared.candidateRevision,
+    { sourceRevision: prepared.candidateRevision, artifacts: prepared.artifacts }, prepared, ports);
+  if (prepared.schema !== "agtmai-prepared-local-purpose-genesis-v2" || prepared.approval !== null || observation.operations.length !== 10
+    || observation.contracts.length !== 10 || new Set(observation.contracts.map(c => c.id)).size !== 10) { refuse("ASSEMBLY_INVENTORY"); }
+  verifyObservedAssemblyAuthority(prepared, observation, ports.authenticatedSafe);
+  const { worst, observed } = verifyObservedAssemblyOperations(prepared, observation, ports);
+  const founderAmount = prepared.configuration.reserve.allocations.find(a => a.id === "founder")!.amountBaseUnits;
+  let balanceTotal = 0n;
+  const contracts = prepared.constructors!.map(constructor => {
+    const actual = observation.contracts.find(c => c.id === constructor.id);
+    if (!actual || Object.keys(actual).toSorted().join() !== "address,balance,getters,id,nonce,runtime" || actual.address !== constructor.predictedAddress || actual.runtime !== constructor.materializedRuntime || actual.nonce !== (constructor.contract === "FounderGrantReserve" ? "2" : "1")) { return refuse("ASSEMBLY_RUNTIME"); }
+    for (const [name, value] of Object.entries(constructor.immutableValues)) {
+      if (actual.getters[name === "INITIAL_CCIP_ADMIN" ? "getCCIPAdmin" : name] !== value) { refuse("ASSEMBLY_GETTER"); }
+    }
+    const requireGetter = (name: string, value: Hex) => requireAssemblyGetter(actual, name, value);
+    if (constructor.contract === "AGTMAICCIPToken") { requireGetter("totalSupply", assemblyWord(prepared.configuration.reserve.initialSupplyBaseUnits)); requireGetter("decimals", assemblyWord("9")); }
+    if (constructor.contract === "ReserveController") { requireGetter("WINDOW", assemblyWord("31536000")); requireGetter("grossCommitted", assemblyWord("0")); requireGetter("rollingCommitted", assemblyWord("0")); }
+    if (constructor.contract === "PurposeReserveVault") { requireGetter("grossOutflow", assemblyWord("0")); requireGetter("rollingOutflow", assemblyWord("0")); }
+    let nested: { parentTransactionHash: Hex; childCreateNonce: "1"; grantConfigured: ContractDeploymentEvidence["receipt"]["logs"][number] } | undefined;
+    if (constructor.creation.kind === "nested") { nested = verifyObservedFounder(prepared, observation, actual, ports); }
+    const configured = prepared.configuration.reserve.allocations.find(a => a.recipient === actual.address);
+    const expectedBalance = constructor.id === "founder-vault" ? founderAmount : constructor.id === "founder-reserve-create" || !configured ? "0" : configured.amountBaseUnits;
+    if (actual.balance !== expectedBalance) { refuse("ASSEMBLY_BALANCE"); }
+    balanceTotal += uint(actual.balance);
+    const parentOperation = nested ? observation.operations[1]! : observation.operations.find(o => o.id === constructor.id)!;
+    return { ...constructor, observed: { ...actual, block: observation.genesis, ...(nested ?? { transactionHash: parentOperation.transactionHash }) } };
+  });
+  if (balanceTotal !== uint(prepared.configuration.reserve.initialSupplyBaseUnits)) { refuse("ASSEMBLY_CONSERVATION"); }
+  return { schema: "agtmai-deployment-manifest-v2" as const, coverage: "full-ethereum-reserve-assembly" as const, broadcastAllowed: false as const,
+    status: "synthetic-local-observation" as const, configuration: prepared.configuration, configurationSha256: prepared.configurationSha256,
+    sourceRevision: prepared.candidateRevision, preparedSha256: ports.sha256(deploymentBytes(prepared)), evidenceSha256: ports.sha256(deploymentBytes(observation)),
+    attemptIdentity: prepared.planSha256, approval: null, authorityClass: "test-only" as const, chainId: "1" as const,
+    packageTiming: "complete gas-bearing rehearsal package reconstructed after execution of pre-frozen inventory" as const,
+    facts: projectLocalAssemblyFacts(prepared.configuration, prepared.configurationSha256), contracts,
+    funding: { operation: prepared.operations[9]!, before: observation.fundingBefore, after: observation.fundingAfter, observed: observation.operations[9]! }, gas: observation.operations, gasBufferBps: observation.gasBufferBps,
+    genesis: observation.genesis, authority: observation.authority, worstCaseWei: worst.toString(), observedWei: observed.toString(), actualProductionDeployment: "unavailable" as const };
+}
+export type ObservedAssemblyManifest = ReturnType<typeof materializeObservedAssemblyManifest>;
+
+function uint(value: string): bigint { const n = parseCanonicalUint(value); if (n === undefined) { return refuse("ASSEMBLY_INTEGER"); } return n; }
+const assemblyWord = (v: string): Hex => `0x${BigInt(v).toString(16).padStart(64, "0")}`;
+const assemblyEvent = (address: Hex, topics: readonly Hex[], data: Hex) => ({ address, topics, data });
+function requireAssemblyGetter(actual: AssemblyContractObservation, name: string, value: Hex): void { if (actual.getters[name] !== value) { refuse("ASSEMBLY_GETTER"); } }
+function verifyObservedOperationBinding(prepared: PreparedLocalPurposeGenesis, observation: LocalAssemblyObservation, i: number): void {
+  const operation = prepared.operations[i]!, actual = observation.operations[i]!, before = actual.predecessor, after = actual.block;
+    if (actual.id !== operation.id || actual.nonce !== operation.nonce || actual.sender !== prepared.configuration.execution.sender || actual.chainId !== "1"
+      || actual.input !== (operation.initcode ?? operation.calldata) || actual.value !== "0" || actual.status !== "1"
+      || actual.actualAddress !== (operation.expectedAddress ?? operation.to) || !isDigest(actual.transactionHash)
+      || !isDigest(before.hash) || !isDigest(after.hash) || actual.parentHash !== before.hash || uint(after.number) !== uint(before.number) + 1n || uint(after.timestamp) <= uint(before.timestamp)
+      || (i > 0 && !same(before, observation.operations[i - 1]!.block))) { refuse("ASSEMBLY_TRANSACTION"); }
+}
+function verifyObservedOperationCost(actual: AssemblyOperationObservation, prepared: PreparedLocalPurposeGenesis, buffer: number) {
+    const estimate = uint(actual.gasEstimate), limit = uint(actual.gasLimit), fee = uint(actual.maxFeePerGas), used = uint(actual.gasUsed), price = observedReceiptPrice(actual, fee);
+    if (!estimate || !limit || !used || used > limit || limit > uint(actual.blockGasLimit)
+      || uint(actual.maxPriorityFeePerGas) > fee || fee < uint(actual.baseFeePerGas) || actual.observedCostWei !== (used * price).toString()) { refuse("ASSEMBLY_COST"); }
+  const policy = prepared.configuration.execution;
+  if (!Number.isSafeInteger(buffer) || buffer < 0 || buffer > 10000 || limit !== (estimate * BigInt(10000 + buffer) + 9999n) / 10000n
+    || limit > uint(policy.maxGasPerTransaction) || fee > uint(policy.maxFeePerGasWei) || uint(actual.maxPriorityFeePerGas) > uint(policy.maxPriorityFeePerGasWei)
+    || uint(actual.block.timestamp) > uint(actual.id === "founder-fund" ? policy.fundingDeadline : policy.executionDeadline)) { refuse("ASSEMBLY_POLICY"); }
+  return { limit, fee, used, price };
+}
+function observedReceiptPrice(actual: AssemblyOperationObservation, maxFee: bigint): bigint {
+  const price = uint(actual.effectiveGasPrice), baseFee = uint(actual.receiptBaseFeePerGas);
+  const basePlusPriority = baseFee + uint(actual.maxPriorityFeePerGas);
+  if (!price || baseFee > maxFee || price !== (maxFee < basePlusPriority ? maxFee : basePlusPriority)) { refuse("ASSEMBLY_COST"); }
+  return price;
+}
+function verifyObservedAssemblyOperations(prepared: PreparedLocalPurposeGenesis, observation: LocalAssemblyObservation, ports: LocalPurposePorts) {
+  let worst = 0n, observed = 0n;
+  for (const [i] of prepared.operations.entries()) {
+    const actual = observation.operations[i]!;
+    verifyObservedOperationBinding(prepared, observation, i);
+    verifyObservedAssemblyLogs(prepared, actual, i, ports);
+    const { limit, fee, used, price } = verifyObservedOperationCost(actual, prepared, observation.gasBufferBps);
+    worst += limit * fee; observed += used * price;
+    if (worst >= 1n << 256n || observed >= 1n << 256n) { refuse("ASSEMBLY_COST"); }
+  }
+  if (observation.observedWei !== observed.toString() || !same(observation.genesis, observation.operations[9]!.block)) { refuse("ASSEMBLY_GENESIS"); }
+  if (worst > uint(prepared.configuration.execution.maxTotalFeeWei)) { refuse("ASSEMBLY_POLICY"); }
+  return { worst, observed };
+}
+/** Reuse frozen constructor words and normalized allocation order; receipts supply only the funding timestamp. */
+function verifyObservedAssemblyLogs(prepared: PreparedLocalPurposeGenesis, actual: AssemblyOperationObservation, i: number, ports: LocalPurposePorts): void {
+  const token = prepared.constructors![0]!.predictedAddress, vault = prepared.constructors![9]!, reserve = prepared.constructors![1]!.predictedAddress;
+  const topic = (signature: string) => ports.keccak256(new TextEncoder().encode(signature));
+  let expected: readonly { readonly address: Hex; readonly topics: readonly Hex[]; readonly data: Hex }[] = [];
+  if (i === 0) {
+    expected = prepared.configuration.reserve.allocations.flatMap(a => [
+      assemblyEvent(token, [topic("Transfer(address,address,uint256)"), assemblyWord("0"), assemblyWord(a.recipient)], assemblyWord(a.amountBaseUnits)),
+      assemblyEvent(token, [topic("GenesisAllocation(bytes32,address,uint256)"), encodeAllocationId(a.id)!, assemblyWord(a.recipient)], assemblyWord(a.amountBaseUnits)),
+    ]);
+  } else if (i === 1) {
+    expected = [assemblyEvent(vault.predictedAddress, [topic("GrantConfigured(address,address,address,address,(uint256,uint64,uint64,uint64,uint8,bytes32))"),
+      vault.immutableValues.TOKEN!, vault.immutableValues.BENEFICIARY!, vault.immutableValues.ORIGINAL_RESERVE!], `0x${vault.constructorArgs.slice(2 + 3 * 64)}`)];
+  } else if (i >= 3 && i <= 8) {
+    const c = prepared.constructors![i]!, v = c.immutableValues;
+    expected = [assemblyEvent(c.predictedAddress, [topic("Configured(address,address,bytes32,uint64,uint64,uint256)"), v.TOKEN!, v.CONTROLLER!, v.PURPOSE!],
+      `0x${v.OPENS_AT!.slice(2)}${v.WINDOW_SECONDS!.slice(2)}${v.ROLLING_CAP!.slice(2)}`)];
+  } else if (i === 9) {
+    const amount = prepared.configuration.reserve.allocations.find(a => a.id === "founder")!.amountBaseUnits;
+    const approvalTopics = [topic("Approval(address,address,uint256)"), assemblyWord(reserve), assemblyWord(vault.predictedAddress)];
+    expected = [assemblyEvent(token, approvalTopics, assemblyWord(amount)),
+      assemblyEvent(token, [topic("Transfer(address,address,uint256)"), assemblyWord(reserve), assemblyWord(vault.predictedAddress)], assemblyWord(amount)),
+      assemblyEvent(vault.predictedAddress, [topic("GrantFunded(uint256,uint64)")], `0x${assemblyWord(amount).slice(2)}${assemblyWord(actual.block.timestamp).slice(2)}`),
+      assemblyEvent(token, approvalTopics, assemblyWord("0"))];
+  }
+  if (!Array.isArray(actual.logs) || actual.logs.length !== expected.length) { refuse("ASSEMBLY_EVENT_COVERAGE"); }
+  for (const [j, log] of actual.logs.entries()) {
+    const wanted = expected[j]!;
+    if (log.address !== wanted.address || !same(log.topics, wanted.topics) || log.data !== wanted.data || log.removed !== false
+      || parseCanonicalUint(log.logIndex) === undefined || (j > 0 && BigInt(log.logIndex) !== BigInt(actual.logs[j - 1]!.logIndex) + 1n)) { refuse("ASSEMBLY_EVENT_MISMATCH"); }
+  }
+}
+function verifyObservedFounder(prepared: PreparedLocalPurposeGenesis, observation: LocalAssemblyObservation, actual: AssemblyContractObservation, ports: LocalPurposePorts) {
+  const founder = prepared.configuration.reserve.founder;
+  const founderAmount = prepared.configuration.reserve.allocations.find(a => a.id === "founder")!.amountBaseUnits;
+  const requireGetter = (name: string, value: Hex) => requireAssemblyGetter(actual, name, value);
+
+      requireGetter("funded", assemblyWord("1"));
+      const terms = [founderAmount, founder.schedule.start, founder.schedule.cliff, founder.schedule.end, "0"].map(assemblyWord).map(w => w.slice(2)).join("") + founder.purpose.slice(2);
+      requireGetter("grant", `0x${terms}${["0", "0", "0", "1", "0"].map(assemblyWord).map(w => w.slice(2)).join("")}` as Hex);
+      const parent = observation.operations[1]!;
+  const repeat = ports.keccak256(new TextEncoder().encode("AlreadyFunded()")).slice(0, 10);
+  if (observation.fundingAfter.allowance !== "0" || observation.fundingAfter.repeatCallRevert !== repeat) { refuse("ASSEMBLY_FUNDING"); }
+  const before = observation.fundingBefore;
+  if (!same(before.block, observation.operations[8]!.block) || before.reserveBalance !== founderAmount || before.vaultBalance !== "0"
+    || before.allowance !== "0" || before.funded !== assemblyWord("0")) { refuse("ASSEMBLY_FUNDING"); }
+  return { parentTransactionHash: parent.transactionHash, childCreateNonce: "1" as const, grantConfigured: parent.logs[0]! };
+}
+
+function verifyObservedAssemblyAuthority(prepared: PreparedLocalPurposeGenesis, observation: LocalAssemblyObservation, authenticated: ObservedAssemblyPorts["authenticatedSafe"]): void {
+  if (!authenticated || !isEvmAddress(authenticated.singletonAddress) || !isDigest(authenticated.proxyCodeHash) || !isDigest(authenticated.singletonCodeHash)
+    || authenticated.deployments.length !== 2 || new Set(authenticated.deployments.map(s => s.address)).size !== 2
+    || authenticated.deployments.some(s => !isEvmAddress(s.address) || !isDigest(s.setupTransactionHash))) { refuse("ASSEMBLY_AUTHORITY"); }
+  if (observation.authority.length !== 2 || new Set(observation.authority.map(s => s.address)).size !== 2
+    || prepared.configuration.custodySafes.some(configured => !observation.authority.some(s => s.address === configured.address
+      && s.threshold === 2 && s.owners.toSorted().join() === configured.owners.toSorted().join() && s.nonce === "0"
+      && s.singletonAddress === authenticated.singletonAddress && s.singletonSlot === assemblyWord(authenticated.singletonAddress)
+      && s.modules.length === 0 && s.guard === null && s.fallbackHandler === null
+      && s.proxyCodeHash === authenticated.proxyCodeHash && s.singletonCodeHash === authenticated.singletonCodeHash
+      && s.setupProvenance === authenticated.deployments.find(d => d.address === s.address)?.setupTransactionHash))) { refuse("ASSEMBLY_AUTHORITY"); }
 }

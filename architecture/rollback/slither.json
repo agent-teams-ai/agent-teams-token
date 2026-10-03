@@ -67,6 +67,7 @@
     "tooling/security/slither/tests/executable.test.ts",
     "tooling/security/slither/tests/failure-taxonomy.test.ts",
     "tooling/security/slither/tests/fault-injection.test.ts",
+    "tooling/security/slither/tests/fifo-admission.test.ts",
     "tooling/security/slither/tests/fixtures/Vulnerable.sol",
     "tooling/security/slither/tests/fixtures/foundry-1.8.0-production-artifact.json",
     "tooling/security/slither/tests/fixtures/foundry-1.8.0-production-build-info.json",
@@ -132,8 +133,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "297675a4b5b5e77ba9f9574f7c8cd18078d45eca06816b7a0c15424c2ce2a933",
-      "afterSha256": "2a954553ba478e1b3aa3b13643e834f1e3f5081a99d1965ed985d1a981149be5"
+      "beforeSha256": "c7b5381198b49ae249fec3ca2aa2b06971f2452a4123b43317229a70253e5c9f",
+      "afterSha256": "04fbf50b5ba5ec7504740fd6a47dbc18be08349ed95a61165c49b8f695eb034d"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",

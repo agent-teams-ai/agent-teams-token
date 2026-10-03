@@ -22,6 +22,8 @@ export interface SolanaTransactionPorts<Expected, Envelope, State> {
   sign(expected: Expected): Promise<SignedSolanaTransaction>;
   inspectSigned(bytes: string): Promise<InspectedSolanaTransaction>;
   observe(signed: SignedSolanaTransaction, intent: Envelope): Promise<SolanaObservation<State>>;
+  /** Read-only prerequisites for a first send; rejection preserves the signed record. */
+  beforeBroadcast?(): Promise<void>;
   broadcast(bytes: string): Promise<string>;
 }
 export interface SolanaTransactionContract<Expected, Envelope, State> {
@@ -43,6 +45,11 @@ function unsigned(value: string): boolean {
 function validSigned(signed: SignedSolanaTransaction): boolean {
   return base64(signed.bytesBase64) && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signed.signature) &&
     /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(signed.blockhash) && unsigned(signed.lastValidBlockHeight);
+}
+function validateSignedIdentity(signed: SignedSolanaTransaction, decoded: InspectedSolanaTransaction): void {
+  if (decoded.signature !== signed.signature || decoded.blockhash !== signed.blockhash || !base64(decoded.messageBase64)) {
+    throw new Error("Signed Solana identity mismatch");
+  }
 }
 function finalizedOutcome<Envelope, State>(observation: Extract<SolanaObservation<State>, { kind: "finalized" }>, record: SolanaTransactionRecord<Envelope>, matches: (state: State | null, intent: Envelope) => boolean): "succeeded" | "failed" | null {
   if (observation.signature !== record.signed.signature || observation.messageBase64 !== record.messageBase64 || !unsigned(observation.slot)) { return null; }
@@ -72,7 +79,7 @@ export async function runSolanaTransactionJournal<Expected extends { testOnly: t
     if (!validSigned(signed)) { throw new Error("Invalid signed Solana transaction"); }
     const decoded = await ports.inspectSigned(signed.bytesBase64);
     const intent = contract.verify(decoded.intent, expected);
-    if (decoded.signature !== signed.signature || decoded.blockhash !== signed.blockhash || !base64(decoded.messageBase64)) { throw new Error("Signed Solana identity mismatch"); }
+    validateSignedIdentity(signed, decoded);
     if (record === null) {
       record = { schema: contract.schema, intent, signed, messageBase64: decoded.messageBase64, phase: "signed" };
       await ports.write(record);
@@ -92,6 +99,8 @@ export async function runSolanaTransactionJournal<Expected extends { testOnly: t
       return { status: phase, record: current, reason: contract.successReason };
     }
     if (observation.kind !== "not-found" || current.phase !== "signed") { return unresolved("submission-unresolved-or-expired"); }
+    try { await ports.beforeBroadcast?.(); }
+    catch { return unresolved("before-broadcast-precondition-failed"); }
     current = { ...current, phase: "submitting" }; await ports.write(current);
     let signature: string;
     try { signature = await ports.broadcast(signed.bytesBase64); }

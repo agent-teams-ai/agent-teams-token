@@ -49,3 +49,19 @@ export function closeCommandLogDescriptors(descriptors) {
   }
   return failures;
 }
+
+export function commandOutcomeFields(result) {
+  // An uncertainty guard carries the observed outcome separately. Keep the
+  // guard as the thrown cause while recording the actual observed error code.
+  const observedError = result.error?.result?.error ?? result.error;
+  return {
+    exitCode: result.status,
+    signal: result.signal,
+    timedOut: result.targetStatus.timedOut === true || result.error?.code === "ETIMEDOUT"
+      || result.supervisorStatus?.error === "ETIMEDOUT",
+    processesQuiescent: result.targetStatus.quiescent,
+    supervisor: result.supervisorStatus,
+    execution: result.execution,
+    spawnError: observedError?.code ?? null,
+  };
+}

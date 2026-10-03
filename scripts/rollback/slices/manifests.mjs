@@ -277,7 +277,7 @@ function validateManifestComplements(slice, fields) {
   if (JSON.stringify(fields.sharedPaths) !== JSON.stringify(expectedSharedPaths[slice])) {
     throw new Error("ROLLBACK_SHARED_PATH_COVERAGE slice=" + slice);
   }
-  if (JSON.stringify(fields.retainedPaths) !== JSON.stringify(expectedRetainedSharedPaths)) {
+  if (JSON.stringify(fields.retainedPaths) !== JSON.stringify(expectedRetainedSharedPaths[slice])) {
     throw new Error("ROLLBACK_RETAINED_SHARED_PATH_COVERAGE slice=" + slice);
   }
 }

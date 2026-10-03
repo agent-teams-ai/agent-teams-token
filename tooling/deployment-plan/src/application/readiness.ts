@@ -35,6 +35,7 @@ function assertReasons(reasons: unknown): asserts reasons is readonly string[] {
 }
 function assertReconciliation(reconciliation: Record<string, unknown>, reasons: readonly string[]): void {
   const { adjustedGlobalSupply: adjusted, backingSurplus: surplus } = reconciliation;
+  if (reasons.includes("activity-coverage-incomplete") && reconciliation.status !== "unknown") { invalid(); }
   if (surplus === null) {
     if (adjusted !== null || reconciliation.status !== "unknown") { invalid(); }
   } else {

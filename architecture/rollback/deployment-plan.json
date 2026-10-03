@@ -47,6 +47,7 @@
     "tooling/deployment-plan/tests/contributor-safe-execution.integration.test.ts",
     "tooling/deployment-plan/tests/domain.test.ts",
     "tooling/deployment-plan/tests/fixtures/forge-build-info-1.8.0-representative.json",
+    "tooling/deployment-plan/tests/fixtures/proof-custody.ts",
     "tooling/deployment-plan/tests/helpers/local-safe.ts",
     "tooling/deployment-plan/tests/helpers/no-replace-directory-rename.ts",
     "tooling/deployment-plan/tests/helpers/real-production-package.ts",
@@ -59,6 +60,8 @@
     "tooling/deployment-plan/tests/production-execution.test.ts",
     "tooling/deployment-plan/tests/production-guards.test.ts",
     "tooling/deployment-plan/tests/production-native-policy.test.ts",
+    "tooling/deployment-plan/tests/production-preflight-arguments.test.ts",
+    "tooling/deployment-plan/tests/proof-custody.test.ts",
     "tooling/deployment-plan/tests/purpose-reserves.integration.test.ts",
     "tooling/deployment-plan/tests/raw-artifact-fixture.ts",
     "tooling/deployment-plan/tests/readiness-transport.test.ts",
@@ -93,33 +96,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "297675a4b5b5e77ba9f9574f7c8cd18078d45eca06816b7a0c15424c2ce2a933",
-      "afterSha256": "39301e8d081a1ec90545b745b38422abbe1721835241f427df3ac11a043da38d"
-    },
-    {
-      "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-      "beforeSha256": "f51080c3ad2c7babe38665d962e2109c719765b19b3ea53508e34233dc65d6ab",
-      "afterSha256": "e4e9c5e8109a8658217ed9c8be565ab5820a76818f92ad8ae34783ee519be226"
-    },
-    {
-      "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
-      "beforeSha256": "30b7ab175fd2134173cae1aeae144a5dabca9c6dc02429c1b254548ebfed36ab",
-      "afterSha256": "ed2aced7a31e8e30ebcf5fe46722effae0af6fbdbe75ef3ecdc727133e636c22"
-    },
-    {
-      "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-      "beforeSha256": "50a166071320c7ee470095d7fe813b05a7b00738bab7d670bd41fd3f636d568a",
-      "afterSha256": "bbd3aed0f0efb9609cdeffeb1bab6dd88097dd416c05806b4c63228dd14f383a"
-    },
-    {
-      "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
-      "beforeSha256": "bb6de39043dcc923ef1336c24b5240f34835652c8b0b305a8099a258db117c24",
-      "afterSha256": "f731b5370a5b3f98895d0e74c5f8e55bdf5a2296b71d5db3d1791d02b274326d"
-    },
-    {
-      "path": "packages/contexts/supply/tests/production-deployment.test.ts",
-      "beforeSha256": "f3234d780197c7c3af3603322d2b461f96fa73bf5399cf8df8a95b186ec9e56e",
-      "afterSha256": "b8938b47ebd49c7eb944cbd8d6f98e3b1fedbcb60d881f825f3b2ac15ef3a1a4"
+      "beforeSha256": "c7b5381198b49ae249fec3ca2aa2b06971f2452a4123b43317229a70253e5c9f",
+      "afterSha256": "e8e0366e1f01a687c6be9deaa570f7f2a2a964ed37cd6d96428607b3432d1310"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",
@@ -128,7 +106,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "613ed65bd4d5b81cd30181915d44a0d499ab99b2d317cab6c6ce8cbf55251b45",
+      "beforeSha256": "e45c4c73c3dad09957eee5306a8299083d00990ba00db373a4c93ec60ea84466",
       "afterSha256": "absent"
     },
     {
@@ -142,24 +120,14 @@
       "afterSha256": "e497a44eec3f9c82b7a859f799e8d39266e9b7b207da6b262b165badf0200f62"
     },
     {
-      "path": "tooling/local-evm/process.ts",
-      "beforeSha256": "f081446219ab0816a3905cfc86bd5aa99f9a64e3f1c097a313a6c52fa78e0c33",
-      "afterSha256": "74c901f9b039f185bd306efa31d1fff566ab46ec98b7a75dd133ce1b83063bff"
-    },
-    {
       "path": "tooling/local-evm/rpc.ts",
-      "beforeSha256": "659e2862a146e4ade666f2a269f1e02a33e557f7d31c7d7c88a2a23af9d464db",
+      "beforeSha256": "6335a386841840e5dee7c4f922f03d0efd41c74cf32de48a887e04e3df1b7c8a",
       "afterSha256": "4e8c3fe1ec97161ef7e0ad05b604915cc1aa15e19734984af7c2339e6b30e4bb"
     },
     {
       "path": "tooling/local-evm/tests/rpc.test.ts",
-      "beforeSha256": "ceb80de2b96fb86629be2e8a56be2a5d5ebc72a62d62aa9de2ed4b81096dc391",
+      "beforeSha256": "544adcbeab38790eca7e2a77442571a75af5da9d11d03374eb5889defc5392b9",
       "afterSha256": "731bf0f8f357ba62505e49ac52d2724be1bc674c9f8f2a07980aa5f200459f39"
-    },
-    {
-      "path": "tooling/local-evm/toolchain.ts",
-      "beforeSha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e",
-      "afterSha256": "024fd537c43eb5fb067c485075dfe151ca764871f625e9250df29d1bfef27177"
     }
   ],
   "sharedPaths": [
@@ -167,25 +135,63 @@
     ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
-    "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
-    "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
-    "packages/contexts/supply/tests/deployment-cli.test.ts",
-    "packages/contexts/supply/tests/production-deployment.test.ts",
     "scripts/deployment/estimate-local.ts",
     "scripts/deployment/local-execution-proof.ts",
     "scripts/tests/workflow.test.mjs",
     "tooling/deployment-plan/src/README.md",
-    "tooling/local-evm/process.ts",
     "tooling/local-evm/rpc.ts",
-    "tooling/local-evm/tests/rpc.test.ts",
-    "tooling/local-evm/toolchain.ts"
+    "tooling/local-evm/tests/rpc.test.ts"
   ],
   "retainedSharedPaths": [
     {
       "path": "architecture/foundation/repository-agent-workflow.yaml",
       "sha256": "8413d3e29613ccea223fc35588c380ccce334fb6d4b95287897b6586eb25113a",
       "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub; current-main Docs Protocol authoring paths retain full-scan enforcement"
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+      "sha256": "a7571f4d3367dad5e3b93390362a5ad56255161ac66f3ca9700314966829b618",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts",
+      "sha256": "c2724bb916953560ec47e9bb10fb45fac6ad41f228233dbb4d540c0d1ab663c2",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/passport.ts",
+      "sha256": "a7d56942538c61e219810d5e37d7a64e89d9ad9f6488fd8d86765be0bac95b52",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+      "sha256": "b0f70abdd4379f96c88c8232a9e7fa6b7dddd55910b6c612d900d4fb0fbfa341",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts",
+      "sha256": "967f65f7b10d0bb48a477717beb82637d68851ab382b0803305cbc1d6a1e216a",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+      "sha256": "cefb97b1bb96dc66376831adc3c14cbc9a2bcbd4880dde8ffc32d2e354482617",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/src/features/genesis-manifest/deployment.ts",
+      "sha256": "da1a8303915c030d737b37b03a4427032e46a7dfdeb121fbac0a472bb592b5b3",
+      "reason": "Independent Supply full Ethereum manifest, passport, facts and observed projection exports survive deployment-plan removal without restoring historical reporting."
+    },
+    {
+      "path": "packages/contexts/supply/tests/deployment-cli.test.ts",
+      "sha256": "4f539a44c456a9a79fef15b6ad955d57e2f28780a98ca3e5f34d7492920b852a",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "packages/contexts/supply/tests/production-deployment.test.ts",
+      "sha256": "5828e3b45d22add5f570924bc688e6697f43f523e9d5b85f2729b06dffd73c76",
+      "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
     },
     {
       "path": "scripts/tests/node26-compatibility.test.mjs",
@@ -196,6 +202,26 @@
       "path": "scripts/tests/tooling-boundaries.test.mjs",
       "sha256": "9c2464af858f0a34c7d6bca0de91d9cc0943d2948b9fe5591dc879e38a74022d",
       "reason": "the three prerequisite tooling DAG declarations remain intentionally enforced"
+    },
+    {
+      "path": "tooling/local-evm/process.ts",
+      "reason": "Independent Local EVM supervisor custody: durably register the actual Anvil child in its run lease before exposing identity or accepting parent acknowledgement; retain the five-argument surviving runner API and authenticated stop confirmation. No dependency on the removed deployment planner.",
+      "sha256": "fe71c2570ba7ba2457df33e82037e3af254e58dc85c5c5cca6fcebe2e6b83497"
+    },
+    {
+      "path": "tooling/local-evm/toolchain.ts",
+      "reason": "Independent Local EVM toolchain admission: authenticate the pinned Foundry archive as well as installed binaries for surviving runner and tests. No dependency on the removed deployment planner.",
+      "sha256": "a8a9c3674b421e9172bd0e33bd096c3dbf71cddc44fdbc068ed42bcd5f485e9e"
+    },
+    {
+      "path": "tooling/testnet-ccip/src/adapters/local-safe.ts",
+      "sha256": "cbd3e27d8e8cfc6f55e9e3b097dcaa664202004a7e6d27e3c4fbf2cebbe7625c",
+      "reason": "Passive official Safe artifact, setup, hash, signature and inner-event semantics serve independent custody consumers after planner removal; this adapter owns no process or key lifecycle."
+    },
+    {
+      "path": "tooling/testnet-ccip/src/adapters/safe-custody.ts",
+      "sha256": "456b250552316483523c9180b2f4133662a035b6c8a00830de176c5df435c4ce",
+      "reason": "Passive official Safe artifact, setup, hash, signature and inner-event semantics serve independent custody consumers after planner removal; this adapter owns no process or key lifecycle."
     }
   ],
   "survivingGates": [

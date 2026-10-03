@@ -1,5 +1,7 @@
+import type { LocalPurposeGenesis } from "../domain/local-purpose-genesis.js";
 import { validateReserveGenesis } from "../domain/reserve-genesis.js";
 import { canonicalJson, type JsonValue } from "./canonical.js";
+import type { ValidatedProductionDeployment } from "../domain/production-deployment.js";
 
 export interface ReserveFactsPorts { readonly sha256: (bytes: Uint8Array) => `0x${string}` }
 
@@ -23,4 +25,28 @@ export function verifyReserveFacts(input: unknown, approvedConfigurationSha256: 
       basis: "gross-funded-allocation", refundsRestoreCapacity: false, unusedCapacityRollsOver: false },
   } as const;
   return { facts, canonicalBytes: new TextEncoder().encode(canonicalJson(facts as unknown as JsonValue)) };
+}
+
+/** Projection of admitted v2 inputs. Approval digests identify inputs, not the approving human. */
+export function projectAssemblyFacts(config: ValidatedProductionDeployment, assemblyConfigurationSha256: string) {
+  if (config.schema !== "agtmai-production-deployment-v2" || config.purposeVaults === undefined) {
+    throw new Error("PRODUCTION_ASSEMBLY_V2_REQUIRED");
+  }
+  return assemblyFacts({ reserveGenesis: config.reserveGenesis, purposeVaults: config.purposeVaults }, assemblyConfigurationSha256);
+}
+function assemblyFacts(config: { reserveGenesis: LocalPurposeGenesis["reserve"]; purposeVaults: LocalPurposeGenesis["purposeVaults"] }, assemblyConfigurationSha256: string) {
+  return { broadcastAllowed: false as const, evidence: "unsigned-preparation" as const, deploymentVerified: false as const,
+    configuration: "accepted-production-configuration" as const, assemblyConfigurationSha256,
+    actualProductionDeployment: "unavailable" as const, syntheticLocalObservation: "pending" as const,
+    reserve: config.reserveGenesis, purposeVaults: config.purposeVaults.map(policy => ({ ...policy,
+      recipient: config.reserveGenesis.allocations.find(a => a.id === policy.allocationId)!.recipient,
+      controller: config.reserveGenesis.contributors.controller })),
+    disclosure: "A full cap can leave at opening. The controller selects recipients; downstream transfers are unrestricted. Refunds do not restore gross capacity; expiry restores rolling capacity. No lifetime cap exists." };
+}
+
+/** Selected synthetic policy is not an accepted production configuration. */
+export function projectLocalAssemblyFacts(config: LocalPurposeGenesis, configurationSha256: string) {
+  return { ...assemblyFacts({ reserveGenesis: config.reserve, purposeVaults: config.purposeVaults }, configurationSha256),
+    evidence: "synthetic-local-observation" as const, configuration: "selected-test-only-policy" as const,
+    syntheticLocalObservation: "observed-owned-loopback-chain-1" as const, approval: null, deploymentVerified: false as const };
 }

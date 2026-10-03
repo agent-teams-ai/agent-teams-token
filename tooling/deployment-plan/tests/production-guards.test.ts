@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateProductionGuards } from "../src/domain/production-guards.ts";
+import { evaluateProductionGuards, checkedOperationGas, reserveAssemblyCost } from "../src/domain/production-guards.ts";
 import { assessProductionPreflight } from "../src/application/production-preflight.ts";
 import { deriveCreateAddress, keccak256 } from "../src/domain/identity.ts";
 import { parseProductionExpectations } from "../src/adapters/production-inputs.ts";
@@ -214,4 +214,29 @@ test("expectation parser rejects fields belonging to the other operation kind", 
     const input = structuredClone(fixture.expectations) as unknown as { operations: Record<string, unknown>[] }; mutate(input.operations);
     assert.throws(() => parseProductionExpectations(input), /PREFLIGHT_SCHEMA/);
   }
+});
+
+test("shared integer gas admission rounds upward and reserves unestimated constructors before mint", () => {
+  const selectedPolicy = { ...policy, gasBufferBps: 2000, evmMaxGasPerTransaction: "20000", evmMaxFeePerGasWei: "11", evmMaxPriorityFeePerGasWei: "2", evmMaxTotalFeeWei: "2200000" };
+  const op = { id: "selected-fixture", kind: "create" as const, intentHash: hash, gasEstimate: "10001", gasLimit: "12002", baseFeePerGas: "9", maxPriorityFeePerGas: "2", maxFeePerGas: "11", blockGasLimit: "30000", value: "7" };
+  assert.equal(checkedOperationGas(op, selectedPolicy), 132029n);
+  for (const mutation of [{ gasLimit: "12001" }, { gasLimit: "12003" }, { maxFeePerGas: "12" }, { maxPriorityFeePerGas: "3" }, { blockGasLimit: "12001" }, { gasEstimate: "0" }, { gasEstimate: "01" }]) {
+    assert.throws(() => checkedOperationGas({ ...op, ...mutation }, selectedPolicy));
+  }
+  // All ten maximum commitments exactly fit; one less wei blocks before first mint.
+  assert.equal(reserveAssemblyCost(selectedPolicy, 0n, 10, 2200000n), 2200000n);
+  assert.throws(() => reserveAssemblyCost(selectedPolicy, 0n, 10, 2199999n), /ASSEMBLY_RESERVATION/);
+  assert.throws(() => reserveAssemblyCost({ ...selectedPolicy, evmMaxTotalFeeWei: "2199999" }, 0n, 10, 2200000n), /ASSEMBLY_RESERVATION/);
+  assert.equal(reserveAssemblyCost(selectedPolicy, 132029n, 9, 1980000n), 2112029n);
+  assert.throws(() => reserveAssemblyCost(selectedPolicy, 220001n, 9, 1980000n), /ASSEMBLY_RESERVATION/);
+  assert.throws(() => checkedOperationGas({ ...op, gasLimit: ((1n << 256n) - 1n).toString() }, selectedPolicy));
+});
+
+test("production tooling rejects unknown and mixed expectation versions and synthetic proof promotion", () => {
+  const { expectations } = completeFixture();
+  assert.throws(() => parseProductionExpectations({ ...expectations, schema: "agtmai-local-purpose-proof-v2" }), /PREFLIGHT_VALUE/);
+  assert.throws(() => parseProductionExpectations({ ...expectations, coverage: "full-ethereum-reserve-assembly" }), /PREFLIGHT_SCHEMA/);
+  assert.throws(() => parseProductionExpectations({ ...expectations, schema: "agtmai-production-expectations-v2" }), /PREFLIGHT_VALUE/);
+  const mixed = { ...expectations, schema: "agtmai-production-expectations-v2", assemblyConfigurationSha256: hash, coverage: "full-ethereum-reserve-assembly" };
+  assert.throws(() => parseProductionExpectations(mixed), /PREFLIGHT_SCHEMA/);
 });

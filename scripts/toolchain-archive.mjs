@@ -63,7 +63,7 @@ function openVerifiedArchive({ name, platform, artifact, archive, missingCode })
   }
   let descriptor;
   try {
-    descriptor = openSync(archive, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openSync(archive, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const identity = fstatSync(descriptor, { bigint: true });
     if (!identity.isFile() || identity.nlink !== 1n) {
       throw new Error(`TOOLCHAIN_ARCHIVE_UNSAFE tool=${name} platform=${platform} reason=not-single-link-regular-file`);
@@ -256,7 +256,7 @@ export function prepareVerifiedPayload({
     internalTreeUpdateAllowed = true;
     const snapshotPath = join(staged, ".archive-snapshot");
     copyDescriptor(verified.descriptor, verified.identity.size, snapshotPath);
-    snapshot = openSync(snapshotPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    snapshot = openSync(snapshotPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const snapshotIdentity = fstatSync(snapshot, { bigint: true });
     if (!snapshotIdentity.isFile() || snapshotIdentity.nlink !== 1n
       || sha256Descriptor(snapshot, snapshotIdentity.size) !== artifact.sha256) {

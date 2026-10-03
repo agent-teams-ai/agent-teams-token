@@ -60,6 +60,13 @@ export function encodeProductionFounderReserve(input: ProductionFounderReserveIn
   return `0x${[addressWord(input.token), addressWord(input.beneficiary), addressWord(input.controller), productionWord(BigInt(input.allocation)), productionWord(BigInt(input.start)), productionWord(BigInt(input.cliff)), productionWord(BigInt(input.end)), productionWord(0n), input.purpose.slice(2)].join("")}`;
 }
 
+/** The child constructor is encoded from its authenticated parent inputs, never a fabricated grant record. */
+export function encodeProductionFounderVault(input: ProductionFounderReserveInput & { readonly reserve: Hex }): Hex {
+  return `0x${[addressWord(input.token), addressWord(input.beneficiary), addressWord(input.reserve), addressWord(input.controller),
+    productionWord(BigInt(input.allocation)), productionWord(BigInt(input.start)), productionWord(BigInt(input.cliff)),
+    productionWord(BigInt(input.end)), productionWord(0n), input.purpose.slice(2)].join("")}`;
+}
+
 export function encodeProductionReserveController(token: Hex, controller: Hex, purpose: Hex, rollingCap: string, perGrantCap: string): Hex {
   return `0x${[addressWord(token), addressWord(controller), purpose.slice(2), productionWord(BigInt(rollingCap)), productionWord(BigInt(perGrantCap))].join("")}`;
 }

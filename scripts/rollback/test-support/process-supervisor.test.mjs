@@ -365,9 +365,9 @@ for (const parentSignal of ["SIGINT", "SIGTERM"]) {
       }
       assert.equal(live(root, "leaf"), true);
       const helperDirectories = readdirSync(helperTmp);
-      assert.equal(helperDirectories.length, 1, "synchronous parent built one helper in its private TMPDIR");
-      assert.match(helperDirectories[0], /^rollback-subreaper-/u);
-      assert.equal(existsSync(join(helperTmp, helperDirectories[0], "subreaper")), true);
+      assert.equal(helperDirectories.length, 1, "synchronous parent owns one invocation with its pinned helper in private TMPDIR");
+      assert.match(helperDirectories[0], /^agtmai-toolchain-exec-/u);
+      assert.equal(existsSync(join(helperTmp, helperDirectories[0], "native-subreaper")), true);
       parent.kill(parentSignal);
       await new Promise((resolve) => {parent.once("close", resolve);});
       const drainDeadline = Date.now() + 2500;

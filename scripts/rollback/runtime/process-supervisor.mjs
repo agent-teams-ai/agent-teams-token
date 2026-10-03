@@ -1,8 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { closeSync, constants, fstatSync, openSync, readSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
@@ -96,55 +94,84 @@ const helperImage = [
   "+P3f5Xn2RRhUAAA=",
 ].join("");
 
-function buildHelper() {
+
+function verifyPinnedFile(path, expectedHash) {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let failure;
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile() || before.nlink !== 1 || before.size > 64 * 1024 * 1024) {
+      throw new Error("ROLLBACK_PROCESS_BUILD_PREREQUISITE_MISMATCH");
+    }
+    const hash = createHash("sha256");
+    const chunk = Buffer.alloc(64 * 1024);
+    let offset = 0;
+    while (offset < before.size) {
+      const count = readSync(fd, chunk, 0, Math.min(chunk.length, before.size - offset), offset);
+      if (count === 0) {throw new Error("ROLLBACK_PROCESS_BUILD_PREREQUISITE_MISMATCH");}
+      hash.update(chunk.subarray(0, count));
+      offset += count;
+    }
+    const after = fstatSync(fd);
+    if (!after.isFile() || before.dev !== after.dev || before.ino !== after.ino
+      || before.size !== after.size || before.mode !== after.mode || after.nlink !== 1
+      || hash.digest("hex") !== expectedHash) {
+      throw new Error("ROLLBACK_PROCESS_BUILD_PREREQUISITE_MISMATCH");
+    }
+  } catch (error) {failure = error;}
+  // Attempt a single close; a rejected close is never retried.
+  try {closeSync(fd);} catch (error) {
+    if (failure) {throw new AggregateError([failure, error], "ROLLBACK_PROCESS_PIN_CLOSE_FAILED", { cause: failure });}
+    throw error;
+  }
+  if (failure) {throw failure;}
+}
+
+// The existing Token build tuple stays local to this product boundary. Provision
+// only reviewed bytes into the caller's private invocation; never invoke GCC.
+export function prepareNativeSupervisor(path) {
   if (process.platform !== "linux" || process.arch !== "x64") {
     throw new Error("ROLLBACK_PROCESS_PLATFORM_UNSUPPORTED");
   }
-  if (digest(readFileSync(source)) !== pins.source || digest(readFileSync(compiler)) !== pins.compiler) {
-    throw new Error("ROLLBACK_PROCESS_BUILD_PREREQUISITE_MISMATCH");
-  }
+  verifyPinnedFile(source, pins.source);
+  verifyPinnedFile(compiler, pins.compiler);
   const bytes = gunzipSync(Buffer.from(helperImage, "base64"));
   if (digest(bytes) !== pins.executable) {throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED");}
-  const directory = mkdtempSync(join(tmpdir(), "rollback-subreaper-"));
-  const executable = join(directory, "subreaper");
-  try {
-    writeFileSync(executable, bytes, {flag: "wx", mode: 0o700});
-    if (digest(readFileSync(executable)) !== pins.executable) {throw new Error("ROLLBACK_PROCESS_BUILD_UNVERIFIED");}
-    chmodSync(executable, 0o700);
-    return { directory, executable };
-  } catch (error) {
-    rmSync(directory, { recursive: true, force: true });
-    throw error;
-  }
+  writeFileSync(path, bytes, { flag: "wx", mode: 0o700 });
+  return pins.executable;
 }
 
-// Synchronous callers keep evidence descriptors open until native custody
-// proves ECHILD or reports uncertainty. There is no outer timeout.
+// The invocation owns every descriptor, including file-backed helper output.
+// Executing the inherited read-only FD binds the loaded ELF to its pinned bytes.
+// The outer SIGKILL watchdog is deliberately independent of native drain/reaping.
 export function superviseCommand(config) {
-  let helper;
-  try {
-    helper = buildHelper();
-    const result = spawnSync(helper.executable,
-      [String(config.timeout), String(config.drainMs ?? 5000),
-        String(config.termMs ?? 1000), config.command, ...config.arguments], {
-        cwd: config.cwd, env: config.environment,
-        input: config.input === undefined ? undefined : Buffer.from(config.input, "base64"),
-        encoding: "utf8", maxBuffer: 1024 * 1024,
-        stdio: [config.input === undefined ? "ignore" : "pipe", "pipe", "pipe",
-          config.stdoutDescriptor, config.stderrDescriptor],
-      });
-    if (result.error || result.status !== 0) {
-      throw new Error("ROLLBACK_PROCESS_HELPER_UNCONFIRMED " + (result.error?.message ?? result.stderr ?? ""));
-    }
-    const report = JSON.parse(result.stdout);
-    if (!["completed", "reaped", "uncertain"].includes(report.custody)) {
-      throw new Error("ROLLBACK_PROCESS_REPORT_INVALID");
-    }
-    return report;
-  } catch (error) {
-    return { status: null, signal: null, error: { code: "ESUPERVISOR", message: error.message },
-      custody: "uncertain", uncertainty: error.message };
-  } finally {
-    if (helper) {rmSync(helper.directory, { recursive: true, force: true });}
+  return spawnSync(`/proc/self/fd/${config.executableFd}`,
+    [String(config.timeout), "5000", "1000", config.command, ...config.arguments], {
+      cwd: config.cwd,
+      env: config.environment,
+      stdio: config.stdio,
+      timeout: config.outerTimeout,
+      killSignal: "SIGKILL",
+    });
+}
+
+export function parseNativeSupervisorReport(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).toSorted().join(",") !== "custody,error,signal,signalledCount,status,uncertainty"
+    || !["completed", "reaped", "uncertain"].includes(value.custody)
+    || (value.status !== null && (!Number.isInteger(value.status) || value.status < 0 || value.status > 255))
+    || (value.signal !== null && (typeof value.signal !== "string" || !/^SIG[A-Z0-9]+$/u.test(value.signal)))
+    || (value.error !== null && (typeof value.error !== "object" || Array.isArray(value.error)
+      || Object.keys(value.error).join(",") !== "code" || typeof value.error.code !== "string"
+      || !/^E[A-Z0-9]+$/u.test(value.error.code)))
+    || (value.uncertainty !== null && typeof value.uncertainty !== "string")
+    || !Number.isSafeInteger(value.signalledCount) || value.signalledCount < 0 || value.signalledCount > 8192
+    || (value.custody !== "uncertain" && (value.uncertainty !== null
+      || (value.status === null && value.signal === null)))
+    || (value.custody === "completed" && ["ELEAK", "ETIMEDOUT", "ECANCELLED"].includes(value.error?.code))
+    || (value.custody === "reaped" && !["ELEAK", "ETIMEDOUT", "ECANCELLED"].includes(value.error?.code))
+    || (value.status !== null && value.signal !== null)) {
+    throw new Error("ROLLBACK_PROCESS_REPORT_INVALID");
   }
+  return value;
 }

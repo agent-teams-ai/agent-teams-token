@@ -30,6 +30,7 @@
     "tooling/local-solana/src/domain/model.ts",
     "tooling/local-solana/tests/cli-boundary.test.ts",
     "tooling/local-solana/tests/cli.test.ts",
+    "tooling/local-solana/tests/fifo-admission.test.ts",
     "tooling/local-solana/tests/filesystem.test.ts",
     "tooling/local-solana/tests/helpers/agave-recovery.ts",
     "tooling/local-solana/tests/helpers/captured-validator.ts",
@@ -80,8 +81,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "297675a4b5b5e77ba9f9574f7c8cd18078d45eca06816b7a0c15424c2ce2a933",
-      "afterSha256": "5b60614fa94734c647c033c3ce3487b675942401f6b24f40c85f944351d82abe"
+      "beforeSha256": "c7b5381198b49ae249fec3ca2aa2b06971f2452a4123b43317229a70253e5c9f",
+      "afterSha256": "47551dbec9aacd5b2fdf13612d35b08b19737983e43cc5bcf4950caf0e899f36"
     },
     {
       "path": "scripts/solana/local-fixture.ts",

@@ -1,7 +1,50 @@
 import * as proofSupport from "./proof-fixture.mjs";
+import { deploymentPlanSharedEditBaseline } from "../slices/config.mjs";
+import { restoreDeploymentPlanSharedEdits } from "../slices/transforms.mjs";
+import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
-const { cloneRepository } = proofSupport;
+const { cloneRepository, assertRegisteredLocalEvmCustody } = proofSupport;
+
+const supplySurvivors = [
+  "packages/contexts/supply/src/features/genesis-manifest/application/deployment-manifest.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/application/passport.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/application/reserve-facts.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/deployment.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/application/prepare-production-deployment.ts",
+  "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts",
+  "packages/contexts/supply/tests/deployment-cli.test.ts",
+  "packages/contexts/supply/tests/production-deployment.test.ts",
+];
+
+const passiveSafeSurvivors = ["tooling/testnet-ccip/src/adapters/local-safe.ts", "tooling/testnet-ccip/src/adapters/safe-custody.ts"];
+
+test("precise deployment-plan reversal preserves independently edited Supply bytes", () => {
+  const boundary = temporaryDirectory("agtmai-rollback-supply-survivor-");
+  const checkout = join(boundary, "checkout"), quarantineRoot = join(boundary, "gate-tmp");
+
+  let workspaceHandle;
+  try {
+    cloneRepository(repositoryRoot, checkout, boundary);
+    const edited = new Map([...supplySurvivors, ...passiveSafeSurvivors].map(path => {
+      const original = readFileSync(join(repositoryRoot, path));
+      const bytes = Buffer.concat([original, Buffer.from(`\n// Independent survivor edit: ${path}\n`)]);
+      assert.notDeepEqual(bytes, original, path);
+      writeFileSync(join(checkout, path), bytes); return [path, bytes];
+    }));
+    mkdirSync(quarantineRoot, { mode: 0o700 });
+    workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+    const sharedPlan = snapshotRollbackSharedPaths(checkout, deploymentPlanSharedEditBaseline.paths, workspaceHandle);
+    restoreDeploymentPlanSharedEdits(checkout, sharedPlan, workspaceHandle);
+    for (const path of [...supplySurvivors, ...passiveSafeSurvivors]) {
+      assert.deepEqual(readFileSync(join(checkout, path)), edited.get(path), path);
+    }
+  } finally {
+    closeRollbackWorkspaceHandle(workspaceHandle);
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
 
 test("all three rollback manifest schemas have complete, non-overlapping exact ownership", () => {
   assert.equal(validateManifestSet(manifests()).length, 3);
@@ -29,40 +72,79 @@ test("every production manifest verifies declared hashes through the default app
         manifest.sliceId,
       );
       if (manifest.sliceId === "deployment-plan") {
-        const adapterPath = "packages/contexts/supply/src/features/genesis-manifest/adapters/deployment-artifacts.ts";
-        const current = readFileSync(join(repositoryRoot, adapterPath), "utf8");
-        const applied = readFileSync(join(checkout, adapterPath), "utf8");
-        // Rehashed manifests must not silently restore a pre-purpose reader:
-        // the independent Supply test and its complete reader still survive.
-        const localReader = current.slice(
-          current.indexOf("export async function readLocalPurposeArtifactPins("),
-          current.indexOf("async function readProductionPinnedArtifact("),
-        );
-        assert.ok(localReader.startsWith("export async function readLocalPurposeArtifactPins("));
-        assert.ok(applied.includes(localReader), "retain local reader's Git/compiler checks unchanged");
-        const namedSlots = current.slice(
-          current.indexOf("function productionImmutableReferences("),
-          current.indexOf("/** Reopen the actual pinned inputs;"),
-        );
-        assert.ok(namedSlots.startsWith("function productionImmutableReferences("));
-        assert.ok(applied.includes(namedSlots), "retain local named immutable validation unchanged");
-        for (const line of current.split("\n").filter((value) =>
-          value.startsWith("import ") && /local-purpose/u.test(value))) {
-          assert.ok(applied.includes(line), "retain local reader's imports");
+        // Real applied bytes must retain independent report/authentication semantics;
+        // historical source fragments cannot qualify the surviving implementation.
+        for (const path of [...supplySurvivors, ...passiveSafeSurvivors,
+          "packages/contexts/supply/tests/local-purpose-artifacts.test.ts",
+          "packages/contexts/supply/tests/local-purpose-planner.test.ts"]) {
+          assert.deepEqual(readFileSync(join(checkout, path)), readFileSync(join(repositoryRoot, path)), path);
         }
-        const survivor = "packages/contexts/supply/tests/local-purpose-artifacts.test.ts";
-        assert.deepEqual(readFileSync(join(checkout, survivor)), readFileSync(join(repositoryRoot, survivor)));
-        assert.match(
-          applied,
-          /immutableReferences: contracts === undefined \? immutableReferences\(runtime\) : productionImmutableReferences\(runtime, build, pin\.contract\)/u,
-          "historical production reader restores unnamed slots; only local inventory uses named slots",
-        );
+        // The complete sequential suite must allow its slow per-case timeout budgets (~280s).
+        const cleanup = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "tooling/local-evm/tests/cleanup.test.ts"], { cwd: checkout, env: {TMPDIR: tmpdir(), PATH: process.env.PATH}, encoding: "utf8", timeout: 360_000 });
+        assert.equal(existsSync(join(checkout, "scripts/deployment/local-execution-proof.ts")), false); assert.equal(cleanup.error, undefined); assert.equal(cleanup.signal, null); assert.equal(cleanup.status, 0, cleanup.stdout + cleanup.stderr);
+        for (const outcome of ["retains", "removes"]) {parseStrictTap(cleanup.stdout, `runner startup publication failure ${outcome} custody after real supervisor cleanup`);}
       }
     } finally {
       closeRollbackWorkspaceHandle(workspaceHandle);
       rmSync(boundary, { recursive: true, force: true });
     }
   }
+});
+
+// Exercise the surviving caller and durable lease, rather than accepting a
+// rehashed historical process implementation that leaves lease.anvil null.
+test("deployment-plan rollback preserves Local EVM supervisor registration before acknowledgement", {timeout: 40_000}, () => {
+  const boundary = temporaryDirectory("agtmai-rollback-evm-custody-");
+  const checkout = join(boundary, "checkout");
+  const quarantineRoot = join(boundary, "gate-tmp");
+  const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
+  let workspaceHandle;
+  try {
+    cloneRepository(repositoryRoot, checkout, boundary);
+    copyCurrentRollbackSharedState(checkout, manifest);
+    mkdirSync(quarantineRoot, { mode: 0o700 });
+    workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+    applyManifest(checkout, manifest, { workspaceHandle });
+    verifyAppliedState(checkout, manifest, { workspaceHandle });
+    for (const path of ["tooling/local-evm/process.ts", "tooling/local-evm/toolchain.ts"]) {
+      const retained = manifest.retainedSharedPaths.find(entry => entry.path === path);
+      assert.ok(retained, "independent Local EVM behavior has exact retained authority");
+      assert.equal(digestFile(join(checkout, path)), retained.sha256);
+      assert.deepEqual(readFileSync(join(checkout, path)), readFileSync(join(repositoryRoot, path)));
+    }
+    // These additions serve the removed execution proof only. Their genuine
+    // historical reversals still run while the independent supervisor survives.
+    for (const path of ["tooling/local-evm/rpc.ts", "tooling/local-evm/tests/rpc.test.ts"]) {
+      assert.equal(readFileSync(join(checkout, path), "utf8"), git(checkout, [
+        "show", "dfe89da4c77a186aefbaead50981a327317f3bc4:" + path,
+      ]));
+    }
+    assertRegisteredLocalEvmCustody(checkout);
+    // The cases observe durable registration at the parent callback, reject a
+    // foreign lease before exposing identity, and independently observe exit.
+    for (const path of manifest.ownedPaths) {assert.equal(existsSync(join(checkout, path)), false, path);}
+    verifyAppliedState(checkout, manifest, { workspaceHandle });
+  } finally {
+    closeRollbackWorkspaceHandle(workspaceHandle);
+    rmSync(boundary, { recursive: true, force: true });
+  }
+});
+
+test("retained Local EVM authority rejects digest drift and arbitrary reclassification", () => {
+  const drifted = manifests();
+  const deployment = drifted.find(({ sliceId }) => sliceId === "deployment-plan");
+  deployment.retainedSharedPaths.find(entry => entry.path === "tooling/local-evm/process.ts").sha256 = "0".repeat(64);
+  assert.throws(() => validateManifestSet(drifted), /ROLLBACK_RETAINED_SHARED_PATH_DRIFT/u);
+
+  const arbitrary = manifests();
+  arbitrary.find(({ sliceId }) => sliceId === "deployment-plan").retainedSharedPaths.push({
+    path: "tooling/local-evm/runner.ts", reason: "Undeclared retention must remain forbidden", sha256: digestFile(join(repositoryRoot, "tooling/local-evm/runner.ts")),
+  });
+  assert.throws(() => validateManifestSet(arbitrary), /ROLLBACK_RETAINED_SHARED_PATH_COVERAGE/u);
+
+  const otherSlice = manifests();
+  otherSlice[0].retainedSharedPaths.push(deployment.retainedSharedPaths.find(entry => entry.path === "tooling/local-evm/toolchain.ts"));
+  assert.throws(() => validateManifestSet(otherSlice), /ROLLBACK_RETAINED_SHARED_PATH_COVERAGE/u);
 });
 
 // Regression trigger: whole-file restoration removes these named public exports
@@ -130,15 +212,17 @@ void ports;
     const applied = readFileSync(join(supply, "src/features/genesis-manifest/composition/deployment-files.ts"), "utf8");
     const current = readFileSync(join(repositoryRoot,
       "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts"), "utf8");
-    assert.equal(applied, current
-      .replace("export const productionCompilerPorts =", "const productionCompilerPorts =")
-      .replace("export { readProductionArtifactPins, readLocalPurposeArtifactPins }",
-        "export { readLocalPurposeArtifactPins }"));
+    assert.equal(applied, current, "Supply construction and exports are independent survivors");
     basicRun(process.execPath, ["--input-type=module", "--eval", `
 import assert from "node:assert/strict";
-import * as entrypoint from "@agent-teams/supply/deployment-files";
-assert.equal(Object.hasOwn(entrypoint, "productionCompilerPorts"), false);
-assert.equal(Object.hasOwn(entrypoint, "readProductionArtifactPins"), false);
+import { productionCompilerPorts, readProductionArtifactPins } from "@agent-teams/supply/deployment-files";
+import { constructProductionAssembly, prepareAssemblyManifest, materializeObservedAssemblyManifest, generatePassport } from "@agent-teams/supply/deployment";
+assert.equal(typeof productionCompilerPorts.encodePurposeVault, "function");
+assert.equal(typeof readProductionArtifactPins, "function");
+assert.equal(typeof constructProductionAssembly, "function");
+assert.equal(typeof prepareAssemblyManifest, "function");
+assert.equal(typeof materializeObservedAssemblyManifest, "function");
+assert.equal(typeof generatePassport, "function");
 `], { cwd: supply });
   } finally {
     closeRollbackWorkspaceHandle(workspaceHandle);
@@ -146,45 +230,14 @@ assert.equal(Object.hasOwn(entrypoint, "readProductionArtifactPins"), false);
   }
 });
 
-test("deployment-plan public reversal rejects missing and duplicate owned edits", () => {
-  const path = "packages/contexts/supply/src/features/genesis-manifest/composition/deployment-files.ts";
-  const edits = [
-    ["production-compiler-export", "export const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,"],
-    ["production-reader-export", 'export { readProductionArtifactPins, readLocalPurposeArtifactPins } from "../adapters/deployment-artifacts.js";\n'],
-  ];
-  for (const [label, token] of edits) {
-    for (const mode of ["missing", "duplicate"]) {
-      const boundary = temporaryDirectory("agtmai-rollback-public-edit-drift-");
-      const checkout = join(boundary, "checkout");
-      const quarantineRoot = join(boundary, "gate-tmp");
-      const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
-      let workspaceHandle;
-      try {
-        cloneRepository(repositoryRoot, checkout, boundary);
-        copyCurrentRollbackSharedState(checkout, manifest);
-        const original = readFileSync(join(checkout, path), "utf8");
-        const drifted = mode === "missing" ? original.replace(token, "") : original + token;
-        writeFileSync(join(checkout, path), drifted);
-        // Even a manifest admitting the drifted input cannot turn an ambiguous
-        // or missing owned edit into a successful historical-file restoration.
-        manifest.reverseEdits.find(edit => edit.path === path).beforeSha256 =
-          createHash("sha256").update(drifted).digest("hex");
-        mkdirSync(quarantineRoot, { mode: 0o700 });
-        workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
-        assert.throws(
-          () => applyManifest(checkout, manifest, { workspaceHandle }),
-          error => {
-            assert.ok(error.message.includes(`ROLLBACK_EXACT_EDIT_MISMATCH edit=deployment-files:${label}`));
-            return true;
-          },
-          mode + ": " + label,
-        );
-        assert.equal(readFileSync(join(checkout, path), "utf8"), drifted);
-      } finally {
-        closeRollbackWorkspaceHandle(workspaceHandle);
-        rmSync(boundary, { recursive: true, force: true });
-      }
-    }
+test("deployment-plan retains every Supply assembly and passive Safe custody byte", () => {
+  const manifest = manifests().find(({ sliceId }) => sliceId === "deployment-plan");
+
+  for (const path of [...supplySurvivors, ...passiveSafeSurvivors]) {
+    assert.ok(!manifest.sharedPaths.includes(path));
+    assert.ok(!manifest.reverseEdits.some(edit => edit.path === path));
+    assert.equal(manifest.retainedSharedPaths.find(entry => entry.path === path)?.sha256,
+      digestFile(join(repositoryRoot, path)), path);
   }
 });
 

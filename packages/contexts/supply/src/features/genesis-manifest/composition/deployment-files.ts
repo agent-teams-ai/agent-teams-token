@@ -7,19 +7,20 @@ import { prepareLocalPurposeGenesis } from "../application/prepare-local-purpose
 import { parsePreparedDeployment, parseDeploymentEvidence } from "../adapters/deployment-evidence.js";
 import { readDeploymentFile, verifyDeploymentFiles } from "../adapters/deployment-store.js";
 import { readProductionArtifactPins, verifyPreparedArtifacts } from "../adapters/deployment-artifacts.js";
-import { encodeDeploymentToken, encodeDeploymentGrant, encodeProductionFounderReserve, encodeProductionReserveController, encodeLocalPurposeToken, encodeLocalPurposeVault } from "../adapters/deployment-abi.js";
+import { encodeDeploymentToken, encodeDeploymentGrant, encodeProductionFounderReserve, encodeProductionReserveController, encodeLocalPurposeToken, encodeLocalPurposeVault, encodeProductionFounderVault } from "../adapters/deployment-abi.js";
 import { expectedTokenCalls, expectedGrantCalls, deploymentCreateAddress, keccakBytes } from "../adapters/deployment-observations.js";
 import { sha256 } from "../adapters/digest.js";
 import { parseStrict } from "../adapters/strict-source.js";
+import type { LocalPurposeCandidate } from "../adapters/local-purpose-build.js";
 import type { Hex } from "../domain/deployment.js";
 
 export const deploymentCompilerPorts = { sha256, encodeToken: encodeDeploymentToken, encodeGrant: encodeDeploymentGrant,
   expectedTokenCalls, expectedGrantCalls, createAddress: deploymentCreateAddress };
-export const productionCompilerPorts = { encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,
+export const productionCompilerPorts = { encodePurposeVault: encodeLocalPurposeVault, encodeFounderVault: encodeProductionFounderVault, encodeToken: encodeDeploymentToken, encodeFounderReserve: encodeProductionFounderReserve,
   encodeReserveController: (input: { token: Hex; controller: Hex; purpose: Hex; rollingCap: string; perGrantCap: string }) => encodeProductionReserveController(input.token, input.controller, input.purpose, input.rollingCap, input.perGrantCap), createAddress: deploymentCreateAddress, keccak256: keccakBytes };
 export const localPurposeCompilerPorts = { sha256, keccak256: keccakBytes, createAddress: deploymentCreateAddress,
   encodeToken: encodeLocalPurposeToken, encodeFounderReserve: encodeProductionFounderReserve,
-  encodeReserveController: encodeProductionReserveController, encodePurposeVault: encodeLocalPurposeVault };
+  encodeReserveController: encodeProductionReserveController, encodePurposeVault: encodeLocalPurposeVault, encodeFounderVault: encodeProductionFounderVault };
 export { prepareLocalPurposeGenesis };
 const text = async (path: string): Promise<string> => new TextDecoder().decode(await readDeploymentFile(path));
 export async function loadPreparedDeployment(path: string): Promise<PreparedDeployment> {
@@ -41,18 +42,20 @@ export async function loadDeploymentManifest(path: string): Promise<{ readonly m
 }
 
 /** Re-open the exact published inventory and reconstruct it through Supply's production authority. */
-export async function loadPreparedProductionPackage(directory: string): Promise<PreparedProductionDeployment> {
+export async function loadPreparedProductionPackage(directory: string, candidate?: LocalPurposeCandidate): Promise<PreparedProductionDeployment> {
   const selected = resolve(directory);
   const inventory = await verifyDeploymentFiles(selected);
+  const configuration = productionSource(await text(join(selected, "canonical-production-configuration.json")));
+  const v2 = configuration.schema === "agtmai-production-deployment-v2";
   const requiredFiles = [
     "agtmaicciptoken.artifact.json", "agtmaicciptoken.build-info.json",
     "canonical-production-configuration.json", "foundergrantreserve.artifact.json", "foundergrantreserve.build-info.json",
     "prepared-production-deployment.json", "production-approval.json", "production-artifact-pins.json", "production-expectations.json",
     "reservecontroller.artifact.json", "reservecontroller.build-info.json",
+    ...(v2 ? ["purposereservevault.artifact.json", "purposereservevault.build-info.json", "grantvault.artifact.json", "grantvault.build-info.json"] : []),
   ].toSorted();
   if (JSON.stringify(inventory.files.map(file => file.name).toSorted()) !== JSON.stringify(requiredFiles)) {throw new Error("DEPLOYMENT_PRODUCTION_PACKAGE_INVENTORY");}
-  const configuration = productionSource(await text(join(selected, "canonical-production-configuration.json")));
-  const artifacts = await readProductionArtifactPins(join(selected, "production-artifact-pins.json"));
+  const artifacts = await readProductionArtifactPins(join(selected, "production-artifact-pins.json"), candidate);
   const approval = parseProductionApproval(await text(join(selected, "production-approval.json")));
   const expectations = parseProductionExpectations(await text(join(selected, "production-expectations.json")));
   const result = prepareProductionDeployment(configuration, { artifactSourceRevision: artifacts.sourceRevision, artifacts: artifacts.artifacts, approval, expectations }, productionCompilerPorts, sha256);
@@ -62,10 +65,10 @@ export async function loadPreparedProductionPackage(directory: string): Promise<
   return result.prepared;
 }
 
-function productionSource(source: string): unknown {
+function productionSource(source: string): Record<string, unknown> {
   const parsed = parseStrict(source);
-  if (parsed.diagnostics.length || parsed.value === undefined) {throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");}
-  return parsed.value;
+  if (parsed.diagnostics.length || parsed.value === null || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");}
+  return parsed.value as Record<string, unknown>;
 }
 
 function exactObject(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -76,17 +79,23 @@ function exactObject(value: unknown, fields: readonly string[]): Record<string, 
 }
 
 export function parseProductionApproval(source: string): ProductionApproval {
-  return exactObject(productionSource(source), ["configurationSha256", "reference", "reserveConfigurationSha256", "schema"]) as unknown as ProductionApproval;
+  const value = productionSource(source);
+  if (value.schema !== "agtmai-production-approval-v1" && value.schema !== "agtmai-production-approval-v2") { throw new Error("DEPLOYMENT_PRODUCTION_SOURCE"); }
+  return exactObject(value, ["configurationSha256", "reference", "reserveConfigurationSha256", "schema", ...(value.schema === "agtmai-production-approval-v2" ? ["assemblyConfigurationSha256"] : [])]) as unknown as ProductionApproval;
 }
 
 export function parseProductionExpectations(source: string): ProductionExpectation {
-  const root = exactObject(productionSource(source), ["artifactPinsSha256", "attemptIdentity", "authority", "chainId", "configurationSha256", "deployer", "maxObservationAgeSeconds", "maxTotalCostWei", "operations", "reserveConfigurationSha256", "schema", "sender", "sourceRevision", "startingNonce"]);
+  const value = productionSource(source);
+  if (value.schema !== "agtmai-production-expectations-v1" && value.schema !== "agtmai-production-expectations-v2") { throw new Error("DEPLOYMENT_PRODUCTION_SOURCE"); }
+  const v2 = value.schema === "agtmai-production-expectations-v2";
+  const root = exactObject(value, ["artifactPinsSha256", "attemptIdentity", "authority", "chainId", "configurationSha256", "deployer", "maxObservationAgeSeconds", "maxTotalCostWei", "operations", "reserveConfigurationSha256", "schema", "sender", "sourceRevision", "startingNonce", ...(v2 ? ["assemblyConfigurationSha256", "coverage"] : [])]);
   if (!Array.isArray(root.authority) || !Array.isArray(root.operations)) {throw new Error("DEPLOYMENT_PRODUCTION_SOURCE");}
   for (const safe of root.authority) {exactObject(safe, ["address", "fallbackHandler", "guard", "modules", "nonce", "owners", "proxyCodeHash", "singletonCodeHash", "setupProvenance", "singletonAddress", "singletonSlot", "threshold"]);}
   const common = ["baseFeePerGas", "blockGasLimit", "expectedAddress", "gasEstimate", "gasLimit", "id", "intentHash", "kind", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "value"];
   for (const operation of root.operations) {
     const item = operation as Record<string, unknown>;
-    const fields = item.kind === "call" ? [...common, "calldata"] : item.id === "founder-reserve-create" ? [...common, "initcode", "initcodeHash", "nestedAddress", "runtime", "runtimeHash"] : [...common, "initcode", "initcodeHash", "runtime", "runtimeHash"];
+    const runtime = v2 ? ["runtimeTemplate", "runtimeTemplateHash"] : ["runtime", "runtimeHash"];
+    const fields = item.kind === "call" ? [...common, "calldata"] : [...common, "initcode", "initcodeHash", ...runtime, ...(item.id === "founder-reserve-create" ? ["nestedAddress"] : [])];
     exactObject(operation, fields);
   }
   return root as unknown as ProductionExpectation;

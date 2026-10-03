@@ -23,15 +23,20 @@ const safe = (value: unknown): SafeState => {
 
 export function parseProductionExpectations(input: unknown): ProductionExpectations {
   const value = record(input);
-  keys(value, ["schema", "chainId", "sender", "deployer", "configurationSha256", "reserveConfigurationSha256", "sourceRevision", "artifactPinsSha256", "startingNonce", "maxObservationAgeSeconds", "operations", "maxTotalCostWei", "attemptIdentity", "authority"], ["schema", "chainId", "sender", "deployer", "configurationSha256", "reserveConfigurationSha256", "sourceRevision", "artifactPinsSha256", "startingNonce", "maxObservationAgeSeconds", "operations", "maxTotalCostWei", "attemptIdentity", "authority"]);
+  const v2 = value.schema === "agtmai-production-expectations-v2";
+  if (!v2 && value.schema !== "agtmai-production-expectations-v1") {reject("VALUE");}
+  const versionFields = v2 ? ["assemblyConfigurationSha256", "coverage"] : [];
+  if (v2 && (!digest(value.assemblyConfigurationSha256) || value.coverage !== "full-ethereum-reserve-assembly")) {reject("VALUE");}
+  keys(value, [...versionFields, "schema", "chainId", "sender", "deployer", "configurationSha256", "reserveConfigurationSha256", "sourceRevision", "artifactPinsSha256", "startingNonce", "maxObservationAgeSeconds", "operations", "maxTotalCostWei", "attemptIdentity", "authority"], [...versionFields, "schema", "chainId", "sender", "deployer", "configurationSha256", "reserveConfigurationSha256", "sourceRevision", "artifactPinsSha256", "startingNonce", "maxObservationAgeSeconds", "operations", "maxTotalCostWei", "attemptIdentity", "authority"]);
   mapArray(value.authority, safe);
   mapArray(value.operations, operation => {
     const item = record(operation);
     const common = ["id", "kind", "intentHash", "nonce", "expectedAddress", "gasEstimate", "gasLimit", "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "blockGasLimit", "value"];
-    const allowed = item.kind === "call" ? [...common, "calldata"] : item.id === "founder-reserve-create" ? [...common, "nestedAddress", "initcode", "initcodeHash", "runtime", "runtimeHash"] : [...common, "initcode", "initcodeHash", "runtime", "runtimeHash"];
+    const runtime = v2 ? ["runtimeTemplate", "runtimeTemplateHash"] : ["runtime", "runtimeHash"];
+    const allowed = item.kind === "call" ? [...common, "calldata"] : item.id === "founder-reserve-create" ? [...common, "nestedAddress", "initcode", "initcodeHash", ...runtime] : [...common, "initcode", "initcodeHash", ...runtime];
     keys(item, allowed, allowed);
     if (!stringValue(item.id) || !stringValue(item.kind) || !digest(item.intentHash)) {reject("VALUE");}
-    optional(item.nonce, decimal); optional(item.expectedAddress, address); optional(item.nestedAddress, address); optional(item.initcode, bytes); optional(item.initcodeHash, digest); optional(item.runtime, bytes); optional(item.runtimeHash, digest); optional(item.calldata, bytes);
+    optional(item.nonce, decimal); optional(item.expectedAddress, address); optional(item.nestedAddress, address); optional(item.initcode, bytes); optional(item.initcodeHash, digest); optional(item.runtime, bytes); optional(item.runtimeHash, digest); optional(item.calldata, bytes); optional(item.runtimeTemplate, bytes); optional(item.runtimeTemplateHash, digest);
     for (const field of ["gasEstimate", "gasLimit", "baseFeePerGas", "maxPriorityFeePerGas", "maxFeePerGas", "blockGasLimit", "value"]) {if (!decimal(item[field])) {reject("VALUE");}}
     return item;
   });

@@ -285,7 +285,12 @@ test("local execution RPC distinguishes a bounded EVM revert from malformed tran
       response.end(JSON.stringify({jsonrpc: "2.0", id: body.id, error: {code: -32_000, message: "execution reverted", data: "0x"}}));
     });
   }));
-  await assert.rejects(createLocalExecutionRpcClient(url).request("eth_call", []), hasCode("LOCAL_EVM_RPC_EXECUTION_ERROR"));
+  await assert.rejects(createLocalExecutionRpcClient(url).request("eth_call", []), (cause: unknown) => {
+    const error = cause as { code?: string; rpcCode?: number; data?: unknown };
+    assert.equal(error.code, "LOCAL_EVM_RPC_EXECUTION_ERROR");
+    assert.equal(error.rpcCode, -32_000); assert.equal(error.data, "0x");
+    return true;
+  });
   await assert.rejects(createLocalExecutionRpcClient(url).request("eth_sendTransaction", []), hasCode("LOCAL_EVM_RPC_METHOD_INVALID"));
   await assert.rejects(createLocalExecutionRpcClient(url).request("eth_sendRawTransaction", []), hasCode("LOCAL_EVM_RPC_METHOD_INVALID"));
 });

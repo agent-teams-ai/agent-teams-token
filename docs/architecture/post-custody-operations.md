@@ -69,6 +69,105 @@ registries never become a second editable fact source.
   references and RPC settings remain private. A file-hash inventory is written
   last, excludes its own digest, and rejects changed/missing files.
 
+## Full unsigned assembly checkpoint
+
+Production `agtmai-production-deployment-v2` requires exactly six `purposeVaults`
+records: long-term, users, operations, ecosystem, financing and liquidity. Each
+selects canonical positive `opensAt`, `windowSeconds` and `rollingCapBaseUnits`;
+the cap cannot exceed that allocation, and execution must finish before opening.
+Deployment and reserve configuration must be accepted, generic grants empty,
+two explicitly referenced 2-of-3 Safes qualified in configuration, and bridge
+null. No dates, real identities or cap amounts are supplied as defaults.
+
+Select v2 approval, expectations and artifact-pins records together. The retained
+two configuration hashes keep their v1 meanings; `assemblyConfigurationSha256`
+commits the complete normalized v2 envelope, including Safe references and all
+policies. Approval references and matching hashes identify selected inputs;
+they do not authenticate an approving human. V1 remains four unsigned operations
+with `token-and-reserves-only` coverage.
+
+`compile-production` accepts `--repository-root` and `--candidate-revision` for
+v2 in addition to its existing config/artifacts/approval/expectations/output
+arguments. The candidate must be clean. Artifact admission authenticates Git
+objects, complete vendor inventory, compiler executable and fresh compiler
+output. `loadPreparedProductionPackage(directory, candidate)` repeats that
+admission and reconstructs the exact inventory; omitting candidate fails v2.
+The compiler-input digest binds both sources and settings.
+
+The package describes nine predicted CREATEs, the nested founder GrantVault at
+CREATE(founder reserve, 1), and the funding CALL. The child's constructor derives
+from parent inputs; no child transaction or receipt is invented. Prepared runtime
+templates and fully materialized immutable expectations are separate fields.
+`prepareAssemblyManifest` and the existing passport renderer project unsigned
+facts and ten offline source-verification inputs, with observed fields null.
+Production deployment and explorer verification are unavailable. All exports
+keep `broadcastAllowed: false`.
+
+Synthetic local-purpose v2 uses the same construction kernel, chain ID 1,
+test-only authority and null approval; it never manufactures production
+acceptance. PR2 implements actual loopback execution, both official Safes, genuine
+estimates against predecessor state, runtime/getter evidence and observed costs;
+native qualification remains pending.
+The unsigned projection does not prove that execution.
+
+### Native full-assembly qualification
+
+Run on a clean committed candidate after the accepted PR1 rebase, outside the
+provider sandbox. Keep the pinned tools/dependencies and official Safe archive
+available. The existing provisioning authority is:
+
+```sh
+bash scripts/prepare-safe-artifacts.sh
+```
+
+Export its printed `AGTMAI_SAFE_ARTIFACT_DIRECTORY` and
+`AGTMAI_SAFE_PINS_SHA256` assignments. If the archive is absent, its explicit
+`--fetch` provisioning mode is a separate native preparation step. The proof
+checks those pins against the existing reviewed repository authority.
+
+Focused native execution uses the existing canonical test file:
+
+```sh
+pnpm build
+.tools/bin/node --test tooling/deployment-plan/tests/purpose-reserves.integration.test.ts tooling/deployment-plan/tests/contributor-safe-execution.integration.test.ts
+```
+
+`pnpm test:deployment-plan` includes the same mandatory full E2E, the preserved
+v1 execution and contributor-intent suites, mined CREATE failure and custody
+regressions. This is not an optional alternate workflow. Success outputs persist
+under `.local/full-assembly-*/observed/`: `local-purpose-proof-v2.json`,
+`deployment-manifest-v2.json`, `prepared-local-purpose-genesis.json`, the canonical
+local configuration and artifact inputs, `reserve-facts.json`,
+`token-passport.json`, `token-passport.md`, `authority-registry.json`, inventory
+and READY. Failure directories contain public `diagnostics.json` without READY;
+never infer absence of effects from timeout or resubmit a pending operation.
+
+The proof freezes construction before the first mint, estimates each operation
+against its actual predecessor and reserves all remaining unestimated operations
+at configured maximum gas/fee. The complete gas-bearing local package is
+reconstructed after execution, before scenario outflows. Genesis stays bound to
+the funding block; scenario costs/effects and bootstrap/funder costs are separate.
+Synthetic chain ID 1, null approval and test-only authority cannot serve as
+production evidence. Production still requires its complete selected offline
+expectations before publication. Live Ethereum fees and ETH/USD are unavailable.
+
+Deployment-plan removal retains Supply construction, observed manifest/passport
+semantics and tests, and the passive Safe custody adapter. It reverses only its
+Local EVM transport additions while preserving independent process/toolchain
+bytes. Integration must add exact retained ownership for the four Supply report
+surfaces (`application/deployment-manifest.ts`, `application/passport.ts`,
+`application/reserve-facts.ts`, `deployment.ts` within this feature) and
+`tooling/testnet-ccip/src/adapters/local-safe.ts` and `safe-custody.ts`. The precise
+reversal and survivor regressions are in the patch; official manifest hashes are
+computed by orchestration after the clean commit, never guessed here.
+Then run the documented maintenance command and final `pnpm check:linux` proof,
+including actual applied-state Supply tests and Local EVM survivors. Neither
+focused tests nor maintenance are sealed rollback evidence.
+
+A full purpose cap can leave at opening; the Safe selects recipients and
+downstream transfers are unrestricted. Refunds do not restore gross capacity;
+expiry restores rolling capacity. There is no lifetime cap.
+
 ## Grant custody boundaries
 
 The [current qualification slice](../PLAN.md#grant-custody-qualification-2026-09-16)
@@ -236,6 +335,13 @@ be replayed as new transfers.
 
 ## Deployment configuration commands
 
+The legacy `validate`/`compile` route uses deployment `schemaVersion: 1` for
+`local-test` or `owned-testnet` inputs; validation alone is not production
+admission. `compile` rejects `mainnet-dry-run` with
+`DEPLOYMENT_PRODUCTION_ENVELOPE_REQUIRED`, even with a legacy `--approval`.
+The following materialization and verification commands consume the legacy
+prepared package, not `prepared-production-deployment.json`.
+
 ```bash
 pnpm deployment:config validate --config "$CONFIG"
 pnpm deployment:config compile --config "$CONFIG" --artifacts "$ARTIFACT_PINS" --output "$PREPARED"
@@ -243,15 +349,47 @@ pnpm deployment:config materialize --prepared "$PREPARED/prepared-deployment.jso
 pnpm deployment:config verify --manifest "$DEPLOYMENT/deployment-manifest.json"
 ```
 
-For production compilation, also supply `--approval "$APPROVAL"`. The standalone
-approval record has schema `agtmai-deployment-approval-v1`, a public `reference`
-and the independently selected `configurationSha256`. There is no execution or
-RPC option on these commands.
+Production v1 preparation uses the separate `agtmai-production-deployment-v1`
+envelope: `deployment` (`schemaVersion: 1`), `reserveGenesis`
+(`agtmai-reserve-genesis-v1`), `projectControllerSafeId` and
+`founderBeneficiarySafeId`. Both embedded configurations must be `accepted` and
+strictly validated; deployment mode is `mainnet-dry-run`, Ethereum chain ID `"1"`.
+Ethereum-only genesis may use `deployment.bridge: null` under
+[ADR-0010](../decisions/0010-ethereum-first-launch-sequence.md).
 
-The `agtmai-artifact-pins-v1` input records the contract-source `sourceRevision`
-and exactly two artifact entries (`AGTMAICCIPToken`, `GrantVault`), each with
-`artifactPath`, `artifactSha256`, `buildInfoPath` and `buildInfoSha256`. Hashes
-cover the actual bytes. Paths must stay below the trusted pins directory, with
+```bash
+pnpm deployment:config validate-production --config "$PRODUCTION_CONFIG"
+pnpm deployment:config compile-production --config "$PRODUCTION_CONFIG" --artifacts "$PRODUCTION_ARTIFACT_PINS" --approval "$PRODUCTION_APPROVAL" --expectations "$PRODUCTION_EXPECTATIONS" --output "$PRODUCTION_PREPARED"
+```
+
+All five `compile-production` options are required. The approval has schema
+`agtmai-production-approval-v1`, a public `reference`, `configurationSha256`
+(the canonical validated `deployment` digest) and `reserveConfigurationSha256`
+(the canonical validated `reserveGenesis` digest). Independently select both
+approval digests; a self-declared status or legacy single-digest approval is
+insufficient.
+
+The required `agtmai-production-expectations-v1` record binds chain ID `"1"`,
+`sourceRevision`, both configuration digests, `artifactPinsSha256` (the canonical
+resolved artifact set, not the raw pins file), `attemptIdentity`, matching
+`sender`/`deployer`, `startingNonce`, `maxObservationAgeSeconds` and
+`maxTotalCostWei`. It includes exactly two Safe authority records with public
+owners, threshold, nonce, proxy/singleton code hashes, singleton address/slot,
+modules, guard, fallback handler and setup provenance. Its four operations are
+`token-create`, `founder-reserve-create`, `controller-create` and `founder-fund`;
+each binds kind, intent hash, nonce, expected address, zero value, gas estimate,
+buffered gas limit, block gas limit and base/priority/max fee values. Creates
+also bind initcode/runtime bytes and hashes; founder reserve creation binds its
+nested vault address. Funding binds the exact `fund()` calldata. Unknown fields
+and mismatched identities, artifacts or policy limits are rejected.
+
+The local/testnet `agtmai-artifact-pins-v1` input has exactly two entries:
+`AGTMAICCIPToken` and `GrantVault`. Production v1 instead requires
+`agtmai-production-artifact-pins-v1` with exactly three: `AGTMAICCIPToken`,
+`FounderGrantReserve` and `ReserveController`. Both pin schemas record the
+contract-source `sourceRevision`; each entry has `contract`, `artifactPath`,
+`artifactSha256`, `buildInfoPath` and `buildInfoSha256`. Hashes cover the actual
+bytes. Paths must stay below the trusted pins directory, with
 no absolute paths, traversal or linked files/directories. Artifact leaves are
 `<Contract>.json` or `<contract-lowercase>.artifact.json`; build-info leaves are
 Foundry's 16-hex-digit `.json` names or `<contract-lowercase>.build-info.json`.
@@ -263,7 +401,16 @@ Reads traverse each parent through held Linux directory descriptors and recheck
 their identities before returning bytes. Platforms without that traversal fail
 closed with `DEPLOYMENT_IO_DESCRIPTOR_TRAVERSAL_UNAVAILABLE`.
 
-Materialization requires bounded native creation evidence for each present
+Production v1 compilation publishes `prepared-production-deployment.json` with
+coverage `token-and-reserves-only`, canonical configuration, approval,
+expectations and authenticated artifact/build-info files. It prepares four
+unsigned operations; it does not sign, deploy or establish live Safe authority.
+Unresolved runtime immutables require deterministic local execution before
+qualification. Neither route offers execution or RPC options; both report
+`broadcastAllowed: false`. Production preflight and fresh per-broadcast owner
+approval remain separate gates.
+
+Legacy materialization requires bounded native creation evidence for each present
 contract: transaction identity/input, receipt/events, canonical block observations,
 finality, runtime and all required getters at the same block. It emits
 `not-deployed`, `partial` or `deployed` without inventing missing observations.
@@ -486,15 +633,15 @@ technical adapters, and the disposable Anvil harness remains dev-only
 composition. This does not add an Assembly graph node, adoption profile or
 general deployment framework.
 
-After the offline preflight is accepted, implementation stays limited to two
-reviewable slices. The first emits one deterministic unsigned package for the
-token, contributor reserve, founder reserve with its nested vault, and founder
-funding call. It binds predicted addresses to genesis recipients and records
-artifact, constructor, source and operation provenance. The second executes
-that exact package only against the existing disposable Anvil environment and
-verifies code, immutable terms, reserve balances, the nested founder vault,
-permissionless founder funding, fixed supply and the 3% founder, 17%
-contributors and 80% remaining allocations.
+The retained v1 path prepares four top-level operations with
+`token-and-reserves-only` coverage. Full v2 preparation adds the six purpose
+reserves through the same construction kernel, with nine top-level CREATEs,
+one nested founder vault and a funding CALL. Its unsigned production package
+requires every selected gas expectation before publication. The PR2 rehearsal
+freezes synthetic construction before mint, estimates each send against the
+actual predecessor, then reconstructs the complete gas-bearing package after
+execution. Native qualification above checks all ten instances and the same-chain
+Safe scenarios; a runnable patch alone supplies no observed success.
 
 Both slices remain non-broadcasting and use one fixed topology. Mainnet forks,
 generic deployment platforms, generic Solana observation tooling, utility
