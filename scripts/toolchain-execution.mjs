@@ -575,6 +575,19 @@ function fallbackTerminateUncertainGroup(status) {
   return failures;
 }
 
+function supervisedCustody(quiescent, status, native) {
+  return !quiescent ? "uncertain"
+    : native.custody === "reaped" || status.timedOut || status.error === "ENOBUFS" ? "reaped" : "completed";
+}
+
+function observerSupervisorStatus(result, status, native) {
+  return {
+    status: native === undefined ? result.status : native.status,
+    signal: native === undefined ? result.signal : native.signal,
+    error: result.error?.code ?? (status?.finished !== true && native?.error?.code === "ETIMEDOUT" ? "ETIMEDOUT" : null),
+  };
+}
+
 function supervisedOutcome(result, status, output, native) {
   const errorCode = status?.timedOut ? "ETIMEDOUT" : status?.error;
   const observedError = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
@@ -583,24 +596,16 @@ function supervisedOutcome(result, status, output, native) {
     ...result, error: observedError, output, stdout: output[1], stderr: output[2],
     signal: status?.signal ?? null, status: status?.status ?? null,
     targetStatus: status ?? { quiescent: false },
-    custody: !quiescent ? "uncertain"
-      : native.custody === "reaped" || status.timedOut || status.error === "ENOBUFS" ? "reaped" : "completed",
+    custody: supervisedCustody(quiescent, status, native),
     uncertainty: !quiescent ? native?.uncertainty ?? "ROLLBACK_PROCESS_CUSTODY_UNCONFIRMED" : null,
     signalledCount: native?.signalledCount ?? 0,
     // A native report describes the Node observer; without it, retain the
     // native helper's outer watchdog result. Neither is the target outcome.
-    supervisorStatus: {
-      status: native === undefined ? result.status : native.status,
-      signal: native === undefined ? result.signal : native.signal,
-      error: result.error?.code ?? (status?.finished !== true && native?.error?.code === "ETIMEDOUT" ? "ETIMEDOUT" : null),
-    },
+    supervisorStatus: observerSupervisorStatus(result, status, native),
   };
 }
 
-function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, targetFds = [], timeoutMs,
-  encoding = "utf8", maxBuffer = 1024 * 1024 }) {
-  // File-backed pipes keep the outer sync watchdog bounded even if a lost
-  // supervisor leaves a descendant holding its streams open.
+function prepareSupervisorFiles(invocation, stdio, input) {
   const captures = [];
   let supervisorStdio;
   let nativeStatus;
@@ -633,6 +638,85 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
     error.execution = { launched: false, quiescent: true };
     throw error;
   }
+  return { captures, supervisorStdio, nativeStatus, nativeErrors, helper };
+}
+
+function recordedOutcomeFieldsValid(recorded) {
+  return (recorded.error === null || (typeof recorded.error === "string" && /^E[A-Z0-9]+$/u.test(recorded.error)))
+    && (recorded.status === null || (Number.isInteger(recorded.status) && recorded.status >= 0 && recorded.status <= 255))
+    && (recorded.signal === null || (typeof recorded.signal === "string" && /^SIG[A-Z0-9]+$/u.test(recorded.signal)))
+    && (recorded.status === null || recorded.signal === null)
+    && (recorded.status !== null || recorded.signal !== null || recorded.error !== null);
+}
+
+function recordedOutcomeValid(recorded) {
+  return recorded?.finished === true
+    && typeof recorded.timedOut === "boolean" && typeof recorded.spawnFailed === "boolean"
+    && typeof recorded.supervisionFailed === "boolean"
+    && Number.isSafeInteger(recorded.supervisorPid) && recorded.supervisorPid > 1
+    && recordedOutcomeFieldsValid(recorded);
+}
+
+function recordedObserverExit(recorded, recordedOutcome) {
+  return !recordedOutcome ? undefined
+    : recorded.supervisionFailed ? 125 : recorded.timedOut ? 124 : recorded.spawnFailed ? 126
+    : recorded.signal !== null ? 128 : recorded.status ?? 1;
+}
+
+function recordedCommandError(result, recorded, native, recordedOutcome) {
+  return recordedOutcome ? recorded.error ?? native?.error?.code ?? result.error?.code ?? null
+    : result.error?.code ?? native?.error?.code ?? "ESUPERVISOR";
+}
+
+function nativeWatchdogSucceeded(result) {
+  return result.error === undefined && result.status === 0 && result.signal === null;
+}
+
+function supervisedStatus(result, recorded, native, settled) {
+  const recordedOutcome = recordedOutcomeValid(recorded);
+  const observerExit = recordedObserverExit(recorded, recordedOutcome);
+  const finished = recordedOutcome && native?.signal === null && native.status === observerExit;
+  return {
+    ...recorded,
+    finished,
+    error: recordedCommandError(result, recorded, native, recordedOutcome),
+    quiescent: finished && settled && nativeWatchdogSucceeded(result),
+    // An observed target outcome survives a later native drain/watchdog loss.
+    // It still cannot authorize success or cleanup without matched settlement.
+    status: recordedOutcome ? recorded.status : null,
+    signal: recordedOutcome ? recorded.signal : null,
+    timedOut: recorded?.timedOut === true || result.error?.code === "ETIMEDOUT" || native?.error?.code === "ETIMEDOUT",
+  };
+}
+
+function checkedSupervisedOutcome({ result, status, outcome, invocation, failures, captureFailures }) {
+  if (status?.quiescent !== true) {
+    const error = new Error(`TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN invocation=${invocation.root}`,
+      { cause: result.error ?? outcome.error });
+    error.code = "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN";
+    // Supervisor exit/signal is distinct from the target's observed outcome.
+    // Killing the group is a fallback, not a proof that every child is gone.
+    error.result = outcome;
+    if (failures.length + captureFailures.length > 0) {
+      const failure = new AggregateError([error, ...failures, ...captureFailures], error.message, { cause: error });
+      failure.result = outcome;
+      throw failure;
+    }
+    throw error;
+  }
+  if (captureFailures.length > 0) {
+    const failure = new AggregateError(captureFailures, "TOOLCHAIN_CAPTURE_FAILED", { cause: captureFailures[0] });
+    failure.result = outcome;
+    throw failure;
+  }
+  return outcome;
+}
+
+function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, targetFds = [], timeoutMs,
+  encoding = "utf8", maxBuffer = 1024 * 1024 }) {
+  // File-backed pipes keep the outer sync watchdog bounded even if a lost
+  // supervisor leaves a descendant holding its streams open.
+  const { captures, supervisorStdio, nativeStatus, nativeErrors, helper } = prepareSupervisorFiles(invocation, stdio, input);
   const statusFd = 5 + targetFds.length;
   const config = {
     args,
@@ -666,37 +750,13 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
   let native;
   try {native = parseNativeSupervisorReport(readSupervisorStatus(invocation, nativeStatus));} catch {}
   const settled = native !== undefined && native.custody !== "uncertain" && native.uncertainty === null;
-  const recordedOutcome = recorded?.finished === true
-    && typeof recorded.timedOut === "boolean" && typeof recorded.spawnFailed === "boolean"
-    && typeof recorded.supervisionFailed === "boolean"
-    && Number.isSafeInteger(recorded.supervisorPid) && recorded.supervisorPid > 1
-    && (recorded.error === null || (typeof recorded.error === "string" && /^E[A-Z0-9]+$/u.test(recorded.error)))
-    && (recorded.status === null || (Number.isInteger(recorded.status) && recorded.status >= 0 && recorded.status <= 255))
-    && (recorded.signal === null || (typeof recorded.signal === "string" && /^SIG[A-Z0-9]+$/u.test(recorded.signal)))
-    && (recorded.status === null || recorded.signal === null)
-    && (recorded.status !== null || recorded.signal !== null || recorded.error !== null);
-  const observerExit = !recordedOutcome ? undefined
-    : recorded.supervisionFailed ? 125 : recorded.timedOut ? 124 : recorded.spawnFailed ? 126
-      : recorded.signal !== null ? 128 : recorded.status ?? 1;
-  const finished = recordedOutcome && native?.signal === null && native.status === observerExit;
-  const status = {
-    ...recorded,
-    finished,
-    error: recordedOutcome ? recorded.error ?? native?.error?.code ?? result.error?.code ?? null
-      : result.error?.code ?? native?.error?.code ?? "ESUPERVISOR",
-    quiescent: finished && settled && result.error === undefined && result.status === 0 && result.signal === null,
-    // An observed target outcome survives a later native drain/watchdog loss.
-    // It still cannot authorize success or cleanup without matched settlement.
-    status: recordedOutcome ? recorded.status : null,
-    signal: recordedOutcome ? recorded.signal : null,
-    timedOut: recorded?.timedOut === true || result.error?.code === "ETIMEDOUT" || native?.error?.code === "ETIMEDOUT",
-  };
+  const status = supervisedStatus(result, recorded, native, settled);
   // Refresh both private protocol files only after their bounded readers have
   // verified identities. Missing/corrupt native custody always stays uncertain.
   // ECHILD already rules out surviving owned groups, even if the command
   // observer was lost. Do not signal stale IDs in that case; overall custody
   // remains uncertain and cannot authorize removal without the observer.
-  const kernelSettled = settled && result.error === undefined && result.status === 0 && result.signal === null;
+  const kernelSettled = settled && nativeWatchdogSucceeded(result);
   const failures = fallbackTerminateUncertainGroup(kernelSettled ? { ...status, quiescent: true } : status);
   const { output, captureFailures } = readCapturedOutput(captures, status, maxBuffer, encoding);
   try {
@@ -704,26 +764,7 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
     if (status.quiescent) {nativeErrors.expectedHash = hashDescriptor(nativeErrors.fd);}
   } catch (error) {captureFailures.push(error);}
   const outcome = supervisedOutcome(result, status, output, native);
-  if (status?.quiescent !== true) {
-    const error = new Error(`TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN invocation=${invocation.root}`,
-      { cause: result.error ?? outcome.error });
-    error.code = "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN";
-    // Supervisor exit/signal is distinct from the target's observed outcome.
-    // Killing the group is a fallback, not a proof that every child is gone.
-    error.result = outcome;
-    if (failures.length + captureFailures.length > 0) {
-      const failure = new AggregateError([error, ...failures, ...captureFailures], error.message, { cause: error });
-      failure.result = outcome;
-      throw failure;
-    }
-    throw error;
-  }
-  if (captureFailures.length > 0) {
-    const failure = new AggregateError(captureFailures, "TOOLCHAIN_CAPTURE_FAILED", { cause: captureFailures[0] });
-    failure.result = outcome;
-    throw failure;
-  }
-  return outcome;
+  return checkedSupervisedOutcome({ result, status, outcome, invocation, failures, captureFailures });
 }
 
 // Rollback supplies its own trusted environment and log descriptors; verified

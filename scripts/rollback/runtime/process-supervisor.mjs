@@ -121,7 +121,7 @@ function verifyPinnedFile(path, expectedHash) {
   } catch (error) {failure = error;}
   // Attempt a single close; a rejected close is never retried.
   try {closeSync(fd);} catch (error) {
-    if (failure) {throw new AggregateError([failure, error], "ROLLBACK_PROCESS_PIN_CLOSE_FAILED", { cause: failure });}
+    if (failure) {throw new AggregateError([failure, error], "ROLLBACK_PROCESS_PIN_CLOSE_FAILED", { cause: error });}
     throw error;
   }
   if (failure) {throw failure;}
@@ -155,22 +155,34 @@ export function superviseCommand(config) {
     });
 }
 
-export function parseNativeSupervisorReport(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).toSorted().join(",") !== "custody,error,signal,signalledCount,status,uncertainty"
-    || !["completed", "reaped", "uncertain"].includes(value.custody)
-    || (value.status !== null && (!Number.isInteger(value.status) || value.status < 0 || value.status > 255))
+function invalidNativeReportShape(value) {
+  return value === null || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).toSorted().join(",") !== "custody,error,signal,signalledCount,status,uncertainty";
+}
+
+function invalidNativeReportOutcome(value) {
+  return (value.status !== null && (!Number.isInteger(value.status) || value.status < 0 || value.status > 255))
     || (value.signal !== null && (typeof value.signal !== "string" || !/^SIG[A-Z0-9]+$/u.test(value.signal)))
     || (value.error !== null && (typeof value.error !== "object" || Array.isArray(value.error)
       || Object.keys(value.error).join(",") !== "code" || typeof value.error.code !== "string"
-      || !/^E[A-Z0-9]+$/u.test(value.error.code)))
-    || (value.uncertainty !== null && typeof value.uncertainty !== "string")
-    || !Number.isSafeInteger(value.signalledCount) || value.signalledCount < 0 || value.signalledCount > 8192
-    || (value.custody !== "uncertain" && (value.uncertainty !== null
-      || (value.status === null && value.signal === null)))
+      || !/^E[A-Z0-9]+$/u.test(value.error.code)));
+}
+
+function invalidNativeReportCustody(value) {
+  return (value.custody !== "uncertain" && (value.uncertainty !== null
+    || (value.status === null && value.signal === null)))
     || (value.custody === "completed" && ["ELEAK", "ETIMEDOUT", "ECANCELLED"].includes(value.error?.code))
     || (value.custody === "reaped" && !["ELEAK", "ETIMEDOUT", "ECANCELLED"].includes(value.error?.code))
-    || (value.status !== null && value.signal !== null)) {
+    || (value.status !== null && value.signal !== null);
+}
+
+export function parseNativeSupervisorReport(value) {
+  if (invalidNativeReportShape(value)
+    || !["completed", "reaped", "uncertain"].includes(value.custody)
+    || invalidNativeReportOutcome(value)
+    || (value.uncertainty !== null && typeof value.uncertainty !== "string")
+    || !Number.isSafeInteger(value.signalledCount) || value.signalledCount < 0 || value.signalledCount > 8192
+    || invalidNativeReportCustody(value)) {
     throw new Error("ROLLBACK_PROCESS_REPORT_INVALID");
   }
   return value;
