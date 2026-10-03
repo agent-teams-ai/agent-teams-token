@@ -292,6 +292,29 @@ token_run_node() {
   token_run_clean "$token_pinned_node" "$@"
 }
 
+# Only run-pnpm may inherit the two explicit test-only Safe qualification inputs.
+# Keep them as argv assignments to env -i, never shell source or caller-wide env.
+token_safe_artifact_environment=()
+token_prepare_safe_artifact_environment() {
+  local token_safe_directory=${AGTMAI_SAFE_ARTIFACT_DIRECTORY-}
+  local token_safe_pins=${AGTMAI_SAFE_PINS_SHA256-}
+  if [[ -z "${AGTMAI_SAFE_ARTIFACT_DIRECTORY+x}" \
+    && -z "${AGTMAI_SAFE_PINS_SHA256+x}" ]]; then
+    return 0
+  fi
+  if [[ -z "$token_safe_directory" || -z "$token_safe_pins" \
+    || "$token_safe_directory" != /* || "$token_safe_directory" =~ [[:cntrl:]] \
+    || ! "$token_safe_pins" =~ ^0x[a-f0-9]{64}$ ]] \
+    || ! token_validate_directory "$token_safe_directory" true; then
+    printf 'TOOLCHAIN_SAFE_ARTIFACT_ENV_INVALID\n' >&2
+    return 1
+  fi
+  token_safe_artifact_environment=(
+    "AGTMAI_SAFE_ARTIFACT_DIRECTORY=$token_safe_directory"
+    "AGTMAI_SAFE_PINS_SHA256=$token_safe_pins"
+  )
+}
+
 token_cleanup_node_stage() {
   local token_status=$?
   trap - EXIT
@@ -530,8 +553,10 @@ case "$token_mode" in
     token_run_node "$token_repo_root/scripts/toolchain.mjs" run-pnpm install --frozen-lockfile
     ;;
   run-pnpm)
+    token_prepare_safe_artifact_environment
     token_prepare_pinned_node false
-    token_run_node "$token_repo_root/scripts/toolchain.mjs" run-pnpm "$@"
+    token_run_clean "${token_safe_artifact_environment[@]}" \
+      "$token_pinned_node" "$token_repo_root/scripts/toolchain.mjs" run-pnpm "$@"
     ;;
   run-solana)
     token_prepare_pinned_node false

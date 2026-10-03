@@ -23,6 +23,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  parseNativeSupervisorReport,
+  prepareNativeSupervisor,
+  superviseCommand,
+} from "./rollback/runtime/process-supervisor.mjs";
+
 const SUPERVISOR_ARGUMENT = "--agtmai-toolchain-process-supervisor";
 const TERM_GRACE_MS = 250;
 const KILL_GRACE_MS = 1_000;
@@ -220,6 +226,7 @@ function createInvocation(entries, platform) {
         NPM_CONFIG_GLOBALCONFIG: npmGlobalrc.path,
       },
       files,
+      nullFds: [],
       root,
       rootIdentity,
       snapshots,
@@ -397,8 +404,6 @@ function processGroupMembers(pgid) {
     .map(([pid]) => Number(pid));
 }
 
-function groupHasLiveMembers(pgid) {return processGroupMembers(pgid).length > 0;}
-
 function signalProcess(pid, signal) {
   try {process.kill(pid, signal);} catch (error) {if (error?.code !== "ESRCH") {throw error;}}
 }
@@ -417,16 +422,12 @@ function delay(milliseconds) {
   return new Promise((resolve) => {setTimeout(resolve, milliseconds);});
 }
 
+function groupHasLiveMembers(pgid) {return processGroupMembers(pgid).length > 0;}
+
 async function waitForGroupDisappearance(pgid, milliseconds) {
   const deadline = Date.now() + milliseconds;
   while (groupHasLiveMembers(pgid) && Date.now() < deadline) {await delay(10);}
   return !groupHasLiveMembers(pgid);
-}
-
-function writeSupervisorStatus(fd, status) {
-  const payload = `${JSON.stringify(status)}\n`;
-  ftruncateSync(fd, 0);
-  writeSync(fd, payload, 0, "utf8");
 }
 
 async function quiesceChild(pgid) {
@@ -439,9 +440,15 @@ async function quiesceChild(pgid) {
   return waitForGroupDisappearance(pgid, KILL_GRACE_MS);
 }
 
+function writeSupervisorStatus(fd, status) {
+  const payload = `${JSON.stringify(status)}\n`;
+  ftruncateSync(fd, 0);
+  writeSync(fd, payload, 0, "utf8");
+}
+
 function writeSupervisorFailure(statusFd, error, child, outcome, timedOut) {
   try {writeSupervisorStatus(statusFd, {
-    error: error?.code ?? "unknown", pgid: child?.pid, quiescent: false,
+    error: error?.code ?? "ESUPERVISOR", finished: false, supervisorPid: process.pid, pgid: child?.pid, quiescent: false,
     signal: outcome?.signal ?? null, status: outcome?.status ?? null, timedOut,
   });} catch {}
 }
@@ -454,13 +461,18 @@ async function supervisorMain(encoded) {
   let supervisorError;
   let outcome;
   try {
+    writeSupervisorStatus(config.statusFd, {
+      error: null, finished: false, quiescent: false, supervisorPid: process.pid,
+    });
     child = spawn(config.command, config.args, {
       cwd: config.cwd,
       detached: true,
       env: process.env,
       stdio: config.childStdio,
     });
-    writeSupervisorStatus(config.statusFd, { error: null, pgid: child.pid, quiescent: false });
+    writeSupervisorStatus(config.statusFd, {
+      error: null, finished: false, pgid: child.pid, quiescent: false, supervisorPid: process.pid,
+    });
     outcome = await new Promise((resolve) => {
       const stop = () => {
         termination ??= terminateProcessGroup(child.pid).catch((error) => {supervisorError ??= error;});
@@ -483,16 +495,23 @@ async function supervisorMain(encoded) {
       child.once("exit", (status, signal) => finish({ signal, status }));
     });
     if (termination) {await termination;}
-    const quiescent = await quiesceChild(child.pid);
+    // Preserve Main's bounded ordinary-descendant cleanup before finishing.
+    if (!await quiesceChild(child.pid)) {supervisorError ??= { code: "ESUPERVISOR" };}
+    // Only the enclosing native subreaper can certify all custody via ECHILD.
+    const quiescent = false;
     writeSupervisorStatus(config.statusFd, {
-      error: outcome.error?.code ?? supervisorError?.code ?? null,
+      error: outcome.error?.code ?? (supervisorError ? supervisorError.code ?? "ESUPERVISOR" : null),
+      finished: true,
+      spawnFailed: outcome.error !== undefined,
+      supervisionFailed: supervisorError !== undefined,
+      supervisorPid: process.pid,
       pgid: child.pid,
       quiescent,
       signal: outcome.signal ?? null,
       status: outcome.status ?? null,
       timedOut,
     });
-    if (!quiescent || supervisorError) {process.exitCode = 125;}
+    if (supervisorError) {process.exitCode = 125;}
     else if (timedOut) {process.exitCode = 124;}
     else if (outcome.error) {process.exitCode = 126;}
     else if (outcome.signal) {process.exitCode = 128;}
@@ -503,19 +522,19 @@ async function supervisorMain(encoded) {
   }
 }
 
-function readSupervisorStatus(invocation) {
+function readSupervisorStatus(invocation, file = invocation.status) {
   try {
-    const descriptor = fstatSync(invocation.status.fd);
-    if (!sameIdentity(invocation.status.identity, descriptor)
+    const descriptor = fstatSync(file.fd);
+    if (!sameIdentity(file.identity, descriptor)
       || descriptor.nlink !== 1
       || (descriptor.mode & 0o777) !== 0o600
       || descriptor.size > 4_096) {return;}
     const buffer = Buffer.alloc(descriptor.size);
-    if (readSync(invocation.status.fd, buffer, 0, buffer.length, 0) !== buffer.length) {return;}
+    if (readSync(file.fd, buffer, 0, buffer.length, 0) !== buffer.length) {return;}
     const payload = buffer.toString("utf8");
     const status = JSON.parse(payload);
-    invocation.status.expectedHash = createHash("sha256").update(payload).digest("hex");
-    invocation.status.identity = descriptor;
+    file.expectedHash = createHash("sha256").update(payload).digest("hex");
+    file.identity = descriptor;
     return status;
   } catch {return;}
 }
@@ -541,6 +560,8 @@ function readCapturedOutput(captures, status, maxBuffer, encoding) {
 function fallbackTerminateUncertainGroup(status) {
   const failures = [];
   if (status?.quiescent === true) {return failures;}
+  // Exact recorded groups are a best-effort fallback only. Killing them cannot
+  // substitute for the missing native report or authorize invocation deletion.
   if (Number.isSafeInteger(status?.pgid) && status.pgid > 1) {
     try {
       signalGroup(status.pgid, "SIGTERM");
@@ -548,66 +569,127 @@ function fallbackTerminateUncertainGroup(status) {
       signalGroup(status.pgid, "SIGKILL");
     } catch (error) {failures.push(error);}
   }
+  if (Number.isSafeInteger(status?.supervisorPid) && status.supervisorPid > 1) {
+    try {signalGroup(status.supervisorPid, "SIGKILL");} catch (error) {failures.push(error);}
+  }
   return failures;
 }
 
-function supervisedOutcome(result, status, output) {
+function supervisedCustody(quiescent, status, native) {
+  return !quiescent ? "uncertain"
+    : native.custody === "reaped" || status.timedOut || status.error === "ENOBUFS" ? "reaped" : "completed";
+}
+
+function observerSupervisorStatus(result, status, native) {
+  return {
+    status: native === undefined ? result.status : native.status,
+    signal: native === undefined ? result.signal : native.signal,
+    error: result.error?.code ?? (status?.finished !== true && native?.error?.code === "ETIMEDOUT" ? "ETIMEDOUT" : null),
+  };
+}
+
+function supervisedOutcome(result, status, output, native) {
   const errorCode = status?.timedOut ? "ETIMEDOUT" : status?.error;
   const observedError = errorCode ? Object.assign(new Error(errorCode), { code: errorCode }) : result.error;
+  const quiescent = status?.quiescent === true;
   return {
     ...result, error: observedError, output, stdout: output[1], stderr: output[2],
     signal: status?.signal ?? null, status: status?.status ?? null,
     targetStatus: status ?? { quiescent: false },
-    supervisorStatus: { status: result.status, signal: result.signal, error: result.error?.code ?? null },
+    custody: supervisedCustody(quiescent, status, native),
+    uncertainty: !quiescent ? native?.uncertainty ?? "ROLLBACK_PROCESS_CUSTODY_UNCONFIRMED" : null,
+    signalledCount: native?.signalledCount ?? 0,
+    // A native report describes the Node observer; without it, retain the
+    // native helper's outer watchdog result. Neither is the target outcome.
+    supervisorStatus: observerSupervisorStatus(result, status, native),
   };
 }
 
-function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, targetFds = [], timeoutMs,
-  encoding = "utf8", maxBuffer = 1024 * 1024 }) {
-  // File-backed pipes keep the outer sync watchdog bounded even if a lost
-  // supervisor leaves a descendant holding its streams open.
+function prepareSupervisorFiles(invocation, stdio, input) {
   const captures = [];
   let supervisorStdio;
+  let nativeStatus;
+  let nativeErrors;
+  let helper;
   try {
     supervisorStdio = stdio.map((entry, index) => {
+      // Native slots 3/4 must receive caller stdout/stderr, not caller 3/4.
+      if (entry === "inherit") {return index;}
+      if (entry === "ignore" && index > 0) {
+        const fd = openSync("/dev/null", fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+        invocation.nullFds.push(fd);
+        return fd;
+      }
       if (entry !== "pipe") {return entry;}
       const file = createControlledFile(join(invocation.root, `stdio-${index}`), index === 0 ? input : "");
       invocation.files.push(file);
       captures[index] = file;
       return file.fd;
     });
+    nativeStatus = createControlledFile(join(invocation.root, "native-status"));
+    invocation.files.push(nativeStatus);
+    nativeErrors = createControlledFile(join(invocation.root, "native-stderr"));
+    invocation.files.push(nativeErrors);
+    const helperPath = join(invocation.root, "native-subreaper");
+    const helperHash = prepareNativeSupervisor(helperPath);
+    helper = openExpectedFile(helperPath, helperHash);
+    invocation.files.push(helper);
   } catch (error) {
     error.execution = { launched: false, quiescent: true };
     throw error;
   }
-  const statusFd = 3 + targetFds.length;
-  const config = {
-    args,
-    captureFds: [1, 2].filter((index) => captures[index]),
-    childStdio: [
-      ...stdio.map((entry) => entry === "ignore" ? "ignore" : "inherit"),
-      ...targetFds.map((_, index) => index + 3),
-    ],
-    command,
-    cwd,
-    maxBuffer,
-    statusFd,
-    timeoutMs,
+  return { captures, supervisorStdio, nativeStatus, nativeErrors, helper };
+}
+
+function recordedOutcomeFieldsValid(recorded) {
+  return (recorded.error === null || (typeof recorded.error === "string" && /^E[A-Z0-9]+$/u.test(recorded.error)))
+    && (recorded.status === null || (Number.isInteger(recorded.status) && recorded.status >= 0 && recorded.status <= 255))
+    && (recorded.signal === null || (typeof recorded.signal === "string" && /^SIG[A-Z0-9]+$/u.test(recorded.signal)))
+    && (recorded.status === null || recorded.signal === null)
+    && (recorded.status !== null || recorded.signal !== null || recorded.error !== null);
+}
+
+function recordedOutcomeValid(recorded) {
+  return recorded?.finished === true
+    && typeof recorded.timedOut === "boolean" && typeof recorded.spawnFailed === "boolean"
+    && typeof recorded.supervisionFailed === "boolean"
+    && Number.isSafeInteger(recorded.supervisorPid) && recorded.supervisorPid > 1
+    && recordedOutcomeFieldsValid(recorded);
+}
+
+function recordedObserverExit(recorded, recordedOutcome) {
+  return !recordedOutcome ? undefined
+    : recorded.supervisionFailed ? 125 : recorded.timedOut ? 124 : recorded.spawnFailed ? 126
+    : recorded.signal !== null ? 128 : recorded.status ?? 1;
+}
+
+function recordedCommandError(result, recorded, native, recordedOutcome) {
+  return recordedOutcome ? recorded.error ?? native?.error?.code ?? result.error?.code ?? null
+    : result.error?.code ?? native?.error?.code ?? "ESUPERVISOR";
+}
+
+function nativeWatchdogSucceeded(result) {
+  return result.error === undefined && result.status === 0 && result.signal === null;
+}
+
+function supervisedStatus(result, recorded, native, settled) {
+  const recordedOutcome = recordedOutcomeValid(recorded);
+  const observerExit = recordedObserverExit(recorded, recordedOutcome);
+  const finished = recordedOutcome && native?.signal === null && native.status === observerExit;
+  return {
+    ...recorded,
+    finished,
+    error: recordedCommandError(result, recorded, native, recordedOutcome),
+    quiescent: finished && settled && nativeWatchdogSucceeded(result),
+    // An observed target outcome survives a later native drain/watchdog loss.
+    // It still cannot authorize success or cleanup without matched settlement.
+    status: recordedOutcome ? recorded.status : null,
+    signal: recordedOutcome ? recorded.signal : null,
+    timedOut: recorded?.timedOut === true || result.error?.code === "ETIMEDOUT" || native?.error?.code === "ETIMEDOUT",
   };
-  const result = spawnSync(process.execPath, [
-    fileURLToPath(import.meta.url),
-    SUPERVISOR_ARGUMENT,
-    Buffer.from(JSON.stringify(config)).toString("base64url"),
-  ], {
-    env,
-    stdio: [...supervisorStdio, ...targetFds, invocation.status.fd],
-    timeout: timeoutMs + TERM_GRACE_MS + KILL_GRACE_MS + 2_000,
-    killSignal: "SIGKILL",
-  });
-  const status = readSupervisorStatus(invocation);
-  const failures = fallbackTerminateUncertainGroup(status);
-  const { output, captureFailures } = readCapturedOutput(captures, status, maxBuffer, encoding);
-  const outcome = supervisedOutcome(result, status, output);
+}
+
+function checkedSupervisedOutcome({ result, status, outcome, invocation, failures, captureFailures }) {
   if (status?.quiescent !== true) {
     const error = new Error(`TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN invocation=${invocation.root}`,
       { cause: result.error ?? outcome.error });
@@ -628,6 +710,61 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
     throw failure;
   }
   return outcome;
+}
+
+function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, targetFds = [], timeoutMs,
+  encoding = "utf8", maxBuffer = 1024 * 1024 }) {
+  // File-backed pipes keep the outer sync watchdog bounded even if a lost
+  // supervisor leaves a descendant holding its streams open.
+  const { captures, supervisorStdio, nativeStatus, nativeErrors, helper } = prepareSupervisorFiles(invocation, stdio, input);
+  const statusFd = 5 + targetFds.length;
+  const config = {
+    args,
+    captureFds: [1, 2].filter((index) => captures[index]),
+    childStdio: [
+      ...stdio.map((entry) => entry === "ignore" ? "ignore" : "inherit"),
+      ...targetFds.map((_, index) => index + 5),
+    ],
+    command,
+    cwd,
+    maxBuffer,
+    statusFd,
+    timeoutMs,
+  };
+  const result = superviseCommand({
+    command: process.execPath,
+    arguments: [fileURLToPath(import.meta.url), SUPERVISOR_ARGUMENT,
+      Buffer.from(JSON.stringify(config)).toString("base64url")],
+    environment: env,
+    cwd,
+    // Native stdout/stderr are private files. The C root redirects 3/4 to
+    // the observer's 1/2; authenticated target FDs survive at 5+, then are
+    // remapped by the observer back to the target's original 3+ contract.
+    stdio: [supervisorStdio[0], nativeStatus.fd, nativeErrors.fd,
+      supervisorStdio[1], supervisorStdio[2], ...targetFds, invocation.status.fd, helper.fd],
+    executableFd: statusFd + 1,
+    timeout: timeoutMs + 1_000,
+    outerTimeout: timeoutMs + TERM_GRACE_MS + KILL_GRACE_MS + 2_000,
+  });
+  const recorded = readSupervisorStatus(invocation);
+  let native;
+  try {native = parseNativeSupervisorReport(readSupervisorStatus(invocation, nativeStatus));} catch {}
+  const settled = native !== undefined && native.custody !== "uncertain" && native.uncertainty === null;
+  const status = supervisedStatus(result, recorded, native, settled);
+  // Refresh both private protocol files only after their bounded readers have
+  // verified identities. Missing/corrupt native custody always stays uncertain.
+  // ECHILD already rules out surviving owned groups, even if the command
+  // observer was lost. Do not signal stale IDs in that case; overall custody
+  // remains uncertain and cannot authorize removal without the observer.
+  const kernelSettled = settled && nativeWatchdogSucceeded(result);
+  const failures = fallbackTerminateUncertainGroup(kernelSettled ? { ...status, quiescent: true } : status);
+  const { output, captureFailures } = readCapturedOutput(captures, status, maxBuffer, encoding);
+  try {
+    nativeErrors.identity = checkedRegularDescriptor(nativeErrors.fd);
+    if (status.quiescent) {nativeErrors.expectedHash = hashDescriptor(nativeErrors.fd);}
+  } catch (error) {captureFailures.push(error);}
+  const outcome = supervisedOutcome(result, status, output, native);
+  return checkedSupervisedOutcome({ result, status, outcome, invocation, failures, captureFailures });
 }
 
 // Rollback supplies its own trusted environment and log descriptors; verified
@@ -698,10 +835,11 @@ function withInvocation(entries, platform, execute) {
   } catch (error) {failures.push(error);}
   // A rejected close may have consumed/reused the FD. Disarm all owners
   // before attempting every close once; never retry an uncertain number.
-  const files = invocation.files;
+  const ownedFds = [...invocation.files.map((file) => file.fd), ...invocation.nullFds];
   invocation.files = [];
-  for (const file of files) {
-    try {closeSync(file.fd);} catch (error) {failures.push(error);}
+  invocation.nullFds = [];
+  for (const fd of ownedFds) {
+    try {closeSync(fd);} catch (error) {failures.push(error);}
   }
   if (failures.length > 0) {
     const failure = failures.length === 1 ? failures[0] : new AggregateError(
@@ -746,7 +884,7 @@ export function executeVerifiedFile({ path, expectedSha256, args = [], beforeSpa
   }
 }
 
-export function executeOpenedNode({ node, script, args, stdio = "pipe", platform = process.platform, subprocessPath = [], timeoutMs }) {
+export function executeOpenedNode({ node, script, args, stdio = "pipe", platform = process.platform, subprocessPath = [], authenticatedToolBinaries, safeArtifactEnvironment, timeoutMs }) {
   const openedNode = openExpectedFile(node.path, node.sha256);
   let openedScript;
   try {
@@ -760,7 +898,20 @@ export function executeOpenedNode({ node, script, args, stdio = "pipe", platform
     ], platform, ({ invocation, targets }) => supervisedSpawn({
       args: [targets[1], ...args],
       command: targets[0],
-      env: minimalSubprocessEnv(invocation, [dirname(targets[0]), dirname(node.path), ...subprocessPath]),
+      // Keep the generic private environment fixed. runPnpm supplies only
+      // validated Safe inputs and authenticated binary paths explicitly.
+      env: {
+        ...minimalSubprocessEnv(invocation, [dirname(targets[0]), dirname(node.path), ...subprocessPath]),
+        ...(authenticatedToolBinaries === undefined ? {} : {
+          AGTMAI_ANVIL_BINARY: authenticatedToolBinaries.anvil,
+          AGTMAI_FORGE_BINARY: authenticatedToolBinaries.forge,
+          AGTMAI_SOLC_BINARY: authenticatedToolBinaries.solc,
+        }),
+        ...(safeArtifactEnvironment === undefined ? {} : {
+          AGTMAI_SAFE_ARTIFACT_DIRECTORY: safeArtifactEnvironment.directory,
+          AGTMAI_SAFE_PINS_SHA256: safeArtifactEnvironment.pinsSha256,
+        }),
+      },
       invocation,
       stdio: inherited,
       targetFds: platform === "linux" ? [openedNode.fd, openedScript.fd] : [],

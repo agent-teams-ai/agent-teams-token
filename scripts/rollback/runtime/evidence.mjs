@@ -13,8 +13,9 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { resolveInside, safeLabel, sha256, tail } from "./common.mjs";
-import { closeCommandLogDescriptors, commandOutcomeFields, selectedEnvironment } from "./evidence-command.mjs";
+import { resolveInside, safeLabel, sha256 } from "./common.mjs";
+import { closeCommandLogDescriptors } from "./evidence-command.mjs";
+import { captureCommandEvidence, commandCustodyFacts, commandPassed } from "./evidence-command-record.mjs";
 import { trustedChildInvocation } from "../../toolchain-environment.mjs";
 import { throwDescriptorCloseFailures } from "./descriptor-close.mjs";
 import {
@@ -314,42 +315,31 @@ export class EvidenceRecorder {
     if (primaryFailure !== undefined) {
       throwDescriptorCloseFailures(finalizationFailures, "ROLLBACK_COMMAND_FINALIZATION_FAILED", primaryFailure);
     }
-    if (result.targetStatus.quiescent !== true) {this.#processesQuiescent = false;}
-    const commandPassed = !result.error && result.status === 0 && result.targetStatus.quiescent === true;
-    if (!commandPassed) {
+    const { dockerSettlementUnproven, nativeCustodyUncertain } = commandCustodyFacts(result, id);
+    if (result.targetStatus.quiescent !== true || nativeCustodyUncertain || dockerSettlementUnproven) {
+      this.#processesQuiescent = false;
+    }
+    const passed = commandPassed(result);
+    if (!passed) {
       primaryFailure = new Error(
         "ROLLBACK_COMMAND_FAILED group=" + group + " id=" + id
-        + " status=" + String(result.status) + " signal=" + String(result.signal),
+        + " status=" + String(result.status) + " signal=" + String(result.signal)
+        + (dockerSettlementUnproven
+          ? " custody=uncertain uncertainty=ROLLBACK_DOCKER_EXACT_ID_SETTLEMENT_UNPROVEN" : ""),
         { cause: result.error },
       );
     }
     let recorded;
     try {
       verifyEvidenceDirectory(this.target);
-      const stdout = readFileSync(stdoutPath);
-      const stderr = readFileSync(stderrPath);
-      if (primaryFailure !== undefined) {
-        primaryFailure.message += "\n" + tail(stdout.toString("utf8") + "\n" + stderr.toString("utf8"), 80);
-      }
-      const entry = {
-        sequence: this.sequence,
-        group,
-        id,
-        phase: options.phase ?? "preparation",
-        command,
-        arguments: invocation.arguments,
-        cwd: options.cwd,
-        environment: selectedEnvironment(invocation.environment),
-        startedAt: startedAt.toISOString(),
-        durationMs: Date.now() - started,
-        ...commandOutcomeFields(result),
-        status: commandPassed && finalizationFailures.length === 0 ? "passed" : "failed",
-        stdout: { path: stdoutRelative, byteLength: stdout.length, sha256: sha256(stdout) },
-        stderr: { path: stderrRelative, byteLength: stderr.length, sha256: sha256(stderr) },
-      };
-      this.document.commands.push(entry);
+      const captured = captureCommandEvidence({
+        sequence: this.sequence, group, id, command, invocation, options, startedAt, started, result,
+        primaryFailure, dockerSettlementUnproven, passed, finalizationFailures,
+        stdoutPath, stderrPath, stdoutRelative, stderrRelative,
+      });
+      this.document.commands.push(captured.entry);
       this.flush();
-      recorded = { stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), entry };
+      recorded = { stdout: captured.stdout.toString("utf8"), stderr: captured.stderr.toString("utf8"), entry: captured.entry };
     } catch (error) {
       if (primaryFailure !== undefined || finalizationFailures.length > 0) {
         finalizationFailures.push(error);

@@ -46,6 +46,7 @@ export const deploymentPlanSharedEditBaseline = Object.freeze({
 export const expectedSharedPaths = Object.freeze({
   "local-solana": [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "scripts/solana/local-fixture.ts",
@@ -55,6 +56,7 @@ export const expectedSharedPaths = Object.freeze({
   ],
   "deployment-plan": [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "scripts/deployment/estimate-local.ts",
@@ -66,6 +68,7 @@ export const expectedSharedPaths = Object.freeze({
   ],
   slither: [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "scripts/tests/workflow.test.mjs",
@@ -76,6 +79,7 @@ export const expectedSharedPaths = Object.freeze({
 
 const commonRetainedSharedPaths = Object.freeze([
   "architecture/foundation/repository-agent-workflow.yaml",
+  "scripts/tests/node26-compatibility.test.mjs",
   "scripts/tests/tooling-boundaries.test.mjs",
 ]);
 

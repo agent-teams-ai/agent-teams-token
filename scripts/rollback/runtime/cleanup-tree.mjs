@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   constants,
   fstatSync,
@@ -7,7 +6,6 @@ import {
   mkdtempSync,
   openSync,
   opendirSync,
-  readSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -15,6 +13,8 @@ import {
   unlinkSync,
 } from "node:fs";
 import { basename } from "node:path";
+
+import { cleanupFileContentSha256 } from "./cleanup-file-content.mjs";
 
 import {
   assertCustodyDescriptor,
@@ -163,7 +163,7 @@ export function removeQuarantinedEntry({
   if (kind === "directory") {
     heldDescriptor = openDirectoryDescriptor(sourcePath);
   } else if (kind === "file") {
-    heldDescriptor = openSync(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    heldDescriptor = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   }
   let primaryFailure;
   try {
@@ -194,7 +194,8 @@ export function removeQuarantinedEntry({
     assertHeldEntryIdentity(stagedIdentity, heldDescriptor, logicalPath);
     let stagedFingerprint = cleanupStrictIdentityFingerprint(stagedIdentity, kind, stagedPath);
     // Rename may change ctime, but must never authorize different file bytes.
-    if (kind === "file" && stagedFingerprint.contentSha256 !== expected.fingerprint.contentSha256) {
+    if (kind === "file" && (typeof expected.fingerprint.fileContentSha256 !== "string"
+      || stagedFingerprint.fileContentSha256 !== expected.fingerprint.fileContentSha256)) {
       throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
     }
 
@@ -443,44 +444,12 @@ export function cleanupStrictIdentityFingerprint(identity, kind, path) {
   } else {
     fingerprint.linkTargetBase64 = null;
   }
-  fingerprint.contentSha256 = kind === "file" ? cleanupFileSha256(identity, path) : null;
-  return Object.freeze(fingerprint);
-}
-
-function assertCleanupFileMetadata(expected, actual, path) {
-  if (!actual.isFile() || CLEANUP_STRICT_IDENTITY_FIELDS.some(
-    (field) => expected[field] !== actual[field],
-  )) {
-    throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
+  if (kind === "file") {
+    fingerprint.fileContentSha256 = cleanupFileContentSha256(
+      identity, path, CLEANUP_STRICT_IDENTITY_FIELDS,
+    );
   }
-}
-
-function cleanupFileSha256(identity, path) {
-  // Read every byte with bounded memory and at most captured size + 1 bytes:
-  // sampled bytes miss interior writes; reading until EOF can chase growth.
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  return useCustodyDescriptor(descriptor, "ROLLBACK_CLEANUP_ENTRY_CLOSE_FAILED", () => {
-    assertCleanupFileMetadata(identity, fstatSync(descriptor, { bigint: true }), path);
-    const hash = createHash("sha256");
-    const chunkBytes = 64n * 1024n;
-    const buffer = Buffer.allocUnsafe(Number(identity.size < chunkBytes ? identity.size + 1n : chunkBytes));
-    let remaining = identity.size;
-    while (remaining > 0n) {
-      const length = Number(remaining < BigInt(buffer.length) ? remaining : BigInt(buffer.length));
-      const count = readSync(descriptor, buffer, 0, length, null);
-      if (count === 0) {
-        throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
-      }
-      hash.update(buffer.subarray(0, count));
-      remaining -= BigInt(count);
-    }
-    if (readSync(descriptor, buffer, 0, 1, null) !== 0) {
-      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + path);
-    }
-    assertCleanupFileMetadata(identity, fstatSync(descriptor, { bigint: true }), path);
-    assertCleanupFileMetadata(identity, lstatSync(path, { bigint: true }), path);
-    return hash.digest("hex");
-  });
+  return Object.freeze(fingerprint);
 }
 
 export function assertCleanupStrictFingerprint(expected, path, logicalPath, message) {
@@ -489,11 +458,10 @@ export function assertCleanupStrictFingerprint(expected, path, logicalPath, mess
   try {
     actualIdentity = lstatSync(path, { bigint: true });
     const kind = cleanupEntryKind(actualIdentity, logicalPath);
-    // Reject changed metadata before reading potentially foreign file bytes.
     if (kind !== expected.kind || CLEANUP_STRICT_IDENTITY_FIELDS.some(
       (field) => String(actualIdentity[field]) !== expected[field],
     )) {
-      throw new Error(message ?? "ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
+      throw new Error("ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
     }
     actual = cleanupStrictIdentityFingerprint(actualIdentity, kind, path);
   } catch (error) {
@@ -502,7 +470,7 @@ export function assertCleanupStrictFingerprint(expected, path, logicalPath, mess
       { cause: error },
     );
   }
-  const fields = ["kind", ...CLEANUP_STRICT_IDENTITY_FIELDS, "linkTargetBase64", "contentSha256"];
+  const fields = ["kind", ...CLEANUP_STRICT_IDENTITY_FIELDS, "linkTargetBase64", "fileContentSha256"];
   if (fields.some((field) => actual[field] !== expected[field])) {
     throw new Error(message ?? "ROLLBACK_CLEANUP_ENTRY_IDENTITY_MISMATCH path=" + logicalPath);
   }

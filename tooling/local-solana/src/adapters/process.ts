@@ -1,5 +1,4 @@
 import { fork, spawn, type ChildProcess } from "node:child_process";
-import { dirname } from "node:path";
 import { realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -7,7 +6,7 @@ import { ASSOCIATED_TOKEN_PROGRAM, CLASSIC_TOKEN_PROGRAM, LocalSolanaError } fro
 import type { CommandPort, CommandResult, ValidatorHandle, ValidatorIdentity, ValidatorPort, ValidatorStartRequest } from "../application/ports.ts";
 import { assertValidatorRpcListener, authenticateValidatorIdentity, processStartIdentity, validatorIdentityAuthenticationFailures } from "./process-identity.ts";
 
-import { reserveStartupCustody } from "./startup-custody.ts";
+import { isStartupFailureCode, recordStartupStage, reserveStartupCustody, startupCustodySettled, startupFailureCode, type StartupCustody, type StartupStage } from "./startup-custody.ts";
 
 export class NodeCommandAdapter implements CommandPort {
   public async run(executable: string, args: readonly string[], options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly stdin?: string; readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}): Promise<CommandResult> {
@@ -39,6 +38,8 @@ export class NodeCommandAdapter implements CommandPort {
 }
 
 export class OwnedValidatorAdapter implements ValidatorPort {
+  private readonly forkSupervisor: typeof fork;
+  public constructor(forkSupervisor: typeof fork = fork) { this.forkSupervisor = forkSupervisor; }
   public async start(request: ValidatorStartRequest): Promise<ValidatorHandle> {
     if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
     if (!request.executable.startsWith("/")) { throw new LocalSolanaError("SOLANA_VALIDATOR_ABSOLUTE", "validator executable must be absolute"); }
@@ -52,10 +53,18 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       "--bpf-program", ASSOCIATED_TOKEN_PROGRAM, request.associatedTokenProgram,
     ];
     const custody = await reserveStartupCustody(request.ledger, request.leaseToken);
-    const supervisor = fork(fileURLToPath(new URL("./validator-supervisor.ts", import.meta.url)), [], {
-      env: request.env, stdio: ["ignore", "ignore", "inherit", "ipc"],
-    });
-    let output = "";
+    let supervisor: ChildProcess;
+    try {
+      supervisor = this.forkSupervisor(fileURLToPath(new URL("./validator-supervisor.ts", import.meta.url)), [], {
+        env: request.env, stdio: ["ignore", "ignore", "ignore", "ipc"],
+      });
+    } catch (cause) {
+      await within(recordStartupStage(custody, "failed", { phase: "reserved", cause }), 1_500).catch(() => false);
+      throw new LocalSolanaError("SOLANA_VALIDATOR_EARLY_EXIT", `supervisor fork failed; startup custody unsettled cause=${startupFailureCode(cause)}`);
+    }
+    let stage: StartupStage = "reserved";
+    let startupFailureNotice: { readonly phase: StartupStage; readonly code: string } | undefined;
+    let portCollision = false;
     let validatorPid: number | undefined;
     let immutableIdentity: ValidatorIdentity | undefined;
     let validatorExit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
@@ -64,52 +73,40 @@ export class OwnedValidatorAdapter implements ValidatorPort {
     supervisor.on("message", (message: unknown) => {
       if (typeof message !== "object" || message === null) { return; }
       const value = message as Record<string, unknown>;
-      if (value.type === "output" && typeof value.value === "string") { output = bounded(output, value.value); }
+      if (value.type === "stage" && isStartupStage(value.stage)) { stage = value.stage; }
+      if (value.type === "startupFailure" && isStartupStage(value.phase) && isStartupFailureCode(value.code)) { startupFailureNotice = { phase: value.phase, code: value.code }; }
+      if (value.type === "portCollision") { portCollision = true; }
       if (value.type === "spawned" && typeof value.pid === "number" && isValidatorIdentity(value.identity)) { validatorPid = value.pid; immutableIdentity = value.identity; }
-      if (value.type === "exit") { validatorExit = { code: typeof value.code === "number" ? value.code : null, signal: typeof value.signal === "string" ? value.signal as NodeJS.Signals : null }; }
+      if (value.type === "exit") { validatorExit = { code: typeof value.code === "number" && Number.isSafeInteger(value.code) ? value.code : null, signal: value.signal === "SIGTERM" || value.signal === "SIGKILL" || value.signal === "SIGINT" ? value.signal : null }; }
       changed();
     });
-    supervisor.once("error", changed); supervisor.once("exit", changed);
+    supervisor.once("error", (cause) => { startupFailureNotice = { phase: stage, code: startupFailureCode(cause) }; changed(); });
+    supervisor.once("exit", changed);
     let shutdown: Promise<void> | undefined;
-    const stopOwned = (): Promise<void> => shutdown ??= stopSupervisor(supervisor, validatorPid);
-    const abort = (): void => { void stopOwned().catch(() => {}); };
+    const stopOwned = (): Promise<void> => shutdown ??= stopSupervisor(supervisor, validatorPid, custody);
+    const abort = (): void => { changed(); void stopOwned().catch(() => {}); };
     request.signal.addEventListener("abort", abort, { once: true });
     try {
       if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
       supervisor.send({ type: "start", executable: request.executable, args, env: request.env, leaseToken: request.leaseToken, custody });
-      await waitFor(() => (validatorPid !== undefined && immutableIdentity !== undefined) || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000);
-      if (validatorPid === undefined || immutableIdentity === undefined) { throw startupFailure(validatorExit, output, request); }
-      const expectedExecutable = await realpath(request.executable); const expectedLedger = await realpath(request.ledger);
-      const liveAuthenticationFailures = await validatorIdentityAuthenticationFailures(
-        immutableIdentity,
-        request.leaseToken,
-      );
-      const identityMismatches = [
-        immutableIdentity.pid !== validatorPid ? "pid" : undefined,
-        immutableIdentity.executable !== expectedExecutable ? "executable" : undefined,
-        immutableIdentity.ledger !== expectedLedger ? "ledger" : undefined,
-        immutableIdentity.bindAddress !== "127.0.0.1" ? "bind-address" : undefined,
-        immutableIdentity.rpcPort !== request.rpcPort ? "rpc-port" : undefined,
-        ...liveAuthenticationFailures.map((failure) => `live-${failure}`),
-      ].filter((value): value is string => value !== undefined);
-      if (identityMismatches.length > 0) {
-        throw new LocalSolanaError(
-          "SOLANA_VALIDATOR_IDENTITY",
-          `supervisor immutable validator identity mismatch: ${identityMismatches.join(",")}`,
-        );
-      }
+      await waitFor(() => (validatorPid !== undefined && immutableIdentity !== undefined) || validatorExit !== undefined || startupFailureNotice !== undefined || supervisorDead(supervisor) || request.signal.aborted, changed, waiters, 5_000);
+      if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
+      if (validatorPid === undefined || immutableIdentity === undefined) { throw startupFailure(validatorExit, stage, startupFailureNotice, portCollision); }
+      await assertExpectedValidatorIdentity(immutableIdentity, validatorPid, request);
       await boundedRegistration(request.registerIdentity(immutableIdentity), request.signal, 5_000);
       let acknowledged = false;
       const acknowledgement = (message: unknown): void => { if ((message as { readonly type?: unknown } | null)?.type === "acknowledged") { acknowledged = true; changed(); } };
       supervisor.on("message", acknowledgement);
       supervisor.send({ type: "acknowledge" });
-      try { await waitFor(() => acknowledged || validatorExit !== undefined || supervisorDead(supervisor), changed, waiters, 5_000); }
+      try { await waitFor(() => acknowledged || validatorExit !== undefined || startupFailureNotice !== undefined || supervisorDead(supervisor) || request.signal.aborted, changed, waiters, 5_000); }
       finally { supervisor.removeListener("message", acknowledgement); }
-      if (!acknowledged) { throw startupFailure(validatorExit, output, request); }
-      await assertSurvivedStartup(() => validatorExit, () => sanitizeValidatorOutput(output, request));
+      if (request.signal.aborted) { throw new LocalSolanaError("SOLANA_COMMAND_ABORTED", "command interrupted"); }
+      if (!acknowledged) { throw startupFailure(validatorExit, stage, startupFailureNotice, portCollision); }
+      await assertSurvivedStartup(() => validatorExit, () => portCollision);
     } catch (cause) {
       request.signal.removeEventListener("abort", abort);
-      await stopOwned();
+      try { await stopOwned(); }
+      catch { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", `validator stop uncertain after startup stage=${stage} phase=${startupFailureNotice?.phase ?? "unknown"} failure=${startupFailureNotice?.code ?? startupFailureCode(cause)}`); }
       throw cause;
     }
     if (validatorPid === undefined || immutableIdentity === undefined) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "validator identity was not registered"); }
@@ -123,10 +120,29 @@ export class OwnedValidatorAdapter implements ValidatorPort {
       if (stopped) { return Promise.resolve(); }
       shutdown ??= (async () => {
         if (processAlive(validatorProcessPid) && !await authenticateValidatorIdentity(identity, request.leaseToken)) { throw new LocalSolanaError("SOLANA_VALIDATOR_IDENTITY", "owned validator identity changed before stop"); }
-        await stopSupervisor(supervisor, validatorProcessPid); stopped = true;
+        await stopSupervisor(supervisor, validatorProcessPid, custody); stopped = true;
       })();
       return shutdown;
     } };
+  }
+}
+
+async function assertExpectedValidatorIdentity(identity: ValidatorIdentity, pid: number, request: ValidatorStartRequest): Promise<void> {
+  const expectedExecutable = await realpath(request.executable); const expectedLedger = await realpath(request.ledger);
+  const liveAuthenticationFailures = await validatorIdentityAuthenticationFailures(identity, request.leaseToken);
+  const identityMismatches = [
+    identity.pid !== pid ? "pid" : undefined,
+    identity.executable !== expectedExecutable ? "executable" : undefined,
+    identity.ledger !== expectedLedger ? "ledger" : undefined,
+    identity.bindAddress !== "127.0.0.1" ? "bind-address" : undefined,
+    identity.rpcPort !== request.rpcPort ? "rpc-port" : undefined,
+    ...liveAuthenticationFailures.map((authFailure) => `live-${authFailure}`),
+  ].filter((value): value is string => value !== undefined);
+  if (identityMismatches.length > 0) {
+    throw new LocalSolanaError(
+      "SOLANA_VALIDATOR_IDENTITY",
+      `supervisor immutable validator identity mismatch: ${identityMismatches.join(",")}`,
+    );
   }
 }
 
@@ -140,20 +156,22 @@ function isValidatorIdentity(value: unknown): value is ValidatorIdentity {
     && identity.bindAddress === "127.0.0.1" && typeof identity.rpcPort === "number" && Number.isSafeInteger(identity.rpcPort) && identity.rpcPort >= 1 && identity.rpcPort <= 65_535;
 }
 
-async function assertSurvivedStartup(exit: () => { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined, stderr: () => string): Promise<void> {
+async function assertSurvivedStartup(exit: () => { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined, collision: () => boolean): Promise<void> {
   await delay(500);
   const result = exit();
   if (result !== undefined) {
-    const output = redact(stderr());
-    const code = /address already in use|os error 98|eaddrinuse/iu.test(output) ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
-    throw new LocalSolanaError(code, `validator exited code=${result.code ?? "null"} signal=${result.signal ?? "none"}: ${output}`);
+    const code = collision() ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
+    throw new LocalSolanaError(code, `validator exited code=${result.code ?? "null"} signal=${result.signal ?? "none"}`);
   }
 }
 
-function startupFailure(exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined, output: string, request: ValidatorStartRequest): LocalSolanaError {
-  const sanitized = sanitizeValidatorOutput(output, request);
-  const code = /address already in use|os error 98|eaddrinuse/iu.test(sanitized) ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
-  return new LocalSolanaError(code, `validator startup failed code=${exit?.code ?? "null"} signal=${exit?.signal ?? "none"}: ${sanitized}`);
+function startupFailure(exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined, stage: StartupStage, failure: { readonly phase: StartupStage; readonly code: string } | undefined, collision: boolean): LocalSolanaError {
+  const code = collision ? "SOLANA_VALIDATOR_PORT_COLLISION" : "SOLANA_VALIDATOR_EARLY_EXIT";
+  return new LocalSolanaError(code, `validator startup failed stage=${stage} phase=${failure?.phase ?? "unknown"} cause=${failure?.code ?? "UNKNOWN"} code=${exit?.code ?? "null"} signal=${exit?.signal ?? "none"}`);
+}
+
+function isStartupStage(value: unknown): value is StartupStage {
+  return value === "reserved" || value === "supervisor-acquired" || value === "spawn-requested" || value === "spawned" || value === "identity-captured" || value === "registered" || value === "stopping" || value === "settled" || value === "failed";
 }
 
 async function waitFor(predicate: () => boolean, changed: () => void, waiters: Set<() => void>, timeoutMs: number): Promise<void> {
@@ -185,9 +203,10 @@ async function boundedRegistration(registration: Promise<void>, signal: AbortSig
   });
 }
 
-async function stopSupervisor(supervisor: ChildProcess, validatorPid: number | undefined): Promise<void> {
+async function stopSupervisor(supervisor: ChildProcess, validatorPid: number | undefined, custody: StartupCustody): Promise<void> {
   if (supervisorDead(supervisor)) {
     if (validatorPid !== undefined && processAlive(validatorPid)) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", "validator supervisor exited without proving child termination"); }
+    if (!await settledStartupCustody(custody)) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", "validator startup custody remains unsettled"); }
     return;
   }
   let stopFailed = false;
@@ -197,7 +216,17 @@ async function stopSupervisor(supervisor: ChildProcess, validatorPid: number | u
   if (supervisor.connected) { supervisor.send({ type: "stop" }); }
   const exited = await within(closed, 10_500);
   supervisor.removeListener("message", failure);
-  if (!exited || stopFailed || (validatorPid !== undefined && processAlive(validatorPid))) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", "validator supervisor could not prove child termination"); }
+  if (!exited || stopFailed || (validatorPid !== undefined && processAlive(validatorPid)) || !await settledStartupCustody(custody)) { throw new LocalSolanaError("SOLANA_CHILD_STOP_TIMEOUT", "validator supervisor could not prove child termination and settled custody"); }
+}
+
+async function settledStartupCustody(custody: StartupCustody): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      startupCustodySettled(custody.directory, custody.token).catch(() => false),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => { resolve(false); }, 2_000); }),
+    ]);
+  } finally { if (timer !== undefined) { clearTimeout(timer); } }
 }
 
 function supervisorDead(supervisor: ChildProcess): boolean { return supervisor.exitCode !== null || supervisor.signalCode !== null; }
@@ -218,7 +247,4 @@ export async function stopChild(child: ChildProcess): Promise<void> {
 }
 async function within(promise: Promise<void>, ms: number): Promise<boolean> { let timer: NodeJS.Timeout | undefined; try { return await Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => { timer = setTimeout(() => { resolve(false); }, ms); })]); } finally { if (timer) { clearTimeout(timer); } } }
 function bounded(previous: string, chunk: string): string { return `${previous}${chunk}`.slice(-64 * 1024); }
-function sanitizeValidatorOutput(value: string, request: ValidatorStartRequest): string {
-  return redact(value).replaceAll(dirname(request.ledger), "[REDACTED_RUN_PATH]");
-}
 export function redact(value: string): string { return value.replace(/(?:\[[0-9]+(?:,[0-9]+){31,}\])|(?:\b[a-z]+(?:\s+[a-z]+){11,23}\b)/giu, "[REDACTED_SECRET]").replace(/\/[A-Za-z0-9_./-]*(?:payer|mint|owner|freeze)\.json/gu, "[REDACTED_KEY_PATH]"); }

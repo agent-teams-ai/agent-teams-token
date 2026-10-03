@@ -356,7 +356,8 @@ function trustedNodeChildMain(require) {
   const path = require("node:path");
   const { constants } = require("node:os");
   const root = path.dirname(process.env.HOME);
-  const paths = [root, ...["home", "xdg-cache", "xdg-config", "xdg-data", "xdg-runtime", "tmp"]
+  const roles = ["root", "home", "xdg-cache", "xdg-config", "xdg-data", "xdg-runtime", "tmp"];
+  const paths = [root, ...roles.slice(1)
     .map((name) => path.join(root, name))];
   const identities = [];
   let child;
@@ -365,6 +366,13 @@ function trustedNodeChildMain(require) {
   let childError = false;
   let graceTimer;
   let reapTimer;
+  const safeErrorCodes = new Set([
+    "EIDENTITY", "ENOTEMPTY", "EEXIST", "ENOENT", "EACCES", "EPERM", "ENOTDIR", "EBUSY", "EIO",
+  ]);
+
+  function errorCode(error) {
+    return safeErrorCodes.has(error?.code) ? error.code : "UNKNOWN";
+  }
 
   function verify(index) {
     const current = fs.lstatSync(paths[index], { bigint: true });
@@ -372,32 +380,49 @@ function trustedNodeChildMain(require) {
     if (!current.isDirectory() || current.uid !== BigInt(process.getuid())
       || (current.mode & 0o777n) !== 0o700n
       || ["dev", "ino", "mode", "uid"].some((key) => current[key] !== expected[key])) {
-      throw new Error("TOOLCHAIN_PRIVATE_ENVIRONMENT_SUBSTITUTED");
+      throw Object.assign(new Error("TOOLCHAIN_PRIVATE_ENVIRONMENT_SUBSTITUTED"), { code: "EIDENTITY" });
     }
   }
 
-  function finish(status, reaped = true) {
+  function removePrivateDirectories() {
+    let diagnostic;
+    // Check the root before each exact rmdir; never traverse retained output.
+    for (const index of [1, 2, 3, 4, 5, 6, 0]) {
+      // A failed child-directory check must never turn into root deletion.
+      if (index === 0 && diagnostic) { break; }
+      let operation = "verify";
+      let role = "root";
+      try {
+        verify(0);
+        role = roles[index];
+        verify(index);
+        operation = "rmdir";
+        fs.rmdirSync(paths[index]);
+      } catch (error) {
+        diagnostic ??= { role, operation, code: errorCode(error) };
+      }
+    }
+    return diagnostic;
+  }
+
+  function finish(status, signal = null, reaped = true) {
     if (finished) { return; }
     finished = true;
     clearTimeout(graceTimer);
     clearTimeout(reapTimer);
-    let cleanupFailed = !reaped;
-    if (reaped) {
-      // Check the root before each exact rmdir; never traverse retained output.
-      for (const index of [1, 2, 3, 4, 5, 6, 0]) {
-        try {
-          verify(0);
-          verify(index);
-          fs.rmdirSync(paths[index]);
-        } catch {
-          cleanupFailed = true;
-        }
-      }
-    }
+    const diagnostic = reaped ? removePrivateDirectories()
+      : { role: "root", operation: "verify", code: "ECHILD_UNREAPED" };
+    const cleanupFailed = diagnostic !== undefined;
     if (cleanupFailed) {
+      const childStatus = Number.isInteger(status) && status >= 0 && status <= 255 ? status : "unknown";
+      const childSignal = signal !== null && Object.hasOwn(constants.signals, signal) ? signal : "none";
+      process.stderr.write("TOOLCHAIN_PRIVATE_ENVIRONMENT_FINALIZATION_FAILED child_status=" + childStatus
+        + " child_signal=" + childSignal + " role=" + diagnostic.role
+        + " operation=" + diagnostic.operation + " code=" + diagnostic.code + "\n");
       process.stderr.write("TOOLCHAIN_PRIVATE_ENVIRONMENT_PRESERVED path=" + root + "\n");
     }
-    process.exitCode = interruption ?? (cleanupFailed || childError ? 1 : status);
+    process.exitCode = cleanupFailed || childError
+      ? 1 : interruption ?? status ?? (signal === null ? 1 : 128 + constants.signals[signal]);
   }
 
   function interrupt(signal) {
@@ -409,7 +434,7 @@ function trustedNodeChildMain(require) {
       child.kill("SIGKILL");
       reapTimer = setTimeout(() => {
         process.stderr.write("TOOLCHAIN_NODE_CHILD_TERMINATION_UNCONFIRMED\n");
-        finish(interruption, false);
+        finish(null, null, false);
         child.unref();
       }, 1_000);
     }, 1_000);
@@ -427,7 +452,7 @@ function trustedNodeChildMain(require) {
       process.stderr.write("TOOLCHAIN_NODE_CHILD_ERROR code=" + error.code + "\n");
     });
     child.once("close", (status, signal) => {
-      finish(status ?? (signal === null ? 1 : 128 + constants.signals[signal]));
+      finish(status, signal);
     });
   } catch {
     finish(1);

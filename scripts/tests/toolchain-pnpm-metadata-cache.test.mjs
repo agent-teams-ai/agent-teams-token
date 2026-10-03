@@ -88,9 +88,44 @@ snapshots:
 
 export function registerPnpmMetadataCacheTests() {
   registerPnpmOfflineMetadataTests();
+  registerPnpmScriptArgumentTests();
   registerPnpmCacheAuthorityTests();
   registerPnpmCacheCreationTests();
   registerPnpmMetadataUmaskTests();
+}
+
+function registerPnpmScriptArgumentTests() {
+  test("pinned pnpm keeps trusted authority options out of nested package-script arguments", (context) => {
+    const previousUmask = process.umask(0o022);
+    context.after(() => process.umask(previousUmask));
+    const fixture = installedFixture(context, true);
+    const project = join(fixture.root, "nested-script-project");
+    const scripts = join(fixture.root, "scripts");
+    fs.mkdirSync(project);
+    fs.mkdirSync(scripts);
+    fs.writeFileSync(join(fixture.root, "fixture-lock.json"), JSON.stringify(fixture.lock));
+    fs.writeFileSync(join(scripts, "bootstrap.sh"), [
+      "#!/bin/sh",
+      `TOKEN_BOOTSTRAP_TEST_MODE=1 TOKEN_TOOLCHAIN_LOCK='${join(fixture.root, "fixture-lock.json")}' TOKEN_TOOLS_ROOT='${fixture.toolsRoot}' exec '${process.execPath}' '${join(repository, "scripts/toolchain.mjs")}' run-pnpm "$@"`,
+      "",
+    ].join("\n"), { mode: 0o700 });
+    fs.writeFileSync(join(project, "package.json"), JSON.stringify({
+      name: "nested-script-project", private: true, packageManager: "pnpm@11.24.0",
+      scripts: { check: "pnpm --version > nested-version" },
+    }));
+
+    const forbidden = pnpm(fixture, project, ["--config.store-dir=/tmp/forbidden", "--version"]);
+    assert.notEqual(forbidden.status, 0);
+    assert.match(forbidden.stderr, /TOOLCHAIN_PNPM_AUTHORITY_ARGUMENT_FORBIDDEN/u);
+    assert.equal(fs.existsSync(join(project, "nested-version")), false);
+
+    const cwd = process.cwd();
+    try {
+      process.chdir(project);
+      assert.equal(runPnpm({ ...fixture, platform, args: ["check"] }), 0);
+    } finally {process.chdir(cwd);}
+    assert.equal(fs.readFileSync(join(project, "nested-version"), "utf8").trim(), "11.24.0");
+  });
 }
 
 function registerPnpmOfflineMetadataTests() {

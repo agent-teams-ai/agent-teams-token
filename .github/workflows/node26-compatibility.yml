@@ -1,0 +1,132 @@
+name: Node 26 Compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node26-compatibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node26-strict-install:
+    name: strict-install-node-${{ matrix.node-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [24.21.0, 26.10.0]
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup exact Node toolchain
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ matrix.node-version }}
+          check-latest: false
+      - name: Install checksum-pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pnpm-11.24.0.tgz"
+          curl --fail --location --silent --show-error --output "$archive" https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz
+          printf '%s  %s\n' 'd1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f' "$archive" | sha256sum --check
+          npm install --global "$archive"
+      - name: Assert exact compatibility toolchain
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${{ matrix.node-version }}"
+          test "$(pnpm --version)" = "11.24.0"
+      - name: Attempt frozen strict install
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm peers check --lockfile-only 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"
+          pnpm install --frozen-lockfile --config.engine-strict=true 2>&1 | tee "$RUNNER_TEMP/node26-strict-install.log"
+      - name: Assert strict install kept the checkout clean
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Upload strict install evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: strict-install-node-${{ matrix.node-version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/node26-strict-install.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  node26-focused-checks:
+    name: focused-checks-node-${{ matrix.node-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [24.21.0, 26.10.0]
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact clean checkout before checks
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"
+      - name: Setup exact Node toolchain
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ matrix.node-version }}
+          check-latest: false
+      - name: Install checksum-pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pnpm-11.24.0.tgz"
+          curl --fail --location --silent --show-error --output "$archive" https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz
+          printf '%s  %s\n' 'd1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f' "$archive" | sha256sum --check
+          npm install --global "$archive"
+      - name: Assert exact compatibility toolchain
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${{ matrix.node-version }}"
+          test "$(pnpm --version)" = "11.24.0"
+      - name: Fetch, install and verify pinned repository tools
+        shell: bash
+        run: |
+          ./dev bootstrap fetch
+          ./dev bootstrap install --offline
+          ./dev bootstrap verify --offline
+          test "$(node --version)" = "v${{ matrix.node-version }}"
+          test "$(.tools/bin/node --version)" = "v24.20.0"
+      - name: Install frozen workspace with strict engines
+        shell: bash
+        run: |
+          pnpm peers check --lockfile-only
+          pnpm install --frozen-lockfile --config.engine-strict=true
+      - name: Run focused Node 26 compatibility checks
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${{ matrix.node-version }}"
+          pnpm check:fast
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          node --test scripts/tests/node26-compatibility.test.mjs
+          pnpm test:linux-parity
+          pnpm genesis:vector:check
+          pnpm rollback:test
+      - name: Assert gates kept the exact checkout clean
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/assert-clean-head.sh "$GITHUB_SHA"

@@ -122,14 +122,19 @@
       "afterSha256": "6a14293be16a0166058ba526663e715025100e23fb14415c7baa60d0d7aa9261"
     },
     {
+      "path": ".github/workflows/node26-compatibility.yml",
+      "beforeSha256": "c1e19fc4a43afef46c3a7a6418eff79aa54d392f633b732c1d63deb7c098fdc7",
+      "afterSha256": "023101b0b1ff8464d3152394fdf229d312307f04ccab370f9ac83ae76108704a"
+    },
+    {
       "path": "architecture/foundation/source-dependencies.yaml",
       "beforeSha256": "52e80a3c7c9c312a0fa31af1c944cadf761c8986ca96bb1b18375bb5c8fc555c",
       "afterSha256": "aee53e709fbbe741795fb88b5f2fd543d05cb894dde1a4a380ef2eb5de72e1df"
     },
     {
       "path": "package.json",
-      "beforeSha256": "d781b9a8b7171bd0bdedbbc364eda148950d600b2361bd7ac6196e6cdefb803d",
-      "afterSha256": "af09f8aaa1587204b6cd96950420526d45f5282af8e28fa97eea9c19eaaea43e"
+      "beforeSha256": "ff7a3d1eb3345a5ff97429b6549d084606dcf04304905be0749396eeb52a3a90",
+      "afterSha256": "f0e7187ce51b5ed0be0d338a521c4f858dc098e37310ed5a0d6ea85c2a647657"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
@@ -149,6 +154,7 @@
   ],
   "sharedPaths": [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "scripts/tests/workflow.test.mjs",
@@ -160,6 +166,11 @@
       "path": "architecture/foundation/repository-agent-workflow.yaml",
       "sha256": "8413d3e29613ccea223fc35588c380ccce334fb6d4b95287897b6586eb25113a",
       "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub; current-main Docs Protocol authoring paths retain full-scan enforcement"
+    },
+    {
+      "path": "scripts/tests/node26-compatibility.test.mjs",
+      "sha256": "5561f0c8e0539a3e243434994315d199dec559eadbb110fbbc5a44fe681d1cef",
+      "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",
