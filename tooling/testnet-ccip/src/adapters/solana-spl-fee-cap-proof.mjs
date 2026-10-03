@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { FEE_QUOTER_PROGRAM } from '../domain/solana-pool-config.ts';
 import { REVERSE } from '../domain/solana-reverse.mjs';
-import { SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM } from '../domain/solana-mint.ts';
+import { SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM, solanaPublicKeyBytes } from '../domain/solana-mint.ts';
 import { loadSolanaProvider } from './solana-transaction-sdk.mjs';
 
 const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
@@ -104,10 +104,29 @@ function tokenState(PublicKey, raw, { address, mint, owner, amount, label }) {
     fail(`${label} mint, owner, balance or delegation invalid`);
   }
 }
-function inspectSendData(PublicKey, data, sourceMint, feeMint, sourceAmount) {
+function sendSelector(value) {
+  const selector = value ?? ETHEREUM_SELECTOR;
+  if ((typeof selector !== 'bigint' && (typeof selector !== 'string' || !/^(0|[1-9][0-9]*)$/.test(selector))) ||
+      String(selector).length > 20 || BigInt(selector) < 0n || BigInt(selector) > U64_MAX) {fail('invalid send selector');}
+  return BigInt(selector);
+}
+function inspectNativeFields(expected, feeMint, receiver, payload, extraArgs) {
+  if (expected && (feeMint !== SYSTEM_PROGRAM || payload.length !== 0 || !receiver.equals(expected.receiver) ||
+      !extraArgs.equals(Buffer.from('181dcf100000000000000000000000000000000001', 'hex')))) {
+    fail('native ccip_send receiver, payload, fee mode or extra args mismatch');
+  }
+}
+// Existing independent reader: nativeExpected enables complete DEV field checks.
+// Omitted options preserve the historical mainnet SPL proof's hash-bound payload policy.
+export function inspectSendData(PublicKey, data, sourceMint, feeMint, amountOrOptions) {
+  // The legacy fifth argument is a bigint; DEV can supply {amount, selector, nativeExpected}.
+  const options = typeof amountOrOptions === 'object' && amountOrOptions !== null ? amountOrOptions : { amount: amountOrOptions };
+  const sourceAmount = options.amount, selector = sendSelector(options.selector);
+  if (!Buffer.isBuffer(data)) {fail('invalid send reader input');}
+  const mintBytes = (address, label) => PublicKey ? key(PublicKey, address, label).toBuffer() : solanaPublicKeyBytes(address);
   const discriminator = createHash('sha256').update('global:ccip_send').digest().subarray(0, 8);
   if (data.length < 16 || !data.subarray(0, 8).equals(discriminator) ||
-      data.readBigUInt64LE(8) !== ETHEREUM_SELECTOR) {fail('wrong ccip_send discriminator or destination');}
+      data.readBigUInt64LE(8) !== BigInt(selector)) {fail('wrong ccip_send discriminator or destination');}
   let offset = 16;
   const take = size => {
     if (!Number.isSafeInteger(size) || size < 0 || offset + size > data.length) {fail('truncated ccip_send');}
@@ -116,14 +135,18 @@ function inspectSendData(PublicKey, data, sourceMint, feeMint, sourceAmount) {
   const vec = () => { const size = take(4).readUInt32LE(0); return take(size); };
   const receiver = vec();
   assertAbi32EvmReceiver(receiver);
-  vec(); // Payload is frozen by the exact send-data hash below.
-  if (take(4).readUInt32LE(0) !== 1 || !take(32).equals(key(PublicKey, sourceMint, 'AGTMAI mint').toBuffer()) ||
-      take(8).readBigUInt64LE(0) !== sourceAmount || !take(32).equals(key(PublicKey, feeMint, 'fee mint').toBuffer())) {
+  const payload = vec(); // Legacy payload remains bound by its exact send-data hash.
+  if (take(4).readUInt32LE(0) !== 1 || !take(32).equals(mintBytes(sourceMint, 'AGTMAI mint')) ||
+      take(8).readBigUInt64LE(0) !== sourceAmount || !take(32).equals(mintBytes(feeMint, 'fee mint'))) {
     fail('ccip_send token amount or fee mint mismatch');
   }
-  vec(); // Extra args are frozen by the exact send-data hash.
+  const extraArgs = vec(); // Legacy extra args remain bound by their exact hash.
   const tokenIndexes = vec();
   if (offset !== data.length || !tokenIndexes.equals(Buffer.from([0]))) {fail('ccip_send token indexes or trailing data invalid');}
+  inspectNativeFields(options.nativeExpected, feeMint, receiver, payload, extraArgs);
+  return { selector: BigInt(selector), receiver: Buffer.from(receiver), data: Buffer.from(payload),
+    tokenAmounts: [{ token: sourceMint, amount: sourceAmount }], feeToken: feeMint,
+    extraArgs: Buffer.from(extraArgs), tokenIndexes: Buffer.from(tokenIndexes) };
 }
 
 function validatePrograms(input) {

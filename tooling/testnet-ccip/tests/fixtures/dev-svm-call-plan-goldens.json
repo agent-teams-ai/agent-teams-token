@@ -1,0 +1,250 @@
+{
+  "qualification": "fixture-only before-state; actual public historical PDA identities except explicit hypothetical LINK config; independently retained public send wire",
+  "source": {
+    "path": ".local/PUBLIC-RECAPTURE/message2-burn-json.response.json",
+    "sha256": "3e421033034d7374bc73746ea7795a37f678eafb346902d7297c98e3eb55608e",
+    "instructionIndex": 1
+  },
+  "oracle": {
+    "routerIdlPath": "node_modules/@chainlink/ccip-sdk/dist/solana/idl/1.6.0/CCIP_ROUTER.js",
+    "routerIdlSha256": "01c560fecef86ae86615dcd77dd1a8048e1a1373248f76781db4716d57aaa10f",
+    "historicalSendHex": "6cd886bff9ea2154d91ad9c94fba41de20000000000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df60000000001000000009d49372ba9140a49e384e7a023a8f5273e7b1b9f87033ceb5ce59c116e900200ca9a3b00000000000000000000000000000000000000000000000000000000000000000000000015000000181dcf1000000000000000000000000000000000010100000000",
+    "changedSendHex": "6cd886bff9ea2154d91ad9c94fba41de2000000000000000000000000000000077777777777777777777777777777777777777770000000001000000009d49372ba9140a49e384e7a023a8f5273e7b1b9f87033ceb5ce59c116e90020100000000002000000000000000000000000000000000000000000000000000000000000000000015000000181dcf1000000000000000000000000000000000010100000000",
+    "changedAmount": "9007199254740993",
+    "changedRecipient": "0x7777777777777777777777777777777777777777",
+    "changedOffsets": {
+      "receiver": [
+        20,
+        52
+      ],
+      "amount": [
+        92,
+        100
+      ]
+    },
+    "externalAltAddresses": [
+      "595XKFP6v7zGTtSuA9h19BdA4q7hmcGTFiHSLRsmV6ru",
+      "8JqpXNmgmRGMm93Kh6sRETcMxbABM8y2oD8YAX26t7Gb",
+      "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+      "DQ2LpgGVwXc62NNkqrwmhLMkUWuxVzMJhyt4p2Yw5aiJ",
+      "ETmid1DpsTNnZGueaiK68hWqfcs6rJii1YFgjKxrcVzF",
+      "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX",
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+      "EkFFAtA4DRfmDGnxGxMcqZfSupUkxvUWEd3VFURYYT1j",
+      "H6ZviaabTYZqUPgiSoMDbeVthcNW9ULcAuUu3zRLFqDR"
+    ]
+  },
+  "route": {
+    "profile": "fixture100",
+    "fixedSupplyBaseUnits": "100000000000",
+    "decimals": 9,
+    "selector": "16015286601757825753",
+    "solanaSelector": "16423721717087811551",
+    "cluster": "solana-devnet",
+    "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    "routerProgram": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+    "feeQuoterProgram": "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi",
+    "poolProgram": "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "rmn": "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7",
+    "nativeMint": "So11111111111111111111111111111111111111112",
+    "mint": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+    "evmToken": "0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9",
+    "evmPool": "0x24508e2eb3bedc086318abc054153fd83823a4e2",
+    "payer": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+    "sender": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+    "forwardRecipient": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+    "recipient": "0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6",
+    "amount": "1000000000",
+    "linkMint": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+    "roles": {
+      "poolOwner": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+      "pendingPoolOwner": null,
+      "rateAdmin": "gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+      "registryAdmin": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+      "pendingRegistryAdmin": null
+    },
+    "alt": "595XKFP6v7zGTtSuA9h19BdA4q7hmcGTFiHSLRsmV6ru",
+    "lookupTableAuthority": "ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+    "identities": {
+      "routerConfig": "3Yrg9E4ySAeRezgQY99NNarAmFLtixapga9MZb6y2dt3",
+      "destChain": "FMupGnCxUXo7FwuNbMUXYspP84LQZRC5syLD1krXCKzg",
+      "nonce": "ChJTvQMwwLyVyeoQaQmh7Bvvh3JcVqMqagVjT1tsf8yZ",
+      "feeReceiver": "9TKiJBGMu1c6aqxaKuzV6G1otYaYM3PLZf5VoUHhjKY2",
+      "spender": "2AjuzTy6z2webxEUu7eZ1DkAyLagZaqH2dgzhbBYjJiG",
+      "feeConfig": "Jexa4tyW5xjDuucnNpTc3cz3Jsq1qY8fp4P4Dd4NQAb",
+      "feeDest": "ESAj1fV8Wb72XU2haE2nbrc46wL3gHpwWQfoVsPnzrTY",
+      "nativeFeeConfig": "7e8EXjofujRmNxSMwo8CT8yxs1xxTexx55BN62xwWrKN",
+      "linkFeeConfig": "4888DZopYApaP8TUaXhaLzTj74Z7MtdViAGG1cUwuAWv",
+      "curses": "CpbeEvmTR4UE8CgDDL5b1nqjSz7JCD4wNJhxPLZRkSL1",
+      "rmnConfig": "GbQFCDTPbhwPjeUvhu7hXEM3Wm2S6t3FCxoCmQtKxetw",
+      "sourceAta": "BDW4fQh6QGDnTbZATEjTCcu1PQaKvKSE5GzmQTGe9Kvh",
+      "perTokenConfig": "fgnvi2sNm7guSH8W6ov445nRit7AgYXdZCaV8RFZENF",
+      "chain": "5GoY6aNRFwQonLxjScU9jJC3BbzGFiQup2CSGiJkBJsQ",
+      "registry": "8JqpXNmgmRGMm93Kh6sRETcMxbABM8y2oD8YAX26t7Gb",
+      "pool": "DQ2LpgGVwXc62NNkqrwmhLMkUWuxVzMJhyt4p2Yw5aiJ",
+      "ata": "ETmid1DpsTNnZGueaiK68hWqfcs6rJii1YFgjKxrcVzF",
+      "signer": "8NGr2WFh3JrC1UzmB3iifESF7W5wf3CBPWguJayuXmkX",
+      "feeTokenConfig": "EkFFAtA4DRfmDGnxGxMcqZfSupUkxvUWEd3VFURYYT1j",
+      "routerPoolSigner": "H6ZviaabTYZqUPgiSoMDbeVthcNW9ULcAuUu3zRLFqDR"
+    },
+    "limiters": {
+      "inbound": {
+        "enabled": true,
+        "capacity": "10000000000",
+        "rate": "1000000000"
+      },
+      "outbound": {
+        "enabled": true,
+        "capacity": "10000000000",
+        "rate": "1000000000"
+      }
+    }
+  },
+  "facts": {
+    "schema": "agtmai-dev-svm-call-input-v1",
+    "testOnly": true,
+    "broadcastAllowed": false,
+    "evidenceClass": "fixture-only",
+    "snapshotSlot": "100",
+    "observedSlot": "101",
+    "validThroughSlot": "120",
+    "state": {
+      "mint": {
+        "address": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+        "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "AQAAAG106/oPQhWOOqVYlCtajns1FevWBmxcKMRyo3PLcQ28AMgXqAQAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+        "sha256": "de3436b75816820a81bcff4e688ca4ccf9e6a61ed07e80619f9edaba774dc6b8"
+      },
+      "sourceAta": {
+        "address": "BDW4fQh6QGDnTbZATEjTCcu1PQaKvKSE5GzmQTGe9Kvh",
+        "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "AJ1JNyupFApJ44TnoCOo9Sc+exufhwM861zlnBFukAJuqvVSqe/ramxV42aF8Aie1jipQPflsrdwnkNGFKHGbwDkC1QCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "sha256": "5269e59c264baf3fd77a15d094cd068eb0db592d19d8fd2122d04a1938d48188"
+      },
+      "poolAta": {
+        "address": "ETmid1DpsTNnZGueaiK68hWqfcs6rJii1YFgjKxrcVzF",
+        "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "AJ1JNyupFApJ44TnoCOo9Sc+exufhwM861zlnBFukAJtdOv6D0IVjjqlWJQrWo57NRXr1gZsXCjEcqNzy3ENvABe0LIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "sha256": "e6f833af9e8e52abbfe1c83cd1081c4d6132633ff072fd9b7a6b60723ea09566"
+      },
+      "routerConfig": {
+        "address": "3Yrg9E4ySAeRezgQY99NNarAmFLtixapga9MZb6y2dt3",
+        "owner": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "mwyq4B76zIIBAd8345Tix+zjAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANmoZhgtaQLmSSx6MoEr6jZ+GpTXBrFu2pFEnQSGuA0BBliT7ZWrhugwWyiYp2G+HCHNv7C39ebv1T6DsoMrGlACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "sha256": "afcbe088d75289e7ac7f00ba3ee75fdcc49a2315bc346e436943058aed8740f7"
+      },
+      "registry": {
+        "address": "8JqpXNmgmRGMm93Kh6sRETcMxbABM8y2oD8YAX26t7Gb",
+        "owner": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "RlzPyEwROXICCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2Aggp+BnDrmIpSyWWWsaCVO664OH5BDVYFZaoAUaviAAAAAAAAAAAAAAAAAAAAGQAAAAAAAAAAAAAAAAAAAAAAnUk3K6kUCknjhOegI6j1Jz57G5+HAzzrXOWcEW6QAgA=",
+        "sha256": "298df1ffcf6daf52ec6ada3308938a0686ad2b9aec18df074074cf9573210a01"
+      },
+      "pool": {
+        "address": "DQ2LpgGVwXc62NNkqrwmhLMkUWuxVzMJhyt4p2Yw5aiJ",
+        "owner": "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "2JJrXmhLtrEBBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkAnUk3K6kUCknjhOegI6j1Jz57G5+HAzzrXOWcEW6QAgltdOv6D0IVjjqlWJQrWo57NRXr1gZsXCjEcqNzy3ENvMgDl+r5fpR9xt5hmP07qjqHG6YHzJWUpYyC0UlBFf5QCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoK7ygf5O7OyHBpcu6uY7ryXXVzkILJ6KrIOEL8jLNa+jCslyl34bq1//bGhikfmU/1LzSr7RvH34j3b0P5JlksjwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABliT7ZWrhugwWyiYp2G+HCHNv7C39ebv1T6DsoMrGlA=",
+        "sha256": "04167410f29494299b27c49bedff80fe296703cda4a45dd550051d75e467e941"
+      },
+      "chain": {
+        "address": "5GoY6aNRFwQonLxjScU9jJC3BbzGFiQup2CSGiJkBJsQ",
+        "owner": "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "DbHpjdQdlDgBAAAAFAAAACRQji6zvtwIYxirwFQVP9g4I6TiIAAAAAAAAAAAAAAAAAAAAL7pG6PKlN18Y57mwbHC/BoZls3JCQCUNXcAAAAAAPFTZQAAAAABAOQLVAIAAAAAypo7AAAAAABe0LIAAAAAAPFTZQAAAAABAOQLVAIAAAAAypo7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "sha256": "a65e532da0e34c27a3d4fb444fc7b95df0fcf873dcb9175c4aa3789c5633ff8e"
+      },
+      "alt": {
+        "address": "595XKFP6v7zGTtSuA9h19BdA4q7hmcGTFiHSLRsmV6ru",
+        "owner": "AddressLookupTab1e1111111111111111111111111",
+        "executable": false,
+        "slot": "100",
+        "dataBase64": "AQAAAP//////////YwAAAAAAAAAAAQ4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4OAAA9gIIKfgZw65iKUslllrGglTuuuDh+QQ1WBWWqAFGr4myT4epLoAgn/J8G7ImAsrVFZ/RG9aJtxJLEStLBGr5ILKMxKtNBqkh6ucX3MNfuRmTSbgpFNOanzpAEazpMJN64Mh5tYvb+SndQEzm21cws0d7Si6tRK4Nxt3wQoHs4H8gDl+r5fpR9xt5hmP07qjqHG6YHzJWUpYyC0UlBFf5QbXTr+g9CFY46pViUK1qOezUV69YGbFwoxHKjc8txDbwG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQCdSTcrqRQKSeOE56AjqPUnPnsbn4cDPOtc5ZwRbpACzDwCzIWdGiBAfgenQFfiZfOfwGgDIA66YnpC5WWgEFrvKB/k7s7IcGly7q5juvJddXOQgsnoqsg4QvyMs1r6MA==",
+        "sha256": "f1c7f784c4609f6539e7d4c6f7d8d89f44871a768b3001e1ac0e453f1e14c01c"
+      }
+    },
+    "before": {
+      "mintSupply": "20000000000",
+      "sourceBalance": "10000000000",
+      "poolBalance": "3000000000",
+      "delegate": null,
+      "delegatedAmount": "0"
+    },
+    "fees": {
+      "quote": {
+        "lamports": "5",
+        "payer": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+        "snapshotSlot": "100",
+        "validThroughSlot": "120",
+        "source": "explicit hypothetical DEV fixture, not fresh chain facts",
+        "selector": "16015286601757825753",
+        "mint": "13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau",
+        "amount": "1000000000",
+        "feeToken": "11111111111111111111111111111111"
+      },
+      "networkFee": {
+        "lamports": "5000",
+        "payer": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+        "snapshotSlot": "100",
+        "validThroughSlot": "120",
+        "source": "explicit hypothetical DEV fixture, not fresh chain facts"
+      },
+      "rent": {
+        "lamports": "0",
+        "payer": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+        "snapshotSlot": "100",
+        "validThroughSlot": "120",
+        "source": "explicit hypothetical DEV fixture, not fresh chain facts"
+      }
+    },
+    "payerBalance": {
+      "lamports": "1000000",
+      "payer": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t",
+      "snapshotSlot": "100",
+      "validThroughSlot": "120",
+      "source": "explicit hypothetical DEV fixture, not fresh chain facts"
+    },
+    "blockhash": {
+      "value": "CRpEEjFbL3jFDGe9Ndxi7SwLTq3aVJgjzP4ZDbYwLcA6",
+      "snapshotSlot": "100",
+      "validThroughSlot": "120",
+      "lastValidBlockHeight": "100",
+      "observedBlockHeight": "99",
+      "source": "hypothetical validity for retained public blockhash bytes"
+    },
+    "maxExposureLamports": "1000000"
+  },
+  "hypotheticalChainConfig": {
+    "qualification": "Explicit hypothetical selected bounded SVM policies and raw bucket observations; no current-chain, repair-history or Mainnet-limit claim. Paired EVM policies remain the integrating consumer prerequisite.",
+    "allocationTailHex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "buckets": {
+      "inbound": {
+        "tokens": "2000000000",
+        "lastUpdatedUnixSeconds": "1700000000",
+        "enabled": true,
+        "capacity": "10000000000",
+        "rate": "1000000000"
+      },
+      "outbound": {
+        "tokens": "3000000000",
+        "lastUpdatedUnixSeconds": "1700000000",
+        "enabled": true,
+        "capacity": "10000000000",
+        "rate": "1000000000"
+      }
+    }
+  }
+}

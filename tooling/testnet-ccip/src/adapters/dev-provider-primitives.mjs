@@ -59,7 +59,55 @@ export function unsignedDevPrimitives(abi, web3) {
     if (typeof value !== 'string' || value.length < 32 || value.length > 44) { fail('invalid public key'); }
     return new web3.PublicKey(value);
   };
+  const canonicalBase64 = value => {
+    if (typeof value !== 'string' || value.length > 4096) { fail('invalid base64'); }
+    const bytes = Buffer.from(value, 'base64');
+    if (bytes.toString('base64') !== value) { fail('noncanonical base64'); }
+    return bytes;
+  };
+  const table = value => {
+    record(value, ['key', 'dataBase64']);
+    return new web3.AddressLookupTableAccount({ key: key(value.key),
+      state: web3.AddressLookupTableAccount.deserialize(canonicalBase64(value.dataBase64)) });
+  };
   return Object.freeze({
+    // Public web3 primitives only. No SPL/Anchor/SDK entry evaluation. EVM additions
+    // can extend this record independently; existing EVM and three-field v0 outputs stay stable.
+    derivePda(program, seeds) {
+      if (!Array.isArray(seeds) || seeds.length > 16 || seeds.some(s => typeof s !== 'string' || !/^(?:[0-9a-f]{2}){0,32}$/.test(s))) {
+        fail('invalid PDA seeds');
+      }
+      return web3.PublicKey.findProgramAddressSync(seeds.map(s => Buffer.from(s, 'hex')), key(program))[0].toBase58();
+    },
+    deriveAta(mint, owner, allowOffCurve = false) {
+      if (typeof allowOffCurve !== 'boolean' || !allowOffCurve && !web3.PublicKey.isOnCurve(key(owner).toBytes())) { fail('ATA owner off curve'); }
+      return web3.PublicKey.findProgramAddressSync([key(owner).toBuffer(),
+        key('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), key(mint).toBuffer()],
+      key('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'))[0].toBase58();
+    },
+    deserializeLookupTable(dataBase64) {
+      const state = web3.AddressLookupTableAccount.deserialize(canonicalBase64(dataBase64));
+      return { deactivationSlot: state.deactivationSlot.toString(), lastExtendedSlot: String(state.lastExtendedSlot),
+        lastExtendedSlotStartIndex: state.lastExtendedSlotStartIndex, authority: state.authority?.toBase58() ?? null,
+        addresses: state.addresses.map(k => k.toBase58()) };
+    },
+    inspectUnsignedV0(input) {
+      record(input, ['transactionBase64', 'lookupTable']);
+      const raw = canonicalBase64(input.transactionBase64);
+      if (raw.length > 1232) { fail('packet exceeds 1232 bytes'); }
+      const transaction = web3.VersionedTransaction.deserialize(raw), message = transaction.message;
+      if (message.version !== 0 || !Buffer.from(transaction.serialize()).equals(raw)) { fail('noncanonical v0 packet'); }
+      const keys = message.getAccountKeys({ addressLookupTableAccounts: [table(input.lookupTable)] });
+      const meta = index => ({ pubkey: keys.get(index).toBase58(), isSigner: message.isAccountSigner(index), isWritable: message.isAccountWritable(index) });
+      return { version: message.version, payer: keys.get(0).toBase58(), header: { ...message.header },
+        recentBlockhash: message.recentBlockhash, messageBase64: Buffer.from(message.serialize()).toString('base64'),
+        signaturesBase64: transaction.signatures.map(s => Buffer.from(s).toString('base64')),
+        accounts: Array.from({ length: keys.length }, (_, i) => meta(i)), staticAccountCount: message.staticAccountKeys.length,
+        lookups: message.addressTableLookups.map(l => ({ key: l.accountKey.toBase58(),
+          writableIndexes: Array.from(l.writableIndexes), readonlyIndexes: Array.from(l.readonlyIndexes) })),
+        instructions: message.compiledInstructions.map(ix => ({ programId: keys.get(ix.programIdIndex).toBase58(),
+          keys: Array.from(ix.accountKeyIndexes, meta), data: '0x' + Buffer.from(ix.data).toString('hex') })) };
+    },
     encodeApprove(spender, amount) {
       return iface.encodeFunctionData('approve', [address(spender), uint(amount, 256)]);
     },
@@ -103,7 +151,7 @@ export function unsignedDevPrimitives(abi, web3) {
       return Object.freeze({ name: decoded.name, args: decoded.args });
     },
     compileUnsignedV0(input) {
-      const value = record(input, ['payer', 'recentBlockhash', 'instructions']);
+      const value = record(input, Object.hasOwn(input ?? {}, 'lookupTable') ? ['payer', 'recentBlockhash', 'instructions', 'lookupTable'] : ['payer', 'recentBlockhash', 'instructions']);
       if (!Array.isArray(value.instructions) || !value.instructions.length || value.instructions.length > 16) { fail('instruction bound'); }
       const instructions = value.instructions.map(item => {
         const instruction = record(item, ['programId', 'keys', 'data']);
@@ -117,7 +165,7 @@ export function unsignedDevPrimitives(abi, web3) {
           data: Buffer.from(hex(instruction.data, 1024).slice(2), 'hex') });
       });
       const message = new web3.TransactionMessage({ payerKey: key(value.payer),
-        recentBlockhash: key(value.recentBlockhash).toBase58(), instructions }).compileToV0Message();
+        recentBlockhash: key(value.recentBlockhash).toBase58(), instructions }).compileToV0Message(value.lookupTable === undefined ? [] : [table(value.lookupTable)]);
       const transaction = new web3.VersionedTransaction(message);
       return Object.freeze({ messageBase64: Buffer.from(message.serialize()).toString('base64'),
         transactionBase64: Buffer.from(transaction.serialize()).toString('base64'),
