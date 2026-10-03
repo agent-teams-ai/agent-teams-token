@@ -226,6 +226,7 @@ function createInvocation(entries, platform) {
         NPM_CONFIG_GLOBALCONFIG: npmGlobalrc.path,
       },
       files,
+      nullFds: [],
       root,
       rootIdentity,
       snapshots,
@@ -421,6 +422,24 @@ function delay(milliseconds) {
   return new Promise((resolve) => {setTimeout(resolve, milliseconds);});
 }
 
+function groupHasLiveMembers(pgid) {return processGroupMembers(pgid).length > 0;}
+
+async function waitForGroupDisappearance(pgid, milliseconds) {
+  const deadline = Date.now() + milliseconds;
+  while (groupHasLiveMembers(pgid) && Date.now() < deadline) {await delay(10);}
+  return !groupHasLiveMembers(pgid);
+}
+
+async function quiesceChild(pgid) {
+  if (pgid === undefined) {return true;} // spawn error: no child was created.
+  if (groupHasLiveMembers(pgid)) {
+    signalGroup(pgid, "SIGTERM");
+    await delay(TERM_GRACE_MS);
+    if (groupHasLiveMembers(pgid)) {signalGroup(pgid, "SIGKILL");}
+  }
+  return waitForGroupDisappearance(pgid, KILL_GRACE_MS);
+}
+
 function writeSupervisorStatus(fd, status) {
   const payload = `${JSON.stringify(status)}\n`;
   ftruncateSync(fd, 0);
@@ -476,8 +495,9 @@ async function supervisorMain(encoded) {
       child.once("exit", (status, signal) => finish({ signal, status }));
     });
     if (termination) {await termination;}
-    // The enclosing native subreaper owns settlement, including escaped sessions.
-    // Exiting this observer lets native custody detect and reap any leaked child.
+    // Preserve Main's bounded ordinary-descendant cleanup before finishing.
+    if (!await quiesceChild(child.pid)) {supervisorError ??= { code: "ESUPERVISOR" };}
+    // Only the enclosing native subreaper can certify all custody via ECHILD.
     const quiescent = false;
     writeSupervisorStatus(config.statusFd, {
       error: outcome.error?.code ?? (supervisorError ? supervisorError.code ?? "ESUPERVISOR" : null),
@@ -588,6 +608,13 @@ function supervisedSpawn({ args, command, cwd, env, input, invocation, stdio, ta
   let helper;
   try {
     supervisorStdio = stdio.map((entry, index) => {
+      // Native slots 3/4 must receive caller stdout/stderr, not caller 3/4.
+      if (entry === "inherit") {return index;}
+      if (entry === "ignore" && index > 0) {
+        const fd = openSync("/dev/null", fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+        invocation.nullFds.push(fd);
+        return fd;
+      }
       if (entry !== "pipe") {return entry;}
       const file = createControlledFile(join(invocation.root, `stdio-${index}`), index === 0 ? input : "");
       invocation.files.push(file);
@@ -767,10 +794,11 @@ function withInvocation(entries, platform, execute) {
   } catch (error) {failures.push(error);}
   // A rejected close may have consumed/reused the FD. Disarm all owners
   // before attempting every close once; never retry an uncertain number.
-  const files = invocation.files;
+  const ownedFds = [...invocation.files.map((file) => file.fd), ...invocation.nullFds];
   invocation.files = [];
-  for (const file of files) {
-    try {closeSync(file.fd);} catch (error) {failures.push(error);}
+  invocation.nullFds = [];
+  for (const fd of ownedFds) {
+    try {closeSync(fd);} catch (error) {failures.push(error);}
   }
   if (failures.length > 0) {
     const failure = failures.length === 1 ? failures[0] : new AggregateError(

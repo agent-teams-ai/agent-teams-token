@@ -1,0 +1,314 @@
+{
+  "schema": "agtmai-dev-transfer-input-v1",
+  "schemaVersion": 1,
+  "testOnly": true,
+  "broadcastAllowed": false,
+  "sourceRevision": "a46230b4cd46740223ca3904e0a1278ddd361cd6",
+  "sourceTree": "99253c2c24d67c96ca184555fd3d2a0954506b46",
+  "lane": {
+    "chainId": "11155111",
+    "ethereumSelector": "16015286601757825753",
+    "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    "solanaSelector": "16423721717087811551",
+    "router": "0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59",
+    "rmn": "0xba3f6251de62ded61ff98590cb2fdf6871fbb991",
+    "registry": "0x95f29fee11c5c55d26cccf1db6772de953b37b82",
+    "routerProgram": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+    "rmnProgram": "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7",
+    "feeQuoterProgram": "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi",
+    "poolProgram": "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+  },
+  "profile": "product100M",
+  "fixedSupplyBaseUnits": "100000000000000000",
+  "decimals": 9,
+  "amount": "1000000000",
+  "pair": {
+    "evm": {
+      "token": "0x1111111111111111111111111111111111111111",
+      "pool": "0x2222222222222222222222222222222222222222",
+      "initialAdmin": "0x3333333333333333333333333333333333333333",
+      "registryAdmin": "0x4444444444444444444444444444444444444444",
+      "poolOwner": "0x5555555555555555555555555555555555555555",
+      "sender": "0x6666666666666666666666666666666666666666",
+      "recipient": "0x7777777777777777777777777777777777777777",
+      "pendingAdmin": "0x0000000000000000000000000000000000000000"
+    },
+    "svm": {
+      "mint": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+      "pool": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "signer": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+      "poolAta": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+      "sourceAta": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+      "registry": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "registryAdmin": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+      "poolOwner": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+      "rateAdmin": "gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+      "spender": "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn",
+      "sender": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+      "recipient": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+      "payer": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+      "pendingAdmin": null,
+      "pendingOwner": null,
+      "alt": {
+        "key": "swqrv48gsrwpBFbftEwnP2vB4jckpvfGJfXkwaniLCC",
+        "authority": "ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+        "addresses": [
+          "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+          "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+          "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+        ],
+        "writableIndexes": [
+          1
+        ]
+      }
+    }
+  },
+  "limiters": {
+    "evmOutbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000"
+    },
+    "evmInbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000"
+    },
+    "svmOutbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000"
+    },
+    "svmInbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000"
+    }
+  },
+  "states": {
+    "forward": {
+      "token": "0x1111111111111111111111111111111111111111",
+      "pool": "0x2222222222222222222222222222222222222222",
+      "initialAdmin": "0x3333333333333333333333333333333333333333",
+      "registryAdmin": "0x4444444444444444444444444444444444444444",
+      "poolOwner": "0x5555555555555555555555555555555555555555",
+      "sender": "0x6666666666666666666666666666666666666666",
+      "pendingAdmin": "0x0000000000000000000000000000000000000000",
+      "router": "0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59",
+      "rmn": "0xba3f6251de62ded61ff98590cb2fdf6871fbb991",
+      "registry": "0x95f29fee11c5c55d26cccf1db6772de953b37b82",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "artifactSha256": "82dac8896b84a7abe909e076a4de830258e19f5aae50f48ce17cfe8305f74114",
+      "decimals": 9,
+      "totalSupply": "100000000000000000",
+      "balance": "2000000000",
+      "allowance": "0",
+      "allowanceOwner": "0x6666666666666666666666666666666666666666",
+      "allowanceSpender": "0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59",
+      "backingHolder": "0x2222222222222222222222222222222222222222",
+      "registeredPool": "0x2222222222222222222222222222222222222222",
+      "remoteSelector": "16423721717087811551",
+      "remoteTokenHex": "0202020202020202020202020202020202020202020202020202020202020202",
+      "remotePoolHex": "0303030303030303030303030303030303030303030303030303030303030303"
+    },
+    "reverse": {
+      "pool": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "poolOwner": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+      "pendingOwner": null,
+      "rateAdmin": "gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+      "registryAdmin": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+      "pendingAdmin": null,
+      "signer": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+      "registry": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "commonBeforeState": true,
+      "mint": {
+        "address": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+        "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "length": 82,
+        "initialized": true,
+        "decimals": 9,
+        "supply": "10000000000",
+        "authority": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+        "freezeAuthority": null
+      },
+      "source": {
+        "address": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+        "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "length": 165,
+        "mint": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+        "owner": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+        "balance": "3000000000",
+        "state": "initialized",
+        "native": false,
+        "closeAuthority": null,
+        "delegate": null,
+        "delegatedAmount": "0"
+      },
+      "poolAccount": {
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "length": 165,
+        "mint": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+        "owner": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+        "balance": "7",
+        "state": "initialized",
+        "native": false,
+        "closeAuthority": null,
+        "delegate": null,
+        "delegatedAmount": "0"
+      },
+      "registryVersion": 2,
+      "registryLength": 170,
+      "registryProgram": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+      "poolProgram": "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB",
+      "supportsAutoDerivation": false,
+      "registryAlt": "swqrv48gsrwpBFbftEwnP2vB4jckpvfGJfXkwaniLCC",
+      "writableIndexes": [
+        1
+      ],
+      "alt": {
+        "key": "swqrv48gsrwpBFbftEwnP2vB4jckpvfGJfXkwaniLCC",
+        "authority": "ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+        "addresses": [
+          "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+          "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+          "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+        ],
+        "program": "AddressLookupTab1e1111111111111111111111111",
+        "deactivationSlot": "18446744073709551615",
+        "lastExtendedSlot": "150"
+      },
+      "router": "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C",
+      "rmn": "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7",
+      "remoteSelector": "16015286601757825753",
+      "remoteTokenHex": "0000000000000000000000001111111111111111111111111111111111111111",
+      "remotePoolHex": "2222222222222222222222222222222222222222"
+    }
+  },
+  "buckets": {
+    "evmOutbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000",
+      "tokens": "10000000000",
+      "owner": "0x2222222222222222222222222222222222222222",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "evmInbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000",
+      "tokens": "10000000000",
+      "owner": "0x2222222222222222222222222222222222222222",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "svmOutbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000",
+      "tokens": "10000000000",
+      "owner": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "svmInbound": {
+      "enabled": true,
+      "capacity": "10000000000",
+      "rate": "1000000000",
+      "tokens": "10000000000",
+      "owner": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  },
+  "quotes": {
+    "forward": {
+      "amount": "1000000000",
+      "selector": "16423721717087811551",
+      "recipient": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+      "feeToken": "0x0000000000000000000000000000000000000000",
+      "ccipFee": "1000000",
+      "networkFee": "5000",
+      "rent": "0",
+      "payerBalance": "10000000",
+      "exposureLimit": "10000000",
+      "sourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "observedAt": "2026-09-08T00:00:00Z",
+      "expiresAt": "2026-09-08T00:05:00Z",
+      "checkedAt": "2026-09-08T00:01:00Z"
+    },
+    "reverse": {
+      "amount": "1000000000",
+      "selector": "16015286601757825753",
+      "recipient": "0x7777777777777777777777777777777777777777",
+      "feeToken": "11111111111111111111111111111111",
+      "ccipFee": "1000000",
+      "networkFee": "5000",
+      "rent": "0",
+      "payerBalance": "10000000",
+      "exposureLimit": "10000000",
+      "sourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "context": {
+        "kind": "hypothetical",
+        "point": "200",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "observedAt": "2026-09-08T00:00:00Z",
+      "expiresAt": "2026-09-08T00:05:00Z",
+      "checkedAt": "2026-09-08T00:01:00Z"
+    }
+  },
+  "blockhash": {
+    "value": "36VASLSKLFD2KokjXG7V28veZvXEsyHRKefLonPaAKzv",
+    "lastValidBlockHeight": "1000",
+    "provenance": {
+      "kind": "hypothetical",
+      "point": "200",
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  "recipientAta": {
+    "address": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+    "exists": true,
+    "payer": "ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+    "rent": "1488440"
+  }
+}

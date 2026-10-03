@@ -3,15 +3,105 @@
 This runbook covers the existing TEST fixture under the
 [active plan](../../docs/PLAN.md): 100 AGTMAI, nine decimals, Ethereum
 LockRelease and the official Solana BurnMint pool. It is not a fresh-address
-deployment wizard or production launch. The only transfer sequence is 1 AGTMAI
-E->A, A->E, E->B; B is receive-only.
+deployment wizard or production launch. The recorded public transfer sequence is 1 AGTMAI
+E->A, A->E, E->B; B is receive-only. The offline DEV preview below accepts
+one explicitly selected hypothetical test pair.
 
-Use pinned Node 24.20.0 from the repository root. Every command below accepts
+Use pinned Node 24.20.0 from the repository root. Existing signing/status commands accept
 exactly one JSON settings path, with no additional CLI flags. Signing commands
 require the existing private TEST settings and durable journals. Recover those
 checkpoints before running anything: missing journals are not permission to
 recreate already deployed contracts or repeat transfers. Never put key material
 or private settings in this document.
+
+## Offline DEV preview: provider-free checkpoint
+
+This new command writes a complete **intent-only diagnostic**. It does not
+produce unsigned EVM calldata/SVM v0 bytes, execute CCIP, authenticate decoded
+captures, or establish current readiness. Both legs remain unavailable for
+execution, `broadcastAllowed: false`; the return remains conditional on finalized
+receive and fresh state. Exit 2 means a persisted/reopened diagnostic; exit 1
+means rejected input or publication. Neither is full unsigned PR1 acceptance.
+
+After the existing build, use the pinned Node wrapper on a qualified host:
+
+```text
+.tools/bin/node tooling/testnet-ccip/src/composition/dev-transfer-preview.mjs --input tooling/testnet-ccip/tests/fixtures/dev-transfer-preview.json --output .local/dev-transfer-preview-example
+.tools/bin/node tooling/testnet-ccip/src/composition/dev-transfer-preview.mjs --reopen .local/dev-transfer-preview-example
+```
+
+The example is a TEST hypothetical model with synthetic public identities and
+100M profile arithmetic, not the historical 100-token deployment. It supplies
+used balances, independent role bindings, an explicit registered ALT inventory
+and old fixture quotes. Its selected signer/ATA bindings are model inputs;
+cryptographic derivation and captured byte decoding remain provider prerequisites.
+No timestamp or agreeing hash upgrades it to native evidence.
+
+The strict private v1 input is demonstrated in that fixture. Every field is
+explicit, including `null` for missing state/quote/bucket/native components.
+Only pinned Sepolia/Devnet chain/program identities are accepted. Amounts,
+selectors, balances, fees and limiter values are canonical decimal strings.
+Mixed-case EVM addresses require EIP55 before normalization. Unknown/duplicate
+fields, keys/signing/RPC fields and unsupported profiles are rejected. Initial
+EVM admin, current registry admin, pool owner, user sender, return recipient,
+SVM registry/rate/pool administrators, payer and nullable ALT authority are
+separate bindings. Direct Pool Signer, classic SPL, freeze None, exact source
+and pool accounts, bounded delegation/allowance and paired limiters are checked
+as decoded consistency. A passed hypothetical admission is labelled in-model.
+
+`plan.json`, `facts.json` and `summary.md` are exclusively written into a new
+0700 directory. `complete.json` is published last with exact byte hashes and
+inventory. Reopen re-admits persisted input and reconstructs plan/fact/display
+semantics independently of supplied hashes. Existing targets, symlinks,
+partial writes, substituted directories and tampered artifacts fail closed.
+Failed publication retains diagnostic residue; remove it only through its
+known owner. The adapter never discovers or recursively deletes outputs.
+Linux descriptor paths and an isolated trusted local runtime/filesystem are
+required; this format is not a guarantee against privileged or continuously
+racing same-UID peers, or a portable filesystem platform.
+
+The remaining public provider inputs are the reviewed npm installation for
+`@chainlink/ccip-sdk@1.13.0`: root `package.json` SHA256
+`8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb`
+and `package-lock.json` SHA256
+`1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f`,
+plus retained tarballs matching that lock's integrity for SDK resolver metadata/IDL,
+`ethers@6.17.0`,
+`@solana/web3.js` and the resolved runtime closure. The latter version and each
+archive integrity must be read from that exact lock; they are not invented here.
+The feature-local admission comparator resolves from the SDK entry without
+evaluating SDK/anchor, compares each installed package against its verified
+`package/` ustar payload, and rejects unsupported/generated/injected entries.
+Run the separate opt-in positive with explicit public paths:
+
+```text
+.tools/bin/node tooling/testnet-ccip/tests/dev-transfer-preview-provider.native.mjs /absolute/public/reviewed-provider /absolute/public/lock-path-tarball-map.json
+```
+
+The JSON map supplies exact npm lock package paths to retained tarball paths.
+Missing inputs fail, and this command never downloads or evaluates SDK/anchor.
+The default suite uses independently constructed TEST mini-closure payloads;
+its positive admission is synthetic, not a real-provider positive or a skip.
+No provisioning, re-pin, install or provider mutation runs in the CLI/tests.
+
+Once those public artifacts are supplied, separately run real positive closure
+admission, account/PDA/ALT decoding, the narrow local ABI/Borsh/v0 encoder and
+independent legacy/changed-route golden compatibility vectors. Then complete
+both persisted byte-output legs with conditional return. Existing signed
+factories and the native-incompatible SPL fee profile must stay disconnected.
+Native quote/simulation metadata does not prove an execution-time SOL ceiling.
+PR2 event decoding and production qualification remain separate later work.
+
+Consumer Module Standard applicability: feature-local helpers/ports and a thin
+CLI within the existing CCIP DEV owner; no independently assembled Host scope.
+Comparison/adoption is not-applicable. Reviewed reference: Get Modular commit
+`fcb3a32fb2868d0b113ce72e1f76f1cdd784d8ef`, complete-document SHA256
+`33b41d5babf0a431c97e8e596a56e6ec1557ba1a0b26d39bf23e13d9a19e1fbd`.
+This classification does not adopt Assembly or certify repository conformance.
+Foundation still does not govern this tooling root. Existing three-slice Linux
+rollback evidence does not qualify removal of these new CCIP files. Reversal
+removes only these new preview files/tests/fixture and the test wiring hunk;
+legacy wrappers, journals, status consumers and qualified Supply stay intact.
 
 ## Public transfer ledger
 

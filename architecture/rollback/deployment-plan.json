@@ -96,8 +96,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "c7b5381198b49ae249fec3ca2aa2b06971f2452a4123b43317229a70253e5c9f",
-      "afterSha256": "e8e0366e1f01a687c6be9deaa570f7f2a2a964ed37cd6d96428607b3432d1310"
+      "beforeSha256": "ff7a3d1eb3345a5ff97429b6549d084606dcf04304905be0749396eeb52a3a90",
+      "afterSha256": "9b1d857fb22ee2fe8a369005aa54702f7fd1d649e3f31dc08763805a1a8f0207"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",
