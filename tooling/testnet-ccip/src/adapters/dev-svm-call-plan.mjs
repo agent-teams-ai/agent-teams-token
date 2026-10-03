@@ -146,11 +146,19 @@ function token(facts, name, address, mint, owner) {
   }
   return { data, balance: data.readBigUInt64LE(64), delegation: data.readBigUInt64LE(121), hasDelegate: data.readUInt32LE(72) === 1 };
 }
+function commonBeforeState(before) {
+  if (before === null) { return null; }
+  shape(before, ['mintSupply', 'sourceBalance', 'poolBalance', 'delegate', 'delegatedAmount'], 'before state');
+  const state = { mintSupply: integer(before.mintSupply, 'mint supply'), sourceBalance: integer(before.sourceBalance, 'source balance'),
+    poolBalance: integer(before.poolBalance, 'pool balance'), delegate: before.delegate, delegatedAmount: integer(before.delegatedAmount, 'delegated amount') };
+  if (state.delegate !== null) { key(state.delegate); }
+  return state;
+}
 function delegationPolicy(source, before, spender, amount) {
   const delegated = source.delegation;
   if (before !== null) {
-    if (integer(before.delegatedAmount, 'delegated amount') !== delegated || source.hasDelegate !== (before.delegate !== null)) { fail('unknown/inconsistent delegation'); }
-    if (source.hasDelegate) { key(before.delegate); keyAt(source.data, 76, before.delegate, 'captured delegate'); }
+    if (before.delegatedAmount !== delegated || source.hasDelegate !== (before.delegate !== null)) { fail('unknown/inconsistent delegation'); }
+    if (source.hasDelegate) { keyAt(source.data, 76, before.delegate, 'captured delegate'); }
   }
   if (source.hasDelegate) {
     if (!source.data.subarray(76, 108).equals(solanaPublicKeyBytes(spender))) { fail('foreign delegate requires reconciliation, including zero'); }
@@ -169,21 +177,19 @@ function capturedSplState(route, facts, e) {
   const pool = token(facts, 'poolAta', e.ata, route.mint, e.signer);
   return { supply, source, pool };
 }
-function beforeState(route, facts, e) {
+function beforeState(route, facts, e, before) {
   const { supply, source, pool } = capturedSplState(route, facts, e), amount = integer(route.amount, 'amount');
-  if (facts.before !== null) {
-    shape(facts.before, ['mintSupply', 'sourceBalance', 'poolBalance', 'delegate', 'delegatedAmount'], 'before state');
-    if (supply !== integer(facts.before.mintSupply, 'mint supply')) { fail('captured mint supply'); }
-    if (source.balance !== integer(facts.before.sourceBalance, 'source balance') ||
-        pool.balance !== integer(facts.before.poolBalance, 'pool balance')) { fail('captured source/pool balances or pool delegation'); }
+  if (before !== null) {
+    if (supply !== before.mintSupply) { fail('captured mint supply'); }
+    if (source.balance !== before.sourceBalance || pool.balance !== before.poolBalance) { fail('captured source/pool balances or pool delegation'); }
   }
   if (source.balance + pool.balance > supply || source.balance < amount || pool.balance + amount > U64_MAX ||
       pool.hasDelegate || pool.delegation !== 0n) {
     fail('captured source/pool balances or pool delegation');
   }
-  const approval = delegationPolicy(source, facts.before, e.spender, amount);
+  const approval = delegationPolicy(source, before, e.spender, amount);
   // Raw facts can be checked without inventing the unavailable common before-state.
-  if (facts.before === null) { return null; }
+  if (before === null) { return null; }
   return { approval, modelledAfter: { qualification: 'hypothetical-success-only',
     mintSupply: (supply - amount).toString(), sourceBalance: (source.balance - amount).toString(),
     poolBalance: pool.balance.toString(), delegate: null, delegatedAmount: '0' } };
@@ -299,6 +305,8 @@ export function admitDevSvmCallFacts(route, facts, derived) {
   for (const field of IDENTITY_FIELDS) {
     if (derived[field] !== route.identities[field]) { fail('derived identity ' + field); }
   }
+  // Supplied common facts remain checkable even when their raw companion is missing.
+  const commonBefore = commonBeforeState(facts.before);
   const cost = costFacts(route, facts);
   if (observed > valid || observed - snapshot > 32n) { cost.missing.push('snapshot expired'); }
   if (facts.state === null || facts.before === null) { cost.missing.push('common captured before-state missing'); }
@@ -308,7 +316,7 @@ export function admitDevSvmCallFacts(route, facts, derived) {
     shape(facts.state, ['mint', 'sourceAta', 'poolAta', 'routerConfig', 'registry', 'pool', 'chain', 'alt'], 'state');
     const limits = routeState(route, facts, derived);
     cost.missing.push(...limits.missing); limiterObservations = limits.observations;
-    before = beforeState(route, facts, derived);
+    before = beforeState(route, facts, derived, commonBefore);
     lookupTable = validateDevSvmLookupTable(route, facts, derived);
   }
   if (cost.missing.length) { return { status: 'prerequisites', reasons: cost.missing, knownCostLowerBoundLamports: cost.knownCostLowerBoundLamports, limiterObservations, broadcastAllowed: false }; }

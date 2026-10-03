@@ -292,3 +292,54 @@ test('unavailable before-state and quote retain null inputs and no bytes', () =>
     if (missingState) { assert.equal(result.limiterObservations, null); }
   }
 });
+
+// PR64-STATIC-001: null raw state hid malformed supplied common before-state.
+const malformedBefore = [
+  ['non-object shape', f => { f.before = []; }, /before state fields/],
+  ['missing field', f => { delete f.before.delegate; }, /before state fields/],
+  ['extra field', f => { f.before.extra = null; }, /before state fields/],
+  ['noncanonical mint supply', f => { f.before.mintSupply = '020000000000'; }, /mint supply canonical u64/],
+  ['negative source balance', f => { f.before.sourceBalance = '-1'; }, /source balance canonical u64/],
+  ['noncanonical pool balance', f => { f.before.poolBalance = '00'; }, /pool balance canonical u64/],
+  ['noncanonical delegated amount', f => { f.before.delegatedAmount = '00'; }, /delegated amount canonical u64/],
+  ['overflowing bigint', f => { f.before.sourceBalance = 18446744073709551616n; }, /source balance u64 range/],
+  ['numeric balance', f => { f.before.sourceBalance = 10000000000; }, /source balance canonical u64/],
+  ['undefined delegate', f => { f.before.delegate = undefined; }, /delegation|Solana mint intent/],
+  ['zero delegate', f => { f.before.delegate = '11111111111111111111111111111111'; }, /delegation|nonzero/]];
+for (const [label, mutate, reason] of malformedBefore) {
+  for (const missingState of [false, true]) {
+    test('PR64-STATIC-001 ' + label + ' with raw ' + (missingState ? 'absent' : 'present') + ' rejects', () => {
+      const { route, facts } = fixture(); mutate(facts);
+      if (missingState) { facts.state = null; }
+      const before = structuredClone(facts.before);
+      assert.throws(() => admit(route, facts), reason);
+      assert.deepEqual(facts.before, before);
+      if (missingState) { assert.equal(facts.state, null); }
+    });
+  }
+}
+test('PR64-STATIC-001 valid before with missing raw preserves integers/delegate and stays unavailable', () => {
+  for (const asBigInt of [false, true]) {
+    for (const delegated of [false, true]) {
+      const { route, facts } = fixture();
+      if (delegated) {
+        facts.before.delegate = route.identities.spender;
+        editRaw(facts, 'sourceAta', b => {
+          b.writeUInt32LE(1, 72); solanaPublicKeyBytes(route.identities.spender).copy(b, 76);
+        });
+      }
+      if (asBigInt) {
+        for (const field of ['mintSupply', 'sourceBalance', 'poolBalance', 'delegatedAmount']) {
+          facts.before[field] = BigInt(facts.before[field]);
+        }
+      }
+      assert.equal(admit(route, facts).status, 'admitted');
+      facts.state = null; const before = structuredClone(facts.before);
+      const result = admit(route, facts); noBytes(result);
+      assert.deepEqual(result.reasons, ['common captured before-state missing']);
+      assert.equal(result.knownCostLowerBoundLamports, '5005'); assert.equal(result.limiterObservations, null);
+      assert.equal(Object.hasOwn(result, 'modelledAfter'), false);
+      assert.deepEqual(facts.before, before); assert.equal(facts.state, null);
+    }
+  }
+});
