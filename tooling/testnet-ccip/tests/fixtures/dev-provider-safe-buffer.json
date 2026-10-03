@@ -1,0 +1,6 @@
+{
+  "package": "safe-buffer@5.2.1",
+  "sha256": "5d181804516c4a693a384272a7bd0e42d17e0d4b301ccfbe408669ccafdcb3e8",
+  "integrity": "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==",
+  "source": "independently integrity-verified retained official npm archive"
+}
