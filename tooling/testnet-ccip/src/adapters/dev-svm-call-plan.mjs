@@ -240,25 +240,30 @@ function costObservation(route, facts, name, fact) {
   if (fact.payer !== route.payer || integer(fact.snapshotSlot, name + ' snapshot') !== integer(facts.snapshotSlot, 'snapshot') ||
       typeof fact.source !== 'string' || !fact.source.length || fact.source.length > 256 ||
       integer(fact.validThroughSlot, name + ' validity') < integer(facts.snapshotSlot, 'snapshot')) { fail(name + ' inconsistent captured fact'); }
-  if (fact.lamports === null) { return { missing: name + ' amount unknown' }; }
-  const amount = integer(fact.lamports, name + ' lamports', name === 'quote');
-  if (name === 'quote' && (amount > 100000000n || integer(fact.selector, 'quote selector') !== integer(route.selector, 'destination selector') ||
+  // A missing monetary amount cannot erase the quote's known route binding.
+  if (name === 'quote' && (integer(fact.selector, 'quote selector') !== integer(route.selector, 'destination selector') ||
       fact.mint !== route.mint || integer(fact.amount, 'quoted amount') !== integer(route.amount, 'amount') || fact.feeToken !== SYSTEM_PROGRAM)) {
     fail('native quote bound/route/amount');
   }
+  if (fact.lamports === null) { return { missing: name + ' amount unknown' }; }
+  const amount = integer(fact.lamports, name + ' lamports', name === 'quote');
+  if (name === 'quote' && amount > 100000000n) { fail('native quote bound/route/amount'); }
   return { amount, missing: integer(fact.validThroughSlot, name + ' expiry') < integer(facts.observedSlot, 'observed slot') ? name + ' expired' : null };
 }
 function blockhashPrerequisite(facts) {
   const block = facts.blockhash;
   if (block === null) { return 'recent blockhash missing'; }
   shape(block, ['value', 'snapshotSlot', 'validThroughSlot', 'lastValidBlockHeight', 'observedBlockHeight', 'source'], 'blockhash');
-  if (block.value === null || block.lastValidBlockHeight === null || block.observedBlockHeight === null) { return 'recent blockhash validity unknown'; }
-  solanaPublicKeyBytes(block.value);
   if (integer(block.snapshotSlot, 'blockhash snapshot') !== integer(facts.snapshotSlot, 'snapshot') ||
       typeof block.source !== 'string' || !block.source.length || block.source.length > 256 ||
       integer(block.validThroughSlot, 'blockhash validity') < integer(facts.snapshotSlot, 'snapshot')) { fail('inconsistent blockhash fact'); }
+  // Validate every supplied value before classifying a missing companion as unknown.
+  if (block.value !== null) { solanaPublicKeyBytes(block.value); }
+  const lastValid = block.lastValidBlockHeight === null ? null : integer(block.lastValidBlockHeight, 'last valid block height');
+  const observed = block.observedBlockHeight === null ? null : integer(block.observedBlockHeight, 'observed block height');
   if (integer(block.validThroughSlot, 'blockhash expiry') < integer(facts.observedSlot, 'observed slot') ||
-      integer(block.lastValidBlockHeight, 'last valid block height') < integer(block.observedBlockHeight, 'observed block height')) { return 'recent blockhash expired'; }
+      lastValid !== null && observed !== null && lastValid < observed) { return 'recent blockhash expired'; }
+  if (block.value === null || lastValid === null || observed === null) { return 'recent blockhash validity unknown'; }
   return null;
 }
 function costFacts(route, facts) {

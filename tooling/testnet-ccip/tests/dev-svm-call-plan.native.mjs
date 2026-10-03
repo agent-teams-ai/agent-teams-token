@@ -361,3 +361,45 @@ test('native compatible aliases build with live construction and compiler observ
   assert.equal(send.accounts[5].address, send.accounts[27].address);
   verifyDevSvmCallPlan(p, route, facts, result);
 });
+
+// SVM-PUBLICATION-001/002: unavailable costs/heights must not hide known identity conflicts.
+test('native quote bindings reject with known or unknown lamports before byte construction', () => {
+  for (const change of [(r, f) => { f.fees.quote.selector = '1'; },
+    (r, f) => { f.fees.quote.mint = r.linkMint; }, (r, f) => { f.fees.quote.amount = '1'; },
+    (r, f) => { f.fees.quote.feeToken = r.linkMint; }]) {
+    for (const missing of [false, true]) {
+      const { route, facts } = fixture(); change(route, facts); if (missing) { facts.fees.quote.lamports = null; }
+      const counter = countedBuilder(); assert.throws(() => counter.build(route, facts), /native quote bound\/route\/amount/);
+      assert.equal(counter.calls(), 0); assert.equal(counter.constructions(), 0);
+    }
+  }
+});
+test('native supplied blockhash facts reject conflicts even with a missing companion value', () => {
+  for (const change of [b => { b.snapshotSlot = '99'; }, b => { b.validThroughSlot = '99'; },
+    b => { b.source = ''; }, b => { b.value = 'invalid-blockhash'; },
+    b => { b.lastValidBlockHeight = '-1'; }, b => { b.observedBlockHeight = '-1'; }]) {
+    for (const missing of [null, 'value', 'lastValidBlockHeight', 'observedBlockHeight']) {
+      const { route, facts } = fixture(); if (missing) { facts.blockhash[missing] = null; } change(facts.blockhash);
+      const counter = countedBuilder(); assert.throws(() => counter.build(route, facts));
+      assert.equal(counter.calls(), 0); assert.equal(counter.constructions(), 0);
+    }
+  }
+});
+test('native correctly bound unknown quote retains null and known cost lower bound', () => {
+  const { route, facts } = fixture(); facts.fees.quote.lamports = null;
+  const counter = countedBuilder(), result = counter.build(route, facts);
+  assert.equal(result.status, 'prerequisites'); assert.ok(result.reasons.includes('quote amount unknown'));
+  assert.equal(result.knownCostLowerBoundLamports, '5000'); assert.equal(facts.fees.quote.lamports, null);
+  assert.equal(counter.calls(), 0); assert.equal(counter.constructions(), 0);
+  for (const field of ['instructions', 'messageBase64', 'transactionBase64', 'modelledAfter']) { assert.equal(Object.hasOwn(result, field), false); }
+});
+test('native consistent incomplete blockhash retains each null without byte construction', () => {
+  for (const missing of ['value', 'lastValidBlockHeight', 'observedBlockHeight']) {
+    const { route, facts } = fixture(); facts.blockhash[missing] = null;
+    const counter = countedBuilder(), result = counter.build(route, facts);
+    assert.equal(result.status, 'prerequisites'); assert.ok(result.reasons.includes('recent blockhash validity unknown'));
+    assert.equal(result.knownCostLowerBoundLamports, '5005'); assert.equal(facts.blockhash[missing], null);
+    assert.equal(counter.calls(), 0); assert.equal(counter.constructions(), 0);
+    for (const field of ['instructions', 'messageBase64', 'transactionBase64', 'modelledAfter']) { assert.equal(Object.hasOwn(result, field), false); }
+  }
+});
