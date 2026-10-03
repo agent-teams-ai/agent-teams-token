@@ -28,6 +28,7 @@ export const SELECTED_PACKAGES = Object.freeze([
   Object.freeze(["@solana/web3.js/node_modules/borsh", "e6f1438a1b4f994cb0b3392ef67cb772a57aa1de6b62ae42805ea7ca9715edb1"]),
   Object.freeze(["text-encoding-utf-8", "6a32754af512ac53c3cbab5e8ec7d2931e43105ee4514a431f76d0e015654e72"]),
   Object.freeze(["safe-buffer", "5d181804516c4a693a384272a7bd0e42d17e0d4b301ccfbe408669ccafdcb3e8"]),
+  Object.freeze(["@solana/web3.js/node_modules/superstruct", "8b02b0ddf37ed32a62c80f03d5c21ed170f605800ab2ad1064f8499391f15f06"]),
   Object.freeze(["jayson", "0403fc8cf5de8a2c19591890eb7090f96a421f319aa6ee1e8044c40a47acd2b2"]),
   Object.freeze(["uuid", "f630703647a5821c735a542edcf8d26c989724efe9d9912ab6f6836a1e79924a"]),
   Object.freeze(["node-fetch", "a70348669b01db602faf140e984e61b01c4380f9b4bf5e460b7960902412832b"]),

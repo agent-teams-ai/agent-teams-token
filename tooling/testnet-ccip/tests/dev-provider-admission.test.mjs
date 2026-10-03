@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Module, { createRequire } from 'node:module';
-import { mkdtemp, cp, readFile, writeFile, mkdir, rm, rename, chmod, symlink, link, rmdir } from 'node:fs/promises';
+import { mkdtemp, cp, readFile, writeFile, mkdir, rm, rename, chmod, symlink, link, rmdir, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,7 @@ let compilations = 0, sentinelEvaluations = 0, effects = 0;
 const compileKey = '_compile';
 const originalCompile = Module.prototype[compileKey];
 Module.prototype[compileKey] = function (content, filename, ...rest) {
-  if (filename.startsWith(root + '/') || filename.startsWith(prepared + '/')) { compilations++; }
+  if (filename.startsWith(staging + '/') || filename.startsWith(prepared + '/')) { compilations++; }
   return originalCompile.call(this, content, filename, ...rest);
 };
 const effect = () => { effects++; throw new Error('offline test forbids network'); };
@@ -287,6 +287,30 @@ try {
     assert.equal(effects, 0); assert.equal(sentinelEvaluations, 0);
     console.log(JSON.stringify({ evidence, candidateCompilations: compilations, harmlessCounter: sentinelEvaluations,
       networkEffects: effects, realUnsignedGoldens: ['approve', 'historical-ccipSend-calldata', 'captured-SPL-approve-v0-zero-signature'] }));
+  });
+  await test('nested superstruct tampering rejects before any candidate compilation', async () => {
+    // A fresh physical owner avoids both positive module caches and negative
+    // optional-resolution caches; only this private, quiescent copy is mutated.
+    const tamperedRoot = join(staging, 'superstruct-provider');
+    await cp(prepared, tamperedRoot, { recursive: true, preserveTimestamps: true });
+    const entry = join(tamperedRoot, 'node_modules/@solana/web3.js/node_modules/superstruct/dist/index.cjs');
+    const original = await lstat(entry), before = compilations, counterBefore = sentinelEvaluations;
+    await changedFile(entry, b => Buffer.concat([b, Buffer.from(sentinel)]), async () => {
+      const changed = await lstat(entry);
+      assert.equal(changed.isFile(), true);
+      for (const field of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink']) {
+        assert.equal(changed[field], original[field], 'sentinel mutation changed file ' + field);
+      }
+      try {
+        await refuses(/package byte drift: node_modules\/@solana\/web3\.js\/node_modules\/superstruct\/dist\/index\.cjs/,
+          { root: tamperedRoot, archives });
+        assert.equal(sentinelEvaluations, counterBefore, 'nested superstruct sentinel changed');
+        assert.equal(Object.keys(require.cache).filter(path => path.startsWith(tamperedRoot + '/')).length, 0);
+      } finally {
+        console.log(JSON.stringify({ regression: 'nested-superstruct-tampering', candidateCompilations: compilations - before,
+          harmlessCounterBefore: counterBefore, harmlessCounterAfter: sentinelEvaluations, networkEffects: effects }));
+      }
+    });
   });
 } finally {
   Module.prototype[compileKey] = originalCompile;
