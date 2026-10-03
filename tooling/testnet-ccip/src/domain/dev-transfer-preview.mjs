@@ -154,3 +154,19 @@ export function admitDevTransfer(input, direction) {
   return { status: conflicts.length ? 'inconsistent' : reasons.length ? 'prerequisite' : 'admitted-in-model', reasons, conflicts, approval,
     conditional: direction === 'reverse', condition: direction === 'reverse' ? 'Finalized receive and fresh return-state admission' : null };
 }
+
+/** Normalized, forward-only local codec intent. Model admission is not chain truth. */
+export function forwardCallIntent(input, admission, quote) {
+  validatePreviewRoute(input);
+  const admitted = admission.status === 'admitted-in-model';
+  // Native gas/rent/balance unknownness remains an execution prerequisite; a known
+  // insufficient budget, expired quote or conflicting identity cannot supply send bytes.
+  const quoteUsable = quote.value !== null && !quote.conflicts.length &&
+    quote.reasons.every(reason => reason.startsWith('Native ') && reason.endsWith(' unknown'));
+  const fee = quoteUsable ? quote.value.ccipFee : null;
+  if (fee !== null && (integer(fee, 256, true) > 10000000000000000n)) {throw new Error('Forward native fee cap');}
+  return Object.freeze({ chainId: PREVIEW_LANE.chainId, router: PREVIEW_LANE.router, selector: PREVIEW_LANE.solanaSelector,
+    token: input.pair.evm.token, sender: input.pair.evm.sender, amount: input.amount,
+    tokenReceiver: '0x' + solanaPublicKeyBytes(input.pair.svm.recipient).toString('hex'), fee,
+    approve: admitted && admission.approval.required === true, send: admitted && quoteUsable });
+}

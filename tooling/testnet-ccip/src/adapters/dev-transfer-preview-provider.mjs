@@ -1,4 +1,12 @@
 import { createHash } from 'node:crypto';
+import { loadDevProvider } from './dev-provider-admission.mjs';
+import { createDevEvmCallPlanPort } from './dev-evm-call-plan.mjs';
+
+// The DEV addendum is separate from immutable legacy PREVIEW_PINS below.
+export async function loadForwardPreviewEncoding(options) {
+  const { primitives } = await loadDevProvider(options);
+  return createDevEvmCallPlanPort(primitives);
+}
 import { gunzipSync } from 'node:zlib';
 import { lstat, readdir, readlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';

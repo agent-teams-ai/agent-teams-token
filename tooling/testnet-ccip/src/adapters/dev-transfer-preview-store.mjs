@@ -4,6 +4,7 @@ import { open, lstat, mkdir, link, unlink, opendir } from 'node:fs/promises';
 import { resolve, dirname, join, parse, relative } from 'node:path';
 import { parsePreviewJson, readPreviewInput } from './dev-transfer-preview-input.mjs';
 import { prepareDevTransferPreview } from '../application/dev-transfer-preview.mjs';
+import { reopenDevEvmCallPlanPort } from './dev-evm-call-plan.mjs';
 
 export function canonicalPreview(value) {
   if (Array.isArray(value)) {return '[' + value.map(canonicalPreview).join(',') + ']';}
@@ -13,8 +14,9 @@ export function canonicalPreview(value) {
 export const hashPreviewBytes = bytes => createHash('sha256').update(bytes).digest('hex');
 export const digestPreview = value => hashPreviewBytes(canonicalPreview(value));
 export function renderPreview(plan) {
-  const lines = ['# Offline DEV transfer intent', '', 'Evidence: fixture-only; ' + plan.status + '; broadcastAllowed: false.',
-    'No CCIP delivery, current readiness, signing or unsigned bytes are claimed.', '',
+  const encoded = plan.legs.forward.callPlan;
+  const lines = [encoded ? '# Offline DEV transfer preview' : '# Offline DEV transfer intent', '', 'Evidence: fixture-only; ' + plan.status + '; broadcastAllowed: false.',
+    encoded ? 'Forward bytes: local-codec-encoding, DEV addendum only. Decoded prerequisites remain unauthenticated; executable: false.' : 'No CCIP delivery, current readiness, signing or unsigned bytes are claimed.', '',
     'Source: ' + plan.source.sourceRevision, 'Route SHA256: ' + plan.routeHash, 'Plan SHA256: ' + plan.planHash,
     'Profile: ' + plan.route.profile + '; amount: ' + plan.route.amount + ' base units (decimals 9).',
     'Lane: Ethereum Sepolia (' + plan.route.lane.chainId + ') → Solana Devnet; conditional return to Sepolia.',
@@ -28,14 +30,24 @@ export function renderPreview(plan) {
   for (const [direction, leg] of Object.entries(plan.legs)) {
     lines.push('## ' + (direction === 'forward' ? 'Receive on Solana' : 'Conditional return to Ethereum'), '',
       'From: ' + leg.from, 'Recipient: ' + leg.recipient, 'Admission: ' + leg.admission.status,
-      'Unsigned availability: unavailable; executable: false.', '');
+      'Unsigned availability: ' + (leg.callPlan?.availability ?? 'unavailable') + '; executable: false.', '');
+    if (leg.callPlan) {
+      lines.push('Encoding authority: ' + leg.callPlan.provenance.authority,
+        'DEV provider manifest / lock SHA256: ' + leg.callPlan.provenance.providerManifestSha256 + ' / ' + leg.callPlan.provenance.providerLockSha256, '');
+      for (const operation of leg.operations.filter(item => item.unsigned)) {
+        const call = operation.unsigned;
+        lines.push('- Conditional ' + operation.kind + ': from ' + call.from + '; to ' + call.to + '; chainId ' + call.chainId + '; value ' + call.value + ' wei',
+          '  Calldata: ' + call.data, '  Call SHA256: ' + operation.callHash);
+      }
+    }
     for (const item of [...leg.conflicts, ...leg.prerequisites, ...leg.executionPrerequisites]) {lines.push('- ' + item);}
     if (leg.condition) {lines.push('- Condition: ' + leg.condition);}
     lines.push('');
   }
   return lines.join('\n');
 }
-export const previewPorts = Object.freeze({ digest: digestPreview, render: renderPreview });
+export const previewPorts = Object.freeze({ digest: digestPreview, render: renderPreview,
+  hashCalldata: data => hashPreviewBytes(Buffer.from(data.slice(2), 'hex')) });
 const identity = s => [s.dev, s.ino].join(':');
 async function noLinkAncestors(path) {
   const absolute = resolve(path), root = parse(absolute).root;
@@ -102,6 +114,10 @@ export async function publishPreview(artifacts, output) {
   } finally { await fd.close(); }
   return reopenPreview(directory);
 }
+function persistedForwardEncoding(plan) {
+  const forward = plan.legs?.forward;
+  return forward?.callPlan ? reopenDevEvmCallPlanPort(forward.callPlan, forward.operations) : undefined;
+}
 export async function reopenPreview(output) {
   if (typeof output !== 'string' || !output.length || output.length > 4096 || output.includes('://')) {throw new Error('Bounded local output path required');}
   const directory = resolve(output); await noLinkAncestors(directory);
@@ -134,7 +150,8 @@ export async function reopenPreview(output) {
     for (let i = 0; i < artifactNames.length; i++) {if (hashPreviewBytes(bytes[i]) !== complete.inventory[artifactNames[i]]) {throw new Error('Artifact byte hash mismatch');}}
     const plan = parsePreviewJson(bytes[0].toString(), 1048576), facts = parsePreviewJson(bytes[1].toString(), 1048576);
     // Reconstruct all semantics from strictly re-admitted persisted input, rather than trusting agreeing hashes.
-    const expected = prepareDevTransferPreview(readPreviewInput(canonicalPreview(plan.input)), previewPorts);
+    const forwardEncoding = persistedForwardEncoding(plan);
+    const expected = prepareDevTransferPreview(readPreviewInput(canonicalPreview(plan.input)), { ...previewPorts, forwardEncoding });
     if (canonicalPreview(plan) !== canonicalPreview(expected.plan) || canonicalPreview(facts) !== canonicalPreview(expected.facts) || bytes[2].toString() !== expected.summary ||
       complete.planHash !== plan.planHash || complete.routeHash !== plan.routeHash || canonicalPreview(complete.source) !== canonicalPreview(plan.source) || complete.evidenceClass !== plan.evidenceClass || complete.status !== plan.status) {throw new Error('Artifact semantic cross-binding mismatch');}
     await assertInventory();
