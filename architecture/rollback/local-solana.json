@@ -72,8 +72,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "7d5268f79529bc8d978cb2abbd9d0e6a18c3752e049d87ebd47328c67ca2b2d8",
-      "afterSha256": "cf7260e430af51ac0a4ec222f19584515db0e6aef9ecebc8117bcc1cfd430680"
+      "beforeSha256": "afe9a596087af0c0ca8785df6987c2142ea00cc9f75ee738bffd8104ac905090",
+      "afterSha256": "497050f763ccc9a02d3af55883db40aa5a41414f420e8f3940d7c006d9e53db1"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
