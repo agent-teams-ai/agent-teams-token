@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { readFile, writeFile, mkdtemp, rm, mkdir, rename, symlink, lstat, readdir, realpath, open } from 'node:fs/promises';
+import { readFile, writeFile, appendFile, mkdtemp, rm, mkdir, rename, symlink, lstat, readdir, realpath, open } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -73,6 +73,63 @@ test('reopen rejects changed display bytes and coherent machine-fact tampering',
   complete.inventory['facts.json'] = bytesHash(bytes); await writeFile(join(other, 'complete.json'), JSON.stringify(complete));
   await assert.rejects(reopenPreview(other), /semantic cross-binding/);
 });
+
+// Failure caught: one new entry during artifact reads could escape the initial inventory check.
+test('reopen rejects a single injected entry after reading completion without directory replacement', async t => {
+  const root = await temporary(t), output = join(root, 'preview');
+  await publishPreview(await artifacts(), output);
+  const directory = await lstat(output), complete = await lstat(join(output, 'complete.json'));
+  const probe = await open(output, 'r'), prototype = Object.getPrototypeOf(probe), realStat = prototype.stat;
+  await probe.close();
+  let completionStats = 0, injections = 0;
+  t.mock.method(prototype, 'stat', async function(...args) {
+    const held = await realStat.apply(this, args);
+    if (held.dev === complete.dev && held.ino === complete.ino && ++completionStats === 2) {
+      await writeFile(join(output, 'injected.txt'), 'single injection'); injections++;
+    }
+    return held;
+  });
+  await assert.rejects(reopenPreview(output), /Incomplete or injected artifact inventory/);
+  assert.equal(injections, 1);
+  const after = await lstat(output); assert.deepEqual([after.dev, after.ino], [directory.dev, directory.ino]);
+  assert.deepEqual((await readdir(output)).toSorted(), ['complete.json', 'facts.json', 'injected.txt', 'plan.json', 'summary.md']);
+  assert.equal(await readFile(join(output, 'injected.txt'), 'utf8'), 'single injection');
+});
+
+// Failure caught: growth after the initial real descriptor stat could allocate/read beyond the byte ceiling before rejection.
+for (const name of ['input', 'complete.json', 'plan.json']) {
+  test('descriptor reads cap post-stat growth for ' + name + ' at maximum plus one byte', async t => {
+    const root = await temporary(t), output = join(root, 'preview'), maximum = name === 'input' ? 65536 : 1048576;
+    const target = name === 'input' ? join(root, 'input.json') : join(output, name);
+    if (name === 'input') {await writeFile(target, 'ten bytes!');} else {await publishPreview(await artifacts(), output);}
+    const probe = await open(target, 'r'), initial = await probe.stat(), prototype = Object.getPrototypeOf(probe);
+    const realStat = prototype.stat, realRead = prototype.read, realReadFile = prototype.readFile;
+    await probe.close();
+    let injections = 0, consumed = 0, growingHandle;
+    t.mock.method(prototype, 'stat', async function(...args) {
+      const held = await realStat.apply(this, args);
+      if (!injections && held.dev === initial.dev && held.ino === initial.ino) {
+        growingHandle = this;
+        await appendFile(target, Buffer.alloc(maximum + 4096 - held.size, 120)); injections++;
+      }
+      return held;
+    });
+    t.mock.method(prototype, 'read', async function(...args) {
+      const result = await realRead.apply(this, args);
+      if (this === growingHandle) {consumed += result.bytesRead;}
+      return result;
+    });
+    t.mock.method(prototype, 'readFile', async function(...args) {
+      const bytes = await realReadFile.apply(this, args);
+      if (this === growingHandle) {consumed += bytes.length;}
+      return bytes;
+    });
+    await assert.rejects(name === 'input' ? readPreviewFile(target, maximum) : reopenPreview(output), /byte bound|changed while/);
+    assert.equal(injections, 1);
+    assert.equal((await lstat(target)).size, maximum + 4096);
+    assert.equal(consumed, maximum + 1, 'real descriptor bytes consumed before overflow rejection');
+  });
+}
 
 // Failure caught: replacing the directory during a real descriptor write could publish completion into, or delete, the foreign object.
 test('directory substitution fails closed and preserves foreign identity and sentinel', async t => {

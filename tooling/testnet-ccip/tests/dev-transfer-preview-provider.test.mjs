@@ -76,6 +76,22 @@ for (const mutation of ['code', 'idl', 'sdk-idl', 'sdk-metadata', 'transitive', 
   });
 }
 
+// Failure caught: masking special permission bits could admit modes forbidden by the integrity-bound tar payload.
+for (const [path, mode, reason] of [
+  ['lib/index.js', 0o4644, /changed installed package entry: lib\/index.js/],
+  ['lib', 0o2755, /changed installed package entry: lib/],
+  ['', 0o1755, /changed package directory mode/],
+]) {
+  test('synthetic provider rejects special permissions on ' + (path || 'package root') + ' before evaluation', async t => {
+    const mini = await miniClosure(t), target = join(mini.root, 'node_modules/ethers', path);
+    assert.equal((await admitPreviewProviders(mini)).evaluated, false);
+    await chmod(target, mode);
+    assert.equal((await lstat(target)).mode & 0o7777, mode);
+    await assert.rejects(admitPreviewProviders(mini), reason);
+    await assert.rejects(lstat(mini.marker), { code: 'ENOENT' });
+  });
+}
+
 // Failure caught: complete lock-integrity payloads must not authorize a runtime closure that reaches SDK/anchor.
 for (const forbiddenRuntime of ['@chainlink/ccip-sdk', '@coral-xyz/anchor']) {
   test('synthetic authenticated closure excludes executable ' + forbiddenRuntime, async t => {

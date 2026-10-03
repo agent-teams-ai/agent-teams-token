@@ -63,7 +63,7 @@ function npmPayload(archive, integrity) {
   return { entries, rootMode };
 }
 async function comparePackage(directory, { entries: expected, rootMode }) {
-  if (((await lstat(directory)).mode & 0o777) !== rootMode) { fail('changed package directory mode'); }
+  if (((await lstat(directory)).mode & 0o7777) !== rootMode) { fail('changed package directory mode'); }
   const actual = new Map();
   const walk = async (path, prefix = '', depth = 0) => {
     if (depth > 16) {fail('installed package depth exceeds bound');}
@@ -73,7 +73,7 @@ async function comparePackage(directory, { entries: expected, rootMode }) {
       const full = join(path, name), s = await lstat(full);
       const type = s.isSymbolicLink() ? 'symlink' : s.isFile() ? 'file' : s.isDirectory() ? 'directory' : 'unsupported';
       if (actual.size >= 4096 || !expected.has(rel)) {fail('injected installed package entry: ' + rel);}
-      const entry = { type, mode: s.mode & 0o777 };
+      const entry = { type, mode: s.mode & 0o7777 };
       if (type === 'file') {entry.sha256 = hashPreviewBytes(await readPreviewFile(full, 33554432));}
       if (type === 'symlink') {entry.target = await readlink(full);}
       actual.set(rel, entry);

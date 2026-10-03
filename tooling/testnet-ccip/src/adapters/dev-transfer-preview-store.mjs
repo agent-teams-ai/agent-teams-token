@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, lstat, mkdir, link, unlink, readdir } from 'node:fs/promises';
+import { open, lstat, mkdir, link, unlink, opendir } from 'node:fs/promises';
 import { resolve, dirname, join, parse, relative } from 'node:path';
 import { parsePreviewJson, readPreviewInput } from './dev-transfer-preview-input.mjs';
 import { prepareDevTransferPreview } from '../application/dev-transfer-preview.mjs';
@@ -45,6 +45,17 @@ async function noLinkAncestors(path) {
     if (!s.isDirectory() || s.isSymbolicLink()) {throw new Error('Local directory ancestor is not a real directory');}
   }
 }
+// Include only one overflow byte, even if a file grows after its initial stat.
+async function readBounded(file, maximum) {
+  const chunks = [], buffer = Buffer.alloc(Math.min(65536, maximum + 1)); let total = 0;
+  for (;;) {
+    const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, maximum + 1 - total), null);
+    if (!bytesRead) {return Buffer.concat(chunks, total);}
+    total += bytesRead;
+    if (total > maximum) {throw new Error('Local file exceeds byte bound');}
+    chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+  }
+}
 export async function readPreviewFile(path, maximum = 65536) {
   const absolute = resolve(path);
   if (typeof path !== 'string' || path.length > 4096 || path.includes('://')) {throw new Error('Bounded local file path required');}
@@ -53,7 +64,7 @@ export async function readPreviewFile(path, maximum = 65536) {
   try {
     const before = await fd.stat();
     if (!before.isFile() || before.size > maximum || identity(before) !== identity(await lstat(absolute))) {throw new Error('Bounded regular local file required');}
-    const bytes = await fd.readFile();
+    const bytes = await readBounded(fd, maximum);
     const after = await fd.stat();
     if (bytes.length > maximum || after.size !== before.size || after.mtimeMs !== before.mtimeMs || identity(after) !== identity(await lstat(absolute))) {throw new Error('Local file changed while reading');}
     return bytes;
@@ -103,14 +114,20 @@ export async function reopenPreview(output) {
       try {
         const before = await file.stat();
         if (!before.isFile() || before.size > 1048576 || identity(before) !== identity(await lstat(path))) {throw new Error('Invalid artifact file');}
-        const bytes = await file.readFile(), after = await file.stat();
+        const bytes = await readBounded(file, 1048576), after = await file.stat();
         if (bytes.length > 1048576 || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || identity(after) !== identity(await lstat(path))) {throw new Error('Artifact changed while reopening');}
         return bytes;
       }
       finally { await file.close(); }
     };
-    const names = (await readdir(anchored)).toSorted();
-    if (names.join(',') !== [...artifactNames, 'complete.json'].toSorted().join(',')) {throw new Error('Incomplete or injected artifact inventory');}
+    const assertInventory = async () => {
+      const remaining = new Set([...artifactNames, 'complete.json']);
+      for await (const entry of await opendir(anchored, { bufferSize: remaining.size + 1 })) {
+        if (!remaining.delete(entry.name)) {throw new Error('Incomplete or injected artifact inventory');}
+      }
+      if (remaining.size) {throw new Error('Incomplete or injected artifact inventory');}
+    };
+    await assertInventory();
     const complete = parsePreviewJson((await read('complete.json')).toString(), 1048576);
     if (Object.keys(complete).toSorted().join(',') !== 'evidenceClass,inventory,planHash,routeHash,schema,source,status' || complete.schema !== 'agtmai-dev-transfer-complete-v1' || Object.keys(complete.inventory).toSorted().join(',') !== artifactNames.slice().toSorted().join(',')) {throw new Error('Invalid completion schema');}
     const bytes = await Promise.all(artifactNames.map(read));
@@ -120,6 +137,7 @@ export async function reopenPreview(output) {
     const expected = prepareDevTransferPreview(readPreviewInput(canonicalPreview(plan.input)), previewPorts);
     if (canonicalPreview(plan) !== canonicalPreview(expected.plan) || canonicalPreview(facts) !== canonicalPreview(expected.facts) || bytes[2].toString() !== expected.summary ||
       complete.planHash !== plan.planHash || complete.routeHash !== plan.routeHash || canonicalPreview(complete.source) !== canonicalPreview(plan.source) || complete.evidenceClass !== plan.evidenceClass || complete.status !== plan.status) {throw new Error('Artifact semantic cross-binding mismatch');}
+    await assertInventory();
     await assertDirectory(directory, id);
     return { directory, status: plan.status, evidenceClass: plan.evidenceClass, planHash: plan.planHash, routeHash: plan.routeHash,
       paths: Object.fromEntries([...artifactNames, 'complete.json'].map(name => [name, join(directory, name)])), plan, facts };
