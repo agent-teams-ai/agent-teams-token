@@ -170,3 +170,66 @@ export function forwardCallIntent(input, admission, quote) {
     tokenReceiver: '0x' + solanaPublicKeyBytes(input.pair.svm.recipient).toString('hex'), fee,
     approve: admitted && admission.approval.required === true, send: admitted && quoteUsable });
 }
+
+function assertReverseCostRoute(r, f, check) {
+  for (const [name, fact] of Object.entries({ ...f.fees, payerBalance: f.payerBalance })) {
+    if (!fact) {continue;}
+    check(fact.payer, r.payer, name + ' payer'); check(fact.snapshotSlot, f.snapshotSlot, name + ' snapshot');
+  }
+  if (f.fees.quote) {
+    check(f.fees.quote.selector, r.selector, 'quoted selector'); check(f.fees.quote.mint, r.mint, 'quoted mint');
+    check(f.fees.quote.amount, r.amount, 'quoted amount'); check(f.fees.quote.feeToken, '11111111111111111111111111111111', 'quoted fee token');
+  }
+  if (f.blockhash) {check(f.blockhash.snapshotSlot, f.snapshotSlot, 'raw blockhash snapshot');}
+}
+
+function assertReverseLimiterBindings(input, r, check) {
+  for (const [direction, name] of [['inbound', 'svmInbound'], ['outbound', 'svmOutbound']]) {
+    const supplied = r.limiters?.[direction];
+    if (supplied) {
+      for (const field of ['enabled', 'capacity', 'rate']) {check(supplied[field], input.limiters[name][field], direction + ' limiter ' + field);}
+    }
+  }
+}
+
+/** The independently selected native route must describe this consumer's pair. */
+export function assertReversePreviewBindings(input, { route: r, facts: f }) {
+  const s = input.pair.svm, e = input.pair.evm, state = input.states.reverse;
+  const check = (actual, expected, name) => {
+    if (!same(actual, expected)) {throw new Error('Reverse preview binding: ' + name);}
+  };
+  for (const name of ['profile', 'fixedSupplyBaseUnits', 'decimals', 'amount']) {check(r[name], input[name], name);}
+  for (const [name, expected] of Object.entries({ selector: input.lane.ethereumSelector, solanaSelector: input.lane.solanaSelector,
+    genesisHash: input.lane.genesisHash, routerProgram: input.lane.routerProgram, feeQuoterProgram: input.lane.feeQuoterProgram,
+    poolProgram: input.lane.poolProgram, tokenProgram: input.lane.tokenProgram, rmn: input.lane.rmnProgram,
+    mint: s.mint, evmToken: e.token, evmPool: e.pool, payer: s.payer, sender: s.sender,
+    forwardRecipient: s.recipient, recipient: e.recipient, alt: s.alt.key, lookupTableAuthority: s.alt.authority })) {check(r[name], expected, name);}
+  for (const [name, expected] of Object.entries({ pool: s.pool, signer: s.signer, ata: s.poolAta,
+    sourceAta: s.sourceAta, registry: s.registry, spender: s.spender })) {check(r.identities[name], expected, name);}
+  for (const [name, expected] of Object.entries({ poolOwner: s.poolOwner, pendingPoolOwner: s.pendingOwner,
+    rateAdmin: s.rateAdmin, registryAdmin: s.registryAdmin, pendingRegistryAdmin: s.pendingAdmin })) {check(r.roles[name], expected, name);}
+  check(s.alt.addresses, [r.alt, r.identities.registry, r.poolProgram, r.identities.pool, r.identities.ata,
+    r.identities.signer, r.tokenProgram, r.mint, r.identities.feeTokenConfig, r.identities.routerPoolSigner], 'selected ALT inventory');
+  if (state) {
+    check(f.snapshotSlot, state.context.point, 'hypothetical snapshot slot');
+    if (f.before) {
+      for (const [name, expected] of Object.entries({ mintSupply: state.mint.supply, sourceBalance: state.source.balance,
+        poolBalance: state.poolAccount.balance, delegate: state.source.delegate, delegatedAmount: state.source.delegatedAmount })) {check(f.before[name], expected, name);}
+    }
+  }
+  assertReverseLimiterBindings(input, r, check);
+  assertReverseCostRoute(r, f, check);
+  const q = input.quotes.reverse;
+  if (q) {
+    check(f.maxExposureLamports, q.exposureLimit, 'explicit exposure limit');
+    for (const [name, expected] of Object.entries({ quote: q.ccipFee, networkFee: q.networkFee, rent: q.rent, payerBalance: q.payerBalance })) {
+      const fact = name === 'payerBalance' ? f.payerBalance : f.fees[name];
+      if (fact && fact.lamports !== null && expected !== null) {check(fact.lamports, expected, name);}
+    }
+  }
+  if (input.blockhash && f.blockhash) {
+    if (f.blockhash.value !== null) {check(f.blockhash.value, input.blockhash.value, 'blockhash');}
+    if (f.blockhash.lastValidBlockHeight !== null) {check(f.blockhash.lastValidBlockHeight, input.blockhash.lastValidBlockHeight, 'blockhash validity');}
+    check(f.blockhash.snapshotSlot, input.blockhash.provenance.point, 'blockhash snapshot');
+  }
+}

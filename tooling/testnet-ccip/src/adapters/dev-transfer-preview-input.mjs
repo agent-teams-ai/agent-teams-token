@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
+import { admitPartialDevSvmCallFacts, validateDevSvmRoute, validateDevSvmLookupTable } from './dev-svm-call-plan.mjs';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { isEvmAddress } from '@agent-teams/supply/deployment';
-import { integer, validatePreviewRoute, PREVIEW_LANE } from '../domain/dev-transfer-preview.mjs';
+import { integer, validatePreviewRoute, PREVIEW_LANE, assertReversePreviewBindings } from '../domain/dev-transfer-preview.mjs';
 import { solanaPublicKeyBytes } from '../domain/solana-mint.ts';
 
 // Private bounded JSON reader: duplicate names, including escaped names, never disappear.
@@ -103,10 +105,156 @@ const validate = object({ schema: literal('agtmai-dev-transfer-input-v1'), schem
   states: object({ forward: nullable(forward), reverse: nullable(reverse) }), buckets: object({ evmOutbound: nullable(bucket), evmInbound: nullable(bucket), svmOutbound: nullable(bucket), svmInbound: nullable(bucket) }),
   quotes: object({ forward: nullable(quote), reverse: nullable(quote) }), blockhash: nullable(object({ value: key, lastValidBlockHeight: decimal(64), provenance: context })),
   recipientAta: nullable(object({ address: key, exists: boolean, payer: key, rent: nullable(decimal(64)) })) });
-export function readPreviewInput(jsonText) {
-  const input = validate(parsePreviewJson(jsonText));
+export function readPreviewInput(jsonText, reverseJsonText) {
+  const parsed = parsePreviewJson(jsonText), embedded = parsed.reverseCall;
+  if (Object.hasOwn(parsed, 'reverseCall')) {delete parsed.reverseCall;}
+  if (embedded !== undefined && reverseJsonText !== undefined) {throw new Error('Duplicate explicit reverse input');}
+  const input = validate(parsed);
+  if (embedded !== undefined || reverseJsonText !== undefined) {
+    input.reverseCall = readReversePreviewInput(reverseJsonText === undefined ? JSON.stringify(embedded) : reverseJsonText);
+    // Validate separately supplied policy before binding the normalized consumer selection.
+    assertReversePreviewBindings(input, input.reverseCall);
+    const supplied = input.reverseCall.route.limiters;
+    input.reverseCall.route.limiters = supplied === null ? null : {
+      inbound: supplied?.inbound === null ? null : { ...input.limiters.svmInbound },
+      outbound: supplied?.outbound === null ? null : { ...input.limiters.svmOutbound } };
+    inspectReversePreviewInput(input);
+  }
   for (const v of [input.pair.svm.alt]) {
     if (!v.addresses.length || new Set(v.addresses).size !== v.addresses.length || v.writableIndexes.some(i => i >= v.addresses.length)) {throw new Error('ALT inventory/index binding');}
   }
   return validatePreviewRoute(input);
+}
+
+// Only these local raw-account facts are admitted. Missing values remain null.
+const base64 = v => {
+  if (typeof v !== 'string' || v.length > 1644 || Buffer.from(v, 'base64').toString('base64') !== v) {throw new Error('Bounded canonical raw account bytes required');}
+  return v;
+};
+const rawAccount = nullable(object({ address: key, owner: key, executable: literal(false), slot: decimal(64), dataBase64: base64, sha256: hex(32) }));
+const observationFields = { lamports: nullable(decimal(64)), payer: key, snapshotSlot: decimal(64), validThroughSlot: decimal(64), source: text };
+const observation = nullable(object(observationFields));
+const rawFacts = object({ schema: literal('agtmai-dev-svm-call-input-v1'), testOnly: literal(true), broadcastAllowed: literal(false),
+  evidenceClass: v => {if (!['fixture-only', 'capture-consistency-only'].includes(v)) {throw new Error('Unauthenticated DEV facts required');} return v;},
+  snapshotSlot: decimal(64), observedSlot: decimal(64), validThroughSlot: decimal(64),
+  state: nullable(object(Object.fromEntries(['mint', 'sourceAta', 'poolAta', 'routerConfig', 'registry', 'pool', 'chain', 'alt'].map(n => [n, rawAccount])))),
+  before: nullable(object({ mintSupply: decimal(64), sourceBalance: decimal(64), poolBalance: decimal(64), delegate: nullable(key), delegatedAmount: decimal(64) })),
+  fees: object({ quote: nullable(object({ ...observationFields, selector: decimal(64), mint: key, amount: decimal(64), feeToken: key })), networkFee: observation, rent: observation }),
+  payerBalance: observation, blockhash: nullable(object({ value: nullable(key), snapshotSlot: decimal(64), validThroughSlot: decimal(64),
+    lastValidBlockHeight: nullable(decimal(64)), observedBlockHeight: nullable(decimal(64)), source: text })), maxExposureLamports: decimal(64) });
+export function readReversePreviewInput(jsonText) {
+  const parsed = parsePreviewJson(jsonText);
+  if (!parsed || Object.keys(parsed).toSorted().join(',') !== 'facts,route') {throw new Error('Explicit reverse route and facts required');}
+  // Builder contract uses plain records; the bounded parser has already rejected duplicate/prototype names.
+  const route = JSON.parse(JSON.stringify(parsed.route));
+  for (const name of ['recipient', 'evmToken', 'evmPool']) {route[name] = normalizePreviewEvm(route[name]);}
+  for (const name of ['amount', 'fixedSupplyBaseUnits', 'selector', 'solanaSelector']) {decimal(64)(route[name]);}
+  validateDevSvmRoute(route);
+  return { route, facts: rawFacts(parsed.facts) };
+}
+const checkRaw = (actual, expected, name) => {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {throw new Error('Reverse raw/decoded observation conflict: ' + name);}
+};
+const bindRawKey = (b, offset, expected, name) => checkRaw(b.subarray(offset, offset + 32).toString('hex'), solanaPublicKeyBytes(expected ?? '11111111111111111111111111111111').toString('hex'), name);
+function bindRawSelected(route, facts, name, a) {
+  const b = Buffer.from(a.dataBase64, 'base64');
+  checkRaw(createHash('sha256').update(b).digest('hex'), a.sha256, name + ' bytes hash');
+  checkRaw(a.slot, facts.snapshotSlot, name + ' snapshot');
+  const address = { mint: route.mint, sourceAta: route.identities.sourceAta, poolAta: route.identities.ata,
+    routerConfig: route.identities.routerConfig, registry: route.identities.registry, pool: route.identities.pool, chain: route.identities.chain, alt: route.alt }[name];
+  const owner = ['mint', 'sourceAta', 'poolAta'].includes(name) ? route.tokenProgram : ['pool', 'chain'].includes(name) ? route.poolProgram
+    : name === 'alt' ? 'AddressLookupTab1e1111111111111111111111111' : route.routerProgram;
+  checkRaw(a.address, address, name + ' selected address'); checkRaw(a.owner, owner, name + ' selected program');
+  checkRaw(b.length, { mint: 82, sourceAta: 165, poolAta: 165, routerConfig: 210, registry: 170, pool: 368, chain: 171, alt: 376 }[name], name + ' layout');
+  if (name === 'alt') {validateDevSvmLookupTable(route, facts, route.identities);}
+  if (name === 'mint') {
+    bindRawKey(b, 4, route.identities.signer, 'selected mint authority'); checkRaw(b[44], route.decimals, 'selected mint decimals');
+  }
+  if (name === 'sourceAta' || name === 'poolAta') {
+    bindRawKey(b, 0, route.mint, name + ' selected mint');
+    bindRawKey(b, 32, name === 'sourceAta' ? route.payer : route.identities.signer, name + ' selected owner');
+  }
+  if (name === 'pool') {
+    checkRaw(b[73], route.decimals, 'selected pool decimals');
+    for (const [offset, expected] of [[9, route.tokenProgram], [41, route.mint], [74, route.identities.signer], [106, route.identities.ata],
+      [138, route.roles.poolOwner], [170, route.roles.pendingPoolOwner], [202, route.roles.rateAdmin],
+      [234, route.identities.routerPoolSigner], [266, route.routerProgram], [336, route.rmn]]) {bindRawKey(b, offset, expected, 'pool binding');}
+  }
+  if (name === 'registry') {
+    for (const [offset, expected] of [[9, route.roles.registryAdmin], [41, route.roles.pendingRegistryAdmin], [73, route.alt], [137, route.mint]]) {bindRawKey(b, offset, expected, 'registry binding');}
+  }
+  if (name === 'chain') {
+    checkRaw([b.readUInt32LE(8), b.readUInt32LE(12), b.readUInt32LE(36), b[72]], [1, 20, 32, route.decimals], 'selected remote pair layout');
+    checkRaw(b.subarray(16, 36).toString('hex'), route.evmPool.slice(2), 'remote pool raw20');
+    checkRaw(b.subarray(40, 72).toString('hex'), route.evmToken.slice(2).padStart(64, '0'), 'remote token ABI32');
+  }
+  if (name === 'routerConfig') {
+    checkRaw(b.readBigUInt64LE(10).toString(), route.solanaSelector, 'selected source selector');
+    bindRawKey(b, 82, route.feeQuoterProgram, 'Fee Quoter'); bindRawKey(b, 114, route.rmn, 'RMN'); bindRawKey(b, 146, route.linkMint, 'LINK mint');
+  }
+  return b;
+}
+function bindRawBefore(before, name, b) {
+  if (!before) {return;}
+  if (name === 'mint') {checkRaw(b.readBigUInt64LE(36).toString(), before.mintSupply, 'raw before supply');}
+  if (name === 'poolAta') {checkRaw(b.readBigUInt64LE(64).toString(), before.poolBalance, 'raw before pool balance');}
+  if (name === 'sourceAta') {
+    checkRaw(b.readBigUInt64LE(64).toString(), before.sourceBalance, 'raw before source balance');
+    checkRaw(b.readUInt32LE(72), Number(before.delegate !== null), 'raw before delegate option');
+    if (before.delegate !== null) {bindRawKey(b, 76, before.delegate, 'raw before delegate');}
+    checkRaw(b.readBigUInt64LE(121).toString(), before.delegatedAmount, 'raw before delegation');
+  }
+}
+function bindRawToken(a, b, d, name) {
+  checkRaw(a.address, d.address, name + ' address'); checkRaw(a.owner, d.program, name + ' program'); checkRaw(b.length, d.length, name + ' layout');
+  bindRawKey(b, 0, d.mint, name + ' mint'); bindRawKey(b, 32, d.owner, name + ' owner');
+  checkRaw(b.readBigUInt64LE(64).toString(), d.balance, name + ' balance');
+  checkRaw(b[108], { initialized: 1, frozen: 2, uninitialized: 0 }[d.state], name + ' state');
+  checkRaw(b.readUInt32LE(109), Number(d.native), name + ' native'); checkRaw(b.readUInt32LE(129), Number(d.closeAuthority !== null), name + ' close option');
+  checkRaw(b.readUInt32LE(72), Number(d.delegate !== null), name + ' delegate option');
+  if (d.delegate !== null) {bindRawKey(b, 76, d.delegate, name + ' delegate');}
+  if (d.closeAuthority !== null) {bindRawKey(b, 133, d.closeAuthority, name + ' close authority');}
+  checkRaw(b.readBigUInt64LE(121).toString(), d.delegatedAmount, name + ' delegation');
+}
+function bindRawDecoded(decoded, name, a, b) {
+  if (!decoded) {return;}
+  if (name === 'registry') {
+    checkRaw(b[8], decoded.registryVersion, 'registry version'); checkRaw(b.length, decoded.registryLength, 'registry layout');
+    checkRaw(b[169], Number(decoded.supportsAutoDerivation), 'registry derivation mode');
+    checkRaw(decoded.writableIndexes, [3, 4, 7], 'registered writable indexes');
+    checkRaw(b.subarray(105, 137).toString('hex'), '00'.repeat(15) + '19' + '00'.repeat(16), 'registered writable bitmap');
+  }
+  if (name === 'mint') {
+    const d = decoded.mint;
+    checkRaw(a.address, d.address, 'mint address'); checkRaw(a.owner, d.program, 'mint owner'); checkRaw(b.length, d.length, 'mint layout');
+    checkRaw(b.readBigUInt64LE(36).toString(), d.supply, 'supply'); bindRawKey(b, 4, d.authority, 'mint authority');
+    checkRaw(b.readUInt32LE(0), Number(d.authority !== null), 'mint authority option');
+    checkRaw(b[44], d.decimals, 'mint decimals'); checkRaw(b[45], Number(d.initialized), 'mint initialized');
+    checkRaw(b.readUInt32LE(46), Number(d.freezeAuthority !== null), 'mint freeze option');
+    if (d.freezeAuthority !== null) {bindRawKey(b, 50, d.freezeAuthority, 'mint freeze authority');}
+  }
+  if (name === 'sourceAta' || name === 'poolAta') {bindRawToken(a, b, name === 'sourceAta' ? decoded.source : decoded.poolAccount, name);}
+  if (name === 'alt' && decoded.alt) {
+    const d = decoded.alt;
+    checkRaw(a.address, d.key, 'ALT key'); checkRaw(a.owner, d.program, 'ALT program');
+    checkRaw(b.readBigUInt64LE(4).toString(), d.deactivationSlot, 'ALT deactivation');
+    checkRaw(b.readBigUInt64LE(12).toString(), d.lastExtendedSlot, 'ALT extension');
+    checkRaw(b[21], Number(d.authority !== null), 'ALT authority option');
+    if (d.authority !== null) {bindRawKey(b, 22, d.authority, 'ALT authority');}
+    checkRaw(b.length, 56 + d.addresses.length * 32, 'ALT inventory length');
+    d.addresses.forEach((address, i) => bindRawKey(b, 56 + 32 * i, address, 'ALT inventory'));
+  }
+}
+export function inspectReversePreviewInput(input) {
+  const { route, facts } = input.reverseCall;
+  assertReversePreviewBindings(input, input.reverseCall);
+  for (const [name, a] of Object.entries(facts.state ?? {})) {
+    if (a) {
+      const b = bindRawSelected(route, facts, name, a);
+      bindRawBefore(facts.before, name, b); bindRawDecoded(input.states.reverse, name, a, b);
+    }
+  }
+  // The backend owns protocol validation, including each supplied partial record.
+  const admission = admitPartialDevSvmCallFacts(route, facts, route.identities);
+  return { ...admission, reasons: admission.reasons ?? [] };
 }
