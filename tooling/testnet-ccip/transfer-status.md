@@ -16,12 +16,14 @@ or private settings in this document.
 
 ## Offline DEV preview: provider-free checkpoint
 
-This new command writes a complete **intent-only diagnostic**. It does not
-produce unsigned EVM calldata/SVM v0 bytes, execute CCIP, authenticate decoded
-captures, or establish current readiness. Both legs remain unavailable for
-execution, `broadcastAllowed: false`; the return remains conditional on finalized
-receive and fresh state. Exit 2 means a persisted/reopened diagnostic; exit 1
-means rejected input or publication. Neither is full unsigned PR1 acceptance.
+The provider-free invocation below retains the **intent-only diagnostic** and
+produces no unsigned bytes. With explicit admitted provider/archive inputs, the
+same CLI can encode forward EVM calldata and, with `--reverse-input`, a conditional
+unsigned Solana v0 return. Outputs remain `fixture-only`, `currentReadiness: null`,
+`broadcastAllowed: false`; bytes prove local encoding only. Preview exit 0 requires
+both send callplans and no conflicts/prerequisites (`DEV-unsigned-local-encoding-only`);
+2 covers diagnostics or missing files/reverse-provider prerequisites; 1 rejects
+other input/publication failures. No exit authorizes execution or proves readiness.
 
 After the existing build, use the pinned Node wrapper on a qualified host:
 
@@ -34,8 +36,9 @@ The example is a TEST hypothetical model with synthetic public identities and
 100M profile arithmetic, not the historical 100-token deployment. It supplies
 used balances, independent role bindings, an explicit registered ALT inventory
 and old fixture quotes. Its selected signer/ATA bindings are model inputs;
-cryptographic derivation and captured byte decoding remain provider prerequisites.
-No timestamp or agreeing hash upgrades it to native evidence.
+provider-free derivation and byte decoding remain prerequisites. Admitted codec
+mode derives/binds identities locally, without proving chain state. No timestamp
+or agreeing hash upgrades the model to native evidence.
 
 The strict private v1 input is demonstrated in that fixture. Every field is
 explicit, including `null` for missing state/quote/bucket/native components.
@@ -49,9 +52,10 @@ separate bindings. Direct Pool Signer, classic SPL, freeze None, exact source
 and pool accounts, bounded delegation/allowance and paired limiters are checked
 as decoded consistency. A passed hypothetical admission is labelled in-model.
 
-`plan.json`, `facts.json` and `summary.md` are exclusively written into a new
-0700 directory. `complete.json` is published last with exact byte hashes and
-inventory. Reopen re-admits persisted input and reconstructs plan/fact/display
+`plan.json`, `facts.json` and `summary.md` are 0600 files in a new 0700 directory.
+`complete.json` is published last with exact byte hashes and inventory. Main and
+separate reverse inputs each have a 65,536-byte bound; reopened preview artifacts
+have a 1,048,576-byte bound. Reopen re-admits input and reconstructs plan/fact/display
 semantics independently of supplied hashes. Existing targets, symlinks,
 partial writes, substituted directories and tampered artifacts fail closed.
 Failed publication retains diagnostic residue; remove it only through its
@@ -60,8 +64,8 @@ Linux descriptor paths and an isolated trusted local runtime/filesystem are
 required; this format is not a guarantee against privileged or continuously
 racing same-UID peers, or a portable filesystem platform.
 
-The remaining public provider inputs are the reviewed npm installation for
-`@chainlink/ccip-sdk@1.13.0`: root `package.json` SHA256
+The retained payload-only comparator uses the earlier reviewed npm installation
+for `@chainlink/ccip-sdk@1.13.0`: root `package.json` SHA256
 `8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb`
 and `package-lock.json` SHA256
 `1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f`,
@@ -84,13 +88,55 @@ The default suite uses independently constructed TEST mini-closure payloads;
 its positive admission is synthetic, not a real-provider positive or a skip.
 No provisioning, re-pin, install or provider mutation runs in the CLI/tests.
 
-Once those public artifacts are supplied, separately run real positive closure
-admission, account/PDA/ALT decoding, the narrow local ABI/Borsh/v0 encoder and
-independent legacy/changed-route golden compatibility vectors. Then complete
-both persisted byte-output legs with conditional return. Existing signed
-factories and the native-incompatible SPL fee profile must stay disconnected.
-Native quote/simulation metadata does not prove an execution-time SOL ceiling.
-PR2 event decoding and production qualification remain separate later work.
+Optional byte mode uses the fixed [DEV replay authority](src/adapters/dev-provider-policy.mjs),
+an absolute quiescent installation and an archive **directory** of retained
+`<sha256>.tgz` files, rather than the comparator's map. Its root manifest/lock
+SHA256 are `9bc50499bd486b1457bb2efb85951ed8b90d15faf13b39d36d3bb97a2338ccc4` /
+`f65db5bc0003f0cfe4545ab853a991cea43ec7b172ad52e5002e7f25dd7ce8c1`.
+It requires pinned Linux x64 Node 24.20.0, owned replay modes and no NODE_OPTIONS/NODE_PATH;
+only the admitted narrow primitives are evaluated, never SDK/Anchor entrypoints.
+Create takes v1 input and separate `{route,facts}` reverse JSON (`input`/`reverseCall`
+from the bidirectional fixture, not its compound JSON):
+
+```text
+.tools/bin/node tooling/testnet-ccip/src/composition/dev-transfer-preview.mjs --input /absolute/public/dev-input.json --output .local/dev-unsigned-example --reverse-input /absolute/public/dev-reverse.json --provider-root /absolute/public/admitted-replay-provider --provider-archives /absolute/public/retained-archives
+.tools/bin/node tooling/testnet-ccip/src/composition/dev-transfer-preview.mjs --reopen .local/dev-unsigned-example --provider-root /absolute/public/admitted-replay-provider --provider-archives /absolute/public/retained-archives
+```
+
+Read `unsignedAvailable`, `reverseUnsignedAvailable`, `qualification` and
+`forwardAvailability`. Reverse reopen requires explicit provider/archive paths again.
+Complete return encoding requires a common hypothetical before-state; partial facts
+retain nulls/prerequisites and no reverse send bytes. Every supplied before-state/raw
+record is admitted even when another is absent. The v0 packet has one zero signature;
+return remains conditional on finalized receive and fresh state. Signed factories/SPL
+fee profiles remain disconnected; quote/simulation metadata enforces no execution-time SOL ceiling.
+
+## Offline DEV captured-evidence report
+
+After the existing domain build, supply an `agtmai-dev-roundtrip-input-v1` header
+with exact PR1 plan/facts path+SHA256 references and at most three selected messages'
+EVM receipt/transaction and SVM capture references. The oracle fixture is not a CLI header.
+
+```text
+.tools/bin/node tooling/testnet-ccip/src/composition/dev-roundtrip-report.mjs --input /absolute/public/dev-report-header.json --provider /absolute/public/admitted-replay-provider --archives /absolute/public/retained-archives --output .local/dev-report-example
+.tools/bin/node tooling/testnet-ccip/src/composition/dev-roundtrip-report.mjs --reopen .local/dev-report-example --provider /absolute/public/admitted-replay-provider --archives /absolute/public/retained-archives
+```
+
+The provider flag pair is optional, but encoded reverse PR1 reconstruction requires it.
+Finite captured lock/mint/burn/release decoding reuses compiled message/supply accounting;
+replay establishes decoded consistency, with authenticity/event-time authorization unknown.
+`recorded-proof` retains historical `fixture100`; `local-event-simulation` keeps the
+product100M oracle (`F=100000000000000000` base units) separate. There is no live
+discovery, current settlement/finality or freshness proof; missing evidence leaves pending/reconciliation unknown.
+Report exit 1 means `inconsistent`/rejected input; 2 means `unknown`; 0 covers other
+statuses, including modeled `surplus`/`under-backed`. Read status/incidents; 0 is no approval.
+Headers are <=65,536 bytes, each capture <=262,144, aggregate <=1,048,576, charged
+per EVM receipt/transaction/SVM role even for repeated paths, before capture decoding,
+PR1 reconstruction or provider loading; PR1 files/proof have separate 1,048,576-byte bounds.
+Publication writes 0600 `input.json`, `report.json`, `summary.md`, then `complete.json`
+in a new 0700 directory; report capacity is 8,388,608 bytes, input/summary 65,536 each.
+Reopen needs original referenced files and the same provider capabilities for identical
+native availability; it recomputes semantics and preserves original watermarks/times.
 
 Consumer Module Standard applicability: feature-local helpers/ports and a thin
 CLI within the existing CCIP DEV owner; no independently assembled Host scope.
@@ -98,10 +144,11 @@ Comparison/adoption is not-applicable. Reviewed reference: Get Modular commit
 `fcb3a32fb2868d0b113ce72e1f76f1cdd784d8ef`, complete-document SHA256
 `33b41d5babf0a431c97e8e596a56e6ec1557ba1a0b26d39bf23e13d9a19e1fbd`.
 This classification does not adopt Assembly or certify repository conformance.
-Foundation still does not govern this tooling root. Existing three-slice Linux
-rollback evidence does not qualify removal of these new CCIP files. Reversal
-removes only these new preview files/tests/fixture and the test wiring hunk;
-legacy wrappers, journals, status consumers and qualified Supply stay intact.
+Foundation still does not govern this tooling root. Supplied bounded DEV removal
+of owned preview/report/codec files and exact owned legacy/test-wiring hunks derives
+prior accepted tree `99253c2c24d67c96ca184555fd3d2a0954506b46`, preserving legacy
+Ethereum/Supply, wrappers/defaults, status consumers and journals. Existing three-slice
+Linux evidence is neither new CCIP removal proof nor on-chain rollback.
 
 ## Public transfer ledger
 
