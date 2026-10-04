@@ -166,50 +166,70 @@ function delegationPolicy(source, before, spender, amount) {
   } else if (delegated !== 0n) { fail('None delegate with nonzero amount'); }
   return delegated === 0n;
 }
-function capturedSplState(route, facts, e) {
+function capturedMintState(route, facts, e) {
   const mint = raw(facts, 'mint', route.mint, SPL_TOKEN_PROGRAM, [82]);
   if (mint.readUInt32LE(0) !== 1 || mint[44] !== 9 || mint[45] !== 1 || mint.readUInt32LE(46) !== 0) { fail('mint authority/decimals/freeze layout'); }
   keyAt(mint, 4, e.signer, 'derived pool mint authority');
   const supply = mint.readBigUInt64LE(36);
   if (supply > integer(route.fixedSupplyBaseUnits, 'fixed supply')) { fail('overissuance incident: captured SPL supply=' + supply); }
+  return supply;
+}
+function capturedSplState(route, facts, e, partial) {
+  const supply = !partial || facts.state.mint !== null ? capturedMintState(route, facts, e) : null;
   if (e.sourceAta === e.ata) { fail('source and pool ATA must differ'); }
-  const source = token(facts, 'sourceAta', e.sourceAta, route.mint, route.payer);
-  const pool = token(facts, 'poolAta', e.ata, route.mint, e.signer);
+  const source = !partial || facts.state.sourceAta !== null ? token(facts, 'sourceAta', e.sourceAta, route.mint, route.payer) : null;
+  const pool = !partial || facts.state.poolAta !== null ? token(facts, 'poolAta', e.ata, route.mint, e.signer) : null;
   return { supply, source, pool };
 }
-function beforeState(route, facts, e, before) {
-  const { supply, source, pool } = capturedSplState(route, facts, e), amount = integer(route.amount, 'amount');
-  if (before !== null) {
-    if (supply !== before.mintSupply) { fail('captured mint supply'); }
-    if (source.balance !== before.sourceBalance || pool.balance !== before.poolBalance) { fail('captured source/pool balances or pool delegation'); }
-  }
-  if (source.balance + pool.balance > supply || source.balance < amount || pool.balance + amount > U64_MAX ||
-      pool.hasDelegate || pool.delegation !== 0n) {
+function validateCapturedBalances(supply, source, pool, amount) {
+  // Check each known balance without substituting zero for a missing capture.
+  if (source && source.balance < amount || pool && (pool.balance + amount > U64_MAX || pool.hasDelegate || pool.delegation !== 0n) ||
+      supply !== null && (supply < amount || source && source.balance > supply || pool && pool.balance > supply ||
+        source && pool && source.balance + pool.balance > supply)) {
     fail('captured source/pool balances or pool delegation');
   }
-  const approval = delegationPolicy(source, before, e.spender, amount);
-  // Raw facts can be checked without inventing the unavailable common before-state.
-  if (before === null) { return null; }
+}
+function beforeState(route, facts, e, partial, before) {
+  const { supply, source, pool } = capturedSplState(route, facts, e, partial), amount = integer(route.amount, 'amount');
+  if (before !== null) {
+    if (supply !== null && supply !== before.mintSupply) { fail('captured mint supply'); }
+    if (source && source.balance !== before.sourceBalance || pool && pool.balance !== before.poolBalance) {
+      fail('captured source/pool balances or pool delegation');
+    }
+  }
+  validateCapturedBalances(supply, source, pool, amount);
+  const approval = source ? delegationPolicy(source, before, e.spender, amount) : null;
+  // Missing raw records or common before-state never produce a modelled complete state.
+  if (before === null || supply === null || source === null || pool === null) { return null; }
   return { approval, modelledAfter: { qualification: 'hypothetical-success-only',
     mintSupply: (supply - amount).toString(), sourceBalance: (source.balance - amount).toString(),
     poolBalance: pool.balance.toString(), delegate: null, delegatedAmount: '0' } };
 }
-function routeState(route, facts, e) {
+function routerState(route, facts, e) {
   const config = raw(facts, 'routerConfig', e.routerConfig, ROUTER_PROGRAM, [210, 'Config']);
   if (config[8] !== 1 || config[9] !== 1 || config.readBigUInt64LE(10) !== integer(route.solanaSelector, 'source selector')) { fail('Router config version/selector'); }
   keyAt(config, 82, FEE_QUOTER_PROGRAM, 'Router Fee Quoter'); keyAt(config, 114, route.rmn, 'Router RMN');
   keyAt(config, 146, route.linkMint, 'Router LINK mint');
+}
+function registryState(route, facts, e) {
   const registry = raw(facts, 'registry', e.registry, ROUTER_PROGRAM, [170, 'TokenAdminRegistry']);
   if (registry[8] !== 2 || registry[169] !== 0) { fail('registry version/auto derivation'); }
   keyAt(registry, 9, route.roles.registryAdmin, 'registry admin'); keyAt(registry, 41, route.roles.pendingRegistryAdmin, 'pending registry admin');
   keyAt(registry, 73, route.alt, 'registered ALT'); keyAt(registry, 137, route.mint, 'registry mint');
   const bitmap = Buffer.alloc(32); bitmap[15] = 0x19;
   if (!registry.subarray(105, 137).equals(bitmap)) { fail('registry writable bitmap must select pool, pool ATA and mint'); }
+}
+function poolState(route, facts, e) {
   const pool = raw(facts, 'pool', e.pool, BURNMINT_PROGRAM, [368, 'State']);
   if (pool[8] !== 1 || pool[73] !== 9 || pool[330] !== 0 || pool[331] !== 0 || pool.readUInt32LE(332) !== 0) { fail('pool state layout'); }
   for (const [offset, address] of [[9, SPL_TOKEN_PROGRAM], [41, route.mint], [74, e.signer], [106, e.ata],
     [138, route.roles.poolOwner], [170, route.roles.pendingPoolOwner], [202, route.roles.rateAdmin], [234, e.routerPoolSigner],
     [266, ROUTER_PROGRAM], [298, SYSTEM_PROGRAM], [336, route.rmn]]) { keyAt(pool, offset, address, 'pool state'); }
+}
+function routeState(route, facts, e, partial) {
+  for (const [name, validate] of [['routerConfig', routerState], ['registry', registryState], ['pool', poolState]]) {
+    if (!partial || facts.state[name] !== null) { validate(route, facts, e); }
+  }
   return chainState(route, facts, e);
 }
 function chainState(route, facts, e) {
@@ -293,7 +313,7 @@ function costFacts(route, facts) {
     knownCostLowerBoundLamports: lowerBound.toString() };
 }
 /** Provider-free admission tests use independently retained derived identities, not native codec stubs. */
-export function admitDevSvmCallFacts(route, facts, derived) {
+function admitCallFacts(route, facts, derived, partial) {
   validateDevSvmRoute(route);
   shape(facts, ['schema', 'testOnly', 'broadcastAllowed', 'evidenceClass', 'snapshotSlot', 'observedSlot', 'validThroughSlot',
     'state', 'before', 'fees', 'payerBalance', 'blockhash', 'maxExposureLamports'], 'captured input');
@@ -305,7 +325,6 @@ export function admitDevSvmCallFacts(route, facts, derived) {
   for (const field of IDENTITY_FIELDS) {
     if (derived[field] !== route.identities[field]) { fail('derived identity ' + field); }
   }
-  // Supplied common facts remain checkable even when their raw companion is missing.
   const commonBefore = commonBeforeState(facts.before);
   const cost = costFacts(route, facts);
   if (observed > valid || observed - snapshot > 32n) { cost.missing.push('snapshot expired'); }
@@ -314,13 +333,23 @@ export function admitDevSvmCallFacts(route, facts, derived) {
   // Known malformed captures stay invalid even when fees/common before-state are unknown.
   if (facts.state !== null) {
     shape(facts.state, ['mint', 'sourceAta', 'poolAta', 'routerConfig', 'registry', 'pool', 'chain', 'alt'], 'state');
-    const limits = routeState(route, facts, derived);
+    const limits = routeState(route, facts, derived, partial);
+    before = beforeState(route, facts, derived, partial, commonBefore);
+    lookupTable = !partial || facts.state.alt !== null ? validateDevSvmLookupTable(route, facts, derived) : null;
     cost.missing.push(...limits.missing); limiterObservations = limits.observations;
-    before = beforeState(route, facts, derived, commonBefore);
-    lookupTable = validateDevSvmLookupTable(route, facts, derived);
+    if (partial) {
+      cost.missing.push(...Object.entries(facts.state).filter(([, value]) => value === null).map(([name]) => 'Raw ' + name + ' missing'));
+    }
   }
   if (cost.missing.length) { return { status: 'prerequisites', reasons: cost.missing, knownCostLowerBoundLamports: cost.knownCostLowerBoundLamports, limiterObservations, broadcastAllowed: false }; }
   return { status: 'admitted', ...before, ...cost, lookupTable, limiterObservations };
+}
+export function admitDevSvmCallFacts(route, facts, derived) {
+  return admitCallFacts(route, facts, derived, false);
+}
+/** Consumer admission checks every present raw record while retaining missing captures. */
+export function admitPartialDevSvmCallFacts(route, facts, derived) {
+  return admitCallFacts(route, facts, derived, true);
 }
 function expectedAccounts(route, e) {
   // Independent account-order policy, from Router IDL + the registered pool list.

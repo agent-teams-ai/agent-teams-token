@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { loadDevProvider } from './dev-provider-admission.mjs';
+import { buildDevSvmCallPlan, verifyDevSvmCallPlan } from './dev-svm-call-plan.mjs';
 import { createDevEvmCallPlanPort } from './dev-evm-call-plan.mjs';
 
 // The DEV addendum is separate from immutable legacy PREVIEW_PINS below.
@@ -136,4 +137,18 @@ export async function admitPreviewProviders({ root, tarballSource, pins = PREVIE
   for (const [label, entry] of Object.entries(entries)) { resolved[label] = await visit(entry); }
   if (admitted.get(resolved.ethers).version !== pins.ethersVersion) { fail('ethers version mismatch'); }
   return { entries, resolverAuthority: { package: sdkRelative, integrity: sdkRecord.integrity, evaluated: false }, packages: Object.fromEntries(admitted), evaluated: false, qualification: 'payload-admission-only' };
+}
+
+/** One admitted installation supplies both narrow consumer capabilities. */
+export function createBidirectionalPreviewEncoding(primitives) {
+  const forwardEncoding = createDevEvmCallPlanPort(primitives);
+  const reverseEncoding = Object.freeze({ provenance: forwardEncoding.provenance,
+    buildReverse: ({ route, facts }) => buildDevSvmCallPlan(primitives, route, facts),
+    inspectReverse: ({ route, facts }, candidate) => verifyDevSvmCallPlan(primitives, route, facts, candidate) });
+  return Object.freeze({ forwardEncoding, reverseEncoding });
+}
+
+export async function loadBidirectionalPreviewEncoding(options) {
+  const { primitives } = await loadDevProvider(options);
+  return createBidirectionalPreviewEncoding(primitives);
 }
