@@ -42,9 +42,61 @@ public; its proposed caps/openings remain discussion-only. Vaults enforce rollin
 gross outflow windows, not purpose after transfer, a global cap, LP locking or
 investor vesting. Existing external security, legal and market gates remain
 unclosed; local proof does not waive them or add a new wait requirement.
-Solana/CCIP is a later release; the existing Fee Quoter provenance gap in
+Solana/CCIP is a later production release; the existing Fee Quoter provenance gap in
 [issue #43](https://github.com/agent-teams-ai/agent-teams-token/issues/43) is not an
 Ethereum-only blocker.
+
+### CCIP DEV integration (published source, local evidence)
+
+Published report source `bc716104315c40a7ea7aa832ffcf46ccd11188a8`, merged in
+[PR #67](https://github.com/agent-teams-ai/agent-teams-token/pull/67) as
+`adc7560cd09300face32b73add55e2513e6e7e0a`, has tree
+`6aef406e705f0f8f463a5f4a6d0348153a18dce2`. Independent hosted source review
+**ACCEPT, P0-P3=0** and the mandatory current Engineering Quality Standard
+supplement both accepted this exact source. Their retained receipt SHA256 values
+are `dca8f0e6c7484d0b71e4498d61c52b7593386d6262995b56748af0e943dc4581`
+and `f5a0ea0a8a56a9d5a76521d3d6d72a555b910b5cf33eb021641204cde9ec472e`.
+All six canonical CI jobs passed on that source in [run 37166820429](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37166820429);
+Documentation Protocol, owner identity and applicable CodeQL checks also passed.
+ReviewRouter failed with `codex_oauth_control_plane_error:400:invalid_action_request`;
+it is not reported as passed. Independent technical review satisfies the owner's
+non-blocking router instruction. Publication qualifies the bounded DEV source,
+not current public-chain settlement or production readiness.
+
+The three real CCIP settled messages at historical 100 supply remain historical.
+Current actual provider codecs and preview/report CLI persistence/reopening are
+local evidence; the product100M monetary vertical is `local-event-simulation`,
+with preview artifacts still `fixture-only`. Retained checks: typed vertical 1 test,
+bidirectional native 10, report native 13 and report pure 44, all zero skips;
+the strict vertical TypeScript contract check is also retained. No new real CCIP
+delivery, current finality/freshness proof or Mainnet readiness is established.
+
+The supplied bounded DEV removal derives the exact prior accepted tree
+`99253c2c24d67c96ca184555fd3d2a0954506b46`, preserving legacy Ethereum/Supply;
+see `.local/PRIVATE-CORRECTED-8B48-REMOVAL-EQUIVALENCE.json`. The existing three-slice
+seal is neither new CCIP removal proof nor on-chain rollback. Mainnet stays deferred;
+ADR-0007's protocol/backing policy and ADR-0010's real inputs, canary and release
+approvals remain conditional.
+
+Verified publication ledger. Each CI run below passed all six canonical jobs on
+the listed source head; merge commits preserve the source tree. These are source
+checks, not seven fresh CCIP transfers.
+
+| PR | Accepted source head | Verified merge | Canonical CI |
+| --- | --- | --- | --- |
+| [#61](https://github.com/agent-teams-ai/agent-teams-token/pull/61) | `0e092236880bb0d43d373f3225cdc0ee4f442a30` | `7a8622f7ab6dc7766055067b2d814f646275a79b` | [37101736608](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37101736608) |
+| [#62](https://github.com/agent-teams-ai/agent-teams-token/pull/62) | `9335b90056ca5e5920cfa89b2346c4e891461efe` | `17e9250f1db1c26fdace707d3387f936b6f3233d` | [37107500793](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37107500793) |
+| [#63](https://github.com/agent-teams-ai/agent-teams-token/pull/63) | `4361b6e73b6490c31f8a06ce2d0062545d1c3efc` | `56fbfe9c48f56e808944e783e06cb91a82856aa2` | [37113039333](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37113039333) |
+| [#64](https://github.com/agent-teams-ai/agent-teams-token/pull/64) | `41ca3e273ec3f61ae626d5c472d9cfad7fa8b29f` | `3adc9ea46452b3b599c4c5dcdc97ecd4d316298b` | [37139179961](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37139179961) |
+| [#65](https://github.com/agent-teams-ai/agent-teams-token/pull/65) | `4d88c554eee1b7b734a5e97e82d235e6439896c1` | `304fa0b4c33b508fd61951924e4d6c58cddf9d89` | [37146863210](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37146863210) |
+| [#66](https://github.com/agent-teams-ai/agent-teams-token/pull/66) | `ec8cb787a51bad63266c336e41ba595c872de955` | `6271c791b87e76e24380b39237628984a9396c40` | [37153156882](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37153156882) (attempt 2) |
+| [#67](https://github.com/agent-teams-ai/agent-teams-token/pull/67) | `bc716104315c40a7ea7aa832ffcf46ccd11188a8` | `adc7560cd09300face32b73add55e2513e6e7e0a` | [37166820429](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37166820429) |
+
+PR #66 attempt 1's `PROOF_TRANSACTION_BINDING` failure is retained with an
+unconfirmed cause; one bounded unchanged-source rerun passed. No guard was
+weakened and the private diagnostic is not published as a fix.
+This documentation is a separate delivery with separate review and CI receipts;
+it does not alter accepted ADRs or complete the full Mainnet goal.
 
 ## Full local Ethereum assembly PR2, 2026-10-01
 
