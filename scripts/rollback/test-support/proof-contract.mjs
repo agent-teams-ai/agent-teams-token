@@ -30,6 +30,12 @@ test("every operational package rollback strips proof recursion", () => {
           JSON.parse(source.toString("utf8")).scripts["deployment:contributor-commitment"],
         );
       }
+      for (const alias of ["deployment:preflight", "deployment:production-preflight"]) {
+        assert.equal(
+          transformed.scripts[alias],
+          slice === "deployment-plan" ? undefined : currentScripts[alias],
+        );
+      }
       assert.doesNotMatch(transformed.scripts.check, /rollback:(?:preflight|test|prove)/u);
       assert.equal(transformed.scripts["test:testnet-ccip"], currentScripts["test:testnet-ccip"]);
       assert.match(transformed.scripts["test:testnet-ccip"], /solana-spl-fee-cap-proof\.test\.mjs/u);
