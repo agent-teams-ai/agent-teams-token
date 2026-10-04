@@ -1,6 +1,7 @@
-import { admitDevTransfer, PREVIEW_SOURCE, PREVIEW_PINS, validatePreviewRoute, U64 } from '../domain/dev-transfer-preview.mjs';
+import { admitDevTransfer, PREVIEW_SOURCE, PREVIEW_PINS, validatePreviewRoute, U64, forwardCallIntent } from '../domain/dev-transfer-preview.mjs';
 
 export const PROVIDER_PREREQUISITE = 'Reviewed CCIP SDK 1.13.0 npm installation with root manifest SHA256 ' + PREVIEW_PINS.providerManifestSha256 + ' and package-lock.json SHA256 ' + PREVIEW_PINS.providerLockSha256 + '; lock-integrity tarballs for SDK resolver metadata/IDL, ethers 6.17.0, @solana/web3.js and their resolved runtime closure; independently admitted entries before evaluation. No provider is loaded by this checkpoint.';
+const BIDIRECTIONAL_PROVIDER_PREREQUISITE = 'Reviewed CCIP SDK 1.13.0 resolver metadata, ethers and web3 from one explicitly selected public-only DEV installation and independent retained archives; loadDevProvider must admit actual package bytes before local encoding. SDK and Anchor entrypoints remain unevaluated.';
 function quoteIdentityMatches(input, reverse, quote) {
   const recipient = reverse ? input.pair.evm.recipient : input.pair.svm.recipient;
   const selector = reverse ? input.lane.ethereumSelector : input.lane.solanaSelector;
@@ -16,7 +17,9 @@ function quoteFacts(input, direction) {
   if (fee <= 0n || fee > maximum) {conflicts.push('Quote outside retained DEV CCIP fee cap');}
   if (reverse && [quote.networkFee, quote.rent, quote.payerBalance, quote.exposureLimit].some(v => v !== null && BigInt(v) > U64)) {conflicts.push('Native lamports overflow u64');}
   if (Date.parse(quote.observedAt) > Date.parse(quote.checkedAt) || Date.parse(quote.expiresAt) <= Date.parse(quote.checkedAt) || Date.parse(quote.observedAt) >= Date.parse(quote.expiresAt)) {reasons.push('Quote expired or inconsistent at declared check time');}
-  if (JSON.stringify(quote.context) !== JSON.stringify(input.states[direction]?.context)) {conflicts.push('Quote before-state provenance mismatch');}
+  const beforeContext = input.states[direction]?.context;
+  if (!beforeContext) {reasons.push('Quote before-state provenance unavailable');}
+  else if (JSON.stringify(quote.context) !== JSON.stringify(beforeContext)) {conflicts.push('Quote before-state provenance mismatch');}
   if (reverse && BigInt(quote.exposureLimit) > 10000000000n) {conflicts.push('Declared SOL exposure exceeds DEV bound');}
   const missingComponents = ['networkFee', 'rent', 'payerBalance'].filter(k => quote[k] === null);
   reasons.push(...missingComponents.map(k => 'Native ' + k + ' unknown'));
@@ -24,41 +27,101 @@ function quoteFacts(input, direction) {
   if (totalExposure !== null && (BigInt(totalExposure) > BigInt(quote.exposureLimit) || BigInt(totalExposure) > BigInt(quote.payerBalance))) {reasons.push('Insufficient balance or declared native exposure budget');}
   return { value: quote, totalExposure, reasons, conflicts, current: false, executionTimeCeilingProven: false };
 }
+function prepareIntentLeg(input, direction) {
+  const admission = admitDevTransfer(input, direction), quote = quoteFacts(input, direction), reverse = direction === 'reverse';
+  const prerequisites = [...admission.reasons, ...quote.reasons, PROVIDER_PREREQUISITE];
+  if (reverse && !input.blockhash) {prerequisites.push('Captured canonical blockhash and validity context missing');}
+  if (!reverse && (!input.recipientAta || !input.recipientAta.exists)) {prerequisites.push('Separate standard recipient ATA creation with explicit payer/rent required before receive');}
+  if (input.recipientAta && input.recipientAta.address !== input.pair.svm.sourceAta) {admission.conflicts.push('Recipient ATA binding mismatch');}
+  const conflicts = [...admission.conflicts, ...quote.conflicts];
+  const user = reverse ? input.pair.svm.payer : input.pair.evm.sender;
+  const recipient = reverse ? input.pair.evm.recipient : input.pair.svm.recipient;
+  const operations = [];
+  if (admission.approval.required === true) {operations.push({ kind: 'bounded-approval-intent', from: user,
+    token: reverse ? input.pair.svm.mint : input.pair.evm.token, spender: reverse ? input.pair.svm.spender : input.lane.router,
+    amount: input.amount, conditional: true, bytes: null, byteSha256: null });}
+  operations.push({ kind: 'send-intent', from: user, recipient, amount: input.amount, conditional: reverse,
+    bytes: null, byteSha256: null, availability: 'unavailable' });
+  let hypotheticalAfter = null;
+  if (reverse && admission.status === 'admitted-in-model' && !conflicts.length) {
+    const state = input.states.reverse;
+    hypotheticalAfter = { sourceBalance: (BigInt(state.source.balance) - BigInt(input.amount)).toString(), poolBalance: state.poolAccount.balance,
+      supply: (BigInt(state.mint.supply) - BigInt(input.amount)).toString(), delegate: null, delegatedAmount: '0',
+      provenance: 'hypothetical; exhausted classic SPL delegation resets None' };
+  }
+  return { from: user, recipient, amount: input.amount, admission, quote, operations, prerequisites, conflicts, hypotheticalAfter,
+    status: conflicts.length ? 'inconsistent' : 'intent-only', unsignedAvailable: false, executable: false,
+    conditional: reverse, condition: admission.condition, executionPrerequisites: ['Fresh authenticated state, quotes, native gas/rent/balance and finality',
+      ...(reverse ? ['Finalized receive; native serialized send has no proven execution-time fee ceiling'] : ['A failed send does not undo a finalized ERC20 approval'])] };
+}
+function encodeForwardPreview(input, forward, forwardEncoding, { digest, hashCalldata }) {
+  const intent = forwardCallIntent(input, forward.admission, forward.quote);
+  // Consumer-owned port: encodeForward(intent) -> five-field unsigned calls;
+  // inspectForward(intent,calls) must reject semantic or canonical-wire drift.
+  const calls = forwardEncoding.encodeForward(intent);
+  forwardEncoding.inspectForward(intent, calls);
+  let index = 0;
+  const operation = kind => {
+    const unsigned = calls[index++];
+    return { kind, conditional: true, unsigned, callHash: digest(unsigned), calldataSha256: hashCalldata(unsigned.data) };
+  };
+  forward.operations = [...(intent.approve ? [operation('bounded-approval')] : []),
+    intent.send ? operation('ccip-send') : forward.operations.at(-1)];
+  forward.callPlan = { provenance: forwardEncoding.provenance, sendAvailable: intent.send,
+    availability: intent.send ? 'conditional-send' : intent.approve ? 'conditional-approval-only' : 'unavailable' };
+  forward.unsignedAvailable = calls.length > 0;
+  forward.status = intent.send ? 'unsigned-conditional' : intent.approve ? 'conditional-approval-only' : 'intent-only';
+  forward.prerequisites = forward.prerequisites.filter(reason => reason !== PROVIDER_PREREQUISITE && reason !== BIDIRECTIONAL_PROVIDER_PREREQUISITE);
+  forward.executionPrerequisites.push('Local codec bytes do not authenticate decoded input or establish execution readiness');
+  if (!intent.send) {forward.prerequisites.push('Send bytes require model admission, zero/exact Router allowance and a bounded quote valid at its declared check time');}
+}
+function encodeReversePreview(input, reverse, reverseAdmission, { reverseEncoding, digest, hashBase64 }) {
+  reverse.callPlan = { provenance: reverseEncoding.provenance, availability: 'unavailable', sendAvailable: false,
+    candidate: null, messageSha256: null, transactionSha256: null };
+  reverse.prerequisites = reverse.prerequisites.filter(reason => !reason.startsWith('Reviewed CCIP SDK'));
+  if (!input.reverseCall) {reverse.prerequisites.push('Explicit local reverse route and raw-account facts missing');}
+  const usable = input.reverseCall && reverseAdmission.status === 'admitted' && reverse.admission.status === 'admitted-in-model' &&
+    reverse.quote.value && !reverse.quote.reasons.length && !reverse.conflicts.length && input.blockhash;
+  if (usable) {
+    const intent = input.reverseCall, candidate = reverseEncoding.buildReverse(intent);
+    reverseEncoding.inspectReverse(intent, candidate);
+    reverse.callPlan = { provenance: reverseEncoding.provenance, availability: 'conditional-send', sendAvailable: true,
+      candidate, messageSha256: hashBase64(candidate.messageBase64), transactionSha256: hashBase64(candidate.transactionBase64) };
+    reverse.operations = candidate.instructions.map((instruction, index) => ({ kind: candidate.instructions.length === 2 && index === 0 ? 'bounded-approval' : 'ccip-send',
+      conditional: true, instruction, instructionHash: digest(instruction), dataSha256: hashBase64(instruction.dataBase64) }));
+    reverse.unsignedAvailable = true; reverse.status = 'unsigned-conditional';
+    reverse.modelledAfter = candidate.modelledAfter;
+    reverse.executionPrerequisites.push('Hypothetical common return before-state; this packet does not prove finalized receive or current readiness',
+      'Independent official SDK/Borsh compatibility oracle remains unqualified');
+  }
+}
 /** Consumer-owned digest/render ports have no filesystem, provider, signer or network capability. */
-export function prepareDevTransferPreview(input, { digest, render }) {
+export function prepareDevTransferPreview(input, { digest, render, hashCalldata, hashBase64, forwardEncoding, reverseEncoding, inspectReverseInput }) {
   validatePreviewRoute(input);
   const source = { ...PREVIEW_SOURCE, pins: PREVIEW_PINS };
   const route = { source, lane: input.lane, pair: input.pair, profile: input.profile, fixedSupplyBaseUnits: input.fixedSupplyBaseUnits,
-    decimals: 9, amount: input.amount, limiters: input.limiters };
+    decimals: 9, amount: input.amount, limiters: input.limiters,
+    ...(input.reverseCall ? { reverseRoute: input.reverseCall.route } : {}) };
   const routeHash = digest(route), legs = {};
-  for (const direction of ['forward', 'reverse']) {
-    const admission = admitDevTransfer(input, direction), quote = quoteFacts(input, direction), reverse = direction === 'reverse';
-    const prerequisites = [...admission.reasons, ...quote.reasons, PROVIDER_PREREQUISITE];
-    if (reverse && !input.blockhash) {prerequisites.push('Captured canonical blockhash and validity context missing');}
-    if (!reverse && (!input.recipientAta || !input.recipientAta.exists)) {prerequisites.push('Separate standard recipient ATA creation with explicit payer/rent required before receive');}
-    if (input.recipientAta && input.recipientAta.address !== input.pair.svm.sourceAta) {admission.conflicts.push('Recipient ATA binding mismatch');}
-    const conflicts = [...admission.conflicts, ...quote.conflicts];
-    const user = reverse ? input.pair.svm.payer : input.pair.evm.sender;
-    const recipient = reverse ? input.pair.evm.recipient : input.pair.svm.recipient;
-    const operations = [];
-    if (admission.approval.required === true) {operations.push({ kind: 'bounded-approval-intent', from: user,
-      token: reverse ? input.pair.svm.mint : input.pair.evm.token, spender: reverse ? input.pair.svm.spender : input.lane.router,
-      amount: input.amount, conditional: true, bytes: null, byteSha256: null });}
-    operations.push({ kind: 'send-intent', from: user, recipient, amount: input.amount, conditional: reverse,
-      bytes: null, byteSha256: null, availability: 'unavailable' });
-    let hypotheticalAfter = null;
-    if (reverse && admission.status === 'admitted-in-model' && !conflicts.length) {
-      const state = input.states.reverse;
-      hypotheticalAfter = { sourceBalance: (BigInt(state.source.balance) - BigInt(input.amount)).toString(), poolBalance: state.poolAccount.balance,
-        supply: (BigInt(state.mint.supply) - BigInt(input.amount)).toString(), delegate: null, delegatedAmount: '0',
-        provenance: 'hypothetical; exhausted classic SPL delegation resets None' };
-    }
-    legs[direction] = { from: user, recipient, amount: input.amount, admission, quote, operations, prerequisites, conflicts, hypotheticalAfter,
-      status: conflicts.length ? 'inconsistent' : 'intent-only', unsignedAvailable: false, executable: false,
-      conditional: reverse, condition: admission.condition, executionPrerequisites: ['Fresh authenticated state, quotes, native gas/rent/balance and finality',
-        ...(reverse ? ['Finalized receive; native serialized send has no proven execution-time fee ceiling'] : ['A failed send does not undo a finalized ERC20 approval'])] };
+  Object.assign(legs, Object.fromEntries(['forward', 'reverse'].map(direction => [direction, prepareIntentLeg(input, direction)])));
+  let reverseAdmission;
+  if (input.reverseCall) {
+    for (const leg of Object.values(legs)) {leg.prerequisites = leg.prerequisites.map(reason => reason === PROVIDER_PREREQUISITE ? BIDIRECTIONAL_PROVIDER_PREREQUISITE : reason);}
+    reverseAdmission = inspectReverseInput(input);
+    legs.reverse.prerequisites.push(...reverseAdmission.reasons);
   }
-  const status = Object.values(legs).some(l => l.conflicts.length) ? 'inconsistent' : 'intent-only';
+  if (forwardEncoding) {
+    assertForwardEncodingInput({ legs });
+    encodeForwardPreview(input, legs.forward, forwardEncoding, { digest, hashCalldata });
+    legs.reverse.prerequisites = legs.reverse.prerequisites.map(reason => reason === PROVIDER_PREREQUISITE
+      ? PROVIDER_PREREQUISITE.replace('No provider is loaded by this checkpoint.', 'The legacy installation remains unrecovered; the separate DEV addendum provides forward encoding only.') : reason);
+  }
+  if (reverseEncoding) {
+    assertForwardEncodingInput({ legs });
+    encodeReversePreview(input, legs.reverse, reverseAdmission, { reverseEncoding, digest, hashBase64 });
+  }
+  const both = legs.forward.callPlan?.sendAvailable && legs.reverse.unsignedAvailable;
+  const status = Object.values(legs).some(l => l.conflicts.length) ? 'inconsistent' : both ? 'unsigned-bidirectional-conditional' : legs.forward.status;
   const planBody = { schema: 'agtmai-dev-transfer-plan-v1', schemaVersion: 1, testOnly: true, broadcastAllowed: false,
     source, route, routeHash, evidenceClass: 'fixture-only', status, input, legs };
   const plan = { ...planBody, planHash: digest(planBody) };
@@ -69,5 +132,37 @@ export function prepareDevTransferPreview(input, { digest, render }) {
       quotes: input.quotes, blockhash: input.blockhash, recipientAta: input.recipientAta },
     fixedSupplyBaseUnits: input.fixedSupplyBaseUnits, profile: input.profile, unsignedAvailable: { forward: false, reverse: false },
     historicalProofReferences: [], providerPrerequisite: PROVIDER_PREREQUISITE };
+  if (forwardEncoding) {
+    facts.unsignedAvailable.forward = legs.forward.unsignedAvailable;
+    facts.forwardEncoding = legs.forward.callPlan;
+    facts.providerPrerequisite = legs.reverse.prerequisites.find(reason => reason.startsWith('Reviewed CCIP SDK'));
+    facts.knownness.reason = 'Hypothetical/unauthenticated decoded input; local forward codec encoding is separate from fresh native observations';
+  }
+  if (input.reverseCall) {facts.knownness.reverseCall = input.reverseCall; if (!forwardEncoding) {facts.providerPrerequisite = BIDIRECTIONAL_PROVIDER_PREREQUISITE;}}
+  if (reverseEncoding) {
+    facts.unsignedAvailable.reverse = legs.reverse.unsignedAvailable;
+    facts.providerPrerequisite = null;
+    facts.knownness.reason = 'Hypothetical/unauthenticated input; admitted local unsigned encoding never proves current chain readiness';
+    if (legs.reverse.callPlan) {facts.reverseEncoding = legs.reverse.callPlan;}
+  }
   return { plan, facts, summary: render(plan, facts) };
+}
+
+/** Run on the entire preview BEFORE candidate loading, and again before encoding. */
+export function assertForwardEncodingInput({ legs }) {
+  const conflicts = Object.values(legs).flatMap(leg => leg.conflicts);
+  for (const leg of Object.values(legs)) {
+    const quote = leg.quote.value;
+    if (!quote) {continue;}
+    let minimumExposure = BigInt(quote.ccipFee);
+    for (const component of ['networkFee', 'rent']) {
+      if (quote[component] !== null) {minimumExposure += BigInt(quote[component]);}
+    }
+    if (minimumExposure > BigInt(quote.exposureLimit) ||
+      quote.payerBalance !== null && minimumExposure > BigInt(quote.payerBalance) ||
+      leg.quote.reasons.includes('Insufficient balance or declared native exposure budget')) {
+      conflicts.push('Native quote exceeds declared budget or payer balance');
+    }
+  }
+  if (conflicts.length) {throw new Error('Forward encoding input conflicts: ' + conflicts.join('; '));}
 }

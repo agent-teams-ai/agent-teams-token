@@ -1,0 +1,30 @@
+{
+  "schema": "agtmai-dev-roundtrip-acceptance-v1",
+  "oracle": "Prewritten implementation plan section 9, independent decimal expectations; retained public decoder authorities are separate files",
+  "F": "100000000000000000",
+  "A": "1000000000",
+  "expected": {
+    "onRamp": "0x23a5084fa78104f3df11c63ae59fcac4f6ad9dee",
+    "offRamp": "0x0820f975ce90ee5c508657f0c58b71d1fcc85ce0",
+    "svmOffRamp": "offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm",
+    "nativeFeeToken": "0x097d90c9d3e0b50ca60e1ae45f6a81010f9fb534",
+    "poolChainConfig": "5GoY6aNRFwQonLxjScU9jJC3BbzGFiQup2CSGiJkBJsQ",
+    "allowedOffRamp": "3esbiuy48XCGL2L2q5UzKfAhHe7DqEFHXv6GzzPwWfW4",
+    "offRampPoolAuthority": "8qxTjifGv98vHhaUDdunUEquZHekHdQ2N8KwfzhxMR96",
+    "routerPoolAuthority": "H6ZviaabTYZqUPgiSoMDbeVthcNW9ULcAuUu3zRLFqDR",
+    "receivers": [
+      { "recipient": "8T13W72sSEKmBpEv1FpUM7nJRatnChEfPSjkbSpdUn9t", "ata": "BDW4fQh6QGDnTbZATEjTCcu1PQaKvKSE5GzmQTGe9Kvh" },
+      { "recipient": "QBqP2WraLUKU1G6tohJusxQ7iG15utpXLVZvvks3sNV", "ata": "2HGSh7v8thLVyxVSizQtvicsfKFrbYeL2sTSGjWzbCDE" }
+    ]
+  },
+  "vectors": [
+    { "name": "initial", "L": "0", "S": "0", "P_ES": "0", "P_SE": "0", "adjusted": "100000000000000000", "surplus": "0", "status": "exact" },
+    { "name": "lock-modeled-P_ES", "L": "1000000000", "S": "0", "P_ES": "1000000000", "P_SE": "0", "adjusted": "100000000000000000", "surplus": "0", "status": "exact" },
+    { "name": "mint", "L": "1000000000", "S": "1000000000", "P_ES": "0", "P_SE": "0", "adjusted": "100000000000000000", "surplus": "0", "status": "exact" },
+    { "name": "burn-modeled-P_SE", "L": "1000000000", "S": "0", "P_ES": "0", "P_SE": "1000000000", "adjusted": "100000000000000000", "surplus": "0", "status": "exact" },
+    { "name": "release", "L": "0", "S": "0", "P_ES": "0", "P_SE": "0", "adjusted": "100000000000000000", "surplus": "0", "status": "exact" },
+    { "name": "extra-mint-one", "L": "1000000000", "S": "1000000001", "P_ES": "0", "P_SE": "0", "adjusted": "100000000000000001", "surplus": "-1", "status": "under-backed" },
+    { "name": "donation-one", "L": "1000000001", "S": "1000000000", "P_ES": "0", "P_SE": "0", "adjusted": "99999999999999999", "surplus": "1", "status": "surplus" },
+    { "name": "impossible-balanced-capture", "L": "100000000000000001", "S": "100000000000000001", "P_ES": "0", "P_SE": "0", "adjusted": null, "surplus": null, "status": "inconsistent" }
+  ]
+}

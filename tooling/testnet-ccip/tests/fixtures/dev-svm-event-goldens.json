@@ -1,0 +1,127 @@
+{
+  "schema": "dev-svm-event-goldens-v1",
+  "evidenceClass": "fixture-only",
+  "lossy": true,
+  "provenance": "Reduced to exact raw Program data bytes from supplied new-public-testnet-recapture responses of old transactions. Full recapture response SHA-256 is retained per vector. These are not the original September captures or historical-capture-replay; no current authorization, finality, CPI or settlement proof is retained.",
+  "expectedAuthority": {
+    "reportPath": "docs/reports/AGTMAI-TESTNET-E2E-2026-09-08.json",
+    "reportSha256": "b694d89230f8726d244781661765c91739f4820f03c8682f52f91245b2a03e0a",
+    "layoutAnalysisPath": ".local/PR2-RAW-LAYOUT-ANALYSIS.json",
+    "layoutAnalysisSha256": "5bec9a3e228acd0d360bb0a867b4b6e83bef21645d2998252116601cce24d529",
+    "basis": "Message IDs, Router receiver and token amount/destination come from the separate canonical report; selectors and field order come from the layout analysis and inspected official IDLs. Remaining expected wire values were inspected separately from production decoder code. OffRamp events contain no amount or receiver."
+  },
+  "vectors": [
+    {
+      "label": "message1-mint-log-8",
+      "recaptureResponsePath": ".local/PUBLIC-HISTORICAL-RECAPTURE/message1-mint-json.response.json",
+      "recaptureResponseSha256": "829515438d0995a8c22608df6aa5455fb109cec9df4388cf064fc19c2064a3ba",
+      "recaptureTransactionId": "4apQ7wSFwRSRtbMRdmEPe9eko6VawQrJnktmStGe8qsAGpQcEWevGy8W9dNAao4SkGPcdPW8Y9wgpZVh8Q4rKcEk",
+      "programDataLogIndex": 8,
+      "dataBase64": "ubCMcO9OH/nZGtnJT7pB3scrAAAAAAAAmqnAIHJkDHkmx0DxUoLABPh0h4nJRGLSzIQzhFimDdRKXGq/fwxqr+82v5Pf6xWNV0FVmnxSGQr0BJBv1SXbTgE=",
+      "rawSha256": "dec48815db922466856646827a1e67cf76ba5865b630d648532be97daad848b5",
+      "encodedBytes": 89,
+      "expected": {
+        "eventName": "ExecutionStateChanged",
+        "sourceChainSelector": "16015286601757825753",
+        "sequenceNumber": "11207",
+        "messageId": "0x9aa9c02072640c7926c740f15282c004f8748789c94462d2cc84338458a60dd4",
+        "messageHash": "0x4a5c6abf7f0c6aafef36bf93dfeb158d5741559a7c52190af404906fd525db4e",
+        "state": 1
+      }
+    },
+    {
+      "label": "message1-mint-log-23",
+      "recaptureResponsePath": ".local/PUBLIC-HISTORICAL-RECAPTURE/message1-mint-json.response.json",
+      "recaptureResponseSha256": "829515438d0995a8c22608df6aa5455fb109cec9df4388cf064fc19c2064a3ba",
+      "recaptureTransactionId": "4apQ7wSFwRSRtbMRdmEPe9eko6VawQrJnktmStGe8qsAGpQcEWevGy8W9dNAao4SkGPcdPW8Y9wgpZVh8Q4rKcEk",
+      "programDataLogIndex": 23,
+      "dataBase64": "ubCMcO9OH/nZGtnJT7pB3scrAAAAAAAAmqnAIHJkDHkmx0DxUoLABPh0h4nJRGLSzIQzhFimDdRKXGq/fwxqr+82v5Pf6xWNV0FVmnxSGQr0BJBv1SXbTgI=",
+      "rawSha256": "4dadea2f22fa5e09601611a2f5e99b5e0082ccdb1805c4f6929f269caa50342f",
+      "encodedBytes": 89,
+      "expected": {
+        "eventName": "ExecutionStateChanged",
+        "sourceChainSelector": "16015286601757825753",
+        "sequenceNumber": "11207",
+        "messageId": "0x9aa9c02072640c7926c740f15282c004f8748789c94462d2cc84338458a60dd4",
+        "messageHash": "0x4a5c6abf7f0c6aafef36bf93dfeb158d5741559a7c52190af404906fd525db4e",
+        "state": 2
+      }
+    },
+    {
+      "label": "message2-burn-log-38",
+      "recaptureResponsePath": ".local/PUBLIC-HISTORICAL-RECAPTURE/message2-burn-json.response.json",
+      "recaptureResponseSha256": "3e421033034d7374bc73746ea7795a37f678eafb346902d7297c98e3eb55608e",
+      "recaptureTransactionId": "5FhfyCdtWEt2kdTG139DRxd2MW6DRxSUSCrD42dd3GTbZWAuorJuWG3WSooRhuHFfr3s5D5d23b7D3A7NtevakAP",
+      "programDataLogIndex": 38,
+      "dataBase64": "F01Jt3u5cznZGtnJT7pB3s0NAAAAAAAAyaanApYL1rRPnAaxcpj3rS2IaafWsD+iWkIlfJXRTzrfN+OU4sfs49ka2clPukHezQ0AAAAAAAAAAAAAAAAAAG6q9VKp7+tqbFXjZoXwCJ7WOKlA9+Wyt3CeQ0YUocZvAAAAACAAAAAAAAAAAAAAAAAAAAAnXucoxJEAtW1Ko3wA4tyP/F5d9hUAAAAYHc8QAAAAAAAAAAAAAAAAAAAAAAEGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQEAAAC4Mh5tYvb+SndQEzm21cws0d7Si6tRK4Nxt3wQoHs4HyAAAAAAAAAAAAAAAAAAAAC+6RujypTdfGOe5sGxwvwaGZbNySAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQDKmjsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAABX5ByUKEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4W68QVTMBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "rawSha256": "1762eb97ebff2c278a11744320924556bb0ba142310b0200495a2fe71b70d3b8",
+      "encodedBytes": 429,
+      "expected": {
+        "eventName": "CCIPMessageSent",
+        "destChainSelector": "16015286601757825753",
+        "sequenceNumber": "3533",
+        "message": {
+          "header": {
+            "messageId": "0xc9a6a702960bd6b44f9c06b17298f7ad2d8869a7d6b03fa25a42257c95d14f3a",
+            "sourceChainSelector": "16423721717087811551",
+            "destChainSelector": "16015286601757825753",
+            "sequenceNumber": "3533",
+            "nonce": "0"
+          },
+          "sender": "6eaaf552a9efeb6a6c55e36685f0089ed638a940f7e5b2b7709e434614a1c66f",
+          "data": "",
+          "receiver": "000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df6",
+          "extraArgs": "181dcf100000000000000000000000000000000001",
+          "feeToken": "069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001",
+          "tokenAmounts": [
+            {
+              "sourcePoolAddress": "b8321e6d62f6fe4a77501339b6d5cc2cd1ded28bab512b8371b77c10a07b381f",
+              "destTokenAddress": "000000000000000000000000bee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9",
+              "extraData": "0000000000000000000000000000000000000000000000000000000000000009",
+              "amount": "1000000000",
+              "destExecData": "00015f90"
+            }
+          ],
+          "feeTokenAmount": "10571890",
+          "feeValueJuels": "86506348000000000"
+        }
+      }
+    },
+    {
+      "label": "message3-mint-log-9",
+      "recaptureResponsePath": ".local/PUBLIC-HISTORICAL-RECAPTURE/message3-mint-json.response.json",
+      "recaptureResponseSha256": "cf601b8794724ccc897634d26b9472f88684416206d2cde6a4261cefeedb2e5f",
+      "recaptureTransactionId": "3Gc1mJJo8wMqZCZq2ei1E9vphBzh7w8XA3EW1JPD1C33AhWTkuNJgcKjuwxE1igMfRXt1SEM3hdWoizVA4Lt72jc",
+      "programDataLogIndex": 9,
+      "dataBase64": "ubCMcO9OH/nZGtnJT7pB3sgrAAAAAAAAZU1E6aol4tkEjGFN5zmMqiLt30AGrmbhoTSD02zgV6Yno7Us5VRX608V1Vf0owuNn3t0xA8u0DKLcm5+sindUAE=",
+      "rawSha256": "0f51dd7ba4f3e7fa41acc76d873aad131470454ca496f64777367eef88940ac4",
+      "encodedBytes": 89,
+      "expected": {
+        "eventName": "ExecutionStateChanged",
+        "sourceChainSelector": "16015286601757825753",
+        "sequenceNumber": "11208",
+        "messageId": "0x654d44e9aa25e2d9048c614de7398caa22eddf4006ae66e1a13483d36ce057a6",
+        "messageHash": "0x27a3b52ce55457eb4f15d557f4a30b8d9f7b74c40f2ed0328b726e7eb229dd50",
+        "state": 1
+      }
+    },
+    {
+      "label": "message3-mint-log-24",
+      "recaptureResponsePath": ".local/PUBLIC-HISTORICAL-RECAPTURE/message3-mint-json.response.json",
+      "recaptureResponseSha256": "cf601b8794724ccc897634d26b9472f88684416206d2cde6a4261cefeedb2e5f",
+      "recaptureTransactionId": "3Gc1mJJo8wMqZCZq2ei1E9vphBzh7w8XA3EW1JPD1C33AhWTkuNJgcKjuwxE1igMfRXt1SEM3hdWoizVA4Lt72jc",
+      "programDataLogIndex": 24,
+      "dataBase64": "ubCMcO9OH/nZGtnJT7pB3sgrAAAAAAAAZU1E6aol4tkEjGFN5zmMqiLt30AGrmbhoTSD02zgV6Yno7Us5VRX608V1Vf0owuNn3t0xA8u0DKLcm5+sindUAI=",
+      "rawSha256": "4abc7b894353976049039af1d52c347e5169b68a23e422d60804d024b8e2c10a",
+      "encodedBytes": 89,
+      "expected": {
+        "eventName": "ExecutionStateChanged",
+        "sourceChainSelector": "16015286601757825753",
+        "sequenceNumber": "11208",
+        "messageId": "0x654d44e9aa25e2d9048c614de7398caa22eddf4006ae66e1a13483d36ce057a6",
+        "messageHash": "0x27a3b52ce55457eb4f15d557f4a30b8d9f7b74c40f2ed0328b726e7eb229dd50",
+        "state": 2
+      }
+    }
+  ]
+}

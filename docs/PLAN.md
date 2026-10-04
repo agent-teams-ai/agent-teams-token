@@ -22,8 +22,20 @@ Remaining work uses existing release requirements and actual owner inputs:
 - Complete existing external security, legal and applicable market gates.
   Deployment and each Mainnet broadcast still require fresh owner approval.
 
-Solana/CCIP remains a later release under ADR-0010. Its existing Fee Quoter
-provenance gap in issue #43 does not block Ethereum-only preparation.
+Solana/CCIP Mainnet remains a later release under ADR-0010. Its existing Fee
+Quoter provenance gap in issue #43 does not block Ethereum-only preparation.
+
+The accepted DEV integration includes an optional admitted unsigned bidirectional
+preview and a finite offline captured-evidence report; see [DEV usage](../tooling/testnet-ccip/transfer-status.md#offline-dev-preview-provider-free-checkpoint).
+Its published source and local evidence are scoped in
+[STATUS](STATUS.md#ccip-dev-integration-published-source-local-evidence).
+Actual provider codecs/CLI persist-reopen evidence and the product100M monetary
+vertical are local evidence, with the vertical labelled `local-event-simulation`;
+preview artifacts remain `fixture-only`. The three real CCIP settled messages at
+historical 100 supply stay historical. Bounded DEV removal preserves legacy
+Ethereum/Supply; it is neither on-chain reversal nor a new CCIP three-slice seal.
+Protocol/backing policy, real inputs, approved canary and release approvals remain
+conditional under proposed ADR-0007 and accepted ADR-0010; Mainnet stays deferred.
 
 ## Full Ethereum assembly correction, 2026-10-01
 
