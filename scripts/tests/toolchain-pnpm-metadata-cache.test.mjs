@@ -368,19 +368,43 @@ function assertMetadataInvocationUmask(context, fixture, callerUmask, outcome) {
       // Linux symlinks always use 0777, so check the actual extraction boundary.
       extractions.push(process.umask());
     }
-    if (args[1] === "--agtmai-toolchain-process-supervisor") {
-      const config = JSON.parse(Buffer.from(args[2], "base64url").toString());
+    // Linux prefixes the observer argv with the native watchdog contract.
+    // Keep this explicit so protocol drift cannot bypass lifecycle assertions.
+    const supervisorArgument = process.platform === "linux" ? 5 : 1;
+    if (args[supervisorArgument] === "--agtmai-toolchain-process-supervisor") {
+      const config = JSON.parse(Buffer.from(args[supervisorArgument + 1], "base64url").toString());
       if (config.args.includes("--metadata-probe")) {
         invocations.push(process.umask());
         privateRoot = dirname(options.env.HOME);
+        if (process.platform === "linux") {
+          assert.equal(command, `/proc/self/fd/${config.statusFd + 1}`);
+          assert.equal(args[3], process.execPath);
+        }
         if (outcome === "throw") {throw new Error("injected pnpm spawn failure");}
         const result = spawn(command, args, options);
         childRan = true;
+        assert.equal(fs.statSync(options.env.HOME).mode & 0o777, 0o700);
+        const metadata = join(options.env.HOME, "child-metadata");
+        assert.equal(fs.statSync(metadata).mode & 0o777, 0o600);
+        assert.equal(fs.readFileSync(metadata, "utf8"), "private invocation data");
+        if (process.platform === "linux") {
+          // Read the real subreaper report before invocation cleanup removes it.
+          assert.deepEqual(JSON.parse(fs.readFileSync(join(privateRoot, "native-status"), "utf8")), {
+            custody: "completed",
+            error: null,
+            signal: null,
+            signalledCount: 0,
+            status: outcome === "nonzero" ? 7 : 0,
+            uncertainty: null,
+          });
+        }
         return result;
       }
     }
     return spawn(command, args, options);
   };
+  // The execution modules import spawnSync as a named builtin export.
+  syncBuiltinESMExports();
   const observation = observeConsumerDescriptors({
     closeTarget(record) {
       if (!record.identity.isDirectory() || !basename(record.path).startsWith(".install-part-")) {return false;}
