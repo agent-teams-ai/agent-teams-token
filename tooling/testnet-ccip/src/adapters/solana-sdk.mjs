@@ -33,9 +33,12 @@ export async function createSolanaMintSdk(providerDirectory) {
     }
   }
   const require = createRequire(resolve(root, "package.json"));
-  const { PublicKey, SystemProgram, Transaction, Keypair } = require("@solana/web3.js");
-  const { createInitializeMint2Instruction, TOKEN_PROGRAM_ID } = require("@solana/spl-token");
-  const bs58 = require("bs58").default;
+  return createMintSdk({ web3: require("@solana/web3.js"), spl: require("@solana/spl-token"), bs58: require("bs58").default });
+}
+export function createMintSdk(provider) {
+  const { PublicKey, SystemProgram, Transaction, Keypair } = provider.web3;
+  const { createInitializeMint2Instruction, TOKEN_PROGRAM_ID } = provider.spl;
+  const { bs58 } = provider;
   function build(expected, latestBlockhash) {
     if (!/^[1-9][0-9]*$/.test(latestBlockhash.lastValidBlockHeight)) { throw new Error("Invalid block validity height"); }
     if (new PublicKey(latestBlockhash.blockhash).toBase58() !== latestBlockhash.blockhash) { throw new Error("Invalid blockhash"); }

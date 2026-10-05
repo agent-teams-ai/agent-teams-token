@@ -1,31 +1,38 @@
 import { projectMessage } from '../../../../packages/domain/src/features/ccip-status/message.ts';
 import { reconcileSupply } from '../../../../packages/domain/src/supply.ts';
-import { FORWARD, forwardRecipient } from './evm-forward.mjs';
-import { REVERSE } from './solana-reverse.mjs';
+import { forwardRoute, forwardRecipient } from './evm-forward.mjs';
+import { reverseRoute } from './solana-reverse.mjs';
 import { ROUTER_PROGRAM } from './solana-registration.ts';
 const equal = (a, b) => typeof a === 'string' && (b.startsWith('0x') ? a.toLowerCase() === b : a === b);
-export function statusRecipient(direction, recipient) {
-  const selected = forwardRecipient(recipient);
-  if (direction === 'solana-to-ethereum' && selected !== FORWARD.recipient) { throw new Error('Reverse fixture supports only recipient A'); }
+export function statusRecipient(direction, recipient, fixture) {
+  const selected = forwardRecipient(recipient, fixture);
+  if (direction === 'solana-to-ethereum' && selected !== forwardRoute(fixture).recipient) { throw new Error('Reverse fixture supports only recipient A'); }
   if (!['ethereum-to-solana', 'solana-to-ethereum'].includes(direction)) { throw new Error('Invalid transfer direction'); }
   return selected;
 }
-export function validateStatusTransfers(transfers) {
+export function validateStatusTransfers(transfers, fixture) {
   if (!Array.isArray(transfers) || transfers.length > 3) { throw new Error('At most three fixed fixture transfers required'); }
-  const slots = transfers.map(transfer => `${transfer.direction}:${statusRecipient(transfer.direction, transfer.recipient)}`);
+  const slots = transfers.map(transfer => `${transfer.direction}:${statusRecipient(transfer.direction, transfer.recipient, fixture)}`);
   if (new Set(slots).size !== slots.length || new Set(transfers.map(transfer => transfer.sourceHash)).size !== transfers.length) { throw new Error('Duplicate fixture transfer'); }
 }
-function validForwardReceiver(forward, message, recipient) { return message.data === '0x' && (!forward || (message.tokenReceiver === recipient && equal(message.tokenAmounts?.[0]?.sourcePoolAddress, FORWARD.pool))); }
-export function matchRequest(request, direction, hash, recipient = FORWARD.recipient) {
+function validForwardReceiver(forward, message, recipient, route) { return message.data === '0x' && (!forward || (message.tokenReceiver === recipient && equal(message.tokenAmounts?.[0]?.sourcePoolAddress, route.pool))); }
+function validSourcePool(forward, message, fixture) {
+  return fixture === undefined || forward || equal(message.tokenAmounts?.[0]?.sourcePoolAddress, fixture.solanaPool);
+}
+/** @param {string=} recipient @param {import("./replacement-fixture.ts").ReplacementFixture=} fixture */
+export function matchRequest(request, direction, hash, recipient, fixture) {
+  const route = forwardRoute(fixture), reverse = reverseRoute(fixture);
+  recipient = statusRecipient(direction, recipient, fixture);
   const forward = direction === 'ethereum-to-solana', message = request.message;
-  const source = forward ? 16015286601757825753n : FORWARD.selector;
-  const destination = forward ? FORWARD.selector : 16015286601757825753n;
+  const source = forward ? 16015286601757825753n : route.selector;
+  const destination = forward ? route.selector : 16015286601757825753n;
   return [request.tx.hash, request.log.transactionHash].every(value => value === hash) && request.lane.sourceChainSelector === source &&
     request.lane.destChainSelector === destination && message.sourceChainSelector === source && message.destChainSelector === destination &&
-    equal(message.sender, forward ? FORWARD.administrator : REVERSE.payer) &&
-    equal(message.receiver, forward ? '11111111111111111111111111111111' : REVERSE.recipient) &&
-    validForwardReceiver(forward, message, recipient) && message.tokenAmounts?.length === 1 &&
-    message.tokenAmounts[0].amount === FORWARD.amount && equal(message.tokenAmounts[0].destTokenAddress, forward ? REVERSE.mint : FORWARD.token) &&
+    equal(message.sender, forward ? route.administrator : reverse.payer) &&
+    equal(message.receiver, forward ? '11111111111111111111111111111111' : reverse.recipient) &&
+    validForwardReceiver(forward, message, recipient, route) && message.tokenAmounts?.length === 1 &&
+    validSourcePool(forward, message, fixture) &&
+    message.tokenAmounts[0].amount === route.amount && equal(message.tokenAmounts[0].destTokenAddress, forward ? reverse.mint : route.token) &&
     /^0x[0-9a-fA-F]{64}$/.test(message.messageId);
 }
 function bindProgramLog(proof, log, program) {
@@ -48,18 +55,19 @@ function bindExecution(proof, log, chain, offRamp) {
     item.data === log.data && JSON.stringify(item.topics) === JSON.stringify(log.topics));
   if (matches.length !== 1 || log.address.toLowerCase() !== offRamp.toLowerCase()) { throw new Error('SDK execution log absent from native receipt'); }
 }
-function verifyNativeSource(forward, proof, request, lane) {
+function verifyNativeSource(forward, proof, request, lane, fixture) {
   if (forward) {
     const nativeLog = proof.logs.filter(log => Number(BigInt(log.logIndex)) === request.log.index &&
       log.address.toLowerCase() === request.log.address.toLowerCase() && log.data === request.log.data &&
       JSON.stringify(log.topics) === JSON.stringify(request.log.topics));
     if (nativeLog.length !== 1 || request.log.address.toLowerCase() !== request.lane.onRamp.toLowerCase()) {throw new Error('SDK source log not present in native receipt');}
   } else {
+    const reverse = reverseRoute(fixture);
     if (request.message.tokenAmounts[0].sourcePoolAddress !== lane?.solanaPool) { throw new Error('Wrong Solana source pool'); }
     bindProgramLog(proof, request.log, ROUTER_PROGRAM);
     const message = proof.transaction.message;
-    if (!message.accountKeys.some(key => key.pubkey === REVERSE.payer && key.signer === true) ||
-      !message.instructions.some(ix => ix.programId === ROUTER_PROGRAM) || request.tx.from !== REVERSE.payer) {throw new Error('Wrong native Solana sender/router');}
+    if (!message.accountKeys.some(key => key.pubkey === reverse.payer && key.signer === true) ||
+      !message.instructions.some(ix => ix.programId === ROUTER_PROGRAM) || request.tx.from !== reverse.payer) {throw new Error('Wrong native Solana sender/router');}
   }
 }
 function verifyExecution(execution, identity, request, hash, successState) {
@@ -115,19 +123,20 @@ async function discoverReceipt(api, messageId, destinationReceipt, forward) {
   return { metadata, discoveryError, ...selectReceipt(metadata, destinationReceipt, forward) };
 }
 export async function inspectTransfer({ sourceHash, direction, recipient, destinationReceipt }, chains, native, api, successState) {
-  const selectedRecipient = statusRecipient(direction, recipient);
+  const fixture = native.lane?.fixture, route = forwardRoute(fixture), reverse = reverseRoute(fixture);
+  const selectedRecipient = statusRecipient(direction, recipient, fixture);
   const forward = direction === 'ethereum-to-solana';
   const { sourceName, destinationName, sourceKind, destinationKind } = roles(forward);
   const proof = await native[sourceName](sourceHash, sourceKind);
-  if (forward && (proof.transaction.to !== FORWARD.router || proof.transaction.from !== FORWARD.administrator)) {throw new Error('Wrong native source sender/router');}
+  if (forward && (proof.transaction.to !== route.router || proof.transaction.from !== route.administrator)) {throw new Error('Wrong native source sender/router');}
   const requests = await chains[sourceName].getMessagesInTx(sourceHash);
-  const matching = requests.filter(request => matchRequest(request, direction, sourceHash, selectedRecipient));
+  const matching = requests.filter(request => matchRequest(request, direction, sourceHash, selectedRecipient, fixture));
   if (matching.length !== 1 || requests.length !== 1) {throw new Error('Source message identity is not unique/exact');}
   const request = matching[0];
-  verifyNativeSource(forward, proof, request, native.lane);
-  const identity = { messageId: request.message.messageId, direction, amount: FORWARD.amount,
-    sourceToken: forward ? FORWARD.token : REVERSE.mint, destinationToken: forward ? REVERSE.mint : FORWARD.token,
-    recipient: forward ? selectedRecipient : REVERSE.recipient };
+  verifyNativeSource(forward, proof, request, native.lane, fixture);
+  const identity = { messageId: request.message.messageId, direction, amount: route.amount,
+    sourceToken: forward ? route.token : reverse.mint, destinationToken: forward ? reverse.mint : route.token,
+    recipient: forward ? selectedRecipient : reverse.recipient };
   const event = (chain, kind, hash, evidence) => ({ ...identity, chain, kind, transactionId: hash,
     eventIndex: evidence.eventIndex, blockHash: evidence.blockHash, blockHeight: evidence.blockHeight, finality: 'finalized' });
   const events = [event(sourceName, sourceKind, sourceHash, proof)];

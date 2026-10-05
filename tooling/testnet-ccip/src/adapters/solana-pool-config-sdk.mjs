@@ -1,3 +1,4 @@
+import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transaction-sdk.mjs";
 import { createSolanaPoolInitSdk } from "./solana-pool-init-sdk.mjs";
 import { createSolanaRegistrationSdk } from "./solana-registration-sdk.mjs";
@@ -10,8 +11,13 @@ export async function createSolanaPoolConfigSdk(providerDirectory) {
   const provider = await loadSolanaProvider(providerDirectory);
   const registrationSdk = await createSolanaRegistrationSdk(providerDirectory);
   const poolSdk = await createSolanaPoolInitSdk(providerDirectory);
+  return createPoolConfigSdk(provider, registrationSdk, poolSdk);
+}
+export function createPoolConfigSdk(provider, registrationSdk, poolSdk) {
   const { PublicKey, TransactionInstruction, Transaction } = provider.web3;
   function derive(input) {
+    const fixture = input.fixture === undefined ? undefined : validateReplacementFixture(input.fixture);
+    if (fixture && (input.payer !== fixture.payer || input.mint !== fixture.mint || input.pool !== fixture.solanaPool)) { throw new Error("Wrong selected pool config identity"); }
     const registration = registrationSdk.derive({ ...input, operation: "transfer-mint-authority" });
     const mint = new PublicKey(input.mint), program = new PublicKey(BURNMINT_PROGRAM);
     const pda = (seeds, owner) => PublicKey.findProgramAddressSync(seeds, new PublicKey(owner));
@@ -25,7 +31,7 @@ export async function createSolanaPoolConfigSdk(providerDirectory) {
       const derived = pda([new PublicKey(input.payer).toBuffer(), u64(recentSlot)], ALT_PROGRAM);
       alt = derived[0].toBase58(); altBump = derived[1];
     } else if (input.recentSlot !== undefined && input.recentSlot !== null) { throw new Error("Remote config operation does not take ALT recentSlot"); }
-    return { ...registration, operation: input.operation, chain,
+    return { ...registration, ...(fixture ? { fixture } : {}), operation: input.operation, chain,
       feeTokenConfig: pda([Buffer.from("fee_billing_token_config"), mint.toBuffer()], FEE_QUOTER_PROGRAM)[0].toBase58(),
       routerPoolSigner: pda([Buffer.from("external_token_pools_signer"), program.toBuffer()], ROUTER_PROGRAM)[0].toBase58(),
       recentSlot, alt, altBump, ...(input.repairRateLimitsBase64 !== undefined ? { repairRateLimitsBase64: input.repairRateLimitsBase64 } : {}) };
@@ -33,7 +39,7 @@ export async function createSolanaPoolConfigSdk(providerDirectory) {
   function validate(intent, expected) {
     const canonical = derive(expected);
     for (const field of Object.keys(canonical)) {
-      if (canonical[field] !== expected[field]) { throw new Error("Wrong derived pool config identity"); }
+      if (JSON.stringify(canonical[field]) !== JSON.stringify(expected[field])) { throw new Error("Wrong derived pool config identity"); }
     }
     return verifySolanaPoolConfigIntent(intent, expected);
   }

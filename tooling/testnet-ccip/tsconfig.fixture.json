@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "allowJs": true, "checkJs": false },
+  "include": ["./tests/replacement-*.test.ts", "./tests/test-rpc*.test.ts", "./src/domain/replacement-fixture.ts", "./src/adapters/fixture-binding.ts"]
+}

@@ -1,3 +1,4 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
 import { BURNMINT_PROGRAM, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -32,10 +33,11 @@ export async function initializeTestPool(settings) {
   if (settings.testOnly !== true || settings.expected.testOnly !== true || settings.expected.cluster !== "solana-devnet") {
     throw new Error("Test-only Solana settings required");
   }
-  const expected = settings.expected;
+  const fixture = bindFixture(settings, [settings.journalFile]);
+  const expected = { ...settings.expected, ...(fixture ? { fixture } : {}) };
   const sdk = await createSolanaPoolInitSdk(settings.providerDirectory);
   const rpc = createSolanaPoolInitRpc((bytes, intent) => sdk.inspectSigned(bytes, {
-    testOnly: true, cluster: intent.cluster, payer: intent.payer, mint: intent.mint, pool: intent.pool,
+    testOnly: true, cluster: intent.cluster, payer: intent.payer, mint: intent.mint, pool: intent.pool, ...(intent.fixture ? { fixture: intent.fixture } : {}),
   }).messageBase64, (bytes, intent) => sdk.verifyState(bytes, intent));
   const result = await runSolanaPoolInitJournal(expected, {
     ...createJournalFile(settings.journalFile), ...rpc,

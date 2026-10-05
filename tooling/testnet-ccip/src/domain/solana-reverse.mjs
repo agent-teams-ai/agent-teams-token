@@ -1,3 +1,4 @@
+import { validateReplacementFixture } from './replacement-fixture.ts';
 import { createHash } from 'node:crypto';
 import { ROUTER_PROGRAM } from './solana-registration.ts';
 import { BURNMINT_PROGRAM } from './solana-pool-init.ts';
@@ -7,6 +8,13 @@ export const REVERSE = Object.freeze({ payer: '8T13W72sSEKmBpEv1FpUM7nJRatnChEfP
   mint: '13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau',
   recipient: '0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6', amount: 1000000000n,
   rmn: 'RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7', nativeMint: 'So11111111111111111111111111111111111111112' });
+export function reverseRoute(fixture) {
+  if (fixture === undefined) { return REVERSE; }
+  const f = validateReplacementFixture(fixture);
+  return Object.freeze({ ...REVERSE, payer: f.payer, mint: f.mint, recipient: f.administrator,
+    amount: BigInt(f.amount), selector: f.reverseSelector });
+}
+const expectedRoute = e => reverseRoute(e.fixture);
 const u32 = n => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
 const bytes = b => Buffer.concat([u32(b.length), b]);
 const meta = (address, isWritable = false, isSigner = false) => ({ address, isWritable, isSigner });
@@ -29,16 +37,23 @@ function validateReverseRoute(route) {
   solanaPublicKeyBytes(route.payer); solanaPublicKeyBytes(route.mint);
 }
 function validateReverseInputs(e, route) {
+  const fixedFixture = route === REVERSE || e.fixture !== undefined;
   if (e.testOnly !== true || e.cluster !== 'solana-devnet' || e.payer !== route.payer || e.mint !== route.mint ||
     typeof e.approval !== 'boolean' || route !== REVERSE &&
     ([e.quotedFee, e.sourceLamports].some(n => typeof n !== 'bigint' && typeof n !== 'string' || String(n).length > 20)) ||
-    !/^[1-9][0-9]*$/.test(e.quotedFee) || BigInt(e.quotedFee) > 100000000n || !/^[1-9][0-9]*$/.test(e.sourceLamports) || BigInt(e.sourceLamports) > (route === REVERSE ? 10000000000n : (1n << 64n) - 1n)) {
+    !/^[1-9][0-9]*$/.test(e.quotedFee) || BigInt(e.quotedFee) > 100000000n || !/^[1-9][0-9]*$/.test(e.sourceLamports) || BigInt(e.sourceLamports) > (fixedFixture ? 10000000000n : (1n << 64n) - 1n)) {
     throw new Error('Wrong fixed reverse scope/quote');
   }
 }
 // Explicit DEV routes do not change historical default callers.
-export function reverseInstructions(e, route = REVERSE) {
+export function reverseInstructions(e, route = expectedRoute(e)) {
   validateReverseRoute(route); validateReverseInputs(e, route);
+  if (e.fixture !== undefined) {
+    const selected = expectedRoute(e), fixture = validateReplacementFixture(e.fixture);
+    if (['payer', 'mint', 'recipient', 'amount'].some(k => String(route[k]) !== String(selected[k])) || e.pool !== fixture.solanaPool) {
+      throw new Error('Conflicting replacement reverse route');
+    }
+  }
   const all = altAddresses(e);
   const accounts = [meta(e.routerConfig), meta(e.destChain, true), meta(e.nonce, true), meta(e.payer, true, true),
     meta(SYSTEM_PROGRAM), meta(SPL_TOKEN_PROGRAM), meta(route.nativeMint), meta(SYSTEM_PROGRAM, true),
@@ -58,8 +73,8 @@ export function reverseInstructions(e, route = REVERSE) {
   return e.approval ? [approval, send] : [send];
 }
 export function verifyReverseIntent(intent, expected) {
-  const instructions = reverseInstructions(expected);
-  if (intent.feePayer !== REVERSE.payer || JSON.stringify(intent.instructions) !== JSON.stringify(instructions)) {
+  const route = expectedRoute(expected), instructions = reverseInstructions(expected, route);
+  if (intent.feePayer !== route.payer || JSON.stringify(intent.instructions) !== JSON.stringify(instructions)) {
     throw new Error('Unexpected reverse instruction, account privilege or payload');
   }
   return { ...expected, schema: 'agtmai-solana-reverse-v1', instructions };
@@ -72,19 +87,20 @@ export function reverseContract(expected) {
       if (JSON.stringify(intent) !== JSON.stringify(verified)) { throw new Error('Stored reverse envelope mismatch'); }
       return JSON.stringify(verified);
     },
-    stateMatches: state => state?.sourceReceiptVerified === true && expected.payer === REVERSE.payer,
+    stateMatches: state => state?.sourceReceiptVerified === true && expected.payer === expectedRoute(expected).payer,
   };
 }
+/** @param {import('./replacement-fixture.ts').ReverseRoute} route */
 export function deriveReverseAccounts(provider, pool, linkMint, route = REVERSE) {
   const selected = route !== REVERSE;
-  const pda = selected ? (program, ...seeds) => provider.derivePda(program,
+  const pda = selected && typeof provider.derivePda === 'function' ? (program, ...seeds) => provider.derivePda(program,
     seeds.map(s => (typeof s === 'string' ? Buffer.from(s) : s).toString('hex'))) :
     (program, ...seeds) => provider.web3.PublicKey.findProgramAddressSync(
       seeds.map(s => typeof s === 'string' ? Buffer.from(s) : s), new provider.web3.PublicKey(program))[0].toBase58();
-  const ata = selected ? (mint, owner, offCurve = false) => provider.deriveAta(mint, owner, offCurve) :
+  const ata = selected && typeof provider.deriveAta === 'function' ? (mint, owner, offCurve = false) => provider.deriveAta(mint, owner, offCurve) :
     (mint, owner, offCurve = false) => provider.spl.getAssociatedTokenAddressSync(
       new provider.web3.PublicKey(mint), new provider.web3.PublicKey(owner), offCurve).toBase58();
-  reverseSelector(route);
+  validateReverseRoute(route);
   if (route.rmn !== REVERSE.rmn || route.nativeMint !== REVERSE.nativeMint) {
     throw new Error('Wrong selected derivation route');
   }

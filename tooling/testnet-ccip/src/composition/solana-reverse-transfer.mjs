@@ -1,3 +1,4 @@
+import { bindFixture } from '../adapters/fixture-binding.ts';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,6 +12,7 @@ const defaults={sdk:createSolanaReverseSdk,store:createJournalFile,rpc:createSol
 export async function transferSolanaReverse(settings,ports=defaults) {
   if(settings.testOnly!==true || !settings.journalFile || !/^[1-9][0-9]*$/.test(settings.maxNativeBalanceLamports) ||
     BigInt(settings.maxNativeBalanceLamports)>10000000000n) {throw new Error('Explicit test-only reverse settings and native exposure required');}
+  bindFixture(settings, [settings.journalFile]);
   const sdk=await ports.sdk(settings),store=ports.store(resolve(settings.journalFile));
   const expectedFrom=stored=>sdk.derive(stored.linkMint,{approval:stored.approval,quotedFee:stored.quotedFee,sourceLamports:stored.sourceLamports});
   const rpc=ports.rpc((bytes,intent)=>sdk.inspectSigned(bytes,expectedFrom(intent)).messageBase64,

@@ -1,3 +1,6 @@
+import { bindFixture } from './fixture-binding.ts';
+import { unsignedSvmPrimitives } from './dev-provider-primitives.mjs';
+import { verifySvmWirePacket } from './dev-svm-call-plan.mjs';
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -7,7 +10,7 @@ import { loadSolanaProvider } from './solana-transaction-sdk.mjs';
 import { createSolanaPoolConfigSdk } from './solana-pool-config-sdk.mjs';
 import { createSolanaPoolInitSdk } from './solana-pool-init-sdk.mjs';
 import { createReverseState } from './solana-reverse-state.mjs';
-import { REVERSE, deriveReverseAccounts, reverseInstructions, verifyReverseIntent } from '../domain/solana-reverse.mjs';
+import { reverseRoute, deriveReverseAccounts, reverseInstructions, verifyReverseIntent } from '../domain/solana-reverse.mjs';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { altAddresses, SEPOLIA_SELECTOR } from '../domain/solana-pool-config.ts';
 import { SOLANA_REMOTE } from '../domain/evm-remote-config.ts';
@@ -32,6 +35,16 @@ export function createReverseTransactionSdk(provider, validateExpected) {
       !Buffer.from(tx.message.serialize()).equals(Buffer.from(message(e,tx.message.recentBlockhash).serialize()))) {
       throw new Error('Unexpected v0 signer, instructions, ALT lookup indexes or global privileges');
     }
+    // The shared raw verifier checks Borsh payload and compiled global privileges/ALT.
+    // Remove signatures only in this read-only verification copy; signed identity is
+    // authenticated separately below by native Ed25519 verification.
+    const unsigned = new VersionedTransaction(tx.message);
+    const lookup = Buffer.alloc(376); lookup.writeUInt32LE(1, 0); lookup.writeBigUInt64LE((1n << 64n) - 1n, 4);
+    lookup[21] = 1; new PublicKey(e.payer).toBuffer().copy(lookup, 22);
+    altAddresses(e).forEach((a, i) => new PublicKey(a).toBuffer().copy(lookup, 56 + i * 32));
+    verifySvmWirePacket(unsignedSvmPrimitives(provider.web3), { ...reverseRoute(e.fixture), selector: SEPOLIA_SELECTOR }, e,
+      { bytesBase64: Buffer.from(unsigned.serialize()).toString('base64'), messageBase64: Buffer.from(tx.message.serialize()).toString('base64'),
+        blockhash: tx.message.recentBlockhash, instructions: reverseInstructions(e) }, { key: e.alt, dataBase64: lookup.toString('base64') });
     // Exact recompiled bytes prove both ordered instruction data and global privilege union.
     const intent = {feePayer:e.payer,instructions:reverseInstructions(e)};
     return {intent,messageBase64:Buffer.from(tx.message.serialize()).toString('base64'),blockhash:tx.message.recentBlockhash};
@@ -79,6 +92,7 @@ export function createReverseTransactionSdk(provider, validateExpected) {
   return {build,inspectSigned,sign};
 }
 export async function createSolanaReverseSdk(settings) {
+  const fixture = bindFixture(settings, [settings.journalFile]), route = reverseRoute(fixture);
   const provider=await loadSolanaProvider(settings.providerDirectory);
   const poolConfig=await createSolanaPoolConfigSdk(settings.providerDirectory),poolSdk=await createSolanaPoolInitSdk(settings.providerDirectory);
   const root=resolve(settings.ccipProviderDirectory);
@@ -87,10 +101,10 @@ export async function createSolanaReverseSdk(settings) {
     if(createHash('sha256').update(await readFile(resolve(root,file))).digest('hex')!==hash){throw new Error('Wrong CCIP provider pin');}
   }
   const require=createRequire(resolve(root,'package.json')),sdk=await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk')).href);
-  const pool=poolConfig.derive({testOnly:true,cluster:'solana-devnet',payer:REVERSE.payer,mint:REVERSE.mint,
-    pool:new provider.web3.PublicKey(Buffer.from(SOLANA_REMOTE.pool.slice(2),'hex')).toBase58(),operation:'set-pool',recentSlot:settings.recentSlot});
-  const state=createReverseState(provider,poolSdk);
-  function derive(linkMint,dynamic) {return {...deriveReverseAccounts(provider,pool,linkMint),...dynamic};}
+  const pool=poolConfig.derive({testOnly:true,cluster:'solana-devnet',payer:route.payer,mint:route.mint,
+    pool:fixture?.solanaPool ?? new provider.web3.PublicKey(Buffer.from(SOLANA_REMOTE.pool.slice(2),'hex')).toBase58(),operation:'set-pool',recentSlot:settings.recentSlot});
+  const state=createReverseState(provider,poolSdk,fixture);
+  function derive(linkMint,dynamic) {return {...deriveReverseAccounts(provider,pool,linkMint,route),...dynamic,...(fixture ? { fixture } : {})};}
   function validateExpected(e) {
     const canonical=derive(e.linkMint,{approval:e.approval,quotedFee:e.quotedFee,sourceLamports:e.sourceLamports});
     if(JSON.stringify(e)!==JSON.stringify(canonical)){throw new Error('Wrong reverse derived identity');}
@@ -101,8 +115,8 @@ export async function createSolanaReverseSdk(settings) {
     async candidate(e) {
       const chain=await sdk.SolanaChain.fromUrl('https://api.devnet.solana.com');
       try {
-        const opts={sender:REVERSE.payer,router:ROUTER_PROGRAM,destChainSelector:BigInt(SEPOLIA_SELECTOR),approveMax:false,
-          message:{receiver:REVERSE.recipient,data:'0x',tokenAmounts:[{token:REVERSE.mint,amount:REVERSE.amount}],
+        const opts={sender:route.payer,router:ROUTER_PROGRAM,destChainSelector:BigInt(SEPOLIA_SELECTOR),approveMax:false,
+          message:{receiver:route.recipient,data:'0x',tokenAmounts:[{token:route.mint,amount:route.amount}],
             feeToken:'11111111111111111111111111111111',extraArgs:{gasLimit:0n,allowOutOfOrderExecution:true}}};
         const fee=await chain.getFee(opts);
         if(typeof fee!=='bigint'||fee<=0n||fee>100000000n){throw new Error('Native quote outside test range');}

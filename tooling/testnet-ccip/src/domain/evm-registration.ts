@@ -1,3 +1,5 @@
+import { validateReplacementFixture } from "./replacement-fixture.ts";
+import type { ReplacementFixture } from "./replacement-fixture.ts";
 const ZERO = "0x" + "0".repeat(40);
 const REGISTRY = "0x95f29fee11c5c55d26cccf1db6772de953b37b82";
 const MODULE = "0xa3c796d480638d7476792230da1e2ada86e031b0";
@@ -10,6 +12,8 @@ export interface RegistrationSnapshot {
   readonly poolToken: string; readonly poolOwner: string;
 }
 export interface RegistrationTarget {
+  readonly fixture?: ReplacementFixture;
+  readonly fixtureIdentity?: string;
   readonly testOnly: true; readonly token: string; readonly pool: string; readonly administrator: string;
 }
 export type RegistrationStep = { readonly kind: "complete" } | {
@@ -24,11 +28,20 @@ function address(value: string, zero = false): string {
   return value.toLowerCase();
 }
 const word = (value: string): string => value.slice(2).padStart(64, "0");
+function validateFixtureTarget(target: RegistrationTarget, token: string, pool: string, admin: string): void {
+  if (target.fixture !== undefined) {
+    const f = validateReplacementFixture(target.fixture);
+    if (token !== f.token || pool !== f.pool || admin !== f.administrator || target.fixtureIdentity !== undefined && target.fixtureIdentity !== f.identity) {
+      throw new Error("Wrong replacement registration authority/peer");
+    }
+  }
+}
 /** One next operation, based on finalized contract state; never silently replace a foreign admin/pool. */
 export function nextRegistrationStep(snapshot: RegistrationSnapshot, target: RegistrationTarget): RegistrationStep {
   if (target.testOnly !== true || snapshot.chainId !== "11155111" ||
     !/^0x[0-9a-fA-F]{64}$/.test(snapshot.finalizedBlockHash)) { throw new Error("Finalized Sepolia evidence required"); }
   const token = address(target.token), pool = address(target.pool), admin = address(target.administrator);
+  validateFixtureTarget(target, token, pool, admin);
   if (address(snapshot.token) !== token || address(snapshot.tokenAdmin) !== admin ||
     address(snapshot.poolToken) !== token || address(snapshot.poolOwner) !== admin) {
     throw new Error("Token/pool ownership does not match deployment");
