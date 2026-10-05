@@ -9,6 +9,11 @@ import type { TestRpcSettings } from "../adapters/test-rpc.ts";
 import { runEvmJournal } from "../application/evm-journal.ts";
 import type { EvmJournalPorts } from "../application/evm-journal.ts";
 import type { SepoliaIntentInput } from "../domain/evm-intent.ts";
+import type { EvmRpcDiagnostic } from "../application/evm-rpc-diagnostic.ts";
+export interface SepoliaExecutionResult {
+  readonly status: string; readonly reason: string; readonly transactionHash: string;
+  readonly diagnostic?: EvmRpcDiagnostic;
+}
 export interface SepoliaExecutionIo {
   signer(config: CastSignerConfig): Pick<EvmJournalPorts, "sign" | "inspectSigned">;
   journal(path: string): Pick<EvmJournalPorts, "read" | "write" | "exclusive">;
@@ -16,7 +21,7 @@ export interface SepoliaExecutionIo {
 }
 export async function executeSepoliaIntent(intent: SepoliaIntentInput, settings: FixtureSelection & TestRpcSettings & {
   readonly signer: CastSignerConfig; readonly journalFile: string;
-}, io: SepoliaExecutionIo = { signer: createCastSigner, journal: createJournalFile, fetcher: globalThis.fetch }): Promise<{ status: string; reason: string; transactionHash: string }> {
+}, io: SepoliaExecutionIo = { signer: createCastSigner, journal: createJournalFile, fetcher: globalThis.fetch }): Promise<SepoliaExecutionResult> {
   const endpoint = selectSepoliaRpc(settings), readRpc = createTestRpcRequest(endpoint, io.fetcher);
   const fixture = bindFixture({ ...settings, testOnly: settings.signer.testOnly }, [settings.journalFile]);
   if (fixture && (intent.chainId !== fixture.chainId || intent.from.toLowerCase() !== fixture.administrator)) {
@@ -47,5 +52,7 @@ export async function executeSepoliaIntent(intent: SepoliaIntentInput, settings:
       return signer.sign(envelope);
     },
   });
-  return { status: result.status, reason: result.reason, transactionHash: result.record.signed.hash };
+  const diagnostic = rpc.diagnostic();
+  return { status: result.status, reason: result.reason, transactionHash: result.record.signed.hash,
+    ...(diagnostic === undefined ? {} : { diagnostic }) };
 }
