@@ -245,3 +245,10 @@ export function validateManualDerivedAccounts(provider) {
   if(JSON.stringify(addresses)!==JSON.stringify(fixedAccounts.map(a=>a.address))){throw new Error('Independent manual PDA derivation mismatch');}
   return addresses;
 }
+
+/** Historical recovery is a single retained message, never a selected route fallback. */
+export function requireHistoricalRecovery(settings) {
+  if (Object.hasOwn(settings, 'fixture') || Object.hasOwn(settings, 'fixtureIdentity')) {
+    throw new Error('Replacement fixture requires a fresh message-specific execution proof');
+  }
+}

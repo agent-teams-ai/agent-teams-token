@@ -8,7 +8,9 @@ import type { EvmJournalRecord } from "../application/evm-journal.ts";
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
 import { lockReleaseConstructor } from "../domain/evm-pool.ts";
 import type { CastSignerConfig } from "../adapters/evm-cast.ts";
-export interface PoolDeploymentSettings {
+import { createTestRpcRequest, selectSepoliaRpc } from "../adapters/test-rpc.ts";
+import type { TestRpcSettings } from "../adapters/test-rpc.ts";
+export interface PoolDeploymentSettings extends TestRpcSettings {
   readonly testOnly: true; readonly tokenSettingsFile: string;
   readonly artifactFile: string; readonly journalFile: string; readonly nonce: string;
   readonly signer: CastSignerConfig;
@@ -28,8 +30,13 @@ export async function loadOfficialPoolArtifact(artifactFile: string): Promise<{
 export async function deployTestPool(settings: PoolDeploymentSettings): Promise<{
   status: string; reason: string; transactionHash: string;
 }> {
+  const endpoint = selectSepoliaRpc(settings);
   if (settings.testOnly !== true || settings.signer.testOnly !== true) { throw new Error("Test-only pool required"); }
-  const tokenSettings = JSON.parse(await readFile(settings.tokenSettingsFile, "utf8")) as TokenDeploymentSettings;
+  const storedSettings = JSON.parse(await readFile(settings.tokenSettingsFile, "utf8")) as TokenDeploymentSettings;
+  if (storedSettings.sepoliaRpc !== undefined && selectSepoliaRpc(storedSettings) !== endpoint) {
+    throw new Error("Conflicting token/pool TEST RPC selection");
+  }
+  const tokenSettings = { ...storedSettings, sepoliaRpc: endpoint };
   // Never start pool deployment while token deployment is unresolved, reverted, or absent.
   // deployTestToken reconciles its existing journal; an absent journal must not be started here.
   const tokenRecord = JSON.parse(await readFile(tokenSettings.journalFile, "utf8")) as EvmJournalRecord;
@@ -37,16 +44,10 @@ export async function deployTestPool(settings: PoolDeploymentSettings): Promise<
   const result = await deployTestToken(tokenSettings);
   if (result.status !== "succeeded") { throw new Error("Token deployment is not finalized successfully"); }
   const confirmed = JSON.parse(await readFile(tokenSettings.journalFile, "utf8")) as EvmJournalRecord;
-  const response = await fetch("https://ethereum-sepolia-rpc.publicnode.com", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [result.transactionHash] }),
-    redirect: "error", signal: AbortSignal.timeout(20_000),
-  });
-  const body = await response.json() as { id: number; jsonrpc: string; error?: unknown; result?: {
+  const receipt = await createTestRpcRequest(endpoint)("eth_getTransactionReceipt", [result.transactionHash]) as {
     transactionHash: string; blockHash: string; status: string; contractAddress: string;
-  } };
-  const receipt = body.result;
-  if (!response.ok || body.id !== 1 || body.jsonrpc !== "2.0" || "error" in body || !receipt ||
+  } | null;
+  if (!receipt ||
     receipt.status !== "0x1" || receipt.transactionHash !== result.transactionHash ||
     receipt.blockHash !== confirmed.receipt?.blockHash || !/^0x[0-9a-fA-F]{40}$/.test(receipt.contractAddress)) {
     throw new Error("Confirmed token address unavailable");

@@ -1,3 +1,4 @@
+import { validateReplacementFixture } from "./replacement-fixture.ts";
 import { createHash } from "node:crypto";
 import { SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM, solanaPublicKeyBytes } from "./solana-mint.ts";
 import type { SolanaMintIntent, MintInstruction } from "./solana-mint.ts";
@@ -18,6 +19,10 @@ const discriminator = (name: string) => createHash("sha256").update("global:" + 
 export function registrationInstruction(expected: SolanaRegistrationExpectation): MintInstruction {
   if (expected.testOnly !== true || expected.cluster !== "solana-devnet" || !REGISTRATION_OPERATIONS.includes(expected.operation)) {
     throw new Error("Invalid test-only registration expectation");
+  }
+  if (expected.fixture !== undefined) {
+    const f = validateReplacementFixture(expected.fixture);
+    if (expected.payer !== f.payer || expected.mint !== f.mint || expected.pool !== f.solanaPool) { throw new Error("Wrong registration fixture authority"); }
   }
   const unique = [expected.payer, expected.mint, expected.pool, expected.signer, expected.ata, expected.registry, expected.routerConfig,
     SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM, ROUTER_PROGRAM, ASSOCIATED_TOKEN_PROGRAM];
@@ -53,5 +58,6 @@ export function verifySolanaRegistrationIntent(intent: SolanaMintIntent, expecte
   }
   return { schema: "agtmai-solana-registration-v1", testOnly: true, cluster: expected.cluster, operation: expected.operation,
     payer: expected.payer, mint: expected.mint, pool: expected.pool, signer: expected.signer, ata: expected.ata,
-    registry: expected.registry, routerConfig: expected.routerConfig, instructions: [structuredClone(allowed)] };
+    registry: expected.registry, routerConfig: expected.routerConfig, instructions: [structuredClone(allowed)],
+    ...(expected.fixture !== undefined ? { fixture: validateReplacementFixture(expected.fixture) } : {}) };
 }

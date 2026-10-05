@@ -236,7 +236,8 @@ async function readCgroupPath(port: ProcessPort, dockerPath: string, id: string,
   const leafNamespace = observed.stdout.slice(0, -1);
   const values = await Promise.all([readlink("/proc/self/ns/pid"), readFile(`/proc/${pid}/cgroup`, "utf8")]).catch(() => {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "live PID namespace or cgroup is unreadable");});
   const [hostNamespace, cgroup] = values;
-  const match = /^0::(\/[A-Za-z0-9_.@:/-]+)\n$/u.exec(cgroup);
+  // Accept only the observed non-resource systemd metadata, then one unified leaf.
+  const match = /^(?:1:name=systemd:\/\n)?0::(\/[A-Za-z0-9_.@:/-]+)\n$/u.exec(cgroup);
   const path = match?.[1];
   if (!/^pid:\[[1-9][0-9]*\]$/u.test(hostNamespace) || hostNamespace === leafNamespace || path === undefined || !path.includes(id) || path.split("/").some((part) => part === "." || part === "..")) {throw new SlitherGateError("CGROUP_RUNTIME_UNPROVEN", "container PID namespace or immutable cgroup leaf is not isolated");}
   return path;

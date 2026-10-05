@@ -1,30 +1,40 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
+import type { FixtureSelection } from "../domain/replacement-fixture.ts";
 import { createCastSigner } from "../adapters/evm-cast.ts";
 import type { CastSignerConfig } from "../adapters/evm-cast.ts";
 import { createJournalFile } from "../adapters/evm-journal-file.ts";
 import { createSepoliaRpc } from "../adapters/evm-rpc.ts";
+import { createTestRpcRequest, selectSepoliaRpc } from "../adapters/test-rpc.ts";
+import type { TestRpcSettings } from "../adapters/test-rpc.ts";
 import { runEvmJournal } from "../application/evm-journal.ts";
+import type { EvmJournalPorts } from "../application/evm-journal.ts";
 import type { SepoliaIntentInput } from "../domain/evm-intent.ts";
-const RPC = "https://ethereum-sepolia-rpc.publicnode.com";
-export async function executeSepoliaIntent(intent: SepoliaIntentInput, settings: {
+export interface SepoliaExecutionIo {
+  signer(config: CastSignerConfig): Pick<EvmJournalPorts, "sign" | "inspectSigned">;
+  journal(path: string): Pick<EvmJournalPorts, "read" | "write" | "exclusive">;
+  fetcher: typeof fetch;
+}
+export async function executeSepoliaIntent(intent: SepoliaIntentInput, settings: FixtureSelection & TestRpcSettings & {
   readonly signer: CastSignerConfig; readonly journalFile: string;
-}): Promise<{ status: string; reason: string; transactionHash: string }> {
-  const signer = createCastSigner(settings.signer);
-  const rpc = createSepoliaRpc(RPC);
-  const store = createJournalFile(settings.journalFile);
+}, io: SepoliaExecutionIo = { signer: createCastSigner, journal: createJournalFile, fetcher: globalThis.fetch }): Promise<{ status: string; reason: string; transactionHash: string }> {
+  const endpoint = selectSepoliaRpc(settings), readRpc = createTestRpcRequest(endpoint, io.fetcher);
+  const fixture = bindFixture({ ...settings, testOnly: settings.signer.testOnly }, [settings.journalFile]);
+  if (fixture && (intent.chainId !== fixture.chainId || intent.from.toLowerCase() !== fixture.administrator)) {
+    throw new Error("Wrong replacement execution chain/authority");
+  }
+  const signer = io.signer(settings.signer);
+  const rpc = createSepoliaRpc(endpoint, io.fetcher);
+  const store = io.journal(settings.journalFile);
   const result = await runEvmJournal(intent, intent, {
     ...store, ...rpc, ...signer,
     async sign(envelope) {
       // Only a new journal needs nonce/funding preflight; restart observes its saved signature.
       async function quantity(method: string, params: string[]): Promise<bigint> {
-        const response = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-          redirect: "error", signal: AbortSignal.timeout(20_000) });
-        const body = await response.json() as { jsonrpc: string; id: number; error?: unknown; result?: string };
-        if (!response.ok || body.jsonrpc !== "2.0" || body.id !== 1 || "error" in body ||
-          !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(body.result ?? "")) {
+        const value = await readRpc(method, params);
+        if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value) || BigInt(value) >= 1n << 256n) {
           throw new Error("Sepolia funding/nonce preflight unavailable");
         }
-        return BigInt(body.result!);
+        return BigInt(value);
       }
       if (await quantity("eth_chainId", []) !== 11155111n) { throw new Error("Wrong deployment chain"); }
       if (await quantity("eth_getTransactionCount", [envelope.from, "pending"]) !== BigInt(envelope.nonce)) {

@@ -91,7 +91,9 @@ test('native RPC retries plain HTTP 429 but propagates cancelled response reads'
   assert.equal(await f.rpc('getTransaction', []), null);
   assert.equal(f.requests.length, 2); assert.deepEqual(f.delays, [1000]);
   const error = new DOMException('cancelled', 'AbortError');
-  const cancelled = retryFixture(() => ({ status: 429, json: async () => { throw error; } }));
+  const cancelled = retryFixture(() => new Response(new ReadableStream({
+    start(controller) { controller.error(error); },
+  }), { status: 429 }));
   await assert.rejects(cancelled.rpc('getTransaction', []), error);
   assert.equal(cancelled.requests.length, 1); assert.deepEqual(cancelled.delays, []);
 });

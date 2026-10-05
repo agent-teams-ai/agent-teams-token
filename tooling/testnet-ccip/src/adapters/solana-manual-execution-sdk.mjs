@@ -1,4 +1,4 @@
-import { MANUAL, manualInput, manualInstructions, validateManualAlts, validateManualExpected, validateManualDerivedAccounts } from '../domain/solana-manual-execution.mjs';
+import { requireHistoricalRecovery, MANUAL, manualInput, manualInstructions, validateManualAlts, validateManualExpected, validateManualDerivedAccounts } from '../domain/solana-manual-execution.mjs';
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -77,6 +77,7 @@ export function createManualTransactionSdk(provider) {
   return {build,inspectSigned,sign};
 }
 export async function createSolanaManualExecutionSdk(settings) {
+  requireHistoricalRecovery(settings);
   const provider=await loadSolanaProvider(settings.providerDirectory);
   const root=resolve(settings.ccipProviderDirectory);
   for(const [file,hash] of Object.entries({'package.json':'8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb',

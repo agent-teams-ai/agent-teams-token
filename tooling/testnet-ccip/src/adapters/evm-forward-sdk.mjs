@@ -3,27 +3,27 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FORWARD, boundedAllowance, forwardRecipient } from '../domain/evm-forward.mjs';
-const RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
+import { forwardRoute, boundedAllowance, forwardRecipient } from '../domain/evm-forward.mjs';
+import { selectSepoliaRpc, createSdkTestFetch } from './test-rpc.ts';
 const ZERO = '0x' + '00'.repeat(20);
 const ABI = ['function approve(address spender,uint256 amount)',
   'function ccipSend(uint64 destinationChainSelector,(bytes receiver,bytes data,(address token,uint256 amount)[] tokenAmounts,address feeToken,bytes extraArgs) message) payable returns(bytes32)'];
 /** Independent ABI authority, deliberately does not use SDK encoders or interfaces. */
-export function createForwardDecoder(ethers, recipientValue) {
-  const tokenReceiver = forwardRecipient(recipientValue);
+export function createForwardDecoder(ethers, recipientValue, fixture) {
+  const route = forwardRoute(fixture), tokenReceiver = forwardRecipient(recipientValue, fixture);
   const iface = new ethers.Interface(ABI), coder = ethers.AbiCoder.defaultAbiCoder();
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   let recipient = 0n;
   for (const char of tokenReceiver) { recipient = recipient * 58n + BigInt(alphabet.indexOf(char)); }
   const extra = '0x1f3b3aba' + coder.encode(['tuple(uint32,uint64,bool,bytes32,bytes32[])'],
     [[0n, 0n, true, '0x' + recipient.toString(16).padStart(64, '0'), []]]).slice(2);
-  const expected = { approval: iface.encodeFunctionData('approve', [FORWARD.router, FORWARD.amount]),
-    send: iface.encodeFunctionData('ccipSend', [FORWARD.selector,
-      ['0x' + '00'.repeat(32), '0x', [[FORWARD.token, FORWARD.amount]], ZERO, extra]]) };
+  const expected = { approval: iface.encodeFunctionData('approve', [route.router, route.amount]),
+    send: iface.encodeFunctionData('ccipSend', [route.selector,
+      ['0x' + '00'.repeat(32), '0x', [[route.token, route.amount]], ZERO, extra]]) };
   return (tx, step, fee) => {
-    const to = step === 'approval' ? FORWARD.token : FORWARD.router;
+    const to = step === 'approval' ? route.token : route.router;
     if (!tx || Object.keys(tx).some(k => !['to','from','data','value'].includes(k)) ||
-      tx.from?.toLowerCase() !== FORWARD.administrator || tx.to?.toLowerCase() !== to ||
+      tx.from?.toLowerCase() !== route.administrator || tx.to?.toLowerCase() !== to ||
       BigInt(tx.value ?? 0n) !== (step === 'approval' ? 0n : fee) ||
       typeof tx.data !== 'string' || tx.data.toLowerCase() !== expected[step]?.toLowerCase()) {
       throw new Error('Unexpected decoded forward operation');
@@ -33,8 +33,9 @@ export function createForwardDecoder(ethers, recipientValue) {
     return tx;
   };
 }
-export async function createEvmForwardSdk(directory, recipientValue) {
-  const recipient = forwardRecipient(recipientValue);
+export async function createEvmForwardSdk(directory, recipientValue, fixture, endpoint = selectSepoliaRpc({})) {
+  const rpcUrl = selectSepoliaRpc({ sepoliaRpc: endpoint });
+  const route = forwardRoute(fixture), recipient = forwardRecipient(recipientValue, fixture);
   const hashes = { 'package.json': '8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb',
     'package-lock.json': '1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f' };
   for (const [file, hash] of Object.entries(hashes)) {
@@ -48,20 +49,20 @@ export async function createEvmForwardSdk(directory, recipientValue) {
   const sdkRequire = createRequire(sdkEntry);
   const ethers = await import(pathToFileURL(sdkRequire.resolve('ethers')).href);
   if (ethers.version !== '6.17.0') { throw new Error('Wrong independent ABI dependency version'); }
-  const verify = createForwardDecoder(ethers, recipient);
-  const rpc = new ethers.JsonRpcProvider(RPC);
-  const chain = await sdk.EVMChain.fromUrl(RPC);
-  const token = new ethers.Contract(FORWARD.token, ['function allowance(address,address) view returns(uint256)'], rpc);
+  const verify = createForwardDecoder(ethers, recipient, fixture);
+  const chain = await sdk.EVMChain.fromUrl(rpcUrl, { fetch: createSdkTestFetch(rpcUrl) });
+  const rpc = chain.provider;
+  const token = new ethers.Contract(route.token, ['function allowance(address,address) view returns(uint256)'], rpc);
   return { verify,
     async allowance() {
       if (BigInt(await rpc.send('eth_chainId', [])) !== 11155111n) { throw new Error('Wrong forward source chain'); }
-      return boundedAllowance(await token.allowance(FORWARD.administrator, FORWARD.router));
+      return boundedAllowance(await token.allowance(route.administrator, route.router), route);
     },
     async prepare() {
       if (BigInt(await rpc.send('eth_chainId', [])) !== 11155111n) { throw new Error('Wrong forward source chain'); }
-      const opts = { sender: FORWARD.administrator, router: FORWARD.router, destChainSelector: FORWARD.selector,
+      const opts = { sender: route.administrator, router: route.router, destChainSelector: route.selector,
         approveMax: false, message: { receiver: '11111111111111111111111111111111', data: '0x',
-          tokenAmounts: [{ token: FORWARD.token, amount: FORWARD.amount }], feeToken: ZERO,
+          tokenAmounts: [{ token: route.token, amount: route.amount }], feeToken: ZERO,
           extraArgs: { computeUnits: 0n, accountIsWritableBitmap: 0n, allowOutOfOrderExecution: true,
             tokenReceiver: recipient, accounts: [] } } };
       const fee = await chain.getFee(opts);
@@ -73,6 +74,6 @@ export async function createEvmForwardSdk(directory, recipientValue) {
       if (approval) { verify(approval, 'approval', 0n); }
       return { fee, send, approval };
     },
-    async destroy() { await chain.destroy(); rpc.destroy(); },
+    async destroy() { await chain.destroy(); },
   };
 }

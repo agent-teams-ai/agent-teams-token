@@ -10,6 +10,7 @@ import { POOL_GLOBAL, BURNMINT_PROGRAM } from '../domain/solana-pool-init.ts';
 import { ALT_PROGRAM } from '../domain/solana-pool-config.ts';
 import { inspectTransfer } from '../domain/transfer-status.mjs';
 import { createNativeStatus } from './transfer-status-native.mjs';
+import { selectSepoliaRpc, selectSolanaRpc, createSdkTestFetch } from './test-rpc.ts';
 import { createSolanaPoolInitSdk } from './solana-pool-init-sdk.mjs';
 import { createSolanaRegistrationSdk } from './solana-registration-sdk.mjs';
 import { createPoolConfigStateVerifier } from './solana-pool-config-state.mjs';
@@ -62,6 +63,7 @@ async function read(rpc,addresses) {
   return result;
 }
 export async function createManualExecutionState(settings, provider) {
+  const sepolia = selectSepoliaRpc(settings), solana = selectSolanaRpc(settings);
   const { PublicKey, AddressLookupTableAccount } = provider.web3;
   const { TOKEN_PROGRAM_ID, unpackAccount, getAssociatedTokenAddressSync } = provider.spl;
   const sdk = await sdkModule(settings.sdkDirectory);
@@ -74,12 +76,12 @@ export async function createManualExecutionState(settings, provider) {
   const lane = { recipientAtas: {[MANUAL.payer]:recipientAta},
     solanaSigner:pda([Buffer.from('ccip_tokenpool_signer'),mint.toBuffer()], BURNMINT_PROGRAM),
     allowedOffRamp:(selector, offRamp) => pda([Buffer.from('allowed_offramp'),le(selector),new PublicKey(offRamp).toBuffer()],ROUTER_PROGRAM) };
-  const native = createNativeStatus(settings.sepoliaRpc,settings.solanaRpc,lane);
+  const native = createNativeStatus(sepolia,solana,lane);
   const logger = {debug(){},info(){},warn(){},error(){}};
   const chains = {};
   try {
-    chains.ethereum = await sdk.EVMChain.fromUrl(settings.sepoliaRpc,{logger});
-    chains.solana = await sdk.SolanaChain.fromUrl(settings.solanaRpc,{logger});
+    chains.ethereum = await sdk.EVMChain.fromUrl(sepolia,{logger, fetch: createSdkTestFetch(sepolia)});
+    chains.solana = await sdk.SolanaChain.fromUrl(solana,{logger, fetch: createSdkTestFetch(solana)});
   } catch(error) { await Promise.all(Object.values(chains).map(c=>c.destroy())); throw error; }
   async function identity(rpc,e) {
     validateManualExpected(e);

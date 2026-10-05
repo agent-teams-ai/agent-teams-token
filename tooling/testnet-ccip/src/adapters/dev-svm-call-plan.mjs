@@ -410,6 +410,13 @@ function verifyPacket(primitives, route, facts, admission, packet) {
     equal(ix.keys, instructions[i].accounts.map(a => union.get(a.address)), 'compiled order/global permissions');
   });
 }
+/** Shared independent wire oracle for the fixed public TESTNET transaction adapter. */
+export function verifySvmWirePacket(primitives, route, expected, packet, lookupTable) {
+  const selected = { ...route, alt: expected.alt };
+  verifyDevSvmInstructions(selected, expected, expected.approval, packet.instructions);
+  verifyPacket(primitives, selected, { blockhash: { value: packet.blockhash } }, { lookupTable },
+    { ...packet, transactionBase64: packet.bytesBase64, requiredSignatures: 1, broadcastAllowed: false });
+}
 /** No RPC, factory instance, SDK send/getFee, key, signing or execution capability. */
 export function buildDevSvmCallPlan(primitives, route, facts) {
   validateDevSvmRoute(route);

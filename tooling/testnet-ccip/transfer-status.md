@@ -14,6 +14,132 @@ checkpoints before running anything: missing journals are not permission to
 recreate already deployed contracts or repeat transfers. Never put key material
 or private settings in this document.
 
+## Replacement public TESTNET fixture (unsigned implementation slice)
+
+The optional replacement route is owned by
+[`replacement-fixture.ts`](src/domain/replacement-fixture.ts). It fixes Sepolia
+chain ID `11155111` and Solana Devnet, decimals 9, local Ethereum issuance
+`100000000000` base units (100 AGT), and transfer amount `1000000000` (1 AGT).
+The Sepolia actor and reverse recipient are
+`0x1D7BfCF10CbD789da22460265352126356701eb3`; the Devnet payer and forward
+recipient are `BoiQxGHPgVaqxPn2TjqzmoHPd5toyfxxZ4wW2M7P3gK8`; the mint is
+`4JvM13AvtMbq7Jyvs2id3wS4gMh2yjAhT4pJphJX48o1`. Its standard BurnMint Pool
+Config PDA is `55PYzTuSbH7mWSQmCqdPfQLkzPHzMKHQ7xaJF8sWxXz5`, derived with
+`ccip_tokenpool_config` and that mint using the existing program pin. This is a
+public derived identity, not evidence that the account exists or is initialized.
+
+Actual Ethereum token and pool deployment addresses are still unknown. The
+existing token/pool deploy, mint-create, pool-initialize and registration paths
+already take administrator/payer/mint inputs. Reuse those paths with the public
+replacement identities and separately owned fresh onboarding journals; do not
+substitute historical addresses or predict an address as an actual deployment.
+Their existing finalized deployment, artifact, supply, rent, registration and
+authority prerequisites remain in force. This implementation does not authorize
+running those effectful commands or creating keys.
+
+After an authenticated operator supplies and independently verifies both public
+Ethereum deployment addresses, call `replacementFixture(token, pool)`. The
+returned immutable fixture's `identity` is SHA256 of UTF-8 `JSON.stringify` of
+`{ ...REPLACEMENT, token: normalizedToken, pool: normalizedPool }` in that exact
+field order. No deployment address defaults exist. Operator authentication stays
+outside this fixture; the hash verifies exact identity consistency and is not an
+authentication proof. Select the fixture through the trusted operator settings
+with both `fixture` and independently selected `fixtureIdentity` equal to this
+hash. Unknown schemas, extra fields, malformed addresses, mutated constants and
+incorrect hashes are rejected; absence alone retains historical A/B defaults.
+
+Every selected operation journal/directory uses a path component exactly equal
+to `agtmai-replacement-<identity>`. Preserve the completed fresh deployment
+checkpoints as inputs under the selected namespace before registration; never
+reuse or migrate a historical fixture journal. Forward approval and send files
+remain distinct with consecutive nonces. Solana registration/configuration use
+their existing operation filenames and the reverse transfer uses the existing
+transaction journal. Symlink aliases and legacy namespace reuse fail before
+provider/signer loading or journal locks. Selected Solana `expected` values must
+match Devnet, the payer, mint and derived pool; supplied duplicate route fields
+must agree. Pool setup and reverse envelopes retain the selected immutable fixture.
+
+The existing forward, reverse, remote configuration and status compositions
+accept this selection. Reciprocal peers, recipient, allowance, ABI/Borsh bytes,
+SDK candidates, PDA/ATA derivations, state reads and native token effects all use
+the selected route. Router, selectors, programs, RMN and provider admission pins
+are unchanged. The historical manual recovery command continues to describe its
+single historical message and rejects any selected fixture before provider or
+journal effects. A replacement manual execution would need a fresh verified
+message-specific proof, which this unsigned fixture slice does not supply.
+
+The reverse transaction adapter reuses the independent raw verifier in
+`dev-svm-call-plan.mjs` to check actual recipient/amount, ordered accounts,
+global signer/writable privileges and loaded ALT contents. Fee ceilings remain
+`10000000000000000` wei and `100000000` lamports; quoted CCIP fees do not replace
+network gas/fee or rent treatment. A signed or uncertain transaction keeps its
+exact journal identity; elapsed validity or missing observations never authorize
+regeneration or resending. Successful source reconciliation proves only the
+source receipt. Offline codec/state tests do not prove real CCIP settlement.
+Mainnet and production token paths are excluded; DEV previews retain
+`broadcastAllowed: false`.
+
+Registration journals retain the validated selected fixture through the actual
+finalized registration-to-pool-configuration handoff. A resumed pool-init journal
+must contain the complete validated selected fixture before signed inspection,
+observation, writes or submission. Missing, different or mutated metadata fails
+closed. Historical envelopes with no fixture retain their serialization.
+
+Focused verification uses the authenticated wrapper after `source scripts/env.sh`:
+
+```bash
+pnpm exec tsc -p tooling/testnet-ccip/tsconfig.fixture.json --pretty false
+AGTMAI_REPLACEMENT_CODEC_DIRECTORY="$PWD/.local/codecs" .tools/bin/node --test \
+  tooling/testnet-ccip/tests/replacement*.test.ts \
+  tooling/testnet-ccip/tests/test-rpc-selection.test.ts
+```
+
+The Token environment owner admits only an absolute, canonical, non-symlink
+codec directory with a bounded public `package.json`: name
+`agtmai-replacement-test-codecs`, version `0.0.0`, `private: true`, type `module`,
+and exactly these dependencies: CCIP SDK `1.13.0`, web3 `1.98.4`, SPL Token
+`0.4.14`, ethers `6.17.0` and the SDK's imported Aptos client peer got `11.8.6`.
+No scripts or other manifest fields are admitted. Retain the resolved lockfile
+and use `--frozen-lockfile --ignore-scripts` when restoring this isolated test
+installation. The generated wrapper must match its current source; use the
+normal pinned offline bootstrap to refresh it after changing the environment
+owner. A parent-only setting was previously stripped by the wrapper and child
+environment allowlist, silently skipping codec tests. Forwarding and rejection
+now have behavioral regressions. These data-codec tests never access keys, sign,
+send RPC or broadcast; the official extra-args encoder is imported as data code.
+They exercise the same SDK factories used by the pinned loaders; they do not
+waive the existing installation hash admission. Missing codecs are reported as
+skips. The loader-rejection case distinguishes a codec installation from the
+operator's still-required authenticated provider. Test comments explain the
+regressions, and exact-base journal/calldata SHA oracles preserve legacy bytes.
+
+## Explicit public TEST RPC selection
+
+The optional `sepoliaRpc` setting accepts exactly
+`https://ethereum-sepolia-rpc.publicnode.com` (the unchanged default) or
+`https://sepolia.gateway.tenderly.co`. An explicit invalid value fails before IO;
+HTTP, credentials, paths, query strings, fragments, ports and other hosts are
+rejected. Publicnode HTTP 403 and the public Tenderly Sepolia chain response were
+observed in the preceding operator slice; this source remediation does not
+re-qualify either provider or make an availability claim. Select the same value
+in token/pool setup, registration, remote configuration, forward transfer and
+status settings. Pool deployment rejects a conflicting endpoint in its token
+settings. The optional `solanaRpc` status setting retains only the official
+`https://api.devnet.solana.com` default in this bounded slice.
+
+One selected Sepolia endpoint feeds readiness, funding/nonce checks, first send,
+journal observation and native/SDK status reads. SDK HTTP hooks use that same
+selection. Responses are bounded to 4 MiB before JSON parsing, each request has
+a 20-second fetch/body deadline, and redirects are rejected. Chain `11155111`,
+Devnet genesis and canonical finalized evidence checks remain required. There
+is no hidden fallback or send retry. Existing status-only bounded 429 read
+retries remain read-only. Changing an endpoint never authorizes resending an
+uncertain journal. Provider installation/profile admission pins are unchanged;
+the public test codec configuration grants no client or signing admission.
+
+The replacement fixture's real on-chain round trip remains **UNPROVEN**. These
+changes qualify only the covered source behavior and offline regressions.
+
 ## Offline DEV preview: provider-free checkpoint
 
 The provider-free invocation below retains the **intent-only diagnostic** and

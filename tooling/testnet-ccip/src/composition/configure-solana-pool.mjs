@@ -1,3 +1,4 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,6 +21,7 @@ export async function verifyPoolConfigPredecessor(settings, expected, { sdk, rpc
   for (const field of ["payer", "mint", "pool", "cluster", "testOnly"]) {
     if (record.intent[field] !== expected[field]) { throw new Error("Wrong predecessor identity"); }
   }
+  if (expected.fixture !== undefined && record.intent.fixture?.identity !== expected.fixture.identity) { throw new Error("Wrong predecessor fixture identity"); }
   const provider = registration ? registrationSdk : sdk;
   const observer = registration ? registrationRpc : expected.operation === "repair-remote-pool-encoding" ? { ...rpc, observe: rpc.observeRepairPredecessor } : rpc;
   const previous = provider.derive(record.intent);
@@ -43,7 +45,8 @@ export async function broadcastPoolConfig(bytes, expected, rpc, sdk) {
 export async function configureTestSolanaPool(settings) {
   if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet" ||
     !POOL_CONFIG_OPERATIONS.includes(settings.expected.operation)) { throw new Error("Explicit test-only pool configuration required"); }
-  const sdk = await createSolanaPoolConfigSdk(settings.providerDirectory), expected = sdk.derive(settings.expected);
+  const fixture = bindFixture(settings, [settings.journalDirectory, settings.registrationJournalFile]);
+  const sdk = await createSolanaPoolConfigSdk(settings.providerDirectory), expected = sdk.derive({ ...settings.expected, ...(fixture ? { fixture } : {}) });
   const rpc = createSolanaPoolConfigRpc((bytes, intent) => sdk.inspectSigned(bytes, intent).messageBase64, sdk);
   // Reconcile the historical set-pool transaction against the explicitly guarded
   // legacy repair prerequisite, not a replay of the old append32 journal.

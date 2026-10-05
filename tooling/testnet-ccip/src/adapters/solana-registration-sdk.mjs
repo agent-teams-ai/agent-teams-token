@@ -1,3 +1,4 @@
+import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import { createHash } from "node:crypto";
 import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transaction-sdk.mjs";
 import { createSolanaPoolInitSdk } from "./solana-pool-init-sdk.mjs";
@@ -12,16 +13,21 @@ import { ROUTER_PROGRAM, registrationInstruction, verifySolanaRegistrationIntent
 export async function createSolanaRegistrationSdk(providerDirectory) {
   const provider = await loadSolanaProvider(providerDirectory);
   const poolSdk = await createSolanaPoolInitSdk(providerDirectory);
+  return createRegistrationSdk(provider, poolSdk);
+}
+export function createRegistrationSdk(provider, poolSdk) {
   const { PublicKey, SystemProgram, TransactionInstruction } = provider.web3;
   const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, unpackMint, unpackAccount } = provider.spl;
   const zero = SystemProgram.programId.toBase58();
   function derive(expected) {
+    const fixture = expected.fixture === undefined ? undefined : validateReplacementFixture(expected.fixture);
+    if (fixture && (expected.payer !== fixture.payer || expected.mint !== fixture.mint || expected.pool !== fixture.solanaPool)) { throw new Error("Wrong registration fixture"); }
     const mint = new PublicKey(expected.mint), program = new PublicKey(BURNMINT_PROGRAM), router = new PublicKey(ROUTER_PROGRAM);
     const pda = (seed, owner) => PublicKey.findProgramAddressSync([Buffer.from(seed), mint.toBuffer()], owner)[0];
     const pool = pda("ccip_tokenpool_config", program).toBase58();
     if (expected.pool !== pool) { throw new Error("Wrong registration pool PDA"); }
     const signer = pda("ccip_tokenpool_signer", program);
-    return { testOnly: expected.testOnly, cluster: expected.cluster, payer: expected.payer, mint: expected.mint,
+    return { ...(fixture ? { fixture } : {}), testOnly: expected.testOnly, cluster: expected.cluster, payer: expected.payer, mint: expected.mint,
       pool, operation: expected.operation, signer: signer.toBase58(), ata: getAssociatedTokenAddressSync(mint, signer, true).toBase58(),
       registry: pda("token_admin_registry", router).toBase58(),
       routerConfig: PublicKey.findProgramAddressSync([Buffer.from("config")], router)[0].toBase58() };

@@ -1,4 +1,5 @@
 import type { Observation, ObservedTransaction, ReceiptEvidence } from "../application/evm-journal.ts";
+import { readTestRpcJson } from "./test-rpc.ts";
 
 type RpcObject = Record<string, unknown>;
 const invalid = (): never => { throw new Error("Invalid Sepolia RPC evidence"); };
@@ -64,7 +65,7 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
   observe(hash: string): Promise<Observation>; broadcast(bytes: string): Promise<string>;
 } {
   const url = new URL(endpoint);
-  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.hash) {
+  if ((url.protocol !== "https:" && !(chainId === "31337" && url.protocol === "http:")) || url.username || url.password || url.hash || url.search) {
     throw new Error("Invalid Sepolia RPC endpoint");
   }
   let requestId = 0;
@@ -75,8 +76,8 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal: AbortSignal.timeout(20_000), redirect: "error",
     });
-    if (!response.ok) { return invalid(); }
-    const payload = object(await response.json());
+    if (!response.ok || response.redirected) { return invalid(); }
+    const payload = object(await readTestRpcJson(response));
     if (payload.jsonrpc !== "2.0" || payload.id !== id || "error" in payload || !("result" in payload)) {
       return invalid();
     }
