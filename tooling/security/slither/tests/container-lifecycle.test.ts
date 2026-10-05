@@ -64,13 +64,13 @@ const parent = "/sys/fs/cgroup/system.slice";
 
 // Only cgroup reads and Docker responses are scripted. Output decoding,
 // exclusive writes, authentication and failure classification are real.
-function scriptCgroup(t: TestContext): string[] {
+function scriptCgroup(t: TestContext, cgroup?: string): string[] {
   const reads: string[] = [];
   const originalRead = fs.readFile;
   const originalLink = fs.readlink;
   const originalStat = fs.lstat;
   const files: Record<string, string> = {
-    "/proc/2/cgroup": `0::/system.slice/docker-${lifecycleId}.scope\n`,
+    "/proc/2/cgroup": cgroup ?? `0::/system.slice/docker-${lifecycleId}.scope\n`,
     [`${parent}/cgroup.controllers`]: "cpu memory pids\n",
     [`${parent}/cgroup.subtree_control`]: "cpu memory pids\n",
     [`${leaf}/pids.max`]: "128\n", [`${leaf}/memory.max`]: "2147483648\n", [`${leaf}/cpu.max`]: "200000 100000\n",
@@ -95,6 +95,7 @@ function scriptCgroup(t: TestContext): string[] {
 }
 
 interface LifecycleOptions {
+  readonly cgroup?: string;
   readonly authority?: MountAuthority;
   readonly acquisitionFails?: boolean;
   readonly completion?: ProcessResult;
@@ -119,7 +120,7 @@ function frame(files: Readonly<Record<string, string>>): string {
 }
 
 async function lifecycle(t: TestContext, options: LifecycleOptions = {}) {
-  const cgroupReads = scriptCgroup(t);
+  const cgroupReads = scriptCgroup(t, options.cgroup);
   const output = await makeTestDirectory("lifecycle-");
   t.after(async () => {await rm(output, {recursive: true, force: true});});
   const calls: {args: readonly string[]; timeout: number}[] = [];
@@ -185,6 +186,35 @@ test("public lifecycle succeeds when host target namespace readlink would return
   assert.equal(await readFile(join(run.output, "slither.exit"), "utf8"), "0\n");
   assert.deepEqual(run.calls.map(({args}) => args[0]), ["info", "create", "container", "start", "container", "exec", "container", "exec", "exec", "container", "exec", "container", "rm"]);
 });
+
+// Real Hetzner kernel bytes include a legacy named hierarchy with no resource controllers.
+test("named systemd metadata preserves verified unified cgroup lifecycle", async (t) => {
+  const run = await lifecycle(t, {cgroup: `1:name=systemd:/\n0::/system.slice/docker-${lifecycleId}.scope\n`});
+  assert.deepEqual(await run.run(), {timedOut: false, exitCode: 0});
+  assert.equal(await readFile(join(run.output, "slither.exit"), "utf8"), "0\n");
+  assert.equal(run.calls.some(({args}) => args.includes(AUTHORIZE_ANALYSIS)), true);
+  assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+});
+
+for (const [name, cgroup] of [
+  ["missing unified", "1:name=systemd:/\n"],
+  ["duplicate unified", `0::/system.slice/docker-${lifecycleId}.scope\n0::/system.slice/docker-${lifecycleId}.scope\n`],
+  ["duplicate metadata", `1:name=systemd:/\n1:name=systemd:/\n0::/system.slice/docker-${lifecycleId}.scope\n`],
+  ["resource v1", `1:cpu,memory:/\n0::/system.slice/docker-${lifecycleId}.scope\n`],
+  ["unknown metadata", `1:name=other:/\n0::/system.slice/docker-${lifecycleId}.scope\n`],
+  ["metadata child path", `1:name=systemd:/child\n0::/system.slice/docker-${lifecycleId}.scope\n`],
+  ["wrong container", `1:name=systemd:/\n0::/system.slice/docker-${"d".repeat(64)}.scope\n`],
+  ["traversal", `1:name=systemd:/\n0::/system.slice/../docker-${lifecycleId}.scope\n`],
+  ["missing newline", `1:name=systemd:/\n0::/system.slice/docker-${lifecycleId}.scope`],
+  ["extra record", `1:name=systemd:/\n0::/system.slice/docker-${lifecycleId}.scope\nunknown\n`],
+] as const) {
+  test(`unsafe cgroup ${name} fails before analysis and removes owned container`, async (t) => {
+    const run = await lifecycle(t, {cgroup});
+    await assert.rejects(run.run(), codeIs("CGROUP_RUNTIME_UNPROVEN"));
+    assert.equal(run.calls.some(({args}) => args.includes(AUTHORIZE_ANALYSIS)), false);
+    assert.deepEqual(run.calls.at(-1)?.args, ["rm", "--force", lifecycleId]);
+  });
+}
 
 for (const [name, observed] of [
   ["empty", result()], ["stderr", result("pid:[2]\n", {stderr: "warning"})],
