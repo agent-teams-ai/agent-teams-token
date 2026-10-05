@@ -1,6 +1,12 @@
 import type { Observation, ObservedTransaction, ReceiptEvidence } from "../application/evm-journal.ts";
+import type { EvmRpcDiagnostic, EvmRpcDiagnostics } from "../application/evm-rpc-diagnostic.ts";
 import { readTestRpcJson } from "./test-rpc.ts";
 
+const phrases = {
+  transport: "RPC transport failed", http: "RPC HTTP response unavailable",
+  json: "RPC response decoding failed", jsonrpc: "RPC error response received",
+  envelope: "RPC response envelope invalid", evidence: "RPC evidence invalid",
+} as const;
 type RpcObject = Record<string, unknown>;
 const invalid = (): never => { throw new Error("Invalid Sepolia RPC evidence"); };
 function object(value: unknown): RpcObject {
@@ -46,7 +52,7 @@ function sameReceipt(left: ReceiptEvidence, right: ReceiptEvidence): boolean {
 }
 
 /** One configured endpoint; absence is endpoint-local and does not authorize replacing a transaction. */
-export function createSepoliaRpc(endpoint: string, fetcher: typeof fetch = globalThis.fetch): {
+export function createSepoliaRpc(endpoint: string, fetcher: typeof fetch = globalThis.fetch): EvmRpcDiagnostics & {
   observe(hash: string): Promise<Observation>; broadcast(bytes: string): Promise<string>;
 } {
   return createEvmRpc(endpoint, "11155111", fetcher);
@@ -61,7 +67,7 @@ export function createLocalCustodyRpc(endpoint: string, fetcher: typeof fetch = 
   return createEvmRpc(endpoint, "31337", fetcher);
 }
 
-function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: typeof fetch): {
+function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: typeof fetch): EvmRpcDiagnostics & {
   observe(hash: string): Promise<Observation>; broadcast(bytes: string): Promise<string>;
 } {
   const url = new URL(endpoint);
@@ -69,18 +75,43 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
     throw new Error("Invalid Sepolia RPC endpoint");
   }
   let requestId = 0;
-  async function rpc(method: string, params: readonly unknown[]): Promise<unknown> {
+  let diagnostic: EvmRpcDiagnostic | undefined;
+  let sourceMethod: EvmRpcDiagnostic["method"] = "eth_chainId";
+  function retain(kind: EvmRpcDiagnostic["kind"], status?: number, code?: number): EvmRpcDiagnostic {
+    // First fault only; construct from allowlisted scalars, never copy provider/exception objects.
+    return diagnostic ??= Object.freeze({ method: sourceMethod, kind, message: phrases[kind],
+      ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? { httpStatus: status } : {}),
+      ...(typeof code === "number" && Number.isSafeInteger(code) ? { rpcCode: code } : {}) });
+  }
+  function fault(kind: EvmRpcDiagnostic["kind"], status?: number, code?: number): never {
+    throw new Error(retain(kind, status, code).message);
+  }
+  async function rpc(method: EvmRpcDiagnostic["method"], params: readonly unknown[]): Promise<unknown> {
+    sourceMethod = method;
     const id = ++requestId;
-    const response = await fetcher(url.href, {
+    let response: Response;
+    try { response = await fetcher(url.href, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal: AbortSignal.timeout(20_000), redirect: "error",
-    });
-    if (!response.ok || response.redirected) { return invalid(); }
-    const payload = object(await readTestRpcJson(response));
-    if (payload.jsonrpc !== "2.0" || payload.id !== id || "error" in payload || !("result" in payload)) {
-      return invalid();
+    }); } catch { return fault("transport"); }
+    if (!response.ok || response.redirected) { return fault("http", response.status); }
+    let body: unknown;
+    try { body = await readTestRpcJson(response); } catch { return fault("json", response.status); }
+    if (body === null || typeof body !== "object" || Array.isArray(body)) { return fault("envelope", response.status); }
+    const payload = body as RpcObject;
+    if (payload.jsonrpc !== "2.0" || payload.id !== id) { return fault("envelope", response.status); }
+    if ("error" in payload) {
+      const error = payload.error;
+      if (!("result" in payload) && error !== null && typeof error === "object" && !Array.isArray(error)) {
+        const { code, message } = error as RpcObject;
+        if (typeof code === "number" && Number.isSafeInteger(code) && typeof message === "string") {
+          return fault("jsonrpc", response.status, code);
+        }
+      }
+      return fault("envelope", response.status);
     }
+    if (!("result" in payload)) { return fault("envelope", response.status); }
     return payload.result;
   }
   async function checkChain(): Promise<void> {
@@ -106,9 +137,13 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
       if (rawTx === null) {
         return rawReceipt === null ? await absent(hash) : { kind: "unknown" };
       }
+      // Deferred evidence validation belongs to its source RPC, regardless of later reads.
+      sourceMethod = "eth_getTransactionByHash";
       const tx = transaction(rawTx, hash, chainId);
       if (rawReceipt === null) { await checkChain(); return { kind: "observed", transaction: tx }; }
+      sourceMethod = "eth_getTransactionReceipt";
       const evidence = receipt(rawReceipt, hash);
+      sourceMethod = "eth_getTransactionByHash";
       const minedTx = object(rawTx);
       if (hex(minedTx.blockHash, 32) !== evidence.blockHash || quantity(minedTx.blockNumber) !== evidence.blockNumber) {
         return { kind: "unknown" };
@@ -128,14 +163,16 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
         BigInt(headAgain.number) < BigInt(head.number) ||
         (headAgain.number === head.number && headAgain.hash !== head.hash)) { return { kind: "unknown" }; }
       return { kind: "observed", transaction: tx, receipt: evidence, finalizedBlock: receiptBlock };
-    } catch { return { kind: "unknown" }; }
+    } catch { retain("evidence"); return { kind: "unknown" }; }
   }
   async function broadcast(bytes: string): Promise<string> {
-    const raw = hex(bytes);
-    if (raw === "0x") { return invalid(); }
-    await checkChain();
-    // No retry. Transport failure or malformed response remains uncertain to the journal.
-    return hex(await rpc("eth_sendRawTransaction", [raw]), 32);
+    try {
+      const raw = hex(bytes);
+      if (raw === "0x") { return invalid(); }
+      await checkChain();
+      // No retry. Transport failure or malformed response remains uncertain to the journal.
+      return hex(await rpc("eth_sendRawTransaction", [raw]), 32);
+    } catch { return fault("evidence"); }
   }
-  return { observe, broadcast };
+  return { observe, broadcast, diagnostic: () => diagnostic };
 }
