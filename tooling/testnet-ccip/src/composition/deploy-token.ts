@@ -1,4 +1,5 @@
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
+import type { SepoliaExecutionResult } from "./execute-sepolia.ts";
 import { selectSepoliaRpc } from "../adapters/test-rpc.ts";
 import type { TestRpcSettings } from "../adapters/test-rpc.ts";
 import { readFile } from "node:fs/promises";
@@ -28,9 +29,7 @@ export function testTokenConstructor(administrator: string): string {
   return "0x" + [word(TEST_SUPPLY), word(96n), addressWord, word(1n), word(1n), addressWord, word(TEST_SUPPLY)].join("");
 }
 
-export async function deployTestToken(settings: TokenDeploymentSettings): Promise<{
-  status: string; reason: string; transactionHash: string;
-}> {
+export async function deployTestToken(settings: TokenDeploymentSettings): Promise<SepoliaExecutionResult> {
   selectSepoliaRpc(settings);
   if (settings.testOnly !== true || settings.signer.testOnly !== true ||
     !/^[0-9a-f]{64}$/.test(settings.artifactSha256)) { throw new Error("Test-only settings required"); }
