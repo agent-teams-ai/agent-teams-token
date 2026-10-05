@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, glob, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFile, glob, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { once } from "node:events";
@@ -31,9 +32,9 @@ test("exact official creation executes offline with immutable runtime and indepe
     [executable("cast"), "b59c2db2c53abe0cae7fb8ef2c78c9603e0b9f5fc600e9cb6d5294a6628b9ff8"], [resolve(".tools/solc-v0.8.36-linux-x64/solc"), pin.compiler.sha256]]) {
     assert.equal(sha(await readFile(path)), hash, "pinned local executable");
   }
-  const artifactBytes = await readFile(".local/INPUT/source-build/LockReleaseTokenPool.source-built.json"); assert.equal(sha(artifactBytes), pin.artifactSha256);
+  const artifactBytes = await readFile(fileURLToPath(new URL("./fixtures/source-built-test-pool/LockReleaseTokenPool.source-built.json", import.meta.url))); assert.equal(sha(artifactBytes), pin.artifactSha256);
   const artifact = JSON.parse(artifactBytes.toString()) as { bytecode: { object: string }; deployedBytecode: { object: string } };
-  const inputBytes = await readFile(".local/INPUT/source-build/SOLC-STANDARD-INPUT.json"); assert.equal(sha(inputBytes), pin.inputSha256);
+  const inputBytes = await readFile(fileURLToPath(new URL("./fixtures/source-built-test-pool/SOLC-STANDARD-INPUT.json", import.meta.url))); assert.equal(sha(inputBytes), pin.inputSha256);
   const input = JSON.parse(inputBytes.toString()) as { sources: Record<string, { content: string }>; settings: { outputSelection: unknown } };
   // Test-only compiler query adds output maps and the fixture. The deployed pool uses authenticated artifact bytes.
   for (const [file, hash] of Object.entries(pin.source)) { assert.equal(sha(Buffer.from(input.sources[file].content)), hash); }
@@ -125,6 +126,7 @@ test("exact official creation executes offline with immutable runtime and indepe
       administrator, pool, receiver: "0x000000000000000000000000000000000000beef", rebalancer: actor });
     assert.equal(balances.pool, "0"); assert.equal(balances.receiver, "13000000012"); assert.equal(balances.rebalancer, "36999999989");
     assert.equal(Object.values(balances).reduce((sum, value) => sum + BigInt(value), 0n), 100000000000n);
+    await mkdir(resolve(".local/evidence"), { recursive: true });
     await writeFile(resolve(".local/evidence/official-pool-observations.json"), JSON.stringify({ artifactSha256: pin.artifactSha256, port, sender: administrator, token, pool,
       estimatedDeploymentGas: BigInt(estimate).toString(), actualDeploymentGas: BigInt(deployed.gasUsed).toString(), materializedImmutableSites: 28,
       runtimeSha256: sha(runtime), balances, scenarios, scope: "offline exact-code pool execution; repository token compiled for fixture; test router/RMN doubles; no real CCIP delivery or public pool deployment; operator gas/exposure remains Root" }, null, 2) + "\n");

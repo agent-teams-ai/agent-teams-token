@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { selectPoolArtifact, assertSelectedPoolAddress } from "../src/adapters/pool-artifact-selection.ts";
 import { deployTestPool, loadOfficialPoolArtifact } from "../src/composition/deploy-pool.ts";
@@ -15,7 +16,7 @@ import type { RegistrationSettings } from "../src/composition/register-token.ts"
 import { runEvmJournal } from "../src/application/evm-journal.ts";
 const fixture = replacementFixture("0x812c4dcbc459a55f8517e87e825b8c728cee7316", "0x8472aa06661671e7e4af43048f0d0446eff2e97d");
 const selection = { testOnly: true as const, fixture, fixtureIdentity: fixture.identity, poolArtifactProfile: "replacement-source-built-test-v1" as const };
-const artifactFile = resolve(".local/INPUT/source-build/LockReleaseTokenPool.source-built.json");
+const artifactFile = fileURLToPath(new URL("./fixtures/source-built-test-pool/LockReleaseTokenPool.source-built.json", import.meta.url));
 const hash = "0x" + "ab".repeat(32), zero = "0x" + "00".repeat(20);
 const word = (n: string) => n.padStart(64, "0");
 function constructorOracle(): string {

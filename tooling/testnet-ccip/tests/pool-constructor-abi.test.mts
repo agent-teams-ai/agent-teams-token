@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { lockReleaseConstructor } from "../src/domain/evm-pool.ts";
 import { validateReplacementCodecDirectory } from "../../../scripts/execution-environment/toolchain-environment.mjs";
@@ -14,7 +15,7 @@ test("actual ethers AbiCoder checks the compiled constructor and malformed ABI w
   const require = createRequire(resolve(directory, "package.json"));
   assert.equal((require("ethers") as { version: string }).version, "6.17.0");
   const { AbiCoder } = require("ethers") as { AbiCoder: { defaultAbiCoder(): Coder } }, coder = AbiCoder.defaultAbiCoder();
-  const artifact = JSON.parse(await readFile(".local/INPUT/source-build/LockReleaseTokenPool.source-built.json", "utf8")) as { abi: { type: string; inputs?: { type: string }[] }[] };
+  const artifact = JSON.parse(await readFile(fileURLToPath(new URL("./fixtures/source-built-test-pool/LockReleaseTokenPool.source-built.json", import.meta.url)), "utf8")) as { abi: { type: string; inputs?: { type: string }[] }[] };
   const types = artifact.abi.find(item => item.type === "constructor")!.inputs!.map(input => input.type);
   assert.deepEqual(types, ["address", "uint8", "address[]", "address", "address"]);
   const token = "0x812c4dcbc459a55f8517e87e825b8c728cee7316";
