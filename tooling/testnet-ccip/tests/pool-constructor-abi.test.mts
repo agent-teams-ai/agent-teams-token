@@ -12,7 +12,7 @@ test("actual ethers AbiCoder checks the compiled constructor and malformed ABI w
   assert.ok(directory, "Prerequisite: isolated preinstalled approved codec workspace; set AGTMAI_REPLACEMENT_CODEC_DIRECTORY (ethers 6.17.0). No installation or fallback.");
   validateReplacementCodecDirectory(directory);
   const require = createRequire(resolve(directory, "package.json"));
-  assert.equal((require("ethers/package.json") as { version: string }).version, "6.17.0");
+  assert.equal((require("ethers") as { version: string }).version, "6.17.0");
   const { AbiCoder } = require("ethers") as { AbiCoder: { defaultAbiCoder(): Coder } }, coder = AbiCoder.defaultAbiCoder();
   const artifact = JSON.parse(await readFile(".local/INPUT/source-build/LockReleaseTokenPool.source-built.json", "utf8")) as { abi: { type: string; inputs?: { type: string }[] }[] };
   const types = artifact.abi.find(item => item.type === "constructor")!.inputs!.map(input => input.type);
