@@ -76,10 +76,10 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
   }
   let requestId = 0;
   let diagnostic: EvmRpcDiagnostic | undefined;
-  let lastMethod: EvmRpcDiagnostic["method"] = "eth_chainId";
+  let sourceMethod: EvmRpcDiagnostic["method"] = "eth_chainId";
   function retain(kind: EvmRpcDiagnostic["kind"], status?: number, code?: number): EvmRpcDiagnostic {
     // First fault only; construct from allowlisted scalars, never copy provider/exception objects.
-    return diagnostic ??= Object.freeze({ method: lastMethod, kind, message: phrases[kind],
+    return diagnostic ??= Object.freeze({ method: sourceMethod, kind, message: phrases[kind],
       ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? { httpStatus: status } : {}),
       ...(typeof code === "number" && Number.isSafeInteger(code) ? { rpcCode: code } : {}) });
   }
@@ -87,7 +87,7 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
     throw new Error(retain(kind, status, code).message);
   }
   async function rpc(method: EvmRpcDiagnostic["method"], params: readonly unknown[]): Promise<unknown> {
-    lastMethod = method;
+    sourceMethod = method;
     const id = ++requestId;
     let response: Response;
     try { response = await fetcher(url.href, {
@@ -137,9 +137,13 @@ function createEvmRpc(endpoint: string, chainId: "11155111" | "31337", fetcher: 
       if (rawTx === null) {
         return rawReceipt === null ? await absent(hash) : { kind: "unknown" };
       }
+      // Deferred evidence validation belongs to its source RPC, regardless of later reads.
+      sourceMethod = "eth_getTransactionByHash";
       const tx = transaction(rawTx, hash, chainId);
       if (rawReceipt === null) { await checkChain(); return { kind: "observed", transaction: tx }; }
+      sourceMethod = "eth_getTransactionReceipt";
       const evidence = receipt(rawReceipt, hash);
+      sourceMethod = "eth_getTransactionByHash";
       const minedTx = object(rawTx);
       if (hex(minedTx.blockHash, 32) !== evidence.blockHash || quantity(minedTx.blockNumber) !== evidence.blockNumber) {
         return { kind: "unknown" };

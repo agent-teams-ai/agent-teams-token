@@ -9,6 +9,7 @@ import { createJournalFile } from "../src/adapters/evm-journal-file.ts";
 import type { EvmJournalRecord } from "../src/application/evm-journal.ts";
 import type { EvmRpcDiagnostic } from "../src/application/evm-rpc-diagnostic.ts";
 import type { CastSignerConfig } from "../src/adapters/evm-cast.ts";
+import { validateSepoliaIntent } from "../src/domain/evm-intent.ts";
 
 // Synthetic signer/inspection ports only; real transport adapter, journal and public composition.
 const hash = "0x" + "ab".repeat(32), bytes = "0xdecafbadcafe0123456789abcdef";
@@ -99,3 +100,43 @@ for (const scenario of scenarios) {
     }
   });
 }
+
+test("submitting reopen attributes malformed transaction evidence after a valid null receipt to its source RPC", async () => {
+  const directory = await mkdtemp(resolve(".local/rpc-diagnostic-journal-"));
+  const journalFile = join(directory, "operation.json");
+  const journal = createJournalFile(journalFile);
+  const record: EvmJournalRecord = { schema: "agtmai-evm-journal-v1", intent: validateSepoliaIntent(intent, intent),
+    signed: { bytes, hash }, phase: "submitting" };
+  const calls: Call[] = [];
+  const fetcher: typeof fetch = async (_input, init) => {
+    const call = JSON.parse(init!.body as string) as Call;
+    calls.push(call);
+    switch (call.method) {
+      case "eth_chainId": return json(call, "0xaa36a7");
+      case "eth_getTransactionByHash": return json(call, { ...intent, hash, chainId: "0xaa36a7",
+        nonce: "0x07", value: "0x0", input: intent.data, providerData: { canary, bytes } });
+      case "eth_getTransactionReceipt": return json(call, null);
+      default: assert.fail("Reopen may only observe: " + call.method);
+    }
+  };
+  const io: SepoliaExecutionIo = { fetcher, journal: createJournalFile, signer: () => ({
+    sign: async () => assert.fail("Submitting reopen must not sign"),
+    inspectSigned: async raw => { assert.equal(raw, bytes); return { ...intent, hash }; },
+  }) };
+  try {
+    await journal.exclusive(() => journal.write(record));
+    const before = await readFile(journalFile, "utf8");
+    const result = await executeSepoliaIntent(intent, { signer, journalFile }, io);
+    assert.equal(await readFile(journalFile, "utf8"), before);
+    assert.deepEqual(calls.map(c => [c.method, c.params]), [
+      ["eth_chainId", []], ["eth_getTransactionByHash", [hash]], ["eth_getTransactionReceipt", [hash]],
+    ]);
+    assert.deepEqual(result, { status: "unresolved", reason: "observation-unknown", transactionHash: hash,
+      diagnostic: { method: "eth_getTransactionByHash", kind: "evidence", message: "RPC evidence invalid" } });
+    assert.ok(Object.isFrozen(result.diagnostic));
+    for (const secret of [canary, bytes, "/unused"]) { assert.ok(!JSON.stringify(result).includes(secret)); }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await assert.rejects(lstat(directory), { code: "ENOENT" });
+  }
+});
