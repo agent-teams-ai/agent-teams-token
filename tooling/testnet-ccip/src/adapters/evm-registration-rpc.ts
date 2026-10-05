@@ -1,4 +1,6 @@
 import type { RegistrationSnapshot, RegistrationTarget } from "../domain/evm-registration.ts";
+import { createTestRpcRequest, selectSepoliaRpc } from "./test-rpc.ts";
+import type { TestRpcSettings } from "./test-rpc.ts";
 const REGISTRY = "0x95f29fee11c5c55d26cccf1db6772de953b37b82";
 function object(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) { throw new Error("Invalid registry RPC response"); }
@@ -15,23 +17,10 @@ function addresses(value: unknown, count: number): string[] {
   });
 }
 /** Read-only snapshot; all eth_call/getCode reads bind to the same canonical finalized hash. */
-export async function readRegistrationSnapshot(target: RegistrationTarget, fetcher: typeof fetch = globalThis.fetch): Promise<RegistrationSnapshot> {
+export async function readRegistrationSnapshot(target: RegistrationTarget & TestRpcSettings, fetcher: typeof fetch = globalThis.fetch): Promise<RegistrationSnapshot> {
   if (target.testOnly !== true || ![target.token, target.pool, target.administrator].every(value =>
     /^0x[0-9a-fA-F]{40}$/.test(value) && !/^0x0+$/.test(value))) { throw new Error("Invalid test registration target"); }
-  let sequence = 0;
-  async function rpc(method: string, params: unknown[]): Promise<unknown> {
-    const id = ++sequence;
-    const response = await fetcher("https://ethereum-sepolia-rpc.publicnode.com", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      signal: AbortSignal.timeout(20_000), redirect: "error",
-    });
-    const body = object(await response.json());
-    if (!response.ok || body.id !== id || body.jsonrpc !== "2.0" || "error" in body || !("result" in body)) {
-      throw new Error("Registry RPC unavailable");
-    }
-    return body.result;
-  }
+  const rpc = createTestRpcRequest(selectSepoliaRpc(target), fetcher);
   if (await rpc("eth_chainId", []) !== "0xaa36a7") { throw new Error("Wrong registry chain"); }
   const block = object(await rpc("eth_getBlockByNumber", ["finalized", false]));
   if (typeof block.hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(block.hash) ||

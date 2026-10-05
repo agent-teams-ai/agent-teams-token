@@ -1,3 +1,4 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,11 +14,12 @@ import { lockReleaseConstructor } from "../domain/evm-pool.ts";
 import { testTokenConstructor } from "./deploy-token.ts";
 import { loadOfficialPoolArtifact } from "./deploy-pool.ts";
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
+import { createTestRpcRequest, selectSepoliaRpc } from "../adapters/test-rpc.ts";
+import type { TestRpcSettings } from "../adapters/test-rpc.ts";
 
-const RPC = "https://ethereum-sepolia-rpc.publicnode.com";
 const kinds = ["register-admin", "accept-admin", "set-pool"] as const;
 type Kind = typeof kinds[number];
-export interface RegistrationSettings extends RegistrationTarget {
+export interface RegistrationSettings extends RegistrationTarget, TestRpcSettings {
   readonly signer: CastSignerConfig;
   readonly tokenDeployment: { readonly journalFile: string; readonly intent: SepoliaIntentInput };
   readonly poolDeployment: { readonly artifactFile: string; readonly journalFile: string; readonly intent: SepoliaIntentInput };
@@ -26,18 +28,14 @@ export interface RegistrationSettings extends RegistrationTarget {
 const defaults = {
   poolArtifact: loadOfficialPoolArtifact,
   read: async (file: string): Promise<EvmJournalRecord> => JSON.parse(await readFile(file, "utf8")) as EvmJournalRecord,
-  observe: createSepoliaRpc(RPC).observe,
+  observe: (hash: string, settings: TestRpcSettings = {}) => createSepoliaRpc(selectSepoliaRpc(settings)).observe(hash),
   snapshot: readRegistrationSnapshot,
   execute: executeSepoliaIntent,
-  async address(record: EvmJournalRecord): Promise<string> {
-    const response = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [record.signed.hash] }),
-      redirect: "error", signal: AbortSignal.timeout(20_000) });
-    const body = await response.json() as { id: number; jsonrpc: string; error?: unknown; result?: {
+  async address(record: EvmJournalRecord, settings: TestRpcSettings = {}): Promise<string> {
+    const receipt = await createTestRpcRequest(selectSepoliaRpc(settings))("eth_getTransactionReceipt", [record.signed.hash]) as {
       transactionHash: string; blockHash: string; status: string; contractAddress: string;
-    } };
-    const receipt = body.result;
-    if (!response.ok || body.id !== 1 || body.jsonrpc !== "2.0" || "error" in body || !receipt ||
+    } | null;
+    if (!receipt ||
       receipt.transactionHash.toLowerCase() !== record.signed.hash.toLowerCase() || receipt.status !== "0x1" ||
       receipt.blockHash.toLowerCase() !== record.receipt?.blockHash.toLowerCase() ||
       !/^0x[0-9a-fA-F]{40}$/.test(receipt.contractAddress)) { throw new Error("Deployment address evidence unavailable"); }
@@ -58,7 +56,7 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
     }
     const record = await ports.read(deployment.journalFile);
     if (record.phase !== "succeeded") { throw new Error("Finalized deployment journal required"); }
-    const observed = await ports.observe(record.signed.hash);
+    const observed = await ports.observe(record.signed.hash, settings);
     if (deployment === settings.poolDeployment) {
       if (observed.kind !== "observed") { throw new Error("Pool deployment observation unavailable: " + observed.kind); }
       const artifact = await ports.poolArtifact(settings.poolDeployment.artifactFile);
@@ -78,7 +76,7 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
       inspectSigned: async () => { if (observed.kind !== "observed") { throw new Error("Deployment unavailable"); }
         return observed.transaction; },
     });
-    if (result.status !== "succeeded" || await ports.address(record) !== expectedAddress.toLowerCase()) {
+    if (result.status !== "succeeded" || await ports.address(record, settings) !== expectedAddress.toLowerCase()) {
       throw new Error("Finalized deployment/address mismatch");
     }
   }
@@ -87,9 +85,11 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
 export async function registerTestToken(settings: RegistrationSettings, ports = defaults): Promise<{
   status: string; reason: string; transactionHash?: string; step?: Kind;
 }> {
+  const sepoliaRpc = selectSepoliaRpc(settings);
   if (settings.testOnly !== true || settings.signer.testOnly !== true) { throw new Error("Test-only registration required"); }
   const files = [settings.tokenDeployment.journalFile, settings.poolDeployment.journalFile,
     ...kinds.map(kind => settings.steps[kind].journalFile)];
+  bindFixture(settings, files);
   // Normalize existing symlinks as well as lexical aliases before checking separation.
   const paths = await Promise.all(files.map(async file => {
     try { return await realpath(file); }
@@ -117,14 +117,14 @@ export async function registerTestToken(settings: RegistrationSettings, ports = 
       to, data, value: "0", nonce: settings.steps[kind].nonce };
     // execute validates the complete stored intent/signature and never retries an uncertain submission.
     if (!record.signed?.hash) { throw new Error("Invalid registration journal"); }
-    const result = await ports.execute(intent, { signer: settings.signer, journalFile: settings.steps[kind].journalFile });
+    const result = await ports.execute(intent, { sepoliaRpc, ...(settings.fixture ? { fixture: settings.fixture, fixtureIdentity: settings.fixtureIdentity } : {}), signer: settings.signer, journalFile: settings.steps[kind].journalFile });
     if (result.status !== "succeeded") { return { ...result, step: kind }; }
   }
   const next = nextRegistrationStep(await ports.snapshot(settings), settings);
   if (next.kind === "complete") { return { status: "succeeded", reason: "finalized-registry-pool-match" }; }
   const result = await ports.execute({ chainId: next.chainId, kind: "call", from: next.from, to: next.to,
     value: next.value, data: next.data, nonce: settings.steps[next.kind].nonce },
-  { signer: settings.signer, journalFile: settings.steps[next.kind].journalFile });
+  { sepoliaRpc, ...(settings.fixture ? { fixture: settings.fixture, fixtureIdentity: settings.fixtureIdentity } : {}), signer: settings.signer, journalFile: settings.steps[next.kind].journalFile });
   return { ...result, step: next.kind };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -5,11 +5,12 @@ import { createSolanaManualExecutionSdk } from '../adapters/solana-manual-execut
 import { createSolanaTransactionRpc } from '../adapters/solana-transaction-rpc.ts';
 import { createJournalFile } from '../adapters/evm-journal-file.ts';
 import { runSolanaTransactionJournal } from '../application/solana-transaction-journal.ts';
-import { manualExpected, validateManualExpected, manualContract } from '../domain/solana-manual-execution.mjs';
+import { requireHistoricalRecovery, manualExpected, validateManualExpected, manualContract } from '../domain/solana-manual-execution.mjs';
 const fromStored=intent=>manualExpected(intent.lookupTables);
 const defaults={sdk:createSolanaManualExecutionSdk,store:createJournalFile,rpc:createSolanaTransactionRpc};
 /** Recover only the original message; the shared durable journal never re-signs uncertain/expired bytes. */
 export async function executeSolanaManualRecovery(settings,ports=defaults) {
+  requireHistoricalRecovery(settings);
   if(settings.testOnly!==true||!settings.journalFile||!/^[1-9][0-9]*$/.test(settings.maxNativeBalanceLamports)||
     BigInt(settings.maxNativeBalanceLamports)>1000000000n){throw new Error('Explicit test-only manual recovery with at most 1 SOL required');}
   const sdk=await ports.sdk(settings),store=ports.store(resolve(settings.journalFile));

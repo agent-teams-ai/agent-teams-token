@@ -1,3 +1,4 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -30,7 +31,8 @@ export async function beforeBroadcastRegistration(expected, rpc, sdk) {
 export async function registerTestSolanaPool(settings) {
   if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet" ||
     !REGISTRATION_OPERATIONS.includes(settings.expected.operation)) { throw new Error("Test-only registration settings required"); }
-  const sdk = await createSolanaRegistrationSdk(settings.providerDirectory), expected = sdk.derive(settings.expected);
+  const fixture = bindFixture(settings, [settings.journalDirectory]);
+  const sdk = await createSolanaRegistrationSdk(settings.providerDirectory), expected = sdk.derive({ ...settings.expected, ...(fixture ? { fixture } : {}) });
   const rpc = createSolanaRegistrationRpc((bytes, intent) => sdk.inspectSigned(bytes, intent).messageBase64, sdk);
   const journalFile = resolve(settings.journalDirectory, expected.operation + ".json");
   const result = await runSolanaRegistrationJournal(expected, {

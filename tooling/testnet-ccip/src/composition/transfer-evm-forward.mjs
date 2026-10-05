@@ -1,3 +1,4 @@
+import { bindFixture } from '../adapters/fixture-binding.ts';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,8 +7,9 @@ import { createJournalFile } from '../adapters/evm-journal-file.ts';
 import { readRemoteConfigSnapshot } from '../adapters/evm-remote-config-rpc.ts';
 import { nextRemoteConfigStep } from '../domain/evm-remote-config.ts';
 import { canonicalIntentJson, validateSepoliaIntent } from '../domain/evm-intent.ts';
-import { FORWARD, boundedAllowance, forwardIntent, forwardTarget, forwardRecipient } from '../domain/evm-forward.mjs';
+import { forwardRoute, boundedAllowance, forwardIntent, forwardTarget, forwardRecipient } from '../domain/evm-forward.mjs';
 import { executeSepoliaIntent } from './execute-sepolia.ts';
+import { selectSepoliaRpc } from '../adapters/test-rpc.ts';
 const defaults = {
   sdk: createEvmForwardSdk, snapshot: readRemoteConfigSnapshot, execute: executeSepoliaIntent,
   read: async file => { const store = createJournalFile(file); return store.exclusive(() => store.read()); },
@@ -15,12 +17,14 @@ const defaults = {
 };
 /** A finalized source receipt means source success only, never destination delivery. */
 export async function transferEvmForward(settings, ports = defaults) {
-  const target = forwardTarget(settings);
+  const sepoliaRpc = selectSepoliaRpc(settings);
+  const fixture = bindFixture(settings, [settings.approvalJournal, settings.sendJournal]);
+  const route = forwardRoute(fixture), target = forwardTarget(settings);
   if (resolve(settings.approvalJournal) === resolve(settings.sendJournal)) { throw new Error('Journal paths alias'); }
   return ports.exclusive(settings.sendJournal, async () => {
-    const sdk = await ports.sdk(settings.providerDirectory, forwardRecipient(settings.recipient));
+    const sdk = await ports.sdk(settings.providerDirectory, forwardRecipient(settings.recipient, fixture), fixture, sepoliaRpc);
     const ready = async () => {
-      if (nextRemoteConfigStep(await ports.snapshot(target), target) !== 'complete') {
+      if (nextRemoteConfigStep(await ports.snapshot({ ...target, sepoliaRpc }), target) !== 'complete') {
         throw new Error('Finalized remote registration/configuration required');
       }
     };
@@ -29,7 +33,7 @@ export async function transferEvmForward(settings, ports = defaults) {
       if (step === 'send' && (fee <= 0n || fee > 10000000000000000n)) { throw new Error('Stored native fee outside bound'); }
       const tx = { from: record.intent.from, to: record.intent.to, data: record.intent.data, value: fee };
       sdk.verify(tx, step, fee);
-      const intent = forwardIntent(tx, nonce);
+      const intent = forwardIntent(tx, nonce, route);
       if (canonicalIntentJson(validateSepoliaIntent(intent, intent)) !== canonicalIntentJson(record.intent)) {
         throw new Error('Stored forward intent conflict');
       }
@@ -40,10 +44,10 @@ export async function transferEvmForward(settings, ports = defaults) {
       // Only phase signed can have its first broadcast. All later phases reconcile despite progressed state.
       if (record.phase === 'signed') {
         await ready();
-        const allowance = boundedAllowance(await sdk.allowance());
-        if (step === 'send' && allowance !== FORWARD.amount) { throw new Error('Exact bounded allowance required'); }
+        const allowance = boundedAllowance(await sdk.allowance(), route);
+        if (step === 'send' && allowance !== route.amount) { throw new Error('Exact bounded allowance required'); }
       }
-      return ports.execute(intent, { signer: settings.signer, journalFile: file });
+      return ports.execute(intent, { sepoliaRpc, signer: settings.signer, journalFile: file, ...(fixture ? { fixture, fixtureIdentity: fixture.identity } : {}) });
     };
     try {
       const sendRecord = await ports.read(settings.sendJournal);
@@ -56,23 +60,23 @@ export async function transferEvmForward(settings, ports = defaults) {
       }
       if (sendRecord) { return { ...await resume(sendRecord, 'send', settings.sendJournal, settings.sendNonce), step: 'send' }; }
       await ready();
-      const allowance = boundedAllowance(await sdk.allowance());
+      const allowance = boundedAllowance(await sdk.allowance(), route);
       const candidate = await sdk.prepare();
       // Read again after the SDK's own allowance lookup, never infer a bound from approveMax=false.
-      if (boundedAllowance(await sdk.allowance()) !== allowance) { throw new Error('Allowance changed during preparation'); }
-      if (allowance < FORWARD.amount) {
+      if (boundedAllowance(await sdk.allowance(), route) !== allowance) { throw new Error('Allowance changed during preparation'); }
+      if (allowance < route.amount) {
         if (approvalRecord || !candidate.approval) { throw new Error('Approval state conflicts with journal/provider'); }
-        const intent = forwardIntent(candidate.approval, settings.approvalNonce);
+        const intent = forwardIntent(candidate.approval, settings.approvalNonce, route);
         sdk.verify(candidate.approval, 'approval', 0n);
         await ready();
-        return { ...await ports.execute(intent, { signer: settings.signer, journalFile: settings.approvalJournal }), step: 'approval' };
+        return { ...await ports.execute(intent, { sepoliaRpc, ...(fixture ? { fixture, fixtureIdentity: fixture.identity } : {}), signer: settings.signer, journalFile: settings.approvalJournal }), step: 'approval' };
       }
       if (candidate.approval) { throw new Error('Unexpected redundant approval'); }
       sdk.verify(candidate.send, 'send', candidate.fee);
       await ready();
-      if (boundedAllowance(await sdk.allowance()) !== FORWARD.amount) { throw new Error('Allowance changed before signing'); }
-      return { ...await ports.execute(forwardIntent(candidate.send, settings.sendNonce),
-        { signer: settings.signer, journalFile: settings.sendJournal }), step: 'send' };
+      if (boundedAllowance(await sdk.allowance(), route) !== route.amount) { throw new Error('Allowance changed before signing'); }
+      return { ...await ports.execute(forwardIntent(candidate.send, settings.sendNonce, route),
+        { sepoliaRpc, ...(fixture ? { fixture, fixtureIdentity: fixture.identity } : {}), signer: settings.signer, journalFile: settings.sendJournal }), step: 'send' };
     } finally { await sdk.destroy(); }
   });
 }

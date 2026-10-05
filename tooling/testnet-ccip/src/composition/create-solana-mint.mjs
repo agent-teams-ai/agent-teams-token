@@ -1,3 +1,4 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,6 +22,7 @@ export async function createTestMint(settings) {
   if (settings.testOnly !== true || settings.expected.testOnly !== true || settings.expected.cluster !== "solana-devnet") {
     throw new Error("Test-only Solana settings required");
   }
+  bindFixture(settings, [settings.journalFile]);
   const expected = settings.expected;
   const sdk = await createSolanaMintSdk(settings.providerDirectory);
   const rpc = createSolanaMintRpc((bytes, intent) => sdk.inspectSigned(bytes, {

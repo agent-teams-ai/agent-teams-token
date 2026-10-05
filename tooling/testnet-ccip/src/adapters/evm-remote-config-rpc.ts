@@ -1,4 +1,6 @@
 import { readRegistrationSnapshot } from "./evm-registration-rpc.ts";
+import { createTestRpcRequest, selectSepoliaRpc } from "./test-rpc.ts";
+import type { TestRpcSettings } from "./test-rpc.ts";
 import { SOLANA_REMOTE } from "../domain/evm-remote-config.ts";
 import type { RemoteRate, RemoteSnapshot } from "../domain/evm-remote-config.ts";
 import type { RegistrationTarget } from "../domain/evm-registration.ts";
@@ -14,20 +16,9 @@ function rate(value: unknown): RemoteRate {
   return { enabled: n[2] === 1n, capacity: n[3]!.toString(), rate: n[4]!.toString() };
 }
 /** All remote calls reuse the registry snapshot's finalized EIP-1898 hash. */
-export async function readRemoteConfigSnapshot(target: RegistrationTarget, fetcher: typeof fetch = globalThis.fetch): Promise<RemoteSnapshot> {
+export async function readRemoteConfigSnapshot(target: RegistrationTarget & TestRpcSettings, fetcher: typeof fetch = globalThis.fetch): Promise<RemoteSnapshot> {
   const registration = await readRegistrationSnapshot(target, fetcher);
-  let id = 1000;
-  async function rpc(method: string, params: unknown[]): Promise<unknown> {
-    const sequence = ++id;
-    const response = await fetcher("https://ethereum-sepolia-rpc.publicnode.com", { method: "POST",
-      headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: sequence, method, params }),
-      signal: AbortSignal.timeout(20_000), redirect: "error" });
-    const body = await response.json() as { jsonrpc?: string; id?: number; error?: unknown; result?: unknown };
-    if (!response.ok || !body || body.jsonrpc !== "2.0" || body.id !== sequence || "error" in body || !("result" in body)) {
-      throw new Error("Remote config RPC unavailable");
-    }
-    return body.result;
-  }
+  const rpc = createTestRpcRequest(selectSepoliaRpc(target), fetcher, 1000);
   const at = { blockHash: registration.finalizedBlockHash, requireCanonical: true };
   const call = (selector: string): Promise<unknown> => rpc("eth_call", [{ to: target.pool,
     data: selector + word(BigInt(SOLANA_REMOTE.selector)) }, at]);

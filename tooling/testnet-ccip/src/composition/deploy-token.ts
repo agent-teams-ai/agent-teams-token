@@ -1,4 +1,6 @@
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
+import { selectSepoliaRpc } from "../adapters/test-rpc.ts";
+import type { TestRpcSettings } from "../adapters/test-rpc.ts";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -6,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import type { CastSignerConfig } from "../adapters/evm-cast.ts";
 import type { SepoliaIntentInput } from "../domain/evm-intent.ts";
 
-export interface TokenDeploymentSettings {
+export interface TokenDeploymentSettings extends TestRpcSettings {
   readonly testOnly: true;
   readonly administrator: string;
   readonly nonce: string;
@@ -29,6 +31,7 @@ export function testTokenConstructor(administrator: string): string {
 export async function deployTestToken(settings: TokenDeploymentSettings): Promise<{
   status: string; reason: string; transactionHash: string;
 }> {
+  selectSepoliaRpc(settings);
   if (settings.testOnly !== true || settings.signer.testOnly !== true ||
     !/^[0-9a-f]{64}$/.test(settings.artifactSha256)) { throw new Error("Test-only settings required"); }
   const artifactBytes = await readFile(settings.artifactFile);

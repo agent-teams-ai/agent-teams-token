@@ -52,9 +52,7 @@ function address(value) {
 }
 
 /** Feature-private assembly of only data codecs. No clients, fees, signer or secret APIs. */
-export function unsignedDevPrimitives(abi, web3) {
-  const iface = new abi.Interface(ABI);
-  let events;
+export function unsignedSvmPrimitives(web3) {
   const key = value => {
     if (typeof value !== 'string' || value.length < 32 || value.length > 44) { fail('invalid public key'); }
     return new web3.PublicKey(value);
@@ -108,6 +106,34 @@ export function unsignedDevPrimitives(abi, web3) {
         instructions: message.compiledInstructions.map(ix => ({ programId: keys.get(ix.programIdIndex).toBase58(),
           keys: Array.from(ix.accountKeyIndexes, meta), data: '0x' + Buffer.from(ix.data).toString('hex') })) };
     },
+    compileUnsignedV0(input) {
+      const value = record(input, Object.hasOwn(input ?? {}, 'lookupTable') ? ['payer', 'recentBlockhash', 'instructions', 'lookupTable'] : ['payer', 'recentBlockhash', 'instructions']);
+      if (!Array.isArray(value.instructions) || !value.instructions.length || value.instructions.length > 16) { fail('instruction bound'); }
+      const instructions = value.instructions.map(item => {
+        const instruction = record(item, ['programId', 'keys', 'data']);
+        if (!Array.isArray(instruction.keys) || instruction.keys.length > 64) { fail('account bound'); }
+        const keys = instruction.keys.map(itemKey => {
+          const meta = record(itemKey, ['pubkey', 'isSigner', 'isWritable']);
+          if (typeof meta.isSigner !== 'boolean' || typeof meta.isWritable !== 'boolean') { fail('invalid account permissions'); }
+          return { pubkey: key(meta.pubkey), isSigner: meta.isSigner, isWritable: meta.isWritable };
+        });
+        return new web3.TransactionInstruction({ programId: key(instruction.programId), keys,
+          data: Buffer.from(hex(instruction.data, 1024).slice(2), 'hex') });
+      });
+      const message = new web3.TransactionMessage({ payerKey: key(value.payer),
+        recentBlockhash: key(value.recentBlockhash).toBase58(), instructions }).compileToV0Message(value.lookupTable === undefined ? [] : [table(value.lookupTable)]);
+      const transaction = new web3.VersionedTransaction(message);
+      return Object.freeze({ messageBase64: Buffer.from(message.serialize()).toString('base64'),
+        transactionBase64: Buffer.from(transaction.serialize()).toString('base64'),
+        requiredSignatures: message.header.numRequiredSignatures, broadcastAllowed: false });
+    },
+  });
+}
+export function unsignedDevPrimitives(abi, web3) {
+  const iface = new abi.Interface(ABI);
+  let events;
+  const { compileUnsignedV0, ...svm } = unsignedSvmPrimitives(web3);
+  return Object.freeze({ ...svm,
     encodeApprove(spender, amount) {
       return iface.encodeFunctionData('approve', [address(spender), uint(amount, 256)]);
     },
@@ -150,26 +176,6 @@ export function unsignedDevPrimitives(abi, web3) {
       }
       return Object.freeze({ name: decoded.name, args: decoded.args });
     },
-    compileUnsignedV0(input) {
-      const value = record(input, Object.hasOwn(input ?? {}, 'lookupTable') ? ['payer', 'recentBlockhash', 'instructions', 'lookupTable'] : ['payer', 'recentBlockhash', 'instructions']);
-      if (!Array.isArray(value.instructions) || !value.instructions.length || value.instructions.length > 16) { fail('instruction bound'); }
-      const instructions = value.instructions.map(item => {
-        const instruction = record(item, ['programId', 'keys', 'data']);
-        if (!Array.isArray(instruction.keys) || instruction.keys.length > 64) { fail('account bound'); }
-        const keys = instruction.keys.map(itemKey => {
-          const meta = record(itemKey, ['pubkey', 'isSigner', 'isWritable']);
-          if (typeof meta.isSigner !== 'boolean' || typeof meta.isWritable !== 'boolean') { fail('invalid account permissions'); }
-          return { pubkey: key(meta.pubkey), isSigner: meta.isSigner, isWritable: meta.isWritable };
-        });
-        return new web3.TransactionInstruction({ programId: key(instruction.programId), keys,
-          data: Buffer.from(hex(instruction.data, 1024).slice(2), 'hex') });
-      });
-      const message = new web3.TransactionMessage({ payerKey: key(value.payer),
-        recentBlockhash: key(value.recentBlockhash).toBase58(), instructions }).compileToV0Message(value.lookupTable === undefined ? [] : [table(value.lookupTable)]);
-      const transaction = new web3.VersionedTransaction(message);
-      return Object.freeze({ messageBase64: Buffer.from(message.serialize()).toString('base64'),
-        transactionBase64: Buffer.from(transaction.serialize()).toString('base64'),
-        requiredSignatures: message.header.numRequiredSignatures, broadcastAllowed: false });
-    },
+    compileUnsignedV0,
   });
 }

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { BURNMINT_PROGRAM } from "../domain/solana-pool-init.ts";
 import { ROUTER_PROGRAM } from "../domain/solana-registration.ts";
-import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, REMOTE_POOL, REMOTE_TOKEN, altAddresses, remoteBytes, remotePoolBytes } from "../domain/solana-pool-config.ts";
+import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, REMOTE_POOL, altAddresses, remoteBytes, remotePoolBytes, remoteTokenBytes } from "../domain/solana-pool-config.ts";
 // Exact residual bytes observed from official edit realloc::zero=false (183 -> 171).
 export const REPAIRED_CHAIN_SLACK = Buffer.from("0200000000ca9a3b000000000000000000000000000000000000000000000000", "hex");
 const discriminator = name => createHash("sha256").update("account:" + name).digest().subarray(0, 8);
@@ -26,7 +26,7 @@ function chainRates(bytes, offset, before, op) {
   const effective = !before && ["init-chain-remote-config", "append-remote-pool-addresses"].includes(op) ? bytes[offset + 16] === 1 : enabled;
   rate(bytes, offset, effective); rate(bytes, offset + 33, effective);
 }
-function chainPeers(bytes, legacy) {
+function chainPeers(bytes, legacy, fixture) {
   const count = bytes.readUInt32LE(8);
 
   const stride = legacy ? 36 : 24;
@@ -35,11 +35,11 @@ function chainPeers(bytes, legacy) {
   if (!tail.equals(Buffer.alloc(32)) && !(count === 1 && !legacy && tail.equals(REPAIRED_CHAIN_SLACK))) { throw new Error("Wrong remote pool allocation slack"); }
   let offset = 12;
   if (count === 1) {
-    const address = legacy ? remoteBytes(REMOTE_POOL) : remotePoolBytes();
+    const address = legacy ? remoteBytes(fixture?.pool ?? REMOTE_POOL) : remotePoolBytes(fixture);
     if (bytes.readUInt32LE(offset) !== address.length || !bytes.subarray(offset + 4, offset + stride).equals(address)) { throw new Error("Wrong remote pool encoding"); }
     offset += stride;
   }
-  if (bytes.readUInt32LE(offset) !== 32 || !bytes.subarray(offset + 4, offset + 36).equals(remoteBytes(REMOTE_TOKEN)) || bytes[offset + 36] !== 9) {
+  if (bytes.readUInt32LE(offset) !== 32 || !bytes.subarray(offset + 4, offset + 36).equals(remoteTokenBytes(fixture)) || bytes[offset + 36] !== 9) {
     throw new Error("Wrong remote token or decimals");
   }
   return { count, offset, tail };
@@ -52,7 +52,7 @@ function verifyChain(raw, expected, phase) {
   }
   const bytes = data(raw, BURNMINT_PROGRAM);
   if (bytes.length < 147 || !bytes.subarray(0, 8).equals(discriminator("ChainConfig"))) { throw new Error("Wrong chain layout"); }
-  const { count, offset: tokenOffset, tail } = chainPeers(bytes, before && op === "repair-remote-pool-encoding");
+  const { count, offset: tokenOffset, tail } = chainPeers(bytes, before && op === "repair-remote-pool-encoding", expected.fixture);
   let offset = tokenOffset;
   if (before && op === "append-remote-pool-addresses" ? count !== 0 : op !== "init-chain-remote-config" && count !== 1) { throw new Error("Wrong remote pool phase"); }
   offset += 37;

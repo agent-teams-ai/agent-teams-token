@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { REVERSE, BURNMINT_PROGRAM } from '../domain/solana-reverse.mjs';
+import { reverseRoute, BURNMINT_PROGRAM } from '../domain/solana-reverse.mjs';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
 import { POOL_GLOBAL } from '../domain/solana-pool-init.ts';
-import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, altAddresses, REMOTE_TOKEN, remoteBytes, remotePoolBytes } from '../domain/solana-pool-config.ts';
+import { ALT_PROGRAM, FEE_QUOTER_PROGRAM, altAddresses, remotePoolBytes, remoteTokenBytes } from '../domain/solana-pool-config.ts';
 import { REPAIRED_CHAIN_SLACK } from './solana-pool-config-state.mjs';
   function layout(b, name, size) {
     if (b.length !== size || !b.subarray(0,8).equals(createHash('sha256').update('account:' + name).digest().subarray(0,8))) {
@@ -23,10 +23,11 @@ import { REPAIRED_CHAIN_SLACK } from './solana-pool-config-state.mjs';
   }
 
   function validateMint(mint,e) {
-    if (!mint.isInitialized || mint.decimals !== 9 || mint.supply !== REVERSE.amount || mint.mintAuthority?.toBase58() !== e.signer || mint.freezeAuthority !== null) { throw new Error('Wrong mint authority or supply'); }
+    if (!mint.isInitialized || mint.decimals !== 9 || mint.supply !== reverseRoute(e.fixture).amount || mint.mintAuthority?.toBase58() !== e.signer || mint.freezeAuthority !== null) { throw new Error('Wrong mint authority or supply'); }
   }
 
-export function createReverseState(provider, poolSdk) {
+export function createReverseState(provider, poolSdk, fixture) {
+  const route = reverseRoute(fixture);
   const { PublicKey, AddressLookupTableAccount } = provider.web3;
   const { TOKEN_PROGRAM_ID, unpackMint, unpackAccount } = provider.spl;
   const key = (b, n) => new PublicKey(b.subarray(n, n + 32)).toBase58();
@@ -39,7 +40,7 @@ export function createReverseState(provider, poolSdk) {
   async function config(rpc, routerConfig) {
     const snapshot = await read(rpc, [routerConfig]);
     const b = account(snapshot.value[0], ROUTER_PROGRAM).data; layout(b, 'Config', 210);
-    if (b[8] !== 1 || b[9] !== 1 || b.readBigUInt64LE(10) !== 16423721717087811551n || key(b,82) !== FEE_QUOTER_PROGRAM || key(b,114) !== REVERSE.rmn) {
+    if (b[8] !== 1 || b[9] !== 1 || b.readBigUInt64LE(10) !== 16423721717087811551n || key(b,82) !== FEE_QUOTER_PROGRAM || key(b,114) !== route.rmn) {
       throw new Error('Wrong finalized router config');
     }
     return key(b,146);
@@ -50,7 +51,7 @@ export function createReverseState(provider, poolSdk) {
     const mint = unpackMint(new PublicKey(e.mint),mintInfo), source = unpackAccount(new PublicKey(e.sourceAta),sourceInfo);
     validateMint(mint,e);
     if (source.mint.toBase58() !== e.mint || source.owner.toBase58() !== e.payer || !source.isInitialized || source.isFrozen || source.isNative ||
-      source.closeAuthority !== null || source.amount !== REVERSE.amount || source.delegatedAmount > REVERSE.amount ||
+      source.closeAuthority !== null || source.amount !== route.amount || source.delegatedAmount > route.amount ||
       source.delegate !== null && source.delegate.toBase58() !== e.spender || source.delegate === null && source.delegatedAmount !== 0n) {
       throw new Error('Wrong source token balance, authority or bounded delegation');
     }
@@ -69,11 +70,11 @@ export function createReverseState(provider, poolSdk) {
   }
   function remote(chainRaw) {
     const chain = account(chainRaw,BURNMINT_PROGRAM).data; layout(chain,'ChainConfig',171);
-    if (chain.readUInt32LE(8) !== 1 || chain.readUInt32LE(12) !== 20 || !chain.subarray(16,36).equals(remotePoolBytes()) ||
-      chain.readUInt32LE(36) !== 32 || !chain.subarray(40,72).equals(remoteBytes(REMOTE_TOKEN)) || chain[72] !== 9) { throw new Error('Wrong remote peers'); }
+    if (chain.readUInt32LE(8) !== 1 || chain.readUInt32LE(12) !== 20 || !chain.subarray(16,36).equals(remotePoolBytes(fixture)) ||
+      chain.readUInt32LE(36) !== 32 || !chain.subarray(40,72).equals(remoteTokenBytes(fixture)) || chain[72] !== 9) { throw new Error('Wrong remote peers'); }
     if (!chain.subarray(139).equals(Buffer.alloc(32)) && !chain.subarray(139).equals(REPAIRED_CHAIN_SLACK)) { throw new Error('Wrong remote allocation slack'); }
     for (const offset of [73,106]) {
-      if (chain[offset+16] !== 1 || chain.readBigUInt64LE(offset+17) !== 10000000000n || chain.readBigUInt64LE(offset+25) !== REVERSE.amount ||
+      if (chain[offset+16] !== 1 || chain.readBigUInt64LE(offset+17) !== 10000000000n || chain.readBigUInt64LE(offset+25) !== route.amount ||
         chain.readBigUInt64LE(offset) > 10000000000n) { throw new Error('Wrong remote rate limits'); }
     }
   }
@@ -85,6 +86,7 @@ export function createReverseState(provider, poolSdk) {
     return new AddressLookupTableAccount({ key: new PublicKey(e.alt), state: AddressLookupTableAccount.deserialize(alt) });
   }
   async function before(rpc, e, maximumLamports) {
+    if (e.payer !== route.payer || e.mint !== route.mint || JSON.stringify(e.fixture) !== JSON.stringify(fixture)) { throw new Error('Wrong reverse state route'); }
     if (!/^[1-9][0-9]*$/.test(maximumLamports) || BigInt(maximumLamports) > 10000000000n) { throw new Error('Explicit bounded test SOL exposure required'); }
     const result = await read(rpc, [e.mint,e.sourceAta,e.pool,e.ata,e.registry,e.chain,e.alt,POOL_GLOBAL,e.payer]);
     const [mintRaw,sourceRaw,poolRaw,poolAtaRaw,registryRaw,chainRaw,altRaw,globalRaw,payerRaw] = result.value;
@@ -96,7 +98,7 @@ export function createReverseState(provider, poolSdk) {
     remote(chainRaw);
     const lookupTable = lookup(altRaw,e,result.context.slot);
     payer(payerRaw,maximumLamports);
-    return { approval: source.delegate === null || source.delegatedAmount < REVERSE.amount,
+    return { approval: source.delegate === null || source.delegatedAmount < route.amount,
       sourceLamports: String(payerRaw.lamports), lookupTable };
   }
   return { config, before };

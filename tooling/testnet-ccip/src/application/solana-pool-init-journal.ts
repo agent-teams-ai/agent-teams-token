@@ -1,4 +1,5 @@
 import { runSolanaTransactionJournal } from "./solana-transaction-journal.ts";
+import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import type { SolanaMintIntent } from "../domain/solana-mint.ts";
 import { verifySolanaPoolInitIntent } from "../domain/solana-pool-init.ts";
 import type { SolanaPoolInitEnvelope, SolanaPoolInitExpectation } from "../domain/solana-pool-init.ts";
@@ -43,6 +44,13 @@ export interface SolanaPoolInitJournalResult {
 function canonical(intent: SolanaPoolInitEnvelope, expected: SolanaPoolInitExpectation): string {
   if (intent.schema !== "agtmai-solana-pool-init-v1" || intent.cluster !== expected.cluster ||
     intent.payer !== expected.payer || intent.mint !== expected.mint || intent.pool !== expected.pool || intent.testOnly !== true) { throw new Error("Conflicting pool init journal intent"); }
+  if (expected.fixture !== undefined) {
+    const selected = validateReplacementFixture(expected.fixture);
+    const stored = validateReplacementFixture(intent.fixture);
+    if (JSON.stringify(stored) !== JSON.stringify(selected)) { throw new Error("Conflicting pool init journal fixture"); }
+  } else if (intent.fixture !== undefined) {
+    throw new Error("Unexpected pool init journal fixture");
+  }
   return JSON.stringify(verifySolanaPoolInitIntent({ feePayer: intent.payer, instructions: intent.instructions }, expected));
 }
 function poolMatches(state: PoolStateEvidence | null, intent: SolanaPoolInitEnvelope): boolean {

@@ -3,6 +3,9 @@ import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transac
 import { verifySolanaPoolInitIntent, BURNMINT_PROGRAM, BURNMINT_PROGRAM_DATA, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
 export async function createSolanaPoolInitSdk(providerDirectory) {
   const provider = await loadSolanaProvider(providerDirectory);
+  return createPoolInitSdk(provider);
+}
+export function createPoolInitSdk(provider) {
   const { PublicKey, SystemProgram, TransactionInstruction } = provider.web3;
   const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } = provider.spl;
   const program = new PublicKey(BURNMINT_PROGRAM);

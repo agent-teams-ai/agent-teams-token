@@ -1,3 +1,6 @@
+import { bindFixture } from "../adapters/fixture-binding.ts";
+import { selectSepoliaRpc } from "../adapters/test-rpc.ts";
+import type { TestRpcSettings } from "../adapters/test-rpc.ts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,7 +11,7 @@ import type { RegistrationTarget } from "../domain/evm-registration.ts";
 import { nextRemoteConfigStep, remoteConfigCalldata } from "../domain/evm-remote-config.ts";
 import { validateSepoliaIntent } from "../domain/evm-intent.ts";
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
-export interface RemoteConfigSettings extends RegistrationTarget {
+export interface RemoteConfigSettings extends RegistrationTarget, TestRpcSettings {
   readonly signer: CastSignerConfig; readonly journalFile: string; readonly nonce: string;
 }
 const defaults = {
@@ -20,9 +23,11 @@ const defaults = {
 export async function configureEvmRemote(settings: RemoteConfigSettings, ports = defaults): Promise<{
   status: string; reason: string; transactionHash?: string;
 }> {
+  selectSepoliaRpc(settings);
   if (settings.testOnly !== true || settings.signer.testOnly !== true) { throw new Error("Test-only remote config required"); }
+  const fixture = bindFixture(settings, [settings.journalFile]);
   const intent = { chainId: "11155111", kind: "call" as const, from: settings.administrator,
-    to: settings.pool, value: "0", nonce: settings.nonce, data: remoteConfigCalldata() };
+    to: settings.pool, value: "0", nonce: settings.nonce, data: remoteConfigCalldata(fixture) };
   validateSepoliaIntent(intent, intent);
   const initial = nextRemoteConfigStep(await ports.snapshot(settings), settings);
   const prior = await ports.read(settings.journalFile);

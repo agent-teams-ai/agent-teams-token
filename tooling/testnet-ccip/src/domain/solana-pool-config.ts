@@ -1,3 +1,5 @@
+import { validateReplacementFixture } from "./replacement-fixture.ts";
+import type { ReplacementFixture } from "./replacement-fixture.ts";
 import { createHash } from "node:crypto";
 import { BURNMINT_PROGRAM } from "./solana-pool-init.ts";
 import { ROUTER_PROGRAM } from "./solana-registration.ts";
@@ -23,7 +25,8 @@ export interface SolanaPoolConfigEnvelope extends SolanaPoolConfigExpectation {
 export const u64 = (n: string | bigint): Buffer => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
 const u32 = (n: number): Buffer => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
 export const remoteBytes = (address: string): Buffer => Buffer.from(address.slice(2).padStart(64, "0"), "hex");
-export const remotePoolBytes = (): Buffer => Buffer.from(REMOTE_POOL.slice(2), "hex");
+export const remotePoolBytes = (fixture?: ReplacementFixture): Buffer => Buffer.from((fixture === undefined ? REMOTE_POOL : validateReplacementFixture(fixture).pool).slice(2), "hex");
+export const remoteTokenBytes = (fixture?: ReplacementFixture): Buffer => remoteBytes(fixture === undefined ? REMOTE_TOKEN : validateReplacementFixture(fixture).token);
 const discriminator = (name: string) => createHash("sha256").update("global:" + name).digest().subarray(0, 8);
 const meta = (address: string, isSigner = false, isWritable = false) => ({ address, isSigner, isWritable });
 export function altAddresses(e: SolanaPoolConfigExpectation): string[] {
@@ -40,8 +43,15 @@ function validateRepair(e: SolanaPoolConfigExpectation): void {
     }
   } else if (e.repairRateLimitsBase64 !== undefined) { throw new Error("Unexpected repair rate limits"); }
 }
+function validateFixture(e: SolanaPoolConfigExpectation): void {
+  if (e.fixture !== undefined) {
+    const f = validateReplacementFixture(e.fixture);
+    if (e.payer !== f.payer || e.mint !== f.mint || e.pool !== f.solanaPool) { throw new Error("Wrong selected pool configuration authority/peer"); }
+  }
+}
 function validate(e: SolanaPoolConfigExpectation): void {
   if (e.testOnly !== true || e.cluster !== "solana-devnet" || !POOL_CONFIG_OPERATIONS.includes(e.operation)) { throw new Error("Invalid test-only pool config scope"); }
+  validateFixture(e);
   validateRepair(e);
   const keys = [e.payer, e.mint, e.pool, e.chain, e.signer, e.ata, e.registry, e.routerConfig, e.feeTokenConfig, e.routerPoolSigner,
     SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM, BURNMINT_PROGRAM, ROUTER_PROGRAM, ALT_PROGRAM, FEE_QUOTER_PROGRAM];
@@ -75,8 +85,8 @@ export function poolConfigInstructions(e: SolanaPoolConfigExpectation): MintInst
   accounts.push(meta(SYSTEM_PROGRAM));
   const init = e.operation === "init-chain-remote-config";
   const repair = e.operation === "repair-remote-pool-encoding";
-  const pools = Buffer.concat([u32(1), u32(20), remotePoolBytes()]);
-  const data = repair ? Buffer.concat([pools, u32(32), remoteBytes(REMOTE_TOKEN), Buffer.from([9])]) : init ? Buffer.concat([u32(0), u32(32), remoteBytes(REMOTE_TOKEN), Buffer.from([9])]) :
+  const pools = Buffer.concat([u32(1), u32(20), remotePoolBytes(e.fixture)]);
+  const data = repair ? Buffer.concat([pools, u32(32), remoteTokenBytes(e.fixture), Buffer.from([9])]) : init ? Buffer.concat([u32(0), u32(32), remoteTokenBytes(e.fixture), Buffer.from([9])]) :
     pools;
   return [instruction(BURNMINT_PROGRAM, accounts, Buffer.concat([discriminator(repair ? "edit_chain_remote_config" : init ? "init_chain_remote_config" : "append_remote_pool_addresses"), ...prefix, data]))];
 }

@@ -13,6 +13,7 @@ export const trustedNodeEnvironmentKeys = Object.freeze([
   "AGTMAI_ANVIL_BINARY",
   "AGTMAI_FORGE_BINARY",
   "AGTMAI_LOCAL_EVM_FAULT",
+  "AGTMAI_REPLACEMENT_CODEC_DIRECTORY",
   "AGTMAI_ROLLBACK_EVIDENCE_DIRECTORY",
   "AGTMAI_ROLLBACK_TMPDIR",
   "AGTMAI_SAFE_ARTIFACT_DIRECTORY",
@@ -82,6 +83,11 @@ export const canonicalGitArguments = Object.freeze([
   "-c", "credential.interactive=never",
 ]);
 
+/**
+ * @param {Record<string, string | undefined>} source
+ * @param {Record<string, unknown>} overrides
+ * @returns {Record<string, string>}
+ */
 export function allowlistedChildEnvironment(source = process.env, overrides = {}) {
   const environment = {};
   for (const key of trustedNodeEnvironmentKeys) {
@@ -106,7 +112,42 @@ export function allowlistedChildEnvironment(source = process.env, overrides = {}
   environment.XDG_DATA_HOME ??= "/nonexistent";
   environment.XDG_RUNTIME_DIR ??= "/nonexistent";
   Object.assign(environment, CANONICAL_NPM_ENVIRONMENT);
+  validateOptionalReplacementCodecDirectory(environment.AGTMAI_REPLACEMENT_CODEC_DIRECTORY);
   return environment;
+}
+
+function validateOptionalReplacementCodecDirectory(directory) {
+  if (directory !== undefined) { validateReplacementCodecDirectory(directory); }
+}
+
+/** Public, offline test data configuration only; this grants no execution-provider admission. */
+export function validateReplacementCodecDirectory(directory) {
+  if (typeof directory !== "string" || !isAbsolute(directory) || directory.length > 4096
+    || /[\0\r\n]/u.test(directory) || resolve(directory) !== directory) { return invalidReplacementCodecConfig(); }
+  try {
+    for (let parent = directory; ; parent = dirname(parent)) {
+      const entry = lstatSync(parent);
+      if (!entry.isDirectory() || entry.isSymbolicLink()) { return invalidReplacementCodecConfig(); }
+      if (parent === dirname(parent)) { break; }
+    }
+    const manifestPath = join(directory, "package.json"), entry = lstatSync(manifestPath);
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.size > 8192) { return invalidReplacementCodecConfig(); }
+    if (!validReplacementCodecManifest(JSON.parse(readFileSync(manifestPath, "utf8")))) { return invalidReplacementCodecConfig(); }
+  } catch { return invalidReplacementCodecConfig(); }
+  return directory;
+}
+
+function invalidReplacementCodecConfig() { throw new Error("TOOLCHAIN_REPLACEMENT_CODEC_CONFIG_INVALID"); }
+
+function validReplacementCodecManifest(manifest) {
+  const packages = { "@chainlink/ccip-sdk": "1.13.0", "@solana/web3.js": "1.98.4",
+    "@solana/spl-token": "0.4.14", ethers: "6.17.0", got: "11.8.6" };
+  return manifest !== null && typeof manifest === "object" && !Array.isArray(manifest)
+    && manifest.name === "agtmai-replacement-test-codecs" && manifest.version === "0.0.0"
+    && manifest.private === true && manifest.type === "module"
+    && Object.keys(manifest).toSorted().join() === "dependencies,name,private,type,version"
+    && manifest.dependencies && Object.keys(manifest.dependencies).length === Object.keys(packages).length
+    && Object.entries(packages).every(([name, version]) => manifest.dependencies[name] === version);
 }
 
 export function canonicalGitEnvironment(source = process.env) {
