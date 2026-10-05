@@ -1,5 +1,6 @@
 import { cleanupRemovalResult, cleanupSnapshotSha256 } from "./cleanup-evidence.mjs";
 import {
+  fchmodSync,
   fstatSync,
   lstatSync,
   realpathSync,
@@ -9,7 +10,6 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
-  closeDescriptorOnce,
   throwDescriptorCloseFailures,
 } from "./descriptor-close.mjs";
 import {
@@ -30,10 +30,15 @@ import {
   assertCustodyCanonicalSpelling,
   assertCustodyDescriptor,
   assertCustodyDirectChild,
+  assertCustodyIdentity,
+  closeCustodyDescriptor,
+  closeCustodyDescriptors,
+  collectCustodyDescriptorCloseFailure,
   custodyDescriptorChild as descriptorChild,
   custodyDescriptorDirectory,
-  forgetCustodyDescriptor,
+  custodyIdentity,
   updateCustodyDescriptor,
+  useCustodyDescriptor,
 } from "./custody.mjs";
 
 const CLEANUP_MAX_ALLOWED_ENTRIES = 2;
@@ -63,7 +68,7 @@ export function createCleanupHandle(path, policy) {
   }
   const configuration = cleanupPolicy(path, policy);
   const owner = String(process.getuid());
-  let rootDescriptor = openDirectoryDescriptor(configuration.temporaryRoot);
+  const rootDescriptor = openDirectoryDescriptor(configuration.temporaryRoot);
   let descriptor;
   try {
     const rootIdentity = fstatSync(rootDescriptor, { bigint: true });
@@ -102,31 +107,14 @@ export function createCleanupHandle(path, policy) {
       targetPrefix: configuration.targetPrefix,
       allowedEntries: configuration.allowedEntries,
       rootDescriptor,
-      rootDevice: String(rootIdentity.dev),
-      rootInode: String(rootIdentity.ino),
+      rootDevice: String(rootIdentity.dev), rootInode: String(rootIdentity.ino),
       descriptor,
-      device: String(identity.dev),
-      inode: String(identity.ino),
+      device: String(identity.dev), inode: String(identity.ino),
       owner,
       closed: false,
     };
   } catch (error) {
-    const failures = [];
-    const descriptors = [descriptor, rootDescriptor];
-    descriptor = undefined;
-    rootDescriptor = undefined;
-    for (const openedDescriptor of descriptors) {
-      if (!Number.isInteger(openedDescriptor)) {
-        continue;
-      }
-      forgetCustodyDescriptor(openedDescriptor);
-      try {
-        closeDescriptorOnce(openedDescriptor);
-      } catch (closeError) {
-        failures.push(closeError);
-      }
-    }
-    throwDescriptorCloseFailures(failures, "ROLLBACK_CLEANUP_CLOSE_FAILED", error);
+    closeCustodyDescriptors([descriptor, rootDescriptor], "ROLLBACK_CLEANUP_CLOSE_FAILED", error);
   }
 }
 
@@ -142,13 +130,11 @@ export function captureCleanupTreeSnapshot(handle) {
   assertCleanupTreeSnapshot(handle.descriptor, snapshot);
   cleanupTreeSnapshots.set(handle, snapshot);
   return {
-    schemaVersion: 1,
-    result: "captured",
+    schemaVersion: 1, result: "captured",
     custodySha256: cleanupSnapshotSha256(snapshot),
     entryCount: state.count,
     limits: {
-      maxDepth: CLEANUP_MAX_DEPTH,
-      maxEntries: CLEANUP_MAX_ENTRIES,
+      maxDepth: CLEANUP_MAX_DEPTH, maxEntries: CLEANUP_MAX_ENTRIES,
       maxRelativeBytes: CLEANUP_MAX_RELATIVE_BYTES,
     },
   };
@@ -199,8 +185,7 @@ export function updateCleanupTreeSnapshot(handle, options = {}) {
   assertCleanupTreeSnapshot(handle.descriptor, next);
   cleanupTreeSnapshots.set(handle, next);
   return {
-    schemaVersion: 1,
-    result: "updated",
+    schemaVersion: 1, result: "updated",
     custodySha256: cleanupSnapshotSha256(next),
     entryCount: state.count,
     addedEntries: added.toSorted(),
@@ -210,20 +195,16 @@ export function updateCleanupTreeSnapshot(handle, options = {}) {
 
 export function cleanupIdentityBoundDirectory(handle, options = {}) {
   validateCleanupHandle(handle);
+  let invalidOptions;
   if (options === null || typeof options !== "object" || Array.isArray(options)
     || Object.keys(options).some((key) => key !== "onBoundary")
     || (options.onBoundary !== undefined && typeof options.onBoundary !== "function")) {
-    const primaryFailure = new Error("ROLLBACK_CLEANUP_OPTIONS_INVALID");
-    const failures = [];
-    closeCleanupHandle(handle, failures);
-    throwDescriptorCloseFailures(
-      failures, "ROLLBACK_CLEANUP_CLOSE_FAILED", primaryFailure,
-    );
+    invalidOptions = "ROLLBACK_CLEANUP_OPTIONS_INVALID";
   }
 
   const snapshot = cleanupTreeSnapshots.get(handle);
-  if (snapshot === undefined) {
-    const primaryFailure = new Error("ROLLBACK_CLEANUP_SNAPSHOT_REQUIRED");
+  if (invalidOptions !== undefined || snapshot === undefined) {
+    const primaryFailure = new Error(invalidOptions ?? "ROLLBACK_CLEANUP_SNAPSHOT_REQUIRED");
     const failures = [];
     closeCleanupHandle(handle, failures);
     throwDescriptorCloseFailures(
@@ -273,8 +254,16 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
     );
     assertCleanupTreeSnapshot(handle.descriptor, snapshot);
 
+    // Linux directory moves between parents require write permission on the
+    // directory itself (for '..'), as well as on both parents. Sealed SDK
+    // declaration directories are owned 0500 objects. Admit only an owner-write
+    // transition on those exact captured objects, after target quarantine.
+    const removalSnapshot = Object.freeze({ entries: Object.freeze(snapshot.entries.map((entry) =>
+      prepareCleanupOwnerWrite(handle.descriptor, entry, entry.name, options))) });
+    assertCleanupTreeSnapshot(handle.descriptor, removalSnapshot);
+
     staging = createStagingDirectory(quarantine.descriptor);
-    for (const entry of snapshot.entries) {
+    for (const entry of removalSnapshot.entries) {
       removeQuarantinedEntry({
         parentDescriptor: handle.descriptor,
         expected: entry,
@@ -363,14 +352,45 @@ export function cleanupIdentityBoundDirectory(handle, options = {}) {
   return result;
 }
 
+function prepareCleanupOwnerWrite(parentDescriptor, expected, logicalPath, options) {
+  if (expected.kind !== "directory") { return expected; }
+  const sourcePath = descriptorChild(parentDescriptor, expected.name);
+  assertCustodyDescriptor(parentDescriptor);
+  const before = assertCleanupStrictFingerprint(expected.fingerprint, sourcePath, logicalPath);
+  const descriptor = openDirectoryDescriptor(sourcePath);
+  return useCustodyDescriptor(descriptor, "ROLLBACK_CLEANUP_PERMISSIONS_CLOSE_FAILED", () => {
+    assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
+    let identity = before, fingerprint = expected.fingerprint;
+    if ((before.mode & 0o200n) === 0n) {
+      boundary(options, "before-directory-permissions", { path: logicalPath, sourcePath });
+      assertCustodyDescriptor(parentDescriptor);
+      assertCustodyDescriptor(descriptor);
+      assertCleanupStrictFingerprint(expected.fingerprint, sourcePath, logicalPath);
+      assertCustodyIdentity(before, fstatSync(descriptor, { bigint: true }));
+      fchmodSync(descriptor, Number((before.mode & 0o7777n) | 0o200n));
+      identity = fstatSync(descriptor, { bigint: true });
+      assertCustodyIdentity({ ...custodyIdentity(before), mode: before.mode | 0o200n,
+        ctimeNs: identity.ctimeNs }, identity,
+      "ROLLBACK_CLEANUP_PERMISSIONS_TRANSITION_UNSAFE path=" + logicalPath);
+      fingerprint = cleanupStrictIdentityFingerprint(identity, "directory", sourcePath);
+      assertCleanupStrictFingerprint(fingerprint, sourcePath, logicalPath);
+      updateCustodyDescriptor(descriptor, realpathSync(sourcePath), identity);
+    }
+    return Object.freeze({
+      ...expected, identity, fingerprint,
+      children: Object.freeze(expected.children.map((child) => prepareCleanupOwnerWrite(
+        descriptor, child, logicalPath + "/" + child.name, options,
+      ))),
+    });
+  });
+}
+
 export function abandonCleanupHandle(handle) {
   validateCleanupHandle(handle);
   const result = {
-    schemaVersion: 1,
-    result: "preserved",
+    schemaVersion: 1, result: "preserved",
     path: handle.path,
-    device: handle.device,
-    inode: handle.inode,
+    device: handle.device, inode: handle.inode,
   };
   closeCleanupHandle(handle);
   return result;
@@ -413,10 +433,7 @@ function cleanupPolicy(path, policy) {
   }
   assertCustodyDirectChild(temporaryRoot, canonicalPath, targetName);
   return {
-    temporaryRoot,
-    targetName,
-    targetPrefix: policy.targetPrefix,
-    allowedEntries,
+    temporaryRoot, targetName, targetPrefix: policy.targetPrefix, allowedEntries,
   };
 }
 
@@ -467,25 +484,17 @@ function validateCleanupHandle(handle) {
 
 function closeCleanupOwnedDescriptor(owner, key, failures) {
   const descriptor = owner?.[key];
-  if (!Number.isInteger(descriptor)) {
-    return;
-  }
+  if (!Number.isInteger(descriptor)) { return; }
   owner[key] = undefined;
-  forgetCustodyDescriptor(descriptor);
-  try {
-    closeDescriptorOnce(descriptor);
-  } catch (error) {
-    if (failures === undefined) {
-      throw error;
-    }
-    failures.push(error);
+  if (failures === undefined) {
+    closeCustodyDescriptor(descriptor);
+  } else {
+    collectCustodyDescriptorCloseFailure(descriptor, failures);
   }
 }
 
 function closeCleanupHandle(handle, failures) {
-  if (handle.closed) {
-    return;
-  }
+  if (handle.closed) { return; }
   handle.closed = true;
   cleanupTreeSnapshots.delete(handle);
   const collectedFailures = failures ?? [];
