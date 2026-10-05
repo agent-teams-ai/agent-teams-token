@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFile, fork, spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -19,14 +18,18 @@ export async function genuineAgaveRecovery(repositoryRoot: string): Promise<void
   const store = new PrivateRunStore(runRoot, outputRoot); const neighbourRun = await store.create();
   await writeFile(neighbourRun.payerKey, "NEIGHBOUR_SENTINEL", { mode: 0o600 });
   const neighbour = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const neighbourClosed = childClosed(neighbour);
   let ports: PortLease | undefined;
   let snapshots: ToolLease | undefined; let owner: ChildProcess | undefined; let paths: RunPaths | undefined;
+  let ownerClosed: Promise<void> | undefined;
   let tools: ToolPaths | undefined;
   let identity: ValidatorIdentity | undefined; let custodian: { pid: number; start: string } | undefined;
+  const failures: unknown[] = [];
   try {
     ports = await new LoopbackPortAllocator(join(root, "ports")).allocate();
     tools = await new PinnedToolResolver(repositoryRoot, new NodeCommandAdapter()).resolve({ run: neighbourRun, own: (lease) => { snapshots = lease; } });
     owner = fork(new URL("./start-unregistered-agave.ts", import.meta.url), [runRoot, outputRoot], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+    ownerClosed = childClosed(owner);
     const run = await message(owner, "run") as { paths: RunPaths }; paths = run.paths;
     const captured = message(owner, "captured"); owner.send({ tools, rpcPort: ports.rpcPort, faucetPort: ports.faucetPort, gossipPort: ports.gossipPort, dynamicPortRange: ports.dynamicPortRange });
     identity = (await captured as { identity: ValidatorIdentity }).identity;
@@ -38,7 +41,7 @@ export async function genuineAgaveRecovery(repositoryRoot: string): Promise<void
     assert.equal(JSON.parse(await readFile(join(paths.directory, ".agtmai-local-solana-lease.json"), "utf8")).validator, null);
     // Freeze disconnect handling so reclamation MUST run first while Agave is captured and live.
     process.kill(custodian.pid, "SIGSTOP");
-    const ownerClosed = once(owner, "close"); owner.kill("SIGKILL"); await ownerClosed;
+    owner.kill("SIGKILL"); await ownerClosed;
     assert.equal(await store.reclaimStale(), 0); await lstat(paths.ledger);
     assert.equal(await authenticateValidatorIdentity(identity, paths.leaseToken), true);
     process.kill(custodian.pid, "SIGCONT");
@@ -49,19 +52,56 @@ export async function genuineAgaveRecovery(repositoryRoot: string): Promise<void
     await assert.rejects(lstat(paths.directory), { code: "ENOENT" });
     process.kill(neighbour.pid!, 0); assert.equal(await readFile(neighbourRun.payerKey, "utf8"), "NEIGHBOUR_SENTINEL");
     await lstat(neighbourRun.directory);
-  } finally {
-    if (custodian !== undefined && await processStartIdentity(custodian.pid).catch(() => null) === custodian.start) { process.kill(custodian.pid, "SIGCONT"); }
-    if (owner !== undefined && owner.exitCode === null && owner.signalCode === null) { const closed = once(owner, "close"); owner.kill("SIGKILL"); await closed; }
-    if (identity !== undefined && paths !== undefined && !await exited(identity.pid) && await authenticateValidatorIdentity(identity, paths.leaseToken)) { process.kill(identity.pid, "SIGKILL"); }
-    const neighbourClosed = once(neighbour, "close"); neighbour.kill("SIGKILL"); await neighbourClosed;
-    // Uncertain processes retain their ledger and executable snapshots, including on test failure.
-    if (identity !== undefined) { await requireExited(identity.pid); }
-    if (custodian !== undefined) { await requireExited(custodian.pid); }
-    // Even a lost capture message cannot authorize removing executable snapshots.
-    // Settle every other run first, using the same durable recovery authority.
-    await cleanupRecoveryRuns(store, runRoot, neighbourRun, { snapshots, ports, tools });
-    await rm(root, { recursive: true, force: true });
+  } catch (cause) { failures.push(cause); }
+  finally {
+    const stopFailures: unknown[] = [];
+    // A failed signal must not strand the other directly owned children.
+    for (const stop of [
+      async () => {
+        if (custodian !== undefined && await processStartIdentity(custodian.pid).catch(() => null) === custodian.start) { signalRecoveryProcess(custodian.pid, "SIGCONT"); }
+      },
+      async () => {
+        if (owner !== undefined) {
+          if (owner.exitCode === null && owner.signalCode === null) { owner.kill("SIGKILL"); }
+          await ownerClosed;
+        }
+      },
+      async () => {
+        if (identity !== undefined && paths !== undefined && !await exited(identity.pid) && await authenticateValidatorIdentity(identity, paths.leaseToken)) { signalRecoveryProcess(identity.pid, "SIGKILL"); }
+      },
+      async () => {
+        if (neighbour.exitCode === null && neighbour.signalCode === null) { neighbour.kill("SIGKILL"); }
+        await neighbourClosed;
+      },
+    ]) {
+      try { await stop(); } catch (cause) { stopFailures.push(cause); }
+    }
+    failures.push(...stopFailures);
+    if (stopFailures.length === 0) {
+      try {
+        // Uncertain processes retain their ledger and executable snapshots, including on test failure.
+        if (identity !== undefined) { await requireExited(identity.pid); }
+        if (custodian !== undefined) { await requireExited(custodian.pid); }
+        // Even a lost capture message cannot authorize removing executable snapshots.
+        // Settle every other run first, using the same durable recovery authority.
+        await cleanupRecoveryRuns(store, runRoot, neighbourRun, { snapshots, ports, tools });
+        await rm(root, { recursive: true, force: true });
+      } catch (cause) { failures.push(cause); }
+    }
   }
+  if (failures.length === 1) { throw failures[0]; }
+  if (failures.length > 1) { throw new AggregateError(failures, "genuine Agave recovery and cleanup failed", { cause: failures[0] }); }
+}
+
+/** Install at spawn/fork, before any await can miss the child's close event. */
+function childClosed(child: ChildProcess): Promise<void> {
+  return new Promise((resolve) => { child.once("close", () => { resolve(); }); });
+}
+
+/** The caller must authenticate ownership first; disappearance is still not custody settlement. */
+function signalRecoveryProcess(pid: number, signal: NodeJS.Signals): void {
+  try { process.kill(pid, signal); }
+  catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ESRCH") { throw cause; } }
 }
 
 interface RecoveryCleanupOptions {
