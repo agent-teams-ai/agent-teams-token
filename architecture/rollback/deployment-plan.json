@@ -81,7 +81,7 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
+      "beforeSha256": "3f140db84241926bcaa7b1cd938380b62aaf586d7b030b367e6c1270359b77fe",
       "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
     },
     {
@@ -91,8 +91,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "4b365bed31e31012cc002d6fd81feae78d1665c1d3772f0b7256aec01a26ddd6",
-      "afterSha256": "d6910e09746188b0aefa26fb83fc90f18e4b75fd4e73982950f5ea0bd19b40dd"
+      "beforeSha256": "368a7d942150dc7433c33fa525bfcc9acc4a94c35bb88743e0144fb06ac857b0",
+      "afterSha256": "1cb9507d13ef8ac849fa944ccc1d2724320635f4e7ac1bab897cd2086ccdc127"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",

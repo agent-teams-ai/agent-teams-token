@@ -62,7 +62,7 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
+      "beforeSha256": "3f140db84241926bcaa7b1cd938380b62aaf586d7b030b367e6c1270359b77fe",
       "afterSha256": "803b6e6864ced096734c4999142a04875a88ce6f8a35f1236e17fa0c7035cda4"
     },
     {
@@ -72,8 +72,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "4b365bed31e31012cc002d6fd81feae78d1665c1d3772f0b7256aec01a26ddd6",
-      "afterSha256": "db771404577cb7e09b90f027edac27bb00df712810f58eca9738cb6f8c8a2834"
+      "beforeSha256": "368a7d942150dc7433c33fa525bfcc9acc4a94c35bb88743e0144fb06ac857b0",
+      "afterSha256": "5b1054b2be8b7bdca9abf943924e92d8d1ee49aa3d22e9d9f73e8e1aebaa776e"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
