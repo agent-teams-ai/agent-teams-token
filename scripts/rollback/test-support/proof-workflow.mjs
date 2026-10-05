@@ -44,3 +44,37 @@ export function checkWorkflowPolicies(checkout, pattern, count, failures = 0) {
     assert.match(result.stdout, new RegExp(`^not ok [0-9]+ - ${workflowPolicyTitle}$`, "mu"), output);
   }
 }
+
+export function assertRestoredSdkWorkflow(workflow, scripts, baselineFoundation) {
+  const foundation = workflow.jobs["foundation-and-typescript"];
+  const sdkSteps = foundation.steps.filter((step) => step.id === "stage-pinned-sdk-inputs");
+  assert.equal(sdkSteps.length, 1, "restored workflow must stage required SDK inputs exactly once");
+  const [sdkStep] = sdkSteps;
+  assert.deepEqual(sdkStep, {
+    name: "Stage finite public SDK check inputs",
+    id: "stage-pinned-sdk-inputs",
+    shell: "bash",
+    run: "./dev bootstrap sdk-inputs --fetch",
+  });
+  const install = foundation.steps.find((step) => step.name === "Install frozen workspace");
+  const rootCheck = foundation.steps.find((step) => step.name === "Final repository check");
+  assert.ok(foundation.steps.indexOf(sdkStep) < foundation.steps.indexOf(install));
+  assert.ok(foundation.steps.indexOf(install) < foundation.steps.indexOf(rootCheck));
+  assert.equal(rootCheck.if, undefined);
+  assert.equal(rootCheck["continue-on-error"], undefined);
+  assert.equal(rootCheck.run, "source scripts/env.sh && pnpm check");
+  assert.ok(scripts.check.split(" && ").includes("pnpm typecheck"));
+  for (const command of [
+    "tsc -p tooling/testnet-ccip/tsconfig.sdk-execution.json --pretty false",
+    "tsc -p tooling/testnet-ccip/tsconfig.json --pretty false",
+  ]) {
+    assert.equal(scripts.typecheck.split(" && ").filter((entry) => entry === command).length, 1);
+  }
+  assert.doesNotMatch(scripts.typecheck, /\|\||--if-present/u);
+  // The current SDK step is the sole addition to the historical foundation:
+  // proof timeout, environments, preflight, validation and uploads all disappear.
+  assert.deepEqual({
+    ...foundation,
+    steps: foundation.steps.filter((step) => step !== sdkStep),
+  }, baselineFoundation);
+}

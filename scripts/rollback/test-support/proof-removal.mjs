@@ -1,4 +1,4 @@
-import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies } from "./proof-workflow.mjs";
+import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies, assertRestoredSdkWorkflow } from "./proof-workflow.mjs";
 import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
 import { editWorkflowTest, removeWorkflowJob } from "../slices/transforms.mjs";
 import * as proofSupport from "./proof-fixture.mjs";
@@ -409,6 +409,8 @@ for (const manifest of manifests()) {
 
     const restoredPackage = JSON.parse(readFileSync(join(checkout, packagePath), "utf8"));
     const restoredWorkflow = parse(readFileSync(join(checkout, workflowPath), "utf8"));
+    const baselineWorkflow = parse(git(checkout, ["show", `${manifest.baselineSha}:${workflowPath}`]));
+    assertRestoredSdkWorkflow(restoredWorkflow, restoredPackage.scripts, baselineWorkflow.jobs["foundation-and-typescript"]);
     for (const [name, job] of Object.entries(restoredWorkflow.jobs)) {
       if (name !== "foundation-and-typescript") {
         assert.deepEqual(job, candidateJobs[name], name);
@@ -493,6 +495,19 @@ for (const manifest of manifests()) {
         );
         assert.equal(readFileSync(join(checkout, path), "utf8"), changed);
       }
+    }
+    const workflowPath = ".github/workflows/ci.yml";
+    const workflowSource = readFileSync(join(checkout, workflowPath), "utf8");
+    const sdkId = "        id: stage-pinned-sdk-inputs\n";
+    for (const replacement of ["", sdkId + sdkId]) {
+      const changed = workflowSource.replace(sdkId, replacement);
+      writeFileSync(join(checkout, workflowPath), changed);
+      const sharedPlan = snapshotRollbackSharedPaths(checkout, [workflowPath], workspaceHandle);
+      assert.throws(
+        () => removeWorkflowJob(checkout, manifest, sharedPlan, workspaceHandle),
+        { message: `ROLLBACK_WORKFLOW_STEP_${replacement === "" ? "MISSING" : "AMBIGUOUS"} id=stage-pinned-sdk-inputs` },
+      );
+      assert.equal(readFileSync(join(checkout, workflowPath), "utf8"), changed);
     }
   });
 }

@@ -82,7 +82,7 @@
     {
       "path": ".github/workflows/ci.yml",
       "beforeSha256": "3f140db84241926bcaa7b1cd938380b62aaf586d7b030b367e6c1270359b77fe",
-      "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
+      "afterSha256": "b259b0ea5936b205df69dbb2ac927ec92fe97e8a704713cfece23fe1c71ff68e"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
