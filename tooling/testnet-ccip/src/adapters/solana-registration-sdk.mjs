@@ -2,6 +2,7 @@
 import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import { openTestSdk } from "./test-sdk-admission.ts";
 import { selectTestSdk } from "./test-sdk-policy.ts";
+import { createSetupSigning } from "./solana-setup-operator.ts";
 import { createHash } from "node:crypto";
 import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transaction-sdk.mjs";
 import { createSolanaPoolInitSdk, createPoolInitSdk } from "./solana-pool-init-sdk.mjs";
@@ -17,27 +18,46 @@ import { ROUTER_PROGRAM, registrationInstruction, verifySolanaRegistrationIntent
   }
   /** @param {Expectation} expected */
   function snapshotAddresses(expected) { return [expected.mint, expected.pool, expected.ata, expected.registry, POOL_GLOBAL, expected.routerConfig]; }
+/** @typedef {import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation & {readonly operation: import('../domain/solana-registration.ts').RegistrationOperation}} RegistrationInput */
+/** @typedef {{readonly administrator: string, readonly pendingAdministrator: string, readonly lookupTable: string, readonly writableIndexes: string, readonly mint: string, readonly supportsAutoDerivation: boolean}} RegistryState */
+/** @typedef {{derive(e: RegistrationInput): Expectation, inspectSigned(bytes: string, e: Expectation): import('./solana-setup-operator.ts').InspectedSetup<import('../domain/solana-registration.ts').SolanaRegistrationEnvelope>, snapshotAddresses(e: Expectation): string[], decodeRegistry(raw: Account): RegistryState, verifySnapshot(values: readonly Account[], e: Expectation, phase: 'before' | 'after'): import('../application/solana-registration-journal.ts').RegistrationStateEvidence}} RegistrationPredecessorVerifier */
+/** @typedef {{build(e: import('../domain/solana-registration.ts').SolanaRegistrationExpectation, latest: import('./solana-transaction-sdk.mjs').BlockValidity): import('./solana-setup-operator.ts').PreparedSetup<import('../domain/solana-registration.ts').SolanaRegistrationEnvelope>, inspectSigned(bytes: string, e: import('../domain/solana-registration.ts').SolanaRegistrationExpectation): import('./solana-setup-operator.ts').InspectedSetup<import('../domain/solana-registration.ts').SolanaRegistrationEnvelope>, destroy(): Promise<void>, derive(e: RegistrationInput): Expectation, snapshotAddresses(e: Expectation): string[], decodeRegistry(raw: Account): RegistryState, verifySnapshot(values: readonly Account[], e: Expectation, phase: 'before' | 'after'): import('../application/solana-registration-journal.ts').RegistrationStateEvidence}} UnsignedRegistrationSdk */
+/** @overload @param {string} providerDirectory @param {import('./test-sdk-policy.ts').ExplicitTestSdkSelection} selection @returns {Promise<UnsignedRegistrationSdk>} */
+/** @overload @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] @returns {Promise<UnsignedRegistrationSdk | ReturnType<typeof createRegistrationSdk>>} */
 /** @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] */
 export async function createSolanaRegistrationSdk(providerDirectory, selection = {}) {
   const selected = selectTestSdk(selection, providerDirectory, selection.fixture === undefined ? undefined : validateReplacementFixture(selection.fixture));
   if (selected) {
-    const session = await openTestSdk({ root: providerDirectory, archives: selected.archives });
-    try {
-      const pool = createPoolInitSdk(session.native), sdk = createRegistrationSdk(session.native, pool);
-      return Object.freeze({
-        build: /** @param {Parameters<typeof sdk.build>} args */ (...args) => { session.assertHealthy(); const value = sdk.build(...args); session.assertHealthy(); return value; },
-        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { session.assertHealthy(); const value = sdk.inspectSigned(...args); session.assertHealthy(); return value; },
-        derive: /** @param {Parameters<typeof sdk.derive>} args */ (...args) => { session.assertHealthy(); const value = sdk.derive(...args); session.assertHealthy(); return value; },
-        snapshotAddresses: /** @param {Parameters<typeof snapshotAddresses>} args */ (...args) => { session.assertHealthy(); return snapshotAddresses(...args); },
-        decodeRegistry: /** @param {Parameters<typeof sdk.decodeRegistry>} args */ (...args) => { session.assertHealthy(); const value = sdk.decodeRegistry(...args); session.assertHealthy(); return value; },
-        verifySnapshot: /** @param {Parameters<typeof sdk.verifySnapshot>} args */ (...args) => { session.assertHealthy(); const value = sdk.verifySnapshot(...args); session.assertHealthy(); return value; },
-        destroy: async () => session.close(),
-      });
-    } catch (error) { session.close(); throw error; }
+    return (await materializeRegistration(providerDirectory, selected)).sdk;
   }
   const provider = await loadSolanaProvider(providerDirectory);
   const poolSdk = await createSolanaPoolInitSdk(providerDirectory);
   return createRegistrationSdk(provider, poolSdk);
+}
+/** @param {string} directory @param {import('./test-sdk-policy.ts').SelectedTestSdk} selected */
+async function materializeRegistration(directory, selected) {
+  const session = await openTestSdk({ root: directory, archives: selected.archives });
+  try {
+    const pool = createPoolInitSdk(session.native), sdk = createRegistrationSdk(session.native, pool);
+    const owner = createSetupSigning(sdk, session.assertHealthy, session.close);
+    /** @type {UnsignedRegistrationSdk} */
+    const sdkView = Object.freeze({
+        build: owner.build,
+        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { owner.assertOpen(); const value = sdk.inspectSigned(...args); owner.assertOpen(); return value; },
+        derive: /** @param {Parameters<typeof sdk.derive>} args */ (...args) => { owner.assertOpen(); const value = sdk.derive(...args); owner.assertOpen(); return value; },
+        snapshotAddresses: /** @param {Parameters<typeof snapshotAddresses>} args */ (...args) => { owner.assertOpen(); const value = snapshotAddresses(...args); owner.assertOpen(); return value; },
+        decodeRegistry: /** @param {Parameters<typeof sdk.decodeRegistry>} args */ (...args) => { owner.assertOpen(); const value = sdk.decodeRegistry(...args); owner.assertOpen(); return value; },
+        verifySnapshot: /** @param {Parameters<typeof sdk.verifySnapshot>} args */ (...args) => { owner.assertOpen(); const value = sdk.verifySnapshot(...args); owner.assertOpen(); return value; },
+        destroy: owner.destroy,
+      });
+    return Object.freeze({ sdk: sdkView, acquireSigner: owner.acquireSigner });
+  } catch { session.close(); throw new Error("TEST Registration construction failed"); }
+}
+/** @param {string} directory @param {import('./test-sdk-policy.ts').ExplicitTestSdkSelection} selection */
+export async function createSolanaRegistrationOperatorAttempt(directory, selection) {
+  const selected = selectTestSdk(selection, directory, validateReplacementFixture(selection.fixture));
+  if (!selected) { throw new Error("Explicit TEST operator selection required"); }
+  return materializeRegistration(directory, selected);
 }
 /** @param {import('./solana-transaction-sdk.mjs').NativeProvider} provider @param {Pick<ReturnType<typeof createPoolInitSdk>, 'verifyState' | 'verifyGlobal'>} poolSdk */
 export function createRegistrationSdk(provider, poolSdk) {
@@ -147,7 +167,7 @@ export function createRegistrationSdk(provider, poolSdk) {
       key(config, 114) !== "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7") { throw new Error("Wrong router config"); }
     verifyAta(ataRaw, expected, before);
     verifyRegistry(registryRaw, expected, before);
-    return { operation: op, mint: expected.mint, verified: true };
+    return { operation: op, mint: expected.mint, verified: /** @type {const} */ (true) };
   }
 
   return { ...transaction, derive, snapshotAddresses, decodeRegistry, verifySnapshot };

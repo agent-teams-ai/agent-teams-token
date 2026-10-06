@@ -4,9 +4,11 @@ The additive phase2 directory factory accepts explicit TEST SDK selection and
 uses authenticated web3/SPL 0.4.15 constructors. Pool and registration borrow one
 admitted provider. The frozen worker view has no signing method; its `destroy`
 closes the owning admission. Existing checkpoint/predecessor and finalized-state
-policies remain at their current owners. Phase3 entrypoint wiring and genuine
-native capture qualification are pending; synthetic unsigned unit replies do
-not prove deployed registration or authorize a public operation.
+policies remain at their current owners. The TEST composition now uses that
+unsigned view with an explicitly injected transport and a separate lazy Host
+`signPrepared` callback. Native capture qualification and fresh public acceptance
+remain pending; controlled units do not prove deployed registration or authorize
+a public operation.
 
 `src/composition/register-solana-pool.mjs` executes one explicitly selected Devnet
 operation per invocation, after finalized account and predecessor journal checks:
@@ -21,6 +23,18 @@ Private test settings contain `testOnly: true`, `providerDirectory`, `payerFile`
 payer, mint, pool, operation }`. The directory is dedicated to this mint/run;
 each operation gets `<operation>.json`. Reusing a directory with another identity
 fails closed. PDAs are derived and checked against actual signed instructions.
+
+For the admitted TEST profile, the existing JSON CLI requires
+`register-solana-pool.mjs <private-test-settings.json> --operator-test` and an
+explicit `solanaRpc: "https://api.devnet.solana.com"` choice. The statically
+selected Host extracts existing key references; it opens one attempt and acquires
+its private signer only inside a new-operation journal callback. Function callers
+pass `(publicSettings, createRegistrationOperatorIO(testKeys, approvedFetch))`;
+public settings omit key references. An offline caller passes explicit replay IO
+without a signer. Saved journals inspect and observe their original packet, with
+zero key/signer acquisition, build or fresh blockhash. All owned response-body
+and signing work drains before the unsigned SDK's only owning `destroy`.
+This explicit mode preserves the separate public-operation approval requirement.
 
 The initialized mint/pool must already be finalized. Fresh mint supply remains
 zero, decimals nine, freeze authority None. A coherent finalized six-account

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { checkSetupPrepared } from "./solana-setup-operator.ts";
 /** @typedef {import('./test-sdk-admission.ts').NativeSolanaProvider} NativeProvider */
 /** @typedef {{blockhash: string, lastValidBlockHeight: string}} BlockValidity */
 /** @typedef {{bytesBase64: string, blockhash: string, messageBase64: string, lastValidBlockHeight: string}} PreparedTransaction */
@@ -63,29 +64,35 @@ export function createSolanaTransactionSdk(provider, validate, instruction) {
   /** @param {string} bytesBase64 @param {E} expected */
   function inspectSigned(bytesBase64, expected) {
     const bytes = Buffer.from(bytesBase64, "base64");
-    if (bytes.length > 1232 || bytes.toString("base64") !== bytesBase64) { throw new Error("Invalid pool transaction encoding"); }
+    if (!bytes.length || bytes.length > 1232 || bytes.toString("base64") !== bytesBase64) { throw new Error("Invalid pool transaction encoding"); }
     const tx = Transaction.from(bytes);
-    if (!tx.verifySignatures(true) || tx.signatures.length !== 1 || !tx.signature) { throw new Error("Invalid pool signature"); }
+    if (!tx.verifySignatures(true) || tx.signatures.length !== 1 || !tx.signature || !tx.recentBlockhash || !tx.serialize().equals(bytes)) { throw new Error("Invalid pool signature"); }
     return { signature: bs58.encode(tx.signature), blockhash: tx.recentBlockhash, ...decode(tx, expected) };
   }
+  /** @param {PreparedTransaction} prepared @param {E} expected @param {BlockValidity} latest */
+  function inspectPrepared(prepared, expected, latest) { decode(checkSetupPrepared(provider, prepared, latest, [expected.payer]), expected); }
   /** @param {PreparedTransaction} prepared @param {E} expected @param {TestKeys} testKeys */
   async function sign(prepared, expected, testKeys) {
     if (testKeys.testOnly !== true) { throw new Error("Test-only pool key required"); }
-    let secret;
+    let secret, payer, signingSecret;
+    /** @type {unknown[] | undefined} */ let raw;
     try {
-      const raw = JSON.parse(await readFile(testKeys.payerFile, "utf8"));
-      if (!Array.isArray(raw) || raw.length !== 64 || raw.some(v => !Number.isInteger(v) || v < 0 || v > 255)) { throw new Error("Invalid test key"); }
-      secret = Uint8Array.from(raw); raw.fill(0);
-      const payer = Keypair.fromSecretKey(secret);
+      inspectPrepared(prepared, expected, prepared);
+      const parsed = /** @type {unknown} */ (JSON.parse(await readFile(testKeys.payerFile, "utf8")));
+      if (Array.isArray(parsed)) { raw = parsed; }
+      if (!Array.isArray(parsed) || parsed.length !== 64 || parsed.some(v => typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 255)) { throw new Error("Invalid test key"); }
+      secret = Uint8Array.from(parsed); raw?.fill(0);
+      payer = Keypair.fromSecretKey(secret);
       if (payer.publicKey.toBase58() !== expected.payer) { throw new Error("Wrong payer"); }
       const tx = Transaction.from(Buffer.from(prepared.bytesBase64, "base64"));
       decode(tx, expected);
       if (tx.recentBlockhash !== prepared.blockhash) { throw new Error("Wrong prepared blockhash"); }
-      tx.sign(payer);
+      signingSecret = payer.secretKey;
+      tx.sign({ publicKey: payer.publicKey, secretKey: signingSecret });
       const bytesBase64 = tx.serialize().toString("base64"), inspected = inspectSigned(bytesBase64, expected);
       return { bytesBase64, signature: inspected.signature, blockhash: inspected.blockhash, lastValidBlockHeight: prepared.lastValidBlockHeight };
     } catch { throw new Error("Test-only pool signing failed"); }
-    finally { secret?.fill(0); }
+    finally { raw?.fill(0); secret?.fill(0); signingSecret?.fill(0); }
   }
-  return { build, sign, inspectSigned };
+  return { build, sign, inspectSigned, inspectPrepared };
 }

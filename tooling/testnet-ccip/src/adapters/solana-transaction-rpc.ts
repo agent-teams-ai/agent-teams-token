@@ -1,10 +1,30 @@
 import type { SolanaObservation, SignedSolanaTransaction } from "../application/solana-transaction-journal.ts";
+import type { RpcAccount } from "./solana-transaction-sdk.mjs";
 export type SolanaRpcRead = (method: string, params: unknown[]) => Promise<unknown>;
 const GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 type ObjectValue = Record<string, unknown>;
 function object(value: unknown): ObjectValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) { throw new Error("Invalid Devnet evidence"); }
   return value as ObjectValue;
+}
+/** Finite JSON transport guard; layout and authority stay with the native verifier. */
+export function parseSolanaRpcAccount(value: unknown): RpcAccount | null {
+  if (value === null) { return null; }
+  const raw = object(value);
+  if (typeof raw.owner !== "string" || !raw.owner || typeof raw.executable !== "boolean" ||
+    typeof raw.lamports !== "number" || !Number.isSafeInteger(raw.lamports) || raw.lamports < 0 ||
+    !Array.isArray(raw.data) || raw.data.length !== 2 || raw.data[1] !== "base64" || typeof raw.data[0] !== "string" ||
+    Buffer.from(raw.data[0], "base64").toString("base64") !== raw.data[0] ||
+    Object.hasOwn(raw, "rentEpoch") && (typeof raw.rentEpoch !== "number" || !Number.isFinite(raw.rentEpoch) || raw.rentEpoch < 0)) {
+    throw new Error("Invalid Solana RPC account");
+  }
+  return { owner: raw.owner, executable: raw.executable, lamports: raw.lamports, data: [raw.data[0], "base64"],
+    ...(typeof raw.rentEpoch === "number" ? { rentEpoch: raw.rentEpoch } : {}) };
+}
+export function parseSolanaRpcSnapshot(value: unknown, count: number, minContextSlot: number): { slot: number; accounts: (RpcAccount | null)[] } {
+  const raw = object(value), slot = integer(object(raw.context).slot);
+  if (slot < minContextSlot || !Array.isArray(raw.value) || raw.value.length !== count) { throw new Error("Invalid finalized Solana snapshot"); }
+  return { slot, accounts: raw.value.map(parseSolanaRpcAccount) };
 }
 function integer(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) { throw new Error("Invalid RPC integer"); }

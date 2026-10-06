@@ -3,26 +3,43 @@ import { createHash } from "node:crypto";
 import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import { openTestSdk } from "./test-sdk-admission.ts";
 import { selectTestSdk } from "./test-sdk-policy.ts";
+import { createSetupSigning } from "./solana-setup-operator.ts";
 import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transaction-sdk.mjs";
 import { verifySolanaPoolInitIntent, BURNMINT_PROGRAM, BURNMINT_PROGRAM_DATA, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
+/** @typedef {{build(e: import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation, latest: import('./solana-transaction-sdk.mjs').BlockValidity): import('./solana-setup-operator.ts').PreparedSetup<import('../domain/solana-pool-init.ts').SolanaPoolInitEnvelope>, inspectSigned(bytes: string, e: import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation): import('./solana-setup-operator.ts').InspectedSetup<import('../domain/solana-pool-init.ts').SolanaPoolInitEnvelope>, destroy(): Promise<void>, verifyState(bytes: string, e: import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation): import('../application/solana-pool-init-journal.ts').PoolStateEvidence, verifyGlobal(bytes: string): void}} UnsignedPoolInitSdk */
+/** @overload @param {string} providerDirectory @param {import('./test-sdk-policy.ts').ExplicitTestSdkSelection} selection @returns {Promise<UnsignedPoolInitSdk>} */
+/** @overload @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] @returns {Promise<UnsignedPoolInitSdk | ReturnType<typeof createPoolInitSdk>>} */
 /** @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] */
 export async function createSolanaPoolInitSdk(providerDirectory, selection = {}) {
   const selected = selectTestSdk(selection, providerDirectory, selection.fixture === undefined ? undefined : validateReplacementFixture(selection.fixture));
   if (selected) {
-    const session = await openTestSdk({ root: providerDirectory, archives: selected.archives });
-    try {
-      const sdk = createPoolInitSdk(session.native);
-      return Object.freeze({
-        build: /** @param {Parameters<typeof sdk.build>} args */ (...args) => { session.assertHealthy(); const value = sdk.build(...args); session.assertHealthy(); return value; },
-        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { session.assertHealthy(); const value = sdk.inspectSigned(...args); session.assertHealthy(); return value; },
-        verifyState: /** @param {Parameters<typeof sdk.verifyState>} args */ (...args) => { session.assertHealthy(); const value = sdk.verifyState(...args); session.assertHealthy(); return value; },
-        verifyGlobal: /** @param {Parameters<typeof sdk.verifyGlobal>} args */ (...args) => { session.assertHealthy(); sdk.verifyGlobal(...args); session.assertHealthy(); },
-        destroy: async () => session.close(),
-      });
-    } catch (error) { session.close(); throw error; }
+    return (await materializePoolInit(providerDirectory, selected)).sdk;
   }
   const provider = await loadSolanaProvider(providerDirectory);
   return createPoolInitSdk(provider);
+}
+/** @param {string} directory @param {import('./test-sdk-policy.ts').SelectedTestSdk} selected */
+async function materializePoolInit(directory, selected) {
+  const session = await openTestSdk({ root: directory, archives: selected.archives });
+  try {
+    const sdk = createPoolInitSdk(session.native);
+    const owner = createSetupSigning(sdk, session.assertHealthy, session.close);
+    /** @type {UnsignedPoolInitSdk} */
+    const sdkView = Object.freeze({
+        build: owner.build,
+        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { owner.assertOpen(); const value = sdk.inspectSigned(...args); owner.assertOpen(); return value; },
+        verifyState: /** @param {Parameters<typeof sdk.verifyState>} args */ (...args) => { owner.assertOpen(); const value = sdk.verifyState(...args); owner.assertOpen(); return value; },
+        verifyGlobal: /** @param {Parameters<typeof sdk.verifyGlobal>} args */ (...args) => { owner.assertOpen(); sdk.verifyGlobal(...args); owner.assertOpen(); },
+        destroy: owner.destroy,
+      });
+    return Object.freeze({ sdk: sdkView, acquireSigner: owner.acquireSigner });
+  } catch { session.close(); throw new Error("TEST PoolInit construction failed"); }
+}
+/** @param {string} directory @param {import('./test-sdk-policy.ts').ExplicitTestSdkSelection} selection */
+export async function createSolanaPoolInitOperatorAttempt(directory, selection) {
+  const selected = selectTestSdk(selection, directory, validateReplacementFixture(selection.fixture));
+  if (!selected) { throw new Error("Explicit TEST operator selection required"); }
+  return materializePoolInit(directory, selected);
 }
 /** @param {import('./solana-transaction-sdk.mjs').NativeProvider} provider */
 export function createPoolInitSdk(provider) {
@@ -37,7 +54,7 @@ export function createPoolInitSdk(provider) {
     const signer = PublicKey.findProgramAddressSync([Buffer.from("ccip_tokenpool_signer"), mint.toBuffer()], program)[0];
     return { mint, pool, signer, ata: getAssociatedTokenAddressSync(mint, signer, true) };
   }
-  const { build, sign, inspectSigned } = createSolanaTransactionSdk(provider,
+  const { build, sign, inspectSigned, inspectPrepared } = createSolanaTransactionSdk(provider,
     (intent, /** @type {import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation} */expected) => { addresses(expected); return verifySolanaPoolInitIntent(intent, expected); },
     expected => {
       addresses(expected);
@@ -59,7 +76,7 @@ export function createPoolInitSdk(provider) {
       key(234) !== PublicKey.findProgramAddressSync([Buffer.from("external_token_pools_signer"), program.toBuffer()], new PublicKey(key(266)))[0].toBase58() ||
       key(298) !== SystemProgram.programId.toBase58() || data[330] !== 0 || data[331] !== 0 || data.readUInt32LE(332) !== 0 ||
       key(336) !== "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7") { throw new Error("Wrong initialized pool state"); }
-    return { address: expected.pool, mint: expected.mint, owner: expected.payer, verified: true };
+    return { address: expected.pool, mint: expected.mint, owner: expected.payer, verified: /** @type {const} */ (true) };
   }
   /** @param {string} bytesBase64 */
   function verifyGlobal(bytesBase64) {
@@ -72,5 +89,5 @@ export function createPoolInitSdk(provider) {
       throw new Error("Wrong pool global configuration");
     }
   }
-  return { build, sign, inspectSigned, verifyState, verifyGlobal };
+  return { build, sign, inspectSigned, inspectPrepared, verifyState, verifyGlobal };
 }
