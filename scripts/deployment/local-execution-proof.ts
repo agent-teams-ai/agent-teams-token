@@ -149,7 +149,7 @@ export async function runLocalExecutionProof(options: LocalExecutionProofOptions
       const transactionHash = await sendSignedOperation({ cast: foundry.cast, signer, environment: castEnvironment, rpcUrl: anvil.rpcUrl, operation, expected, input });
       const receipt = await waitForReceipt(rpc, transactionHash);
       if (receipt.status !== "0x1") {throw new Error(`PROOF_RECEIPT_${operation.id}`);}
-      const transactionFacts = assertTransaction(await transactionByHash(rpc, transactionHash), receipt, operation.kind, expectations.sender, operation.nonce, input, expected, operation.to);
+      const transactionFacts = assertTransaction(await transactionInReceiptBlock(rpc, transactionHash, receipt), receipt, operation.kind, expectations.sender, operation.nonce, input, expected, operation.to);
       observedTotalCost += BigInt(transactionFacts.observedCostWei);
       const block = await blockByNumber(rpc, receipt.blockNumber); finalBlock = block;
       if (BigInt(block.timestamp) !== nextTimestamp) {throw new Error("PROOF_BLOCK_TIMESTAMP_MISMATCH");}
@@ -227,6 +227,21 @@ async function latestBlock(rpc: Rpc): Promise<Block> {return await blockByNumber
 async function blockByNumber(rpc: Rpc, number: string): Promise<Block> { const value = await rpc.request("eth_getBlockByNumber", [number, false]); if (!value || typeof value !== "object" || Array.isArray(value)) {throw new Error("PROOF_BLOCK");} const block = value as Record<string, unknown>; if (typeof block.number !== "string" || typeof block.hash !== "string" || typeof block.timestamp !== "string" || !/^0x[0-9a-f]{64}$/.test(block.hash)) {throw new Error("PROOF_BLOCK");} return { number: quantityToDecimal(block.number), hash: block.hash, timestamp: block.timestamp }; }
 async function waitForReceipt(rpc: Rpc, hash: string): Promise<Record<string, string>> { for (let attempt = 0; attempt < 100; attempt += 1) { const value = await rpc.request("eth_getTransactionReceipt", [hash]); if (value && typeof value === "object" && !Array.isArray(value)) {return value as Record<string, string>;} await new Promise<void>(_resolve => {setTimeout(_resolve, 10);}); } throw new Error("PROOF_RECEIPT_TIMEOUT"); }
 async function transactionByHash(rpc: Rpc, hash: string): Promise<Record<string, string | null>> { const value = await rpc.request("eth_getTransactionByHash", [hash]); if (!value || typeof value !== "object" || Array.isArray(value)) {throw new Error("PROOF_TRANSACTION");} return value as Record<string, string | null>; }
+
+/** Anvil's hash lookup can still return its pool entry after a receipt is mined. */
+async function transactionInReceiptBlock(rpc: Rpc, hash: string, receipt: Record<string, string>): Promise<Record<string, string | null>> {
+  const reject = (block: unknown): never => { throw new Error("PROOF_TRANSACTION_BLOCK_BINDING", { cause: { transactionHash: hash, receipt, block } }); };
+  if (receipt.transactionHash !== hash || !/^0x[0-9a-f]{64}$/.test(receipt.blockHash) || !/^0x[0-9a-f]+$/.test(receipt.blockNumber) || !/^0x[0-9a-f]+$/.test(receipt.transactionIndex)) { return reject(null); }
+  const value = await rpc.request("eth_getBlockByHash", [receipt.blockHash, true]);
+  if (!value || typeof value !== "object" || Array.isArray(value)) { return reject(value); }
+  const block = value as Record<string, unknown>;
+  if (block.hash !== receipt.blockHash || block.number !== receipt.blockNumber || !Array.isArray(block.transactions)) { return reject(value); }
+  const index = BigInt(receipt.transactionIndex);
+  if (index >= BigInt(block.transactions.length)) { return reject(value); }
+  const transaction: unknown = block.transactions[Number(index)];
+  if (!transaction || typeof transaction !== "object" || Array.isArray(transaction) || (transaction as Record<string, unknown>).hash !== hash) { return reject(value); }
+  return transaction as Record<string, string | null>;
+}
 async function sendSignedOperation(request: { readonly cast: string; readonly signer: readonly string[]; readonly environment: NodeJS.ProcessEnv; readonly rpcUrl: string; readonly operation: Prepared["operations"][number]; readonly expected: Prepared["expectations"]["operations"][number]; readonly input: string }): Promise<string> {
   const {cast, signer, environment, rpcUrl, operation, expected, input} = request;
   if (!expected.gasLimit || !expected.maxFeePerGas || expected.maxPriorityFeePerGas === undefined) {throw new Error("PROOF_GAS_EXPECTATION");}
@@ -240,7 +255,7 @@ async function sendSignedOperation(request: { readonly cast: string; readonly si
 
 // oxlint-disable-next-line max-params, complexity -- compares one RPC transaction and receipt against one prepared operation.
 function assertTransaction(transaction: Record<string, string | null>, receipt: Record<string, string>, kind: "create" | "call", sender: string, nonce: string, input: string, expected: Pick<Prepared["expectations"]["operations"][number], "gasLimit" | "maxFeePerGas" | "maxPriorityFeePerGas">, to?: string): { readonly gasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string; readonly gasUsed: string; readonly effectiveGasPrice: string; readonly observedCostWei: string } {
-  if (transaction.hash !== receipt.transactionHash || transaction.blockHash !== receipt.blockHash || transaction.blockNumber !== receipt.blockNumber || transaction.transactionIndex !== receipt.transactionIndex || transaction.from !== sender || transaction.nonce === null || quantityToDecimal(transaction.nonce) !== nonce || transaction.input !== input || transaction.value !== "0x0" || (kind === "create" ? transaction.to !== null : transaction.to !== to) || receipt.from !== sender || (kind === "call" && receipt.to !== to)) {throw new Error("PROOF_TRANSACTION_BINDING");}
+  if (transaction.hash !== receipt.transactionHash || transaction.blockHash !== receipt.blockHash || transaction.blockNumber !== receipt.blockNumber || transaction.transactionIndex !== receipt.transactionIndex || transaction.from !== sender || transaction.nonce === null || quantityToDecimal(transaction.nonce) !== nonce || transaction.input !== input || transaction.value !== "0x0" || (kind === "create" ? transaction.to !== null : transaction.to !== to) || receipt.from !== sender || (kind === "call" && receipt.to !== to)) {throw new Error("PROOF_TRANSACTION_BINDING", {cause: {expected: {kind, sender, nonce, input, to}, transaction, receipt}});}
   if (transaction.gas === null || transaction.maxFeePerGas === null || transaction.maxPriorityFeePerGas === null || !receipt.gasUsed || !receipt.effectiveGasPrice) {throw new Error("PROOF_TRANSACTION_FEE_FIELDS");}
   const gasLimit = quantityToDecimal(transaction.gas), maxFeePerGas = quantityToDecimal(transaction.maxFeePerGas), maxPriorityFeePerGas = quantityToDecimal(transaction.maxPriorityFeePerGas), gasUsed = quantityToDecimal(receipt.gasUsed), effectiveGasPrice = quantityToDecimal(receipt.effectiveGasPrice);
   if (gasLimit !== expected.gasLimit || maxFeePerGas !== expected.maxFeePerGas || maxPriorityFeePerGas !== expected.maxPriorityFeePerGas || BigInt(gasUsed) === 0n || BigInt(gasUsed) > BigInt(gasLimit) || BigInt(effectiveGasPrice) === 0n || BigInt(effectiveGasPrice) > BigInt(maxFeePerGas)) {throw new Error("PROOF_TRANSACTION_FEE_BINDING");}
