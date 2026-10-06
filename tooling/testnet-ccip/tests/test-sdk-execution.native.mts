@@ -499,7 +499,7 @@ try {
     runtime: { version: process.version, binarySha256: TEST_SDK_NODE_HASH }, rootHashes: TEST_SDK_ROOT_HASHES,
     prerequisite: phase === 'svm' ? "Genuine SVM capture qualification, phase3 composition/status wiring and fresh public three-message acceptance remain pending. Controlled native units are not public E2E evidence." :
       "New replacement pool not deployed/registered; full real forward captures absent. Controlled unit/module checks are not captured qualification.",
-    cleanup: "owned snapshot copies removed; hooks closed in finally; operator read-only mount retained" }, null, 2) + "\n");
+    cleanup: "owned snapshot copies removed; hooks closed in finally; snapshot custody observations recorded in metrics" }, null, 2) + "\n");
   }
 }
 
