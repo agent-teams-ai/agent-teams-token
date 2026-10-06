@@ -13,6 +13,7 @@ import type * as Solana from "../../../../.local/INPUT/provider/node_modules/@ch
 import type * as Api from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/api/index.js";
 import type * as Types from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/types.js";
 import type * as Abi from "../../../../.local/INPUT/provider/node_modules/ethers/lib.esm/abi/index.js";
+import type * as Address from "../../../../.local/INPUT/provider/node_modules/ethers/lib.esm/address/index.js";
 import type * as Contract from "../../../../.local/INPUT/provider/node_modules/ethers/lib.esm/contract/index.js";
 import type * as Web3 from "../../../../.local/INPUT/provider/node_modules/@solana/web3.js/lib/index.js";
 import type * as Spl from "../../../../.local/INPUT/provider/node_modules/@solana/spl-token/lib/types/index.js";
@@ -22,7 +23,7 @@ import type Bs58 from "../../../../.local/INPUT/provider/node_modules/bs58/src/c
 export interface NativeSolanaProvider {
   readonly web3: Pick<typeof Web3, "PublicKey" | "SystemProgram" | "Transaction" | "TransactionInstruction" |
     "TransactionMessage" | "VersionedTransaction" | "AddressLookupTableAccount" | "Keypair">;
-  readonly spl: Pick<typeof Spl, "TOKEN_PROGRAM_ID" | "createInitializeMint2Instruction" |
+  readonly spl: Pick<typeof Spl, "TOKEN_PROGRAM_ID" | "ASSOCIATED_TOKEN_PROGRAM_ID" | "createInitializeMint2Instruction" |
     "getAssociatedTokenAddressSync" | "unpackMint" | "unpackAccount">;
   readonly bs58: Pick<typeof Bs58, "encode">;
 }
@@ -369,6 +370,7 @@ export async function openTestSdk(options: AdmissionOptions) {
     const types: typeof Types = await import(pathToFileURL(require.resolve(TEST_SDK_ENTRIES.types[0])).href);
     if (typeof solana.SolanaChain !== "function" || typeof api.CCIPAPIClient !== "function" || !types.ExecutionState) { fail("selected exports missing"); }
     const abi: typeof Abi = await import(pathToFileURL(require.resolve("ethers/abi")).href);
+    const address: typeof Address = await import(pathToFileURL(require.resolve("ethers/address")).href);
     const contract: typeof Contract = await import(pathToFileURL(require.resolve("ethers/contract")).href);
     const web3: typeof Web3 = require("@solana/web3.js");
     const spl: typeof Spl = require("@solana/spl-token");
@@ -377,12 +379,12 @@ export async function openTestSdk(options: AdmissionOptions) {
       web3: Object.freeze({ PublicKey: web3.PublicKey, SystemProgram: web3.SystemProgram, Transaction: web3.Transaction,
         TransactionInstruction: web3.TransactionInstruction, TransactionMessage: web3.TransactionMessage,
         VersionedTransaction: web3.VersionedTransaction, AddressLookupTableAccount: web3.AddressLookupTableAccount, Keypair: web3.Keypair }),
-      spl: Object.freeze({ TOKEN_PROGRAM_ID: spl.TOKEN_PROGRAM_ID, createInitializeMint2Instruction: spl.createInitializeMint2Instruction,
+      spl: Object.freeze({ TOKEN_PROGRAM_ID: spl.TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID: spl.ASSOCIATED_TOKEN_PROGRAM_ID, createInitializeMint2Instruction: spl.createInitializeMint2Instruction,
         getAssociatedTokenAddressSync: spl.getAssociatedTokenAddressSync, unpackMint: spl.unpackMint, unpackAccount: spl.unpackAccount }),
       bs58: Object.freeze({ encode: bs58.default.encode }),
     });
     assertHealthy();
-    return Object.freeze({ evm, solana, api, types, native, abi, contract, evidence, assertHealthy, close,
+    return Object.freeze({ evm, solana, api, types, native, abi, address: Object.freeze({ getAddress: address.getAddress }), contract, evidence, assertHealthy, close,
       counters });
   } catch (error) { close(); throw error; }
 }
