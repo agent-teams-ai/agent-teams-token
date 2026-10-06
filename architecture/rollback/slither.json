@@ -123,8 +123,8 @@
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
-      "beforeSha256": "c1e19fc4a43afef46c3a7a6418eff79aa54d392f633b732c1d63deb7c098fdc7",
-      "afterSha256": "023101b0b1ff8464d3152394fdf229d312307f04ccab370f9ac83ae76108704a"
+      "beforeSha256": "3e6a1d712c51af1656d29b3eb927c34f8d7db2974d9a1d36958bdbcaa9de935e",
+      "afterSha256": "2cf87a63dea932a31615c2475b6235c470b55918b781612cbd0ad1f7403fb569"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",

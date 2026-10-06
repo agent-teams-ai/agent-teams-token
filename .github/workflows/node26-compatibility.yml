@@ -109,6 +109,10 @@ jobs:
           ./dev bootstrap verify --offline
           test "$(node --version)" = "v${{ matrix.node-version }}"
           test "$(.tools/bin/node --version)" = "v24.20.0"
+      - name: Stage finite public SDK check inputs
+        id: stage-pinned-sdk-inputs
+        shell: bash
+        run: ./dev bootstrap sdk-inputs --fetch
       - name: Install frozen workspace with strict engines
         shell: bash
         run: |
