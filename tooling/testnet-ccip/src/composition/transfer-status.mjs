@@ -28,13 +28,16 @@ export function evmStatusChain(chain, getAddress) {
 }
 /** One-shot read-only CLI. Input contains public hashes and endpoints only. */
 const stringify = value => JSON.stringify(value, (_, item) => typeof item === 'bigint' ? item.toString() : item);
-export async function finalizeStatusReport(collect, cleanup, completeInventory, now = Date.now) {
+/** @param {() => Promise<{ transfers: readonly import('../domain/transfer-status.mjs').StatusTransferReport[], snapshot: import('../domain/transfer-status.mjs').StatusSnapshot }>} collect
+ * @param {() => Promise<unknown>} cleanup @param {boolean} completeInventory
+ * @param {() => number} [now=Date.now] @param {import('../domain/replacement-fixture.ts').ReplacementFixture} [fixture] */
+export async function finalizeStatusReport(collect, cleanup, completeInventory, now = Date.now, fixture) {
   let transfers, snapshot;
   try { ({ transfers, snapshot } = await collect()); }
   finally { await cleanup(); }
   // No asynchronous work may follow the final age check on this response path.
   const current = refreshSnapshotFreshness(snapshot, now());
-  return { transfers, accounting: accountTransfers(transfers, current, completeInventory), readOnly: true };
+  return { transfers, accounting: accountTransfers(transfers, current, completeInventory, fixture), readOnly: true };
 }
 export async function runStatus(settings) {
   const sepolia = selectSepoliaRpc(settings), solana = selectSolanaRpc(settings);
@@ -83,7 +86,7 @@ export async function runStatus(settings) {
     const after = await inspect();
     snapshot.coherent &&= stringify(before) === stringify(after);
     return { transfers: after, snapshot };
-  }, () => Promise.all(Object.values(chains).map(chain => chain.destroy())), settings.completeFixtureInventory === true);
+  }, () => Promise.all(Object.values(chains).map(chain => chain.destroy())), settings.completeFixtureInventory === true, Date.now, fixture);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {

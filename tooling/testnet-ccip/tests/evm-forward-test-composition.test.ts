@@ -5,26 +5,33 @@ import { syncBuiltinESMExports } from "node:module";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Interface, AbiCoder } from "../../../.local/INPUT/provider/node_modules/ethers/lib.esm/abi/index.js";
+import wireFixture from "./fixtures/dev-evm-call-plan-goldens.json" with { type: "json" };
 import { transferEvmForward } from "../src/composition/transfer-evm-forward.mjs";
-import { createForwardDecoder } from "../src/adapters/evm-forward-sdk.mjs";
+import { inspectEvmForwardCalls } from "../src/adapters/dev-evm-call-plan.mjs";
 import { createJournalFile } from "../src/adapters/evm-journal-file.ts";
 import { TEST_SDK_PROFILE, selectTestSdk, type TestSdkSelection } from "../src/adapters/test-sdk-policy.ts";
 import { forwardJournalBinding, type BoundForwardJournalRecord } from "../src/adapters/evm-forward-journal.ts";
 import { replacementFixture, fixtureNamespace } from "../src/domain/replacement-fixture.ts";
 import { solanaPublicKeyBytes } from "../src/domain/solana-mint.ts";
-import { forwardRoute, forwardIntent, FORWARD_RECIPIENT_B } from "../src/domain/evm-forward.mjs";
+import { forwardRoute, forwardIntent, forwardRecipient, FORWARD_RECIPIENT_B } from "../src/domain/evm-forward.mjs";
 import { solanaRemote, type RemoteSnapshot } from "../src/domain/evm-remote-config.ts";
 import { validateSepoliaIntent } from "../src/domain/evm-intent.ts";
 import type { EvmJournalRecord, ObservedTransaction } from "../src/application/evm-journal.ts";
 import type { ForwardTransaction } from "../src/adapters/test-sdk-forward.ts";
 import type { SepoliaExecutionIo } from "../src/composition/execute-sepolia.ts";
 
-// Concrete consumer ports with independent native ABI checking. This is unit evidence, not SDK/native E2E.
+// Controlled composition SDK ports and the existing independent bounded wire inspector.
+// Native ethers ABI/SDK validation remains required in test-sdk-execution.native.mts
+// after Phase2 admission and genuine captures; declaration-only CI cannot qualify it.
 type Settings = Parameters<typeof transferEvmForward>[0];
 type Ports = NonNullable<Parameters<typeof transferEvmForward>[1]>;
+type Sdk = Awaited<ReturnType<Ports["sdk"]>>;
 const fixture = replacementFixture("0x" + "11".repeat(20), "0x" + "22".repeat(20));
 const route = forwardRoute(fixture);
+const retainedSend = wireFixture.historicalCalls.find(call => call.to === wireFixture.historicalIntent.router);
+const retainedApproval = wireFixture.historicalCalls.find(call => call.to === wireFixture.historicalIntent.token);
+assert.ok(retainedSend); assert.ok(retainedApproval);
+const sendTemplate = retainedSend.data, approvalData = retainedApproval.data;
 const offline: typeof fetch = async () => assert.fail("Unit composition must never reach network transport");
 const selection: TestSdkSelection = { testOnly: true, providerProfile: TEST_SDK_PROFILE,
   fixture, fixtureIdentity: fixture.identity, providerArchives: "/unopened-archives", replayFetch: offline };
@@ -36,15 +43,14 @@ function settings(directory: string): Settings {
     sendJournal: join(directory, fixtureNamespace(fixture), "send.json"), approvalNonce: "5", sendNonce: "6" };
 }
 function send(recipient = fixture.recipient): ForwardTransaction {
-  const extra = "0x1f3b3aba" + AbiCoder.defaultAbiCoder().encode(["tuple(uint32,uint64,bool,bytes32,bytes32[])"],
-    [[0n, 0n, true, "0x" + solanaPublicKeyBytes(recipient).toString("hex"), []]]).slice(2);
-  const data = new Interface(["function ccipSend(uint64,(bytes receiver,bytes data,(address token,uint256 amount)[] tokenAmounts,address feeToken,bytes extraArgs))"])
-    .encodeFunctionData("ccipSend", ["16423721717087811551", ["0x" + "00".repeat(32), "0x", [[fixture.token, "1000000000"]], "0x" + "00".repeat(20), extra]]);
+  // Substitute only the selected token/recipient in one retained fixed wire vector;
+  // this is controlled unit data, not actual SDK output or a new ABI encoder.
+  const data = sendTemplate.replace(wireFixture.historicalIntent.token.slice(2), fixture.token.slice(2))
+    .replace(wireFixture.historicalIntent.tokenReceiver.slice(2), solanaPublicKeyBytes(recipient).toString("hex"));
   return { from: fixture.administrator, to: route.router, data, value: 5n };
 }
 function approval(): ForwardTransaction {
-  return { from: fixture.administrator, to: fixture.token, value: 0n,
-    data: new Interface(["function approve(address,uint256)"]).encodeFunctionData("approve", [route.router, "1000000000"]) };
+  return { from: fixture.administrator, to: fixture.token, value: 0n, data: approvalData };
 }
 function snapshot(): RemoteSnapshot {
   const remote = solanaRemote(fixture), rate = { enabled: true, capacity: remote.capacity, rate: remote.rate };
@@ -64,7 +70,15 @@ function harness(config: Settings, allowance = route.amount) {
       assert.equal(directory, config.providerDirectory); assert.equal(supplied?.identity, fixture.identity);
       assert.equal(endpoint, "https://ethereum-sepolia-rpc.publicnode.com");
       wiring.selection = selected;
-      const verify = createForwardDecoder({ Interface, AbiCoder }, recipient, supplied);
+      // The real bounded inspector checks bytes independently of send()'s template.
+      // The consuming port stays concrete; no provider code is evaluated here.
+      const verify: Sdk["verify"] = (tx, step, fee) => inspectEvmForwardCalls({
+        chainId: "11155111", router: route.router, selector: fixture.forwardSelector, token: fixture.token,
+        sender: fixture.administrator, amount: fixture.amount,
+        tokenReceiver: "0x" + solanaPublicKeyBytes(recipient).toString("hex"),
+        fee: step === "approval" ? null : fee.toString(), approve: step === "approval", send: step === "send",
+      }, [{ from: tx.from.toLowerCase(), to: tx.to.toLowerCase(), chainId: "11155111",
+        value: tx.value.toString(), data: tx.data.toLowerCase() }], null);
       return { verify, allowance: async () => { events.push("allowance"); return allowance; },
         prepare: async () => { events.push("prepare"); return { fee: 5n, send: send(recipient), approval: allowance < route.amount ? approval() : null }; },
         destroy: async () => { events.push("destroy"); } };
@@ -81,11 +95,12 @@ function harness(config: Settings, allowance = route.amount) {
     },
   };
   function save(step: "approval" | "send", phase: EvmJournalRecord["phase"] = "submitting"): BoundForwardJournalRecord {
-    const tx = step === "approval" ? approval() : send(config.recipient);
+    const recipient = forwardRecipient(config.recipient, fixture);
+    const tx = step === "approval" ? approval() : send(recipient);
     const input = forwardIntent(tx, step === "approval" ? config.approvalNonce : config.sendNonce, route);
     const record: BoundForwardJournalRecord = { schema: "agtmai-evm-journal-v1", intent: validateSepoliaIntent(input, input), phase,
       signed: { bytes: step === "approval" ? "0x0201" : "0x0202", hash: "0x" + (step === "approval" ? "aa" : "cc").repeat(32) },
-      forwardBinding: forwardJournalBinding(fixture, "BoiQxGHPgVaqxPn2TjqzmoHPd5toyfxxZ4wW2M7P3gK8", config), forwardStep: step };
+      forwardBinding: forwardJournalBinding(fixture, recipient, config), forwardStep: step };
     records.set(step === "approval" ? config.approvalJournal : config.sendJournal, record);
     inspected.set(record.signed.bytes, { hash: record.signed.hash, chainId: record.intent.chainId, from: record.intent.from,
       to: record.intent.to, data: record.intent.data, value: record.intent.value, nonce: record.intent.nonce });
@@ -243,19 +258,55 @@ test("both stored intents and both saved signature projections are inspected bef
       const saved = step === "approval" ? a : s;
       state.records.set(step === "approval" ? config.approvalJournal : config.sendJournal,
         { ...saved, intent: { ...saved.intent, data: "0x12345678" } });
-      await assert.rejects(transferEvmForward(config, state.ports), /decoded forward operation/);
+      await assert.rejects(transferEvmForward(config, state.ports), /Forward callplan semantic mismatch/);
       assert.equal(state.events.includes("inspect"), false); assert.equal(state.events.some(e => e.startsWith("execute:")), false);
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("A binding cannot authorize B wire bytes even when approval calldata remains identical", async () => {
+test("A/B bindings cannot authorize the other recipient's wire bytes even when approval calldata remains identical", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forward-wire-conflict-"));
   try {
-    const config = settings(directory), state = harness(config); state.save("approval"); const saved = state.save("send");
-    state.records.set(config.sendJournal, { ...saved, intent: { ...saved.intent, data: send(FORWARD_RECIPIENT_B).data } });
-    await assert.rejects(transferEvmForward(config, state.ports), /decoded forward operation/);
-    assert.deepEqual(state.events, ["lock", "sdk", "read", "read", "destroy"]);
+    for (const recipient of [fixture.recipient, FORWARD_RECIPIENT_B]) {
+      const config = { ...settings(directory), recipient }, state = harness(config);
+      state.save("approval"); const saved = state.save("send");
+      // Positive stored-pair control reaches only send reconciliation.
+      assert.equal((await transferEvmForward(config, state.ports)).step, "send");
+      state.events.length = 0;
+      const other = recipient === fixture.recipient ? FORWARD_RECIPIENT_B : fixture.recipient;
+      state.records.set(config.sendJournal, { ...saved, intent: { ...saved.intent, data: send(other).data } });
+      await assert.rejects(transferEvmForward(config, state.ports), /Forward callplan semantic mismatch: extraArgs tokenReceiver/);
+      assert.deepEqual(state.events, ["lock", "sdk", "read", "read", "destroy"]);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("independent retained-wire checks refuse candidate route, amount, recipient and extraArgs mutations before execution", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forward-candidate-wire-"));
+  try {
+    for (const recipient of [fixture.recipient, FORWARD_RECIPIENT_B]) {
+      const config = { ...settings(directory), recipient }, valid = send(recipient), control = harness(config);
+      assert.equal((await transferEvmForward(config, control.ports)).step, "send");
+      const mutants: ForwardTransaction[] = [
+        { ...valid, from: fixture.token }, { ...valid, to: fixture.token }, { ...valid, value: 4n },
+        { ...valid, data: valid.data.replace("e3ecc7e294e337df", "e3ecc7e294e337de") },
+        { ...valid, data: valid.data.replace(fixture.token.slice(2), fixture.pool.slice(2)) },
+        { ...valid, data: valid.data.replace("000000003b9aca00", "000000003b9aca01") },
+        { ...valid, data: send(recipient === fixture.recipient ? FORWARD_RECIPIENT_B : fixture.recipient).data },
+        { ...valid, data: valid.data.replace("1f3b3aba", "1f3b3abb") },
+      ];
+      for (const mutant of mutants) {
+        assert.notDeepEqual(mutant, valid);
+        const state = harness(config), factory = state.ports.sdk;
+        state.ports.sdk = async (...args) => {
+          const sdk = await factory(...args);
+          return { ...sdk, prepare: async () => ({ ...await sdk.prepare(), send: mutant }) };
+        };
+        await assert.rejects(transferEvmForward(config, state.ports), /Forward callplan semantic mismatch/);
+        assert.equal(state.events.some(event => event.startsWith("execute:")), false);
+        assert.equal(state.events.at(-1), "destroy");
+      }
+    }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -310,7 +361,7 @@ test("unbound replacement forward records refuse rewriting and both steps remain
 });
 
 // This positive control intentionally needs the independently owned pure B/bindFixture patch.
-test("replacement B reaches the same selected fixture and encodes B without rehashing its A identity", async () => {
+test("controlled B wire fixture reaches the same selected fixture without rehashing its A identity", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forward-b-dependent-"));
   try {
     const before = JSON.stringify(fixture), config = { ...settings(directory), recipient: FORWARD_RECIPIENT_B }, state = harness(config);
@@ -321,12 +372,17 @@ test("replacement B reaches the same selected fixture and encodes B without reha
 });
 
 function contracts(config: Settings): void {
+  // @ts-expect-error production ingress remains unknown until the recipient owner narrows it
+  send(config.recipient);
+  const recipient: Parameters<typeof send>[0] = forwardRecipient(config.recipient, fixture);
+  // @ts-expect-error the consumed transaction port requires bigint native value
+  const badTransaction: ForwardTransaction = { ...send(recipient), value: "5" };
   // @ts-expect-error execution transport must implement actual fetch
   const badFetch: TestSdkSelection = { ...selection, replayFetch: () => 5 };
   // @ts-expect-error execution nonce is a canonical decimal string, never a number
   transferEvmForward({ ...config, sendNonce: 6 });
   // @ts-expect-error common selection carries a string fixture identity
   selectTestSdk({ ...selection, fixtureIdentity: 5 }, config.providerDirectory, fixture);
-  void badFetch;
+  void badFetch; void badTransaction;
 }
 void contracts;
