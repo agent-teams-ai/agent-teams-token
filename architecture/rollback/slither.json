@@ -118,8 +118,8 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
-      "afterSha256": "6a14293be16a0166058ba526663e715025100e23fb14415c7baa60d0d7aa9261"
+      "beforeSha256": "3f140db84241926bcaa7b1cd938380b62aaf586d7b030b367e6c1270359b77fe",
+      "afterSha256": "64302086ad270b5ed3b04ed08607180e0054007ebe7d7b7cafcc75c4ad22f5b4"
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
@@ -133,8 +133,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "2079e2fb02b4df5b27a6a4d3ce58dd977de67e0a984ff5d0b574fe1ad2275f39",
-      "afterSha256": "6aa65b67459bf4e0e70b6936a8245af2bbb0f1f6c7a07cff23b52bee52c7d50e"
+      "beforeSha256": "3ae16466e2779dd6428b2b5a3b1d2f86585488e0cae92f51a0ce6c6cc0a306b5",
+      "afterSha256": "3bc38a8707c6ca840c3218539fc38920a7c4cc21169a977883e75d506459bb68"
     },
     {
       "path": "scripts/tests/workflow.test.mjs",

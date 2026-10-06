@@ -66,8 +66,8 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
-      "afterSha256": "803b6e6864ced096734c4999142a04875a88ce6f8a35f1236e17fa0c7035cda4"
+      "beforeSha256": "3f140db84241926bcaa7b1cd938380b62aaf586d7b030b367e6c1270359b77fe",
+      "afterSha256": "03e8561b5da77a336beff276462457ede9f230435dfedfd715a777d7ab07ed3f"
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
@@ -81,8 +81,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "2079e2fb02b4df5b27a6a4d3ce58dd977de67e0a984ff5d0b574fe1ad2275f39",
-      "afterSha256": "d3f3a45d05ea61eafc25e1e946061edcd416987da9b2bad36e86939ca5932f68"
+      "beforeSha256": "3ae16466e2779dd6428b2b5a3b1d2f86585488e0cae92f51a0ce6c6cc0a306b5",
+      "afterSha256": "3001a77aad12c0e8a000b8e9ed743d21f1181491cccfe726dc91b35cb3aab463"
     },
     {
       "path": "scripts/solana/local-fixture.ts",

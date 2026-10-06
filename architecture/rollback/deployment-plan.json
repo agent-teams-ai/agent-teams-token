@@ -81,8 +81,8 @@
   "reverseEdits": [
     {
       "path": ".github/workflows/ci.yml",
-      "beforeSha256": "830976c75cfdc4fb369d126f6acf51af74fb511827c5461e0096b804844dc70e",
-      "afterSha256": "141c70b526c76a6a6ed17542bb42fb558ce723ee2bbfafaf2c773a34d78ba7b8"
+      "beforeSha256": "3f140db84241926bcaa7b1cd938380b62aaf586d7b030b367e6c1270359b77fe",
+      "afterSha256": "b259b0ea5936b205df69dbb2ac927ec92fe97e8a704713cfece23fe1c71ff68e"
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
@@ -96,8 +96,8 @@
     },
     {
       "path": "package.json",
-      "beforeSha256": "2079e2fb02b4df5b27a6a4d3ce58dd977de67e0a984ff5d0b574fe1ad2275f39",
-      "afterSha256": "10be04be95ec2cbba3999f9ad7e1530e104d1a20e93c53d23ac0fc0b888a79c4"
+      "beforeSha256": "3ae16466e2779dd6428b2b5a3b1d2f86585488e0cae92f51a0ce6c6cc0a306b5",
+      "afterSha256": "1d96179094424beb365c5e354cc73875373d8681e191109628a45a37e476bdea"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",
@@ -106,7 +106,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "e45c4c73c3dad09957eee5306a8299083d00990ba00db373a4c93ec60ea84466",
+      "beforeSha256": "4e5b3084be2a489e9ea4ef0b3dde20b4cb51799bd95e432d4a6f4cca25b1007a",
       "afterSha256": "absent"
     },
     {

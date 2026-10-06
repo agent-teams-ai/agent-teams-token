@@ -292,16 +292,19 @@ async function exerciseAssemblyScenarios(local: LocalAssemblyScenarioContext, ca
     founderBeneficiaryReleased: founderEntitlement.toString(), contributorRefund: refundAmount.toString(), contributorOwed: vested.toString(), conservation: conservation.toString() };
 }
 
-for (const cleanupUncertain of [false, true]) {
-test(cleanupUncertain ? "completed full assembly with unresolved custody cleanup cannot publish READY" : "same-path synthetic chain-1 full assembly, official 2-of-3 Safes and observed reports", { timeout: 300_000 }, async t => {
+for (const failure of ["none", "preparation", "cleanup"] as const) {
+test(failure === "preparation" ? "early full-proof preparation failure survives the cleanup-negative fixture finalizer" : failure === "cleanup" ? "completed full assembly with unresolved custody cleanup cannot publish READY" : "same-path synthetic chain-1 full assembly, official 2-of-3 Safes and observed reports", { timeout: 300_000 }, async t => {
   await mkdir(resolve(".local"), { recursive: true, mode: 0o700 });
   const outputRoot = await mkdtemp(resolve(".local/full-assembly-"));
   const output = join(outputRoot, "observed");
   const caps = [3_000_000n, 2_000_000n, 1_000_000n, 4_000_000n, 5_000_000n, 500_000n];
   let privateDirectory = "";
+  let custodyPermissionsChanged = false;
+  const preparationFailure = new Error("EXPLICIT_SYNTHETIC_PREPARATION_FAILURE");
   const proof = runLocalAssemblyProof({ repositoryRoot: ".", outputDirectory: output, ...syntheticExecution,
     prepareAssembly: async ({ root, temporary, signerAddress, startingNonce, safes }) => {
       privateDirectory = temporary;
+      if (failure === "preparation") { throw preparationFailure; }
       await buildCandidateArtifacts(root, temporary);
       const predicted = Array.from({ length: 9 }, (_, i) => localPurposeCompilerPorts.createAddress(signerAddress, (BigInt(startingNonce) + BigInt(i)).toString()));
   const recipients = new Map<string, Hex>([["founder", predicted[1]!], ["contributors", predicted[2]!], ...purposes.map((id, i): [string, Hex] => [id, predicted[i + 3]!])]);
@@ -320,19 +323,27 @@ test(cleanupUncertain ? "completed full assembly with unresolved custody cleanup
       await assert.rejects(readFile(join(privateDirectory, "reconstructed/READY")), { code: "ENOENT" });
       const result = await exerciseAssemblyScenarios(local, caps);
       // Real filesystem custody rejection after successful execution; no replacement cleanup adapter.
-      if (cleanupUncertain) { await chmod(dirname(privateDirectory), 0o710); }
+      if (failure === "cleanup") { await chmod(dirname(privateDirectory), 0o710); custodyPermissionsChanged = true; }
       return result;
     },
   });
-  if (cleanupUncertain) {
+  if (failure !== "none") {
     try {
-      await assert.rejects(proof, /ASSEMBLY_PROOF_FAILED/);
+      await assert.rejects(proof, { message: "ASSEMBLY_PROOF_FAILED", ...(failure === "preparation" ? { cause: preparationFailure } : {}) });
       const diagnostic = JSON.parse(await readFile(join(output, "diagnostics.json"), "utf8"));
-      assert.equal(diagnostic.status, "failed"); assert.equal(diagnostic.temporaryRootRemoved, false); assert.equal(diagnostic.cleanupUncertain, true);
-      assert.equal(diagnostic.operations.length, 10);
+      assert.equal(diagnostic.status, "failed"); assert.equal(diagnostic.temporaryRootRemoved, failure === "preparation"); assert.equal(diagnostic.cleanupUncertain, failure === "cleanup");
       await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
-      await readdir(privateDirectory);
-    } finally { if (privateDirectory) { await chmod(dirname(privateDirectory), 0o700); await removeOwnedRunDirectory(dirname(privateDirectory)); } }
+      if (failure === "preparation") {
+        assert.ok(privateDirectory); assert.equal(diagnostic.reason, preparationFailure.message);
+        assert.deepEqual(diagnostic.operations, []); assert.deepEqual(diagnostic.journal, []);
+        for (const directory of [privateDirectory, dirname(privateDirectory)]) {
+          await assert.rejects(readdir(directory), { code: "ENOENT" });
+        }
+      } else {
+        assert.equal(diagnostic.operations.length, 10);
+        await readdir(privateDirectory);
+      }
+    } finally { if (custodyPermissionsChanged) { await chmod(dirname(privateDirectory), 0o700); await removeOwnedRunDirectory(dirname(privateDirectory)); } }
     return;
   }
   const proofResult = await proof;
@@ -460,21 +471,4 @@ test("mint before a mined CREATE failure leaves the predicted recipient funded w
   assert.equal(BigInt(await call(token, "balanceOf(address)", [failedTarget])), 3_000_000n * unit);
   assert.equal(BigInt(await rpc("eth_getTransactionCount", [executor.owner, "latest"])), nonce + 2n);
   await local.cleanup();
-});
-
-test("owned full-proof preparation failure disposes custody and publishes diagnostics without READY", { timeout: 120_000 }, async () => {
-  await mkdir(resolve(".local"), { recursive: true, mode: 0o700 });
-  const output = join(await mkdtemp(resolve(".local/full-assembly-denied-")), "diagnostic");
-  let privateDirectory = "";
-  await assert.rejects(runLocalAssemblyProof({ repositoryRoot: ".", outputDirectory: output, ...syntheticExecution,
-    prepareAssembly: async context => { privateDirectory = context.temporary; throw new Error("EXPLICIT_SYNTHETIC_PREPARATION_FAILURE"); },
-    scenarios: async () => { throw new Error("SCENARIO_MUST_NOT_RUN"); },
-  }), /ASSEMBLY_PROOF_FAILED/);
-  const report = JSON.parse(await readFile(join(output, "diagnostics.json"), "utf8"));
-  assert.ok(privateDirectory); assert.equal(report.reason, "EXPLICIT_SYNTHETIC_PREPARATION_FAILURE");
-  assert.equal(report.status, "failed"); assert.equal(report.temporaryRootRemoved, true);
-  assert.deepEqual(report.operations, []); assert.deepEqual(report.journal, []);
-  await assert.rejects(readFile(join(output, "READY")), { code: "ENOENT" });
-  await assert.rejects(readdir(privateDirectory), { code: "ENOENT" });
-  await assert.rejects(readdir(dirname(privateDirectory)), { code: "ENOENT" });
 });

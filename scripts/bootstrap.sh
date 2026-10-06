@@ -12,11 +12,11 @@ token_downloads="$token_tools_root/downloads"
 umask 077
 
 token_bootstrap_usage() {
-  printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|all|doctor|run-pnpm|run-solana]\n' >&2
+  printf 'Usage: ./dev bootstrap [fetch|install --offline|verify --offline|sdk-inputs --fetch|sdk-inputs --offline|all|doctor|run-pnpm|run-solana]\n' >&2
 }
 
 case "$token_mode" in
-  fetch|install|verify|all|doctor|run-pnpm|run-solana)
+  fetch|install|verify|sdk-inputs|all|doctor|run-pnpm|run-solana)
     ;;
   help|-h|--help)
     token_bootstrap_usage
@@ -551,6 +551,11 @@ case "$token_mode" in
     token_run_node "$token_repo_root/scripts/toolchain.mjs" fetch --scope=solana
     token_run_node "$token_repo_root/scripts/toolchain.mjs" install --offline --scope=solana
     token_run_node "$token_repo_root/scripts/toolchain.mjs" run-pnpm install --frozen-lockfile
+    token_run_node "$token_repo_root/tooling/testnet-ccip/src/adapters/test-sdk-inputs.ts" --fetch
+    ;;
+  sdk-inputs)
+    token_prepare_pinned_node false
+    token_run_node "$token_repo_root/tooling/testnet-ccip/src/adapters/test-sdk-inputs.ts" "$@"
     ;;
   run-pnpm)
     token_prepare_safe_artifact_environment

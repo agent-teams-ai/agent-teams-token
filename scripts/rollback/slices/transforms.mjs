@@ -158,6 +158,19 @@ function workflowJobBlock(source, job) {
   return source.slice(start, next);
 }
 
+function workflowStepBlock(source, id) {
+  const token = `        id: ${id}\n`;
+  const index = source.indexOf(token);
+  if (index < 0) {throw new Error(`ROLLBACK_WORKFLOW_STEP_MISSING id=${id}`);}
+  if (source.indexOf(token, index + token.length) >= 0) {
+    throw new Error(`ROLLBACK_WORKFLOW_STEP_AMBIGUOUS id=${id}`);
+  }
+  const start = source.lastIndexOf("\n      - ", index);
+  if (start < 0) {throw new Error(`ROLLBACK_WORKFLOW_STEP_BOUNDARY_MISSING id=${id}`);}
+  const next = source.indexOf("\n      - ", index + token.length);
+  return source.slice(start + 1, next < 0 ? source.length : next + 1);
+}
+
 export function removeWorkflowJob(root, manifest, sharedPlan, workspaceHandle) {
   const sliceId = manifest.sliceId;
   const job = {
@@ -168,10 +181,25 @@ export function removeWorkflowJob(root, manifest, sharedPlan, workspaceHandle) {
   const path = ".github/workflows/ci.yml";
   const baseline = run("git", ["show", `${manifest.baselineSha}:${path}`], { cwd: root });
   editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) => {
+    const foundation = workflowJobBlock(source, "foundation-and-typescript");
+    // SDK typechecks survive every slice. Preserve their current staging step,
+    // removing only the proof environment whose anchor the baseline omits.
+    const sdkStaging = replaceExactly(
+      workflowStepBlock(foundation, "stage-pinned-sdk-inputs"),
+      "        env: *rollback-runner-environment\n",
+      "",
+      `${sliceId}:sdk-staging-proof-environment`,
+    );
+    const restoredFoundation = replaceExactly(
+      workflowJobBlock(baseline, "foundation-and-typescript"),
+      "      - name: Install frozen workspace\n",
+      `${sdkStaging}      - name: Install frozen workspace\n`,
+      `${sliceId}:sdk-staging-before-workspace`,
+    );
     let result = replaceExactly(
       source,
-      workflowJobBlock(source, "foundation-and-typescript"),
-      workflowJobBlock(baseline, "foundation-and-typescript"),
+      foundation,
+      restoredFoundation,
       `${sliceId}:foundation-rollback-proof-wiring`,
     );
     const start = result.indexOf(`\n  ${job}:\n`);
