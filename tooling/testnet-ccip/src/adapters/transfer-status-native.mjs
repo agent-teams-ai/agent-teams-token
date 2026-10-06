@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ROUTER_PROGRAM } from '../domain/solana-registration.ts';
+import { BURNMINT_PROGRAM } from '../domain/solana-pool-init.ts';
 import { createSepoliaRpc } from './evm-rpc.ts';
 import { readTestRpcJson } from './test-rpc.ts';
 import { forwardRoute, forwardRecipient, FORWARD_RECIPIENT_B } from '../domain/evm-forward.mjs';
@@ -14,9 +15,14 @@ import { reverseRoute } from '../domain/solana-reverse.mjs';
 /** @typedef {{ fixture?: ReplacementFixture, recipientAtas?: Readonly<Record<string, string>>, solanaPoolAta?: string,
  * solanaSigner?: string, solanaSpender?: string, solanaPool?: string,
  * allowedOffRamp?: (selector: bigint, offRamp: string) => string,
- * isOffRampData?: (selector: bigint, offRamp: string) => string }} NativeStatusLane */
+ * isOffRampData?: (selector: bigint, offRamp: string) => string,
+ * solanaLog?: (hash: string, kind: EffectKind, slot: number) => Promise<InvocationLog> }} NativeStatusLane */
+/** Official SDK decoded event metadata, retaining its raw log position and depth.
+ * @typedef {import('../domain/transfer-status.mjs').StatusLog & { level: number }} InvocationLog */
 /** @typedef {(delay: number, signal?: AbortSignal) => Promise<void>} StatusWait */
-/** @typedef {{ programId: string, parsed?: { type: string, info: Record<string, unknown> } }} ParsedInstruction */
+/** @typedef {{ programId: string, stackHeight?: number, parsed?: { type: string, info: Record<string, unknown> } }} ParsedInstruction */
+/** @typedef {{ ix: ParsedInstruction, index: number, topIndex: number, innerIndex: number | null }} InstructionPosition */
+/** @typedef {{ position: InstructionPosition, start: number, end: number, parent?: InvocationFrame }} InvocationFrame */
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
@@ -107,7 +113,8 @@ export function evmEffect(receipt, kind, fixture) {
 /** @param {unknown} value @returns {ParsedInstruction} */
 function instruction(value) {
   const ix = object(value), parsed = ix.parsed;
-  return { programId: text(ix.programId), ...(isObject(parsed) ? { parsed: { type: text(parsed.type), info: object(parsed.info) } } : {}) };
+  return { programId: text(ix.programId), ...(ix.stackHeight == null ? {} : { stackHeight: integer(ix.stackHeight) }),
+    ...(isObject(parsed) ? { parsed: { type: text(parsed.type), info: object(parsed.info) } } : {}) };
 }
 /** Canonical top-level instruction, then its ordered CPI instructions. @param {unknown} tx @param {boolean} [strict] */
 function orderedSolanaInstructions(tx, strict = true) {
@@ -123,8 +130,64 @@ function orderedSolanaInstructions(tx, strict = true) {
     if (index >= top.length || index <= previous || byIndex.has(index)) { throw new Error('Invalid SPL execution order'); }
     previous = index; byIndex.set(index, array(group.instructions).map(instruction));
   }
-  if (!strict && groups.some(group => group.index === undefined)) { return [...top, ...groups.flatMap(group => array(group.instructions).map(instruction))]; }
-  return top.flatMap((ix, index) => [ix, ...(byIndex.get(index) ?? [])]);
+  if (!strict && groups.some(group => group.index === undefined)) {
+    return [...top, ...groups.flatMap(group => array(group.instructions).map(instruction))].map((ix, index) => ({ ix, index, topIndex: index, innerIndex: null }));
+  }
+  let index = 0;
+  return top.flatMap((ix, topIndex) => [{ ix, index: index++, topIndex, innerIndex: null },
+    ...(byIndex.get(topIndex) ?? []).map((inner, innerIndex) => ({ ix: inner, index: index++, topIndex, innerIndex }))]);
+}
+/** Align native instruction coordinates with the runtime invocation trace. Event bytes
+ * are decoded by the official SDK; this only binds that event to its physical CPI owner.
+ * Missing heights, truncated traces and unsupported synthetic events fail closed.
+ * @param {unknown} tx @param {readonly InstructionPosition[]} positions @param {InvocationLog | undefined} event */
+function invocationOwnership(tx, positions, event) {
+  const logs = array(object(object(tx).meta).logMessages).map(text);
+  if (!event || event.type !== 'data' || logs[event.index] !== 'Program data: ' + event.data) { throw new Error('Missing authenticated Solana invocation event'); }
+  /** @type {InvocationFrame[]} */
+  const stack = [], frames = [];
+  let cursor = 0;
+  /** @type {InvocationFrame | undefined} */
+  let owner;
+  for (const [index, line] of logs.entries()) {
+    const invoke = /^Program (\S+) invoke \[(\d+)\]$/.exec(line), finish = /^Program (\S+) (success|failed:.*)$/.exec(line);
+    if (invoke) {
+      const depth = Number(invoke[2]);
+      if (depth !== stack.length + 1) { throw new Error('Invalid Solana invocation depth'); }
+      if (depth === 1) {
+        // Some builtins omit trace lines. Only ungrouped top-level instructions
+        // can be skipped; no token CPI or its parent can disappear this way.
+        while (positions[cursor]?.innerIndex === null && positions[cursor]?.ix.programId !== invoke[1] &&
+          positions[cursor + 1]?.topIndex !== positions[cursor]?.topIndex) { cursor++; }
+      }
+      const position = positions[cursor++], parent = stack.at(-1);
+      if (!position || position.ix.programId !== invoke[1] || (depth === 1 ? position.innerIndex !== null || position.ix.stackHeight !== undefined && position.ix.stackHeight !== 1 :
+        position.innerIndex === null || position.ix.stackHeight !== depth || position.topIndex !== parent?.position.topIndex)) { throw new Error('Solana instruction/invocation coordinates disagree'); }
+      const frame = { position, start: index, end: -1, ...(parent ? { parent } : {}) };
+      frames.push(frame); stack.push(frame);
+    } else if (finish) {
+      const frame = stack.pop();
+      if (!frame || frame.position.ix.programId !== finish[1] || finish[2] !== 'success' ||
+        !stack.length && positions[cursor]?.innerIndex !== null && positions[cursor]?.topIndex === frame.position.topIndex) { throw new Error('Invalid/incomplete Solana invocation return'); }
+      frame.end = index;
+    }
+    if (index === event.index) { owner = stack.at(-1); }
+  }
+  let level = 0;
+  for (let frame = owner; frame; frame = frame.parent) { level++; }
+  if (stack.length || !owner || owner.position.ix.programId !== event.address || event.level !== level ||
+    positions.slice(cursor).some(position => position.innerIndex !== null)) { throw new Error('Unproven Solana invocation ancestry'); }
+  return { frames, owner, eventIndex: event.index };
+}
+/** @param {InvocationFrame | undefined} frame @param {InvocationFrame} ancestor */
+function descendsFrom(frame, ancestor) { for (; frame; frame = frame.parent) { if (frame === ancestor) { return true; } } return false; }
+/** @param {ReturnType<typeof invocationOwnership>} trace @param {number} index */
+function poolInvocation(trace, index) {
+  const frame = trace.frames.find(value => value.position.index === index), pool = frame?.parent;
+  if (!frame || frame.position.ix.programId !== TOKEN || !pool || pool.position.ix.programId !== BURNMINT_PROGRAM ||
+    !descendsFrom(pool, trace.owner)) { throw new Error('SPL effect outside authenticated pool execution'); }
+  if (pool.end >= trace.eventIndex) { throw new Error('Solana pool effect/event order unproven'); }
+  return pool;
 }
 /** @param {unknown} tx */
 function accountKeys(tx) { return array(object(object(object(tx).transaction).message).accountKeys).map(key => typeof key === 'string' ? key : text(object(key).pubkey)); }
@@ -150,14 +213,14 @@ function verifyPoolBurnBalances(tx, owner, expectedAta, lane, fixture) {
   }
 }
 /** The official reverse CPI transfers A's tokens to the pool before burning.
- * @param {unknown} tx @param {string} owner @param {string | undefined} expectedAta @param {NativeStatusLane} lane @param {ReplacementFixture} [fixture] */
-function solanaPoolBurn(tx, owner, expectedAta, lane, fixture) {
+ * @param {unknown} tx @param {string} owner @param {string | undefined} expectedAta @param {NativeStatusLane} lane @param {ReplacementFixture} [fixture] @param {InvocationLog} [event] */
+function solanaPoolBurn(tx, owner, expectedAta, lane, fixture, event) {
   const reverse = reverseRoute(fixture);
   if (owner !== forwardRoute(fixture).recipient) { throw new Error('B reverse is not supported'); }
   if (!expectedAta || !lane.solanaPoolAta || !lane.solanaSigner || !lane.solanaSpender || expectedAta === lane.solanaPoolAta) { throw new Error('Missing canonical burn lane'); }
   const instructions = orderedSolanaInstructions(tx);
   /** @param {readonly string[]} types */
-  const candidates = types => instructions.map((ix, index) => ({ ix, index })).filter(({ ix }) =>
+  const candidates = types => instructions.filter(({ ix }) =>
     ix.programId === TOKEN && ix.parsed && types.includes(ix.parsed.type) && ix.parsed.info.mint === reverse.mint);
   const transfers = candidates(['transferChecked']), burns = candidates(['burn', 'burnChecked']);
   const first = transfers[0], last = burns[0], transfer = first?.ix.parsed?.info, burn = last?.ix.parsed?.info;
@@ -166,18 +229,25 @@ function solanaPoolBurn(tx, owner, expectedAta, lane, fixture) {
   if (first.index >= last.index || transfer.source !== expectedAta || transfer.destination !== lane.solanaPoolAta ||
       transfer.authority !== lane.solanaSpender || tokenAmount.amount !== reverse.amount.toString() || tokenAmount.decimals !== 9 ||
       last.ix.parsed?.type !== 'burn' || burn.account !== lane.solanaPoolAta || burn.authority !== lane.solanaSigner || burn.amount !== reverse.amount.toString()) { throw new Error('Wrong canonical SPL pool transfer/burn'); }
+  if (fixture) {
+    const trace = invocationOwnership(tx, instructions, event);
+    const transferFrame = trace.frames.find(frame => frame.position.index === first.index), pool = poolInvocation(trace, last.index);
+    // Router transfers to the pool, then invokes that pool to burn. Both belong
+    // to the exact router frame emitting this decoded send, not another call to it.
+    if (trace.owner.position.ix.programId !== ROUTER_PROGRAM || !transferFrame || transferFrame.parent !== trace.owner || pool.parent !== trace.owner) { throw new Error('Split Solana router transfer/burn execution'); }
+  }
   verifyPoolBurnBalances(tx, owner, expectedAta, lane, fixture);
   return last.index;
 }
 /** Parsed instructions are native RPC decoding of actual transaction bytes, not CCIP metadata.
- * @param {unknown} tx @param {EffectKind} kind @param {unknown} [recipient] @param {string} [expectedAta] @param {NativeStatusLane} [lane] */
-export function solanaEffect(tx, kind, recipient, expectedAta, lane = {}) {
+ * @param {unknown} tx @param {EffectKind} kind @param {unknown} [recipient] @param {string} [expectedAta] @param {NativeStatusLane} [lane] @param {InvocationLog} [event] */
+export function solanaEffect(tx, kind, recipient, expectedAta, lane = {}, event) {
   if (kind !== 'mint' && kind !== 'burn') { throw new Error('Invalid SPL effect kind'); }
   const fixture = lane.fixture, reverse = reverseRoute(fixture), owner = forwardRecipient(recipient, fixture);
   if (fixture && (!expectedAta || lane.recipientAtas?.[owner] !== expectedAta || !lane.solanaSigner || expectedAta === lane.solanaPoolAta)) { throw new Error('Missing canonical recipient ATA/authority'); }
-  if (kind === 'burn') { return solanaPoolBurn(tx, owner, expectedAta, lane, fixture); }
+  if (kind === 'burn') { return solanaPoolBurn(tx, owner, expectedAta, lane, fixture, event); }
   const instructions = orderedSolanaInstructions(tx, fixture !== undefined);
-  const matches = instructions.map((ix, index) => ({ ix, index })).filter(({ ix }) => ix.programId === TOKEN &&
+  const matches = instructions.filter(({ ix }) => ix.programId === TOKEN &&
     ix.parsed && ['mintTo', 'mintToChecked'].includes(ix.parsed.type) && ix.parsed.info.mint === reverse.mint);
   const match = matches[0], info = match?.ix.parsed?.info;
   if (matches.length !== 1 || !match || !info) { throw new Error('Exact unique SPL mint instruction missing'); }
@@ -192,6 +262,10 @@ export function solanaEffect(tx, kind, recipient, expectedAta, lane = {}) {
   const before = balanceAt(meta.preTokenBalances, index, reverse.mint, owner, fixture !== undefined);
   const after = balanceAt(meta.postTokenBalances, index, reverse.mint, owner, fixture !== undefined);
   if (after.length !== 1 || after[0] === undefined || after[0] - (before[0] ?? 0n) !== reverse.amount) { throw new Error('SPL token effect does not reconcile'); }
+  if (fixture) {
+    const trace = invocationOwnership(tx, instructions, event);
+    if (poolInvocation(trace, match.index).parent !== trace.owner) { throw new Error('Split Solana offRamp/pool execution'); }
+  }
   return match.index;
 }
 /** @param {unknown} account @param {NativeStatusLane} lane */
@@ -277,7 +351,12 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, 
         verifyMint(mint, lane);
         if (contextSlot(mint) < slot) { throw new Error('Invalid finalized mint context'); }
       }
-      return { transaction: solanaTransaction(tx), ...(meta.logMessages === undefined ? {} : { programLogs: array(meta.logMessages).map(text) }), eventIndex: solanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient], lane), blockHash: text(block.blockhash), blockHeight: BigInt(slot) };
+      const event = fixture ? await lane.solanaLog?.(hash, kind, slot) : undefined;
+      if (fixture && kind === 'mint') {
+        if (!event || event.address === BURNMINT_PROGRAM || event.address === ROUTER_PROGRAM) { throw new Error('Missing official offRamp execution owner'); }
+        await this.authorizeOffRamp('solana', event.address, BigInt(fixture.reverseSelector));
+      }
+      return { transaction: solanaTransaction(tx), ...(meta.logMessages === undefined ? {} : { programLogs: array(meta.logMessages).map(text) }), eventIndex: solanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient], lane, event), blockHash: text(block.blockhash), blockHeight: BigInt(slot) };
     },
     /** @returns {Promise<StatusSnapshot & { recipientAccounts?: Readonly<Record<string, { ata: string, owner: string, mint: string, amount: bigint, decimals: number, slot: number }>> }>} */
     async snapshot() {

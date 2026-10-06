@@ -7,6 +7,7 @@ import { TEST_SDK_PROFILE } from '../src/adapters/test-sdk-policy.ts';
 import { replacementFixture } from '../src/domain/replacement-fixture.ts';
 import type { StatusPorts, TestStatusOptions } from '../src/adapters/test-sdk-status.ts';
 import type { StatusSnapshot, StatusTransferReport } from '../src/domain/transfer-status.mjs';
+import type { InvocationLog, NativeStatusLane } from '../src/adapters/transfer-status-native.mjs';
 
 // Pure ingress counterevidence. This file never opens/evaluates an SDK or sends RPC.
 const fixture = replacementFixture('0x812c4dcbc459a55f8517e87e825b8c728cee7316', '0x8472aa06661671e7e4af43048f0d0446eff2e97d');
@@ -68,4 +69,9 @@ export type CheckedContracts = [
   Assert<Equal<'destroy' extends keyof StatusPorts['chains']['solana'] ? true : false, false>>,
   Assert<Equal<'provider' extends keyof StatusPorts['chains']['ethereum'] ? true : false, false>>,
   Assert<Equal<TestStatusOptions['fetcher'], typeof fetch>>,
+  // Losing decoder log depth/coordinates must be a compiler-visible contract change.
+  Assert<Equal<InvocationLog['index' | 'level'], number>>,
+  Assert<Equal<InvocationLog['topics'], readonly string[]>>,
+  Assert<Equal<ReturnType<NonNullable<NativeStatusLane['solanaLog']>>, Promise<InvocationLog>>>,
+  Assert<Equal<IsAny<InvocationLog>, false>>,
 ];

@@ -75,11 +75,13 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
   if (!selected || typeof fetcher !== 'function') { throw new Error('Explicit TEST status selection and replay fetch required'); }
   const sepolia = selectSepoliaRpc({ sepoliaRpc: options.sepolia }), solana = selectSolanaRpc({ solanaRpc: options.solana });
   const abort = new AbortController(), operations = new Set<Promise<unknown>>(), transports = new Set<Promise<unknown>>();
+  const cancellationDebt: unknown[] = [];
   let closing = false, violation: Error | undefined, destruction: Promise<void> | undefined;
   // The owner and its work sets exist before admission or the first constructor.
   const session = await openTestSdk({ root: directory, archives: selected.archives });
   const acquired: (EVMChain | SolanaChain)[] = [];
-  const refuse = (message: string): never => { const error = new Error(message); violation ??= error; logger.error(message); throw error; };
+  const latch = (message: string): Error => { const error = new Error(message); violation ??= error; logger.error(message); return violation; };
+  const refuse = (message: string): never => { throw latch(message); };
   function healthy(): void { session.assertHealthy(); if (violation) { throw violation; } if (closing) { throw new Error('TEST status lifetime closed'); } abort.signal.throwIfAborted(); }
   function track<T>(set: Set<Promise<unknown>>, promise: Promise<T>): Promise<T> {
     set.add(promise); void promise.then(() => set.delete(promise), () => set.delete(promise)); return promise;
@@ -99,16 +101,24 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = []; let size = 0;
+    async function cancelRefused(message: string): Promise<never> {
+      const error = latch(message);
+      try { await reader.cancel(); }
+      catch (cause) { cancellationDebt.push(cause); }
+      // A rejected cancellation ends the JS promise, not the physical resource.
+      // This Response has no independent release witness; its owner survives to process exit.
+      throw error;
+    }
     try {
       const length = response.headers.get('content-length');
       if (response.redirected || response.status >= 300 && response.status < 400 || length !== null && (!/^\d+$/.test(length) || BigInt(length) > BigInt(TEST_RPC_RESPONSE_LIMIT))) {
-        await reader.cancel(); return refuse('Invalid/redirected/over-bound TEST status response');
+        return await cancelRefused('Invalid/redirected/over-bound TEST status response');
       }
       for (;;) {
         const { done, value } = await reader.read();
         if (done) { break; }
         size += value.byteLength;
-        if (size > TEST_RPC_RESPONSE_LIMIT) { await reader.cancel(); return refuse('TEST status response exceeds byte bound'); }
+        if (size > TEST_RPC_RESPONSE_LIMIT) { return await cancelRefused('TEST status response exceeds byte bound'); }
         chunks.push(value);
       }
       return Buffer.concat(chunks, size);
@@ -188,6 +198,7 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
       const released = await Promise.allSettled(acquired.map(chain => Promise.resolve().then(() => chain.destroy())));
       // An SDK timeout or abort can settle an operation while its fetch/body is still held.
       while (operations.size || transports.size) { await Promise.allSettled([...operations, ...transports]); }
+      if (cancellationDebt.length) { throw new AggregateError(cancellationDebt, 'Unresolved TEST status physical cancellation; admission guard retained until process exit'); }
       session.close();
       const errors = released.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
       if (errors.length) { throw new AggregateError(errors, 'TEST status chain cleanup failed'); }
@@ -223,7 +234,16 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
     const lane: NativeStatusLane = Object.freeze({ fixture: selected.fixture, recipientAtas, solanaPoolAta, solanaSigner, solanaPool: selected.fixture.solanaPool,
       solanaSpender: PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], new PublicKey(ROUTER_PROGRAM))[0].toBase58(),
       isOffRampData: (selector, offRamp) => routerAbi.encodeFunctionData('isOffRamp', [selector, offRamp]),
-      allowedOffRamp: (selector, offRamp) => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), bytes, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); } });
+      allowedOffRamp: (selector, offRamp) => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(selector); return PublicKey.findProgramAddressSync([Buffer.from('allowed_offramp'), bytes, new PublicKey(offRamp).toBuffer()], new PublicKey(ROUTER_PROGRAM))[0].toBase58(); },
+      solanaLog: async (hash, kind, slot) => {
+        const transaction = await svm.getTransaction(hash);
+        if (transaction.hash !== hash || transaction.tx.slot !== slot || transaction.error !== null) { throw new Error('SDK/native Solana execution location disagrees'); }
+        const matches = transaction.logs.filter(value => value.type === 'data' && (kind === 'mint' ? session.solana.SolanaChain.decodeReceipt(value)?.state === session.types.ExecutionState.Success :
+          value.address === ROUTER_PROGRAM && session.solana.SolanaChain.decodeMessage(value) !== undefined));
+        const value = matches[0];
+        if (matches.length !== 1 || !value) { throw new Error('Unique official Solana execution log missing'); }
+        return { ...log(value), level: value.level };
+      } });
     const nativeFetch: typeof fetch = (input, init) => String(input) === sepolia || String(input) === new URL(sepolia).href ? rpcEvm(input, init) : rpcSolana(input, init);
     const native = createNativeStatus(sepolia, solana, lane, nativeFetch, now, options.wait, abort.signal);
     function chainPort(chain: EVMChain | SolanaChain, normalize: (address: string) => string): StatusChainPort {

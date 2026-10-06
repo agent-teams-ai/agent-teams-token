@@ -11,7 +11,7 @@ import { inspectTransfer, matchRequest } from '../src/domain/transfer-status.mjs
 import { createTestSdkStatus } from '../src/adapters/test-sdk-status.ts';
 import { testSdkCounters } from '../src/adapters/test-sdk-admission.ts';
 import { validateReplacementFixture } from '../src/domain/replacement-fixture.ts';
-import { solanaEffect, type NativeStatusLane } from '../src/adapters/transfer-status-native.mjs';
+import { solanaEffect, type NativeStatusLane, type InvocationLog } from '../src/adapters/transfer-status-native.mjs';
 import { DEFAULT_SEPOLIA_RPC, DEFAULT_SOLANA_RPC, TEST_RPC_RESPONSE_LIMIT } from '../src/adapters/test-rpc.ts';
 import { BURNMINT_PROGRAM } from '../src/domain/solana-pool-init.ts';
 import { ROUTER_PROGRAM } from '../src/domain/solana-registration.ts';
@@ -26,21 +26,25 @@ import type * as Spl from '../../../.local/INPUT/provider/node_modules/@solana/s
 // are deliberately not genuine RPC captures and do not qualify public delivery.
 const root = resolve('.local/INPUT/native-private-provider'), archives = resolve('.local/INPUT/archives');
 const fixture = validateReplacementFixture(JSON.parse(readFileSync('.local/INPUT/EXACT-FIXTURE.json', 'utf8')));
+interface MintInstruction { programId: string; stackHeight: number; parsed?: { type: string; info: { mint: string; account: string; amount: string; mintAuthority: string } } }
 interface MintTransaction {
   transaction: { message: { accountKeys: string[]; instructions: { programId: string }[] } };
-  meta: { innerInstructions: { index: number; instructions: { programId: string; parsed: { type: string; info: { mint: string; account: string; amount: string; mintAuthority: string } } }[] }[];
+  meta: { logMessages: string[]; innerInstructions: { index: number; instructions: MintInstruction[] }[];
     preTokenBalances: TokenBalance[]; postTokenBalances: TokenBalance[] };
 }
 interface TokenBalance { accountIndex: number; mint: string; owner: string; programId: string; uiTokenAmount: { amount: string; decimals: number } }
 function present<T>(value: T | undefined): T { assert.notEqual(value, undefined); if (value === undefined) { throw new Error('Missing controlled unit field'); } return value; }
 const time = 1_791_288_000_000, hash = '0x' + 'ab'.repeat(32);
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
+const svmOffRamp = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm';
 const token = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function object(value: unknown): Record<string, unknown> { assert.ok(record(value)); return value; }
 function deferred<T>() { return Promise.withResolvers<T>(); }
 async function ticks(): Promise<void> { for (let i = 0; i < 30; i++) { await Promise.resolve(); } }
 async function scenario(name: string): Promise<void> {
+  const reverseCausal = name === 'causal-reverse', causal = name.startsWith('causal-') && !reverseCausal, evmDecoders = name === 'decoders' || causal || reverseCausal;
+  let cpiMutant = '', failedCancellation = false, physicalReleased = true;
   const evms: EVMChain[] = [], svms: SolanaChain[] = [];
   let evmDestroyed = 0, svmDestroyed = 0, calls = 0, installed = false;
   let native: { web3: typeof Web3; spl: typeof Spl } | undefined, lane: NativeStatusLane | undefined;
@@ -50,6 +54,7 @@ async function scenario(name: string): Promise<void> {
   const onRamp = '0x' + '44'.repeat(20), offRamp = '0x0820f975ce90ee5c508657f0c58b71d1fcc85ce0';
   let sourceLog: { data: string; topics: string[] } | undefined, executionLog: { data: string; topics: string[] } | undefined;
   let typeAndVersion: string | undefined;
+  let parseLogs: typeof import('../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/solana/utils.js').parseSolanaLogs | undefined;
   let svmSourceData: string | undefined, svmExecutionData: string | undefined;
   const apiResponse: import('../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/api/types.js').RawMessageResponse = {
     messageId, sender: fixture.administrator, receiver: '11111111111111111111111111111111', status: 'SUCCESS',
@@ -59,7 +64,7 @@ async function scenario(name: string): Promise<void> {
     tokenAmounts: [{ sourceTokenAddress: fixture.token, destTokenAddress: fixture.mint, sourcePoolAddress: fixture.pool, amount: fixture.amount }],
     extraArgs: { computeUnits: 0n, accountIsWritableBitmap: '0', allowOutOfOrderExecution: true, tokenReceiver: FORWARD_RECIPIENT_B, accounts: [] },
     readyForManualExecution: false, finality: 0n, fees: { fixedFeesDetails: { tokenAddress: '0x' + '00'.repeat(20), totalAmount: '1' } },
-    origin: fixture.administrator, sequenceNumber: '7', onramp: onRamp, offramp: BURNMINT_PROGRAM,
+    origin: fixture.administrator, sequenceNumber: '7', onramp: onRamp, offramp: svmOffRamp,
     sendBlockNumber: 10n, sendLogIndex: 1n, version: '1.6.0', receiptTransactionHash: '1'.repeat(64), data: '0x',
   };
   const json = (value: unknown) => JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item);
@@ -99,7 +104,9 @@ async function scenario(name: string): Promise<void> {
     lane = { fixture, recipientAtas: atas, solanaSigner: signer,
       solanaPoolAta: spl.getAssociatedTokenAddressSync(mint, new PublicKey(signer), true, spl.TOKEN_PROGRAM_ID, spl.ASSOCIATED_TOKEN_PROGRAM_ID).toBase58() };
     mutations.mintAuthority = signer;
-    if (name === 'decoders') {
+    parseLogs = (await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk/dist/solana/utils.js')).href)).parseSolanaLogs;
+    lane.solanaSpender = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], new PublicKey(ROUTER_PROGRAM))[0].toBase58();
+    if (evmDecoders) {
       const abi: typeof import('../../../.local/INPUT/provider/node_modules/ethers/lib.esm/abi/index.js') = await import(pathToFileURL(require.resolve('ethers/abi')).href);
       const sourceAbi: typeof import('../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/evm/abi/OnRamp_1_6.js') = await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk/dist/evm/abi/OnRamp_1_6.js')).href);
       const executionAbi: typeof import('../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/evm/abi/OffRamp_1_6.js') = await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk/dist/evm/abi/OffRamp_1_6.js')).href);
@@ -111,8 +118,11 @@ async function scenario(name: string): Promise<void> {
       }]);
       executionLog = new abi.Interface(executionAbi.default).encodeEventLog('ExecutionStateChanged', [BigInt(fixture.forwardSelector), 7n, messageId, hash, 2, '0x', 100n]);
       typeAndVersion = new abi.Interface(['function typeAndVersion() view returns(string)']).encodeFunctionResult('typeAndVersion', ['OnRamp 1.6.0']);
+      const u64 = (value: bigint) => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(value); return bytes; };
+      svmExecutionData = Buffer.concat([createHash('sha256').update('event:ExecutionStateChanged').digest().subarray(0, 8),
+        u64(BigInt(fixture.reverseSelector)), u64(7n), Buffer.from(messageId.slice(2), 'hex'), Buffer.from(hash.slice(2), 'hex'), Buffer.from([2])]).toString('base64');
     }
-    if (name === 'svm-decoders') {
+    if (name === 'svm-decoders' || reverseCausal) {
       const anchor: typeof import('../../../.local/INPUT/provider/node_modules/@coral-xyz/anchor/dist/cjs/index.js') = require('@coral-xyz/anchor');
       const router: typeof import('../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/solana/idl/1.6.0/CCIP_ROUTER.js') = await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk/dist/solana/idl/1.6.0/CCIP_ROUTER.js')).href);
       type Ramp = import('../../../.local/INPUT/provider/node_modules/@coral-xyz/anchor/dist/cjs/index.js').IdlTypes<typeof router.IDL>['SVM2AnyRampMessage'];
@@ -144,6 +154,13 @@ async function scenario(name: string): Promise<void> {
     if (url.startsWith('https://api.ccip.chain.link')) {
       apiCalls++; assert.equal(init.method, 'GET'); assert.equal(init.body, undefined);
       assert.match(url, /^https:\/\/api\.ccip\.chain\.link\/v2\/messages\/0x[0-9a-f]{64}$/);
+      if (failedCancellation) {
+        physicalReleased = false;
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) { if (name !== 'causal-cancel-header') { controller.enqueue(new Uint8Array(TEST_RPC_RESPONSE_LIMIT + 1)); } },
+          async cancel() { bodyCancelled++; entered.resolve(); if (name === 'causal-cancel-pending') { await body.promise; } throw new Error('Controlled retained physical resource'); },
+        }), { status: 404, ...(name === 'causal-cancel-header' ? { headers: { 'content-length': String(TEST_RPC_RESPONSE_LIMIT + 1) } } : {}) });
+      }
       if (held) {
         if (name === 'api-error-body') {
           return new Response(new ReadableStream<Uint8Array>({
@@ -155,7 +172,7 @@ async function scenario(name: string): Promise<void> {
         if (name === 'api-headers' || name === 'deadline') { return header.promise; }
         return new Response(new ReadableStream<Uint8Array>({ async start(controller) { await body.promise; controller.enqueue(new TextEncoder().encode('{}')); controller.close(); } }), { status: 404 });
       }
-      return name === 'decoders' ? new Response(json(apiResponse)) : new Response('{}', { status: 404 });
+      return evmDecoders ? new Response(json(reverseCausal ? { ...apiResponse, offramp: offRamp, receiptTransactionHash: executionHash } : apiResponse)) : new Response('{}', { status: 404 });
     }
     assert.ok(url === DEFAULT_SEPOLIA_RPC + '/' || url === DEFAULT_SOLANA_RPC + '/');
     assert.equal(init.method, 'POST'); assert.equal(typeof init.body, 'string');
@@ -187,6 +204,64 @@ async function scenario(name: string): Promise<void> {
         case 'getGenesisHash': result = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG'; break;
         case 'getSlot': result = 20; break;
         case 'getTransaction': {
+          if (causal || reverseCausal) {
+            assert.ok(lane?.recipientAtas);
+            const ata = present(lane.recipientAtas[reverseCausal ? fixture.recipient : FORWARD_RECIPIENT_B]), data = present(reverseCausal ? svmSourceData : svmExecutionData);
+            if (reverseCausal) {
+              const transfer = { programId: token, stackHeight: 2, parsed: { type: 'transferChecked', info: { mint: fixture.mint, source: ata,
+                destination: lane.solanaPoolAta, authority: lane.solanaSpender, tokenAmount: { amount: fixture.amount, decimals: 9 } } } };
+              const pool = { programId: BURNMINT_PROGRAM, stackHeight: 2 };
+              const burn = { programId: token, stackHeight: 3, parsed: { type: 'burn', info: { mint: fixture.mint, account: lane.solanaPoolAta, authority: lane.solanaSigner, amount: fixture.amount } } };
+              const logs = cpiMutant === 'split' ? ['Program ' + ROUTER_PROGRAM + ' invoke [1]', 'Program ' + token + ' invoke [2]', 'Program ' + token + ' success',
+                ...Array<string>(4).fill('Program log: execution'), 'Program data: ' + data, 'Program ' + ROUTER_PROGRAM + ' success',
+                'Program ' + ROUTER_PROGRAM + ' invoke [1]', 'Program ' + BURNMINT_PROGRAM + ' invoke [2]', 'Program ' + token + ' invoke [3]',
+                'Program ' + token + ' success', 'Program ' + BURNMINT_PROGRAM + ' success', 'Program ' + ROUTER_PROGRAM + ' success'] :
+                ['Program ' + ROUTER_PROGRAM + ' invoke [1]', 'Program ' + token + ' invoke [2]', 'Program ' + token + ' success',
+                'Program ' + BURNMINT_PROGRAM + ' invoke [2]', 'Program ' + token + ' invoke [3]', 'Program ' + token + ' success',
+                'Program ' + BURNMINT_PROGRAM + ' success', 'Program data: ' + data, 'Program ' + ROUTER_PROGRAM + ' success', 'Program ' + fixture.payer + ' invoke [1]', 'Program ' + fixture.payer + ' success'];
+              const balance = (accountIndex: number, owner: string, amount: string) => ({ accountIndex, mint: fixture.mint, owner, programId: token, uiTokenAmount: { amount, decimals: 9 } });
+              result = object(params[1]).encoding === 'jsonParsed' ? {
+                slot: 20, transaction: { signatures: [params[0]], message: { accountKeys: [ata, lane.solanaPoolAta, { pubkey: fixture.payer, signer: true }],
+                  instructions: [{ programId: ROUTER_PROGRAM }, { programId: cpiMutant === 'split' ? ROUTER_PROGRAM : fixture.payer }] } },
+                meta: { err: null, logMessages: logs, innerInstructions: cpiMutant ? [{ index: 0, instructions: [transfer] }, { index: 1, instructions: [pool, burn] }] :
+                  [{ index: 0, instructions: [transfer, pool, burn] }], preTokenBalances: [balance(0, fixture.recipient, fixture.amount), balance(1, present(lane.solanaSigner), '0')],
+                  postTokenBalances: [balance(0, fixture.recipient, '0'), balance(1, present(lane.solanaSigner), '0')] },
+              } : {
+                slot: 20, blockTime: time / 1000, version: 0,
+                transaction: { signatures: [params[0]], message: { header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 1 },
+                  accountKeys: [fixture.payer, ROUTER_PROGRAM], recentBlockhash: fixture.mint, instructions: [], addressTableLookups: [] } },
+                meta: { err: null, fee: 1, preBalances: [1,1], postBalances: [1,1], innerInstructions: [], preTokenBalances: [], postTokenBalances: [],
+                  loadedAddresses: { writable: [], readonly: [] }, logMessages: logs },
+              }; break;
+            }
+            const progressBytes = Buffer.from(data, 'base64'); progressBytes[progressBytes.length - 1] = 1;
+            let eventLogs = ['Program ' + svmOffRamp + ' invoke [1]', 'Program data: ' + progressBytes.toString('base64'), 'Program ' + BURNMINT_PROGRAM + ' invoke [2]',
+              'Program ' + token + ' invoke [3]', 'Program ' + token + ' success', 'Program ' + BURNMINT_PROGRAM + ' success',
+              'Program data: ' + data, 'Program ' + svmOffRamp + ' success', 'Program ' + fixture.payer + ' invoke [1]', 'Program ' + fixture.payer + ' success'];
+            const inner: MintInstruction[] = [{ programId: BURNMINT_PROGRAM, stackHeight: 2 }, { programId: token, stackHeight: 3,
+              parsed: { type: 'mintTo', info: { mint: fixture.mint, account: ata, amount: fixture.amount, mintAuthority: present(lane.solanaSigner) } } }];
+            if (cpiMutant === 'depth') { present(inner[1]).stackHeight = 2; }
+            if (cpiMutant === 'missing-height') { Reflect.deleteProperty(present(inner[1]), 'stackHeight'); }
+            if (cpiMutant === 'trace-truncated') { eventLogs.pop(); }
+            if (cpiMutant === 'split') {
+              eventLogs = ['Program ' + svmOffRamp + ' invoke [1]', ...Array<string>(5).fill('Program log: execution'), 'Program data: ' + data,
+                'Program ' + svmOffRamp + ' success', 'Program ' + svmOffRamp + ' invoke [1]', 'Program ' + BURNMINT_PROGRAM + ' invoke [2]',
+                'Program ' + token + ' invoke [3]', 'Program ' + token + ' success', 'Program ' + BURNMINT_PROGRAM + ' success', 'Program ' + svmOffRamp + ' success'];
+            }
+            const balance = (amount: string) => ({ accountIndex: 0, mint: fixture.mint, owner: FORWARD_RECIPIENT_B, programId: token, uiTokenAmount: { amount, decimals: 9 } });
+            const config = object(params[1]);
+            result = config.encoding === 'jsonParsed' ? {
+              slot: 20, transaction: { signatures: [params[0]], message: { accountKeys: [ata], instructions: [{ programId: svmOffRamp }, { programId: cpiMutant === 'split' ? svmOffRamp : fixture.payer }] } },
+              meta: { err: null, logMessages: eventLogs, innerInstructions: [{ index: ['parent', 'split'].includes(cpiMutant) ? 1 : 0, instructions: inner }],
+                preTokenBalances: [balance('0')], postTokenBalances: [balance(fixture.amount)] },
+            } : {
+              slot: 20, blockTime: time / 1000, version: 0,
+              transaction: { signatures: [params[0]], message: { header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 1 },
+                accountKeys: [fixture.payer, svmOffRamp], recentBlockhash: fixture.mint, instructions: [], addressTableLookups: [] } },
+              meta: { err: null, fee: 1, preBalances: [1,1], postBalances: [1,1], innerInstructions: [], preTokenBalances: [], postTokenBalances: [],
+                loadedAddresses: { writable: [], readonly: [] }, logMessages: eventLogs },
+            }; break;
+          }
           assert.equal(name, 'svm-decoders');
           const execution = params[0] === '2'.repeat(87), program = execution ? BURNMINT_PROGRAM : ROUTER_PROGRAM;
           result = { slot: 20, blockTime: time / 1000, version: 0,
@@ -197,7 +272,7 @@ async function scenario(name: string): Promise<void> {
           break;
         }
         case 'simulateTransaction': {
-          assert.equal(name, 'svm-decoders');
+          assert.ok(name === 'svm-decoders' || reverseCausal);
           const config = object(params[1]); assert.equal(config.sigVerify, false); assert.equal(config.replaceRecentBlockhash, true);
           assert.equal(config.commitment, 'confirmed'); assert.equal(config.encoding, 'base64');
           const label = Buffer.from('CCIP Router 1.6.0'), length = Buffer.alloc(4); length.writeUInt32LE(label.length);
@@ -206,13 +281,15 @@ async function scenario(name: string): Promise<void> {
             returnData: { programId: ROUTER_PROGRAM, data: [encoded, 'base64'] } } }; break;
         }
         case 'eth_getTransactionReceipt': {
-          if (name !== 'decoders') { result = null; break; }
+          if (!evmDecoders) { result = null; break; }
           const txHash = String(params[0]);
           const rawLog = (address: string, event: { data: string; topics: string[] }, index: number) => ({ address, ...event,
             logIndex: '0x' + index.toString(16), transactionHash: txHash, blockHash: hash, blockNumber: '0xa', transactionIndex: '0x0', removed: false });
           result = { transactionHash: txHash, blockHash: hash, blockNumber: '0xa', transactionIndex: '0x0', from: fixture.administrator,
             to: '0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf363a59', status: '0x1', type: '0x0', cumulativeGasUsed: '0x10000', gasUsed: '0x10000', effectiveGasPrice: '0x1', logsBloom: '0x' + '00'.repeat(256),
-            logs: txHash === executionHash ? [rawLog(offRamp, present(executionLog), 0)] : [
+            logs: txHash === executionHash ? [rawLog(offRamp, present(executionLog), 0), ...(reverseCausal ? [rawLog(fixture.token, {
+              topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + fixture.pool.slice(2).padStart(64, '0'),
+                '0x' + fixture.administrator.slice(2).padStart(64, '0')], data: '0x' + (1000000000n).toString(16).padStart(64, '0') }, 1)] : [])] : [
               rawLog(fixture.token, { topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
                 '0x' + fixture.administrator.slice(2).padStart(64, '0'), '0x' + fixture.pool.slice(2).padStart(64, '0')], data: '0x' + (1000000000n).toString(16).padStart(64, '0') }, 0), rawLog(onRamp, present(sourceLog), 1)] };
           break;
@@ -222,21 +299,27 @@ async function scenario(name: string): Promise<void> {
         case 'eth_getCode': result = '0x1234'; break;
         case 'eth_getBlockByNumber': {
           const repeated = blockReads++ % 2 === 1, timestamp = repeated && mutations.endTimestamp !== undefined ? mutations.endTimestamp : mutations.timestamp;
-          result = { ...(name === 'decoders' ? { parentHash: hash, nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1000000', gasUsed: '0x10000', miner: fixture.administrator, extraData: '0x', transactions: [] } : {}),
+          result = { ...(evmDecoders ? { parentHash: hash, nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1000000', gasUsed: '0x10000', miner: fixture.administrator, extraData: '0x', transactions: [] } : {}),
             hash: repeated ? mutations.endHash : mutations.blockHash, number: '0xa', ...(timestamp === undefined ? {} : { timestamp: timestamp === null ? null : '0x' + timestamp.toString(16) }) }; break;
         }
         case 'eth_call': {
-          const call = object(params[0]); if (name === 'decoders' && call.to === onRamp) { result = typeAndVersion; break; } assert.deepEqual(params[1], { blockHash: hash, requireCanonical: true });
+          const call = object(params[0]); if (evmDecoders && call.to === onRamp) { result = typeAndVersion; break; } if (reverseCausal && params[1] === 'finalized') { result = '0x1'; break; } assert.deepEqual(params[1], { blockHash: hash, requireCanonical: true });
           result = '0x' + (call.data === '0x18160ddd' ? 100000000000n : call.data === '0x313ce567' ? 9n : 1000000000n).toString(16).padStart(64, '0'); break;
         }
         case 'getAccountInfo': {
           assert.ok(lane?.recipientAtas);
+          if (causal && params[0] !== fixture.mint && !Object.values(lane.recipientAtas).includes(String(params[0]))) {
+            result = { context: { slot: 20 }, value: params[0] === svmOffRamp ? { owner: 'BPFLoaderUpgradeab1e11111111111111111111111', executable: true, data: ['', 'base64'] } :
+              { owner: ROUTER_PROGRAM, executable: false, data: [createHash('sha256').update('account:AllowedOfframp').digest().subarray(0, 8).toString('base64'), 'base64'] } }; break;
+          }
           if (params[0] === fixture.mint) { result = mintAccount(mutations.mintContext); }
           else {
             const recipient = [fixture.recipient, FORWARD_RECIPIENT_B].find(owner => lane?.recipientAtas?.[owner] === params[0]);
             assert.ok(recipient); result = account(recipient, recipient === FORWARD_RECIPIENT_B ? '1000000000' : '0');
           } break;
         }
+        case 'getSignatureStatuses': result = { context: { slot: 20 }, value: [{ slot: 20, err: null, confirmationStatus: 'finalized' }] }; break;
+        case 'getBlock': result = { blockhash: fixture.mint, signatures: ['1'.repeat(64)] }; break;
         case 'getTokenSupply': result = { context: { slot: 20 }, value: { amount: supplyReads++ % 2 === 1 ? mutations.endSupply ?? mutations.supply : mutations.supply, decimals: mutations.supplyDecimals } }; break;
         case 'getBlockTime': result = mutations.timestamp ?? null; break;
         default: throw new Error('Unexpected controlled unit RPC: ' + String(r.method));
@@ -298,6 +381,55 @@ async function scenario(name: string): Promise<void> {
     await ticks(); assert.equal(settled, false); assert.equal(testSdkCounters()?.closed, false);
     body.resolve(); const error: unknown = await outcome; assert.ok(error instanceof Error); assert.match(error.message, /response exceeds byte bound/);
     await close;
+  } else if (reverseCausal) {
+    const transfer = { direction: 'solana-to-ethereum' as const, sourceHash: '1'.repeat(64), recipient: fixture.recipient,
+      destinationReceipt: { transactionHash: executionHash, offRamp } };
+    await ports.native.authorizeOffRamp('ethereum', offRamp, BigInt(fixture.forwardSelector));
+    assert.equal((await ports.chains.ethereum.getExecutionReceiptInTx(executionHash, { offRamp, messageId, sourceChainSelector: BigInt(fixture.forwardSelector) })).receipt.state, ports.successState);
+    assert.equal((await ports.native.ethereum(executionHash, 'release')).eventIndex, 1);
+    const positive = await inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState);
+    assert.equal(positive.status, 'settled'); assert.equal(positive.pendingAmount, 0n); assert.equal(positive.events[0]?.eventIndex, 3);
+    for (const mutant of ['parent', 'split']) {
+      cpiMutant = mutant;
+      await assert.rejects(ports.native.solana(transfer.sourceHash, 'burn', fixture.recipient), /invocation|coordinates|execution/);
+      await assert.rejects(inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState), /invocation|coordinates|execution/);
+      process.stdout.write(JSON.stringify({ probe: 'U2-reverse', mutant, positive: positive.status, rejected: true }) + '\n');
+    }
+    cpiMutant = '';
+    await assert.rejects(ports.native.solana(transfer.sourceHash, 'burn', FORWARD_RECIPIENT_B), /B reverse/);
+    assert.equal((await inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState)).status, 'settled');
+  } else if (causal) {
+    const transfer = { direction: 'ethereum-to-solana' as const, sourceHash, recipient: FORWARD_RECIPIENT_B,
+      destinationReceipt: { transactionHash: '1'.repeat(64), offRamp: svmOffRamp } };
+    const positive = await inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState);
+    assert.equal(positive.status, 'settled'); assert.equal(positive.pendingAmount, 0n); assert.equal(positive.events[1]?.eventIndex, 2);
+    assert.equal((await ports.native.solana('1'.repeat(64), 'mint', FORWARD_RECIPIENT_B)).eventIndex, 2);
+    if (name === 'causal-cpi') {
+      for (const mutant of ['parent', 'split', 'depth', 'missing-height', 'trace-truncated']) {
+        cpiMutant = mutant;
+        await assert.rejects(ports.native.solana('1'.repeat(64), 'mint', FORWARD_RECIPIENT_B), /invocation|coordinates|ancestry|execution/);
+        const rejected = await inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState);
+        assert.equal(rejected.status, 'pending'); assert.equal(rejected.pendingAmount, null); assert.equal(rejected.events.length, 1);
+        process.stdout.write(JSON.stringify({ probe: 'U2', mutant, positive: positive.status, rejected: rejected.status, pendingUnknown: rejected.pendingAmount === null }) + '\n');
+      }
+      cpiMutant = '';
+      assert.equal((await inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState)).status, 'settled');
+    } else {
+      failedCancellation = true;
+      const inspection = inspectTransfer(transfer, ports.chains, ports.native, ports.api, ports.successState);
+      await entered.promise;
+      // Refusal must already be latched while the physical cancel is still pending.
+      const before = calls;
+      assert.throws(() => ports.native.snapshot(), /byte bound|over-bound/); assert.equal(calls, before);
+      body.resolve();
+      const rejected = await inspection;
+      assert.equal(rejected.status, 'pending'); assert.equal(rejected.pendingAmount, null); assert.equal(physicalReleased, false);
+      const close = ports.destroy(); assert.equal(close, ports.destroy());
+      await assert.rejects(close, /physical cancellation/);
+      assert.equal(testSdkCounters()?.closed, false); assert.equal(evmDestroyed, 1); assert.equal(svmDestroyed, 1); assert.equal(globalFetchAttempts, 0);
+      process.stdout.write(JSON.stringify({ probe: 'U1', scenario: name, qualification: 'UNQUALIFIED', positive: positive.status, rejected: rejected.status,
+        physicalReleased, cleanupRejected: true, hooksClosed: testSdkCounters()?.closed, bodyCancelled }) + '\n'); return;
+    }
   } else if (name === 'decoders') {
     const requests = await ports.chains.ethereum.getMessagesInTx(sourceHash);
     assert.equal(requests.length, 1); const request = present(requests[0]);
@@ -312,7 +444,7 @@ async function scenario(name: string): Promise<void> {
     const found = await ports.api.getMessageById(messageId, { signal: new AbortController().signal }); assert.equal(found.metadata?.status, 'SUCCESS');
     const result = await inspectTransfer({ direction: 'ethereum-to-solana', sourceHash, recipient: FORWARD_RECIPIENT_B }, ports.chains, ports.native, ports.api, ports.successState);
     assert.equal(result.status, 'pending'); assert.equal(result.pendingAmount, null); assert.equal(result.events.length, 1); assert.match(result.destinationError ?? '', /unproven/);
-  } else if (name === 'svm-decoders') {
+  } else if (name === 'svm-decoders' || reverseCausal) {
     const messages = await ports.chains.solana.getMessagesInTx('1'.repeat(64));
     assert.equal(messages.length, 1); const message = present(messages[0]);
     assert.equal(message.message.sourceChainSelector, BigInt(fixture.forwardSelector)); assert.equal(message.message.sequenceNumber, 7n);
@@ -334,25 +466,32 @@ async function scenario(name: string): Promise<void> {
     assert.ok(accountRequests.some(params => Array.isArray(params) && params[0] === lane?.recipientAtas?.[FORWARD_RECIPIENT_B]));
     for (const recipient of [fixture.recipient, FORWARD_RECIPIENT_B]) {
       const ata: string | undefined = lane.recipientAtas[recipient]; assert.ok(ata);
-      const tx: MintTransaction = { transaction: { message: { accountKeys: [ata], instructions: [{ programId: 'router' }, { programId: 'later' }] } }, meta: {
-        innerInstructions: [{ index: 0, instructions: [{ programId: token, parsed: { type: 'mintTo', info: { mint: fixture.mint, account: ata, amount: '1000000000', mintAuthority: present(lane.solanaSigner) } } }] }],
+      const data = Buffer.alloc(16).toString('base64');
+      const tx: MintTransaction = { transaction: { message: { accountKeys: [ata], instructions: [{ programId: svmOffRamp }, { programId: fixture.payer }] } }, meta: {
+        logMessages: ['Program ' + svmOffRamp + ' invoke [1]', 'Program ' + BURNMINT_PROGRAM + ' invoke [2]', 'Program ' + token + ' invoke [3]', 'Program ' + token + ' success', 'Program ' + BURNMINT_PROGRAM + ' success', 'Program data: ' + data, 'Program ' + svmOffRamp + ' success'],
+        innerInstructions: [{ index: 0, instructions: [{ programId: BURNMINT_PROGRAM, stackHeight: 2 }, { programId: token, stackHeight: 3, parsed: { type: 'mintTo', info: { mint: fixture.mint, account: ata, amount: '1000000000', mintAuthority: present(lane.solanaSigner) } } }] }],
         preTokenBalances: [{ accountIndex: 0, mint: fixture.mint, owner: recipient, programId: token, uiTokenAmount: { amount: '0', decimals: 9 } }],
         postTokenBalances: [{ accountIndex: 0, mint: fixture.mint, owner: recipient, programId: token, uiTokenAmount: { amount: '1000000000', decimals: 9 } }] } };
-      assert.equal(solanaEffect(tx, 'mint', recipient, ata, lane), 1);
+      const event = present(present(parseLogs)(tx.meta.logMessages).find(log => log.type === 'data'));
+      const invocation: InvocationLog = { ...event, transactionHash: '1'.repeat(64) };
+      assert.equal(solanaEffect(tx, 'mint', recipient, ata, lane, invocation), 2);
+      const early = structuredClone(tx); early.meta.logMessages.splice(5, 1); early.meta.logMessages.splice(1, 0, 'Program data: ' + data);
+      const earlyEvent = present(present(parseLogs)(early.meta.logMessages).find(log => log.type === 'data'));
+      assert.throws(() => solanaEffect(early, 'mint', recipient, ata, lane, { ...earlyEvent, transactionHash: '1'.repeat(64) }), /effect\/event order/);
       for (const mutate of [
         (t: typeof tx) => { present(t.meta.postTokenBalances[0]).owner = 'wrong'; },
         (t: typeof tx) => { present(present(t.meta.innerInstructions[0]).instructions[0]).programId = 'wrong'; },
-        (t: typeof tx) => { present(present(t.meta.innerInstructions[0]).instructions[0]).parsed.info.mint = '13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau'; },
+        (t: typeof tx) => { present(present(present(t.meta.innerInstructions[0]).instructions[1]).parsed).info.mint = '13Q74er9thh3my9oACjChDhtn4znJibWBp1u8q1rAYau'; },
         (t: typeof tx) => { present(t.meta.preTokenBalances[0]).uiTokenAmount.decimals = 8; },
         (t: typeof tx) => { present(t.meta.postTokenBalances[0]).programId = 'wrong'; },
         (t: typeof tx) => { present(t.meta.postTokenBalances[0]).uiTokenAmount.decimals = 8; },
-        (t: typeof tx) => { present(present(t.meta.innerInstructions[0]).instructions[0]).parsed.info.mintAuthority = 'wrong'; },
-        (t: typeof tx) => { present(present(t.meta.innerInstructions[0]).instructions[0]).parsed.info.account = FORWARD_RECIPIENT_B_ATA; },
-        (t: typeof tx) => { present(t.meta.innerInstructions[0]).instructions.push(present(present(t.meta.innerInstructions[0]).instructions[0])); },
+        (t: typeof tx) => { present(present(present(t.meta.innerInstructions[0]).instructions[1]).parsed).info.mintAuthority = 'wrong'; },
+        (t: typeof tx) => { present(present(present(t.meta.innerInstructions[0]).instructions[1]).parsed).info.account = FORWARD_RECIPIENT_B_ATA; },
+        (t: typeof tx) => { present(t.meta.innerInstructions[0]).instructions.push(present(present(t.meta.innerInstructions[0]).instructions[1])); },
         (t: typeof tx) => { present(t.meta.innerInstructions[0]).index = 9; },
         (t: typeof tx) => { present(t.meta.postTokenBalances[0]).uiTokenAmount.amount = '2000000000'; },
         (t: typeof tx) => { t.meta.postTokenBalances.push(present(t.meta.postTokenBalances[0])); },
-      ]) { const changed = structuredClone(tx); mutate(changed); assert.throws(() => solanaEffect(changed, 'mint', recipient, ata, lane)); }
+      ]) { const changed = structuredClone(tx); mutate(changed); assert.throws(() => solanaEffect(changed, 'mint', recipient, ata, lane, invocation)); }
     }
     mutations.endHash = '0x' + 'cd'.repeat(32); assert.equal((await ports.native.snapshot()).coherent, false); mutations.endHash = hash;
     mutations.endTimestamp = time / 1000 - 1; assert.equal((await ports.native.snapshot()).coherent, false); delete mutations.endTimestamp;
@@ -413,7 +552,7 @@ async function scenario(name: string): Promise<void> {
 const selected = process.argv[2];
 if (selected) { await scenario(selected); }
 else {
-  for (const name of ['observer', 'decoders', 'svm-decoders', 'composition', 'retry', 'byte-utf8', 'byte-limit', 'rpc-reply-id', 'rpc-reply-batch', 'rpc-redirect', 'api-error-body', 'partial', 'api-headers', 'api-body', 'native-body', 'sdk-body', 'deadline', 'cleanup-failure', 'unexpected']) {
+  for (const name of ['observer', 'decoders', 'svm-decoders', 'composition', 'retry', 'byte-utf8', 'byte-limit', 'rpc-reply-id', 'rpc-reply-batch', 'rpc-redirect', 'api-error-body', 'partial', 'api-headers', 'api-body', 'native-body', 'sdk-body', 'deadline', 'cleanup-failure', 'unexpected', 'causal-cpi', 'causal-cancel', 'causal-cancel-header', 'causal-cancel-pending', 'causal-reverse']) {
     test('controlled actual admitted SDK status unit: ' + name, () => {
       const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), name], {
         env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' }, encoding: 'utf8', timeout: 60_000, maxBuffer: 4 * TEST_RPC_RESPONSE_LIMIT });
