@@ -34,6 +34,11 @@ public settings omit key references. An offline caller passes explicit replay IO
 without a signer. Saved journals inspect and observe their original packet, with
 zero key/signer acquisition, build or fresh blockhash. All owned response-body
 and signing work drains before the unsigned SDK's only owning `destroy`.
+Body completion or fulfilled cancellation must acknowledge physical drain;
+read/cancel rejection retains admission guards and reports cleanup debt until
+the dedicated process terminates. Function ingress redacts fixture-binding and
+expectation-capture failures before opening the Host, preserving safe selection
+and missing-operator diagnostics.
 This explicit mode preserves the separate public-operation approval requirement.
 
 The initialized mint/pool must already be finalized. Fresh mint supply remains

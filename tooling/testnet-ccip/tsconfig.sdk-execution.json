@@ -12,6 +12,11 @@
     "src/adapters/solana-sdk.mjs", "src/adapters/solana-transaction-sdk.mjs",
     "src/adapters/solana-pool-init-sdk.mjs", "src/adapters/solana-registration-sdk.mjs",
     "src/adapters/solana-pool-config-sdk.mjs", "src/adapters/solana-reverse-sdk.mjs",
+    "src/adapters/solana-setup-operator.ts", "src/adapters/test-rpc.ts",
+    "src/composition/create-solana-mint.mjs", "src/composition/initialize-solana-pool.mjs",
+    "src/composition/register-solana-pool.mjs", "src/composition/configure-solana-pool.mjs",
+    "src/composition/solana-setup-operator.ts",
+    "tests/solana-setup-operator.test.ts", "tests/solana-setup-wiring.test.ts",
     "tests/test-sdk-admission.test.ts", "tests/test-sdk-svm.test.ts",
     "tests/test-sdk-execution.native.mts", "tests/test-sdk-svm.native.mts",
     "tests/solana-reverse-sdk.test.mts", "tests/replacement-fixture.test.ts", "tests/test-rpc-selection.test.ts"

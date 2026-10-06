@@ -1,5 +1,5 @@
 // @ts-check
-import { selectSetup, freezeSetupExpected, latestSetupBlock, signSetup, setupLifetime, setupObject, parseSetupCli, operatorTestFetch, testKeys, createPoolInitOperatorIO } from "./solana-setup-operator.ts";
+import { setupIngress, selectSetup, freezeSetupExpected, latestSetupBlock, signSetup, setupLifetime, setupObject, parseSetupCli, operatorTestFetch, testKeys, createPoolInitOperatorIO } from "./solana-setup-operator.ts";
 import { createTestRpcRequest, DEFAULT_SOLANA_RPC } from "../adapters/test-rpc.ts";
 import { bindFixture } from "../adapters/fixture-binding.ts";
 import { BURNMINT_PROGRAM, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
@@ -28,15 +28,18 @@ async function verifyMintPrerequisite(expected, readRpc) {
 
 /** @param {import('./solana-setup-operator.ts').InitSettings} settings @param {import('./solana-setup-operator.ts').SetupIO<import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation, import('../adapters/solana-pool-init-sdk.mjs').UnsignedPoolInitSdk>} [io] @returns {Promise<import('./solana-setup-operator.ts').MintResult>} */
 export async function initializeTestPool(settings, io) {
-  if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet") {
-    throw new Error("Test-only Solana settings required");
-  }
-  const selection = selectSetup(settings, io);
-  const providerDirectory = settings.providerDirectory;
-  const journalFile = settings.journalFile;
-  const fixture = bindFixture(settings, [journalFile]);
-  const expected = freezeSetupExpected({ ...settings.expected, ...(fixture ? { fixture } : {}) });
-  const lifetime = setupLifetime(io?.fetcher ?? globalThis.fetch);
+  const { selection, providerDirectory, journalFile, expected, lifetime } = setupIngress(() => {
+    if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet") {
+      throw new Error("Test-only Solana settings required");
+    }
+    const selected = selectSetup(settings, io);
+    const directory = settings.providerDirectory;
+    const file = settings.journalFile;
+    const fixture = bindFixture(settings, [file]);
+    const captured = freezeSetupExpected({ ...settings.expected, ...(fixture ? { fixture } : {}) });
+    const owner = setupLifetime(io?.fetcher ?? globalThis.fetch);
+    return { selection: selected, providerDirectory: directory, journalFile: file, expected: captured, lifetime: owner };
+  });
   /** @type {Awaited<ReturnType<typeof createSolanaPoolInitSdk>> | undefined} */ let acquiredSdk;
   let sdk;
   try { sdk = await lifetime.track(async () => {

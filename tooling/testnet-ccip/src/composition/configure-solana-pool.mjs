@@ -1,5 +1,5 @@
 // @ts-check
-import { selectSetup, freezeSetupExpected, latestSetupBlock, signSetup, setupLifetime, parseSetupCli, operatorTestFetch, testKeys, createPoolConfigOperatorIO } from "./solana-setup-operator.ts";
+import { setupIngress, selectSetup, freezeSetupExpected, latestSetupBlock, signSetup, setupLifetime, parseSetupCli, operatorTestFetch, testKeys, createPoolConfigOperatorIO } from "./solana-setup-operator.ts";
 import { bindFixture } from "../adapters/fixture-binding.ts";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -70,15 +70,18 @@ export async function broadcastPoolConfig(bytes, expected, rpc, sdk) {
 }
 /** @param {import('./solana-setup-operator.ts').ConfigSettings} settings @param {import('./solana-setup-operator.ts').SetupIO<import('../domain/solana-pool-config.ts').SolanaPoolConfigExpectation, import('../adapters/solana-pool-config-sdk.mjs').UnsignedPoolConfigSdk>} [io] @returns {Promise<import('./solana-setup-operator.ts').ConfigResult>} */
 export async function configureTestSolanaPool(settings, io) {
-  if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet" ||
-    !POOL_CONFIG_OPERATIONS.includes(settings.expected.operation)) { throw new Error("Explicit test-only pool configuration required"); }
-  const selection = selectSetup(settings, io);
-  const providerDirectory = settings.providerDirectory;
-  const journalDirectory = settings.journalDirectory;
-  const registrationJournalFilePath = settings.registrationJournalFile;
-  const fixture = bindFixture(settings, [journalDirectory, registrationJournalFilePath]);
-  const input = freezeSetupExpected({ ...settings.expected, ...(fixture ? { fixture } : {}) });
-  const lifetime = setupLifetime(io?.fetcher ?? globalThis.fetch);
+  const { selection, providerDirectory, journalDirectory, registrationJournalFilePath, input, lifetime } = setupIngress(() => {
+    if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet" ||
+      !POOL_CONFIG_OPERATIONS.includes(settings.expected.operation)) { throw new Error("Explicit test-only pool configuration required"); }
+    const selected = selectSetup(settings, io);
+    const directory = settings.providerDirectory;
+    const journal = settings.journalDirectory;
+    const predecessorFile = settings.registrationJournalFile;
+    const fixture = bindFixture(settings, [journal, predecessorFile]);
+    const captured = freezeSetupExpected({ ...settings.expected, ...(fixture ? { fixture } : {}) });
+    const owner = setupLifetime(io?.fetcher ?? globalThis.fetch);
+    return { selection: selected, providerDirectory: directory, journalDirectory: journal, registrationJournalFilePath: predecessorFile, input: captured, lifetime: owner };
+  });
   /** @type {Awaited<ReturnType<typeof createSolanaPoolConfigSdk>> | undefined} */ let acquiredSdk;
   let sdk;
   try { sdk = await lifetime.track(async () => {

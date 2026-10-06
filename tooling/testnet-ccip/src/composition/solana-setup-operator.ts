@@ -16,7 +16,7 @@ import { POOL_CONFIG_OPERATIONS, type SolanaPoolConfigExpectation } from "../dom
 import { selectedFixture, validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import type { FixtureSettings } from "../adapters/fixture-binding.ts";
 import { selectTestSdk, TEST_SDK_PROFILE, type TestSdkSelection, type ExplicitTestSdkSelection } from "../adapters/test-sdk-policy.ts";
-import { createSdkTestFetch, DEFAULT_SOLANA_RPC, selectSolanaRpc } from "../adapters/test-rpc.ts";
+import { createSdkTestFetch, DEFAULT_SOLANA_RPC, selectSolanaRpc, UndrainedTestRpcBody } from "../adapters/test-rpc.ts";
 
 export interface SetupIO<E, S> {
   readonly fetcher: typeof fetch;
@@ -93,6 +93,23 @@ export function freezeSetupExpected<E extends object>(expected: E): Readonly<E> 
   if ("fixture" in copy && copy.fixture && typeof copy.fixture === "object") { Object.freeze(copy.fixture); }
   return Object.freeze(copy);
 }
+const ingressDiagnostics = new Set([
+  "Test-only Solana settings required", "Test-only registration settings required", "Explicit test-only pool configuration required",
+  "Unknown or non-TEST SDK profile", "Canonical TEST SDK directory required",
+  "TEST SDK requires exact selected fixture and retained archives", "Divergent or invalid TEST SDK root alias", "Explicit TEST setup IO required",
+  "Missing selected fixture", "Unknown replacement fixture", "Operator-supplied nonzero TESTNET deployment address required",
+  "Conflicting replacement deployment identity", "Malformed or mutated replacement fixture identity", "Authenticated operator fixture identity required",
+  "Wrong replacement TESTNET chain", "Wrong replacement administrator", "Wrong replacement token", "Wrong replacement pool",
+  "Wrong replacement recipient", "Wrong replacement Solana authority/peer", "Unbound nested fixture",
+  "Fresh replacement journal namespace required; legacy reuse refused", "Replacement journal symlink refused",
+]);
+/** Cover synchronous ingress before any Host await; preserve only exact public diagnostics, never error objects. */
+export function setupIngress<T>(work: () => T): T {
+  let label: string;
+  try { return work(); }
+  catch (error) { label = error instanceof Error && ingressDiagnostics.has(error.message) ? error.message : "TEST setup failed"; }
+  throw new Error(label);
+}
 export function latestSetupBlock(value: unknown): Readonly<BlockValidity> {
   const latest = setupObject(setupObject(value).value);
   if (typeof latest.blockhash !== "string" || typeof latest.lastValidBlockHeight !== "number" ||
@@ -112,10 +129,10 @@ export async function signSetup<E, R>(prepared: PreparedTransaction, expected: E
   return checkSetupSigned(captured, signed, inspect(signed.bytesBase64, expected));
 }
 
-/** Lexical setup attempt lifetime. Entire bounded RPC bodies and sign promises drain before SDK disposal. */
+/** Lexical setup owner. Failed body reads/cancels retain guards until dedicated-process termination. */
 export function setupLifetime(fetcher: typeof fetch, drainMs = 20_000) {
   const abort = new AbortController(), pending = new Set<Promise<unknown>>();
-  let closing = false, closePromise: Promise<void> | undefined;
+  let closing = false, physicalDebt = false, closePromise: Promise<void> | undefined;
   const assertOpen = (): void => { if (closing) { throw new Error("TEST setup attempt closing"); } };
   const track = <T>(work: () => Promise<T>): Promise<T> => {
     if (closing) { return Promise.reject(new Error("TEST setup attempt closing")); }
@@ -127,19 +144,25 @@ export function setupLifetime(fetcher: typeof fetch, drainMs = 20_000) {
       timer = setTimeout(() => reject(new Error("Unresolved TEST setup operation")), 20_000);
     })]).finally(() => clearTimeout(timer));
   };
-  const checked = createSdkTestFetch(DEFAULT_SOLANA_RPC, async (input, init) => {
-    const response = await fetcher(input, init);
-    if (!response.ok || response.redirected) {
-      await response.body?.cancel(); throw new Error("TEST setup RPC unavailable");
+  const checked = createSdkTestFetch(DEFAULT_SOLANA_RPC, fetcher);
+  const ownedFetch: typeof fetch = (input, init) => track(async () => {
+    try { return await checked(input, { ...init,
+      signal: init?.signal ? AbortSignal.any([abort.signal, init.signal]) : abort.signal }); }
+    catch (error) {
+      // The marker also crosses a pre-buffering operator transport's rejected promise.
+      if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; }
+      throw error;
     }
-    return response;
   });
-  const ownedFetch: typeof fetch = (input, init) => track(() => checked(input, { ...init,
-    signal: init?.signal ? AbortSignal.any([abort.signal, init.signal]) : abort.signal }));
   const close = (destroy: () => Promise<void>): Promise<void> => {
     if (closePromise) { return closePromise; }
     closing = true; abort.abort();
-    const drain = (async () => { await Promise.allSettled(pending); await destroy(); })();
+    const drain = (async () => {
+      await Promise.allSettled(pending);
+      // Logical rejection cannot acknowledge an acquired body's physical producer/cancellation.
+      if (physicalDebt) { throw new Error("Unresolved TEST setup cleanup debt"); }
+      await destroy();
+    })();
     let timer: ReturnType<typeof setTimeout>;
     closePromise = Promise.race([drain, new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new Error("Unresolved TEST setup cleanup debt")), drainMs);

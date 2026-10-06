@@ -1,5 +1,5 @@
 // @ts-check
-import { selectSetup, freezeSetupExpected, latestSetupBlock, signSetup, setupLifetime, setupObject, parseSetupCli, operatorTestFetch, mintTestKeys, createMintOperatorIO } from "./solana-setup-operator.ts";
+import { setupIngress, selectSetup, freezeSetupExpected, latestSetupBlock, signSetup, setupLifetime, setupObject, parseSetupCli, operatorTestFetch, mintTestKeys, createMintOperatorIO } from "./solana-setup-operator.ts";
 import { createTestRpcRequest, DEFAULT_SOLANA_RPC } from "../adapters/test-rpc.ts";
 import { bindFixture } from "../adapters/fixture-binding.ts";
 import { readFile } from "node:fs/promises";
@@ -16,15 +16,18 @@ import { runSolanaMintJournal } from "../application/solana-journal.ts";
 
 /** @param {import('./solana-setup-operator.ts').MintSettings} settings @param {import('./solana-setup-operator.ts').SetupIO<import('../domain/solana-mint.ts').SolanaMintExpectation, import('../adapters/solana-sdk.mjs').UnsignedMintSdk>} [io] @returns {Promise<import('./solana-setup-operator.ts').MintResult>} */
 export async function createTestMint(settings, io) {
-  if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet") {
-    throw new Error("Test-only Solana settings required");
-  }
-  const selection = selectSetup(settings, io);
-  const providerDirectory = settings.providerDirectory;
-  const journalFile = settings.journalFile;
-  bindFixture(settings, [journalFile]);
-  const expected = freezeSetupExpected(settings.expected);
-  const lifetime = setupLifetime(io?.fetcher ?? globalThis.fetch);
+  const { selection, providerDirectory, journalFile, expected, lifetime } = setupIngress(() => {
+    if (settings.testOnly !== true || settings.expected?.testOnly !== true || settings.expected.cluster !== "solana-devnet") {
+      throw new Error("Test-only Solana settings required");
+    }
+    const selected = selectSetup(settings, io);
+    const directory = settings.providerDirectory;
+    const file = settings.journalFile;
+    bindFixture(settings, [file]);
+    const captured = freezeSetupExpected(settings.expected);
+    const owner = setupLifetime(io?.fetcher ?? globalThis.fetch);
+    return { selection: selected, providerDirectory: directory, journalFile: file, expected: captured, lifetime: owner };
+  });
   /** @type {Awaited<ReturnType<typeof createSolanaMintSdk>> | undefined} */ let acquiredSdk;
   let sdk;
   try { sdk = await lifetime.track(async () => {

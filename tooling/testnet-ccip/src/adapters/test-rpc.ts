@@ -16,21 +16,33 @@ export function selectSolanaRpc(settings: TestRpcSettings): string {
   return endpoint;
 }
 export const TEST_RPC_RESPONSE_LIMIT = 4 * 1024 * 1024;
-/** Bound streamed bytes before parsing; includes errors and never follows redirect evidence. */
+/** Physical body ownership is unresolved even when a containing fetch promise has rejected. */
+export class UndrainedTestRpcBody extends Error {
+  constructor() { super("Unresolved TEST RPC body ownership"); }
+}
+async function cancelTestRpcBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
+  try { await body?.cancel(); }
+  catch { throw new UndrainedTestRpcBody(); }
+}
+/** EOF or fulfilled cancellation acknowledges body drain; rejection leaves physical ownership uncertain. */
 export async function readTestRpcJson(response: Response): Promise<unknown> {
+  const undrained = (): never => { throw new UndrainedTestRpcBody(); };
   if (response.redirected || !response.body) { throw new Error("Invalid TEST RPC response"); }
   const length = response.headers.get("content-length");
   if (length !== null && (!/^\d+$/.test(length) || BigInt(length) > BigInt(TEST_RPC_RESPONSE_LIMIT))) {
-    await response.body.cancel(); throw new Error("TEST RPC response exceeds bound");
+    await cancelTestRpcBody(response.body); throw new Error("TEST RPC response exceeds bound");
   }
-  const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try { reader = response.body.getReader(); }
+  catch { throw new UndrainedTestRpcBody(); }
+  const chunks: Uint8Array[] = [];
   let total = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await reader.read().catch(undrained);
       if (done) { break; }
       total += value.byteLength;
-      if (total > TEST_RPC_RESPONSE_LIMIT) { await reader.cancel(); throw new Error("TEST RPC response exceeds bound"); }
+      if (total > TEST_RPC_RESPONSE_LIMIT) { await reader.cancel().catch(undrained); throw new Error("TEST RPC response exceeds bound"); }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
@@ -74,7 +86,7 @@ export function createSdkTestFetch(endpoint: string, fetcher: typeof fetch = glo
     const response = await fetcher(url, { method: "POST", headers: { "content-type": "application/json" },
       body: init.body, redirect: "error", credentials: "omit",
       signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000) });
-    if (!response.ok || response.redirected) { throw new Error("SDK TEST RPC unavailable"); }
+    if (!response.ok || response.redirected) { await cancelTestRpcBody(response.body); throw new Error("SDK TEST RPC unavailable"); }
     const body = await readTestRpcJson(response), replies = Array.isArray(body) ? body : [body];
     if (Array.isArray(body) !== Array.isArray(request) || replies.length !== requests.length
       || new Set(requests.map(r => r.id)).size !== requests.length

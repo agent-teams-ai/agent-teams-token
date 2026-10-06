@@ -12,6 +12,7 @@ import { createMintOperatorIO, createPoolInitOperatorIO, createRegistrationOpera
 import type { ExplicitTestSdkSelection, TestSdkSelection } from "../src/adapters/test-sdk-policy.ts";
 import type { MintResult } from "../src/composition/solana-setup-operator.ts";
 import { parseSolanaRpcAccount } from "../src/adapters/solana-transaction-rpc.ts";
+import { readTestRpcJson, TEST_RPC_RESPONSE_LIMIT, UndrainedTestRpcBody } from "../src/adapters/test-rpc.ts";
 import { BURNMINT_PROGRAM, POOL_GLOBAL } from "../src/domain/solana-pool-init.ts";
 import { ROUTER_PROGRAM } from "../src/domain/solana-registration.ts";
 import { createJournalFile } from "../src/adapters/evm-journal-file.ts";
@@ -286,6 +287,46 @@ test("finite RPC account guard preserves empty bytes/null/large rent sentinel an
   assert.deepEqual(parseSolanaRpcAccount(raw), raw); assert.equal(parseSolanaRpcAccount(null), null);
   for (const value of [undefined, [], {}, { ...raw, lamports: 1.5 }, { ...raw, lamports: -1 }, { ...raw, owner: 1 },
     { ...raw, executable: "false" }, { ...raw, data: ["YQ", "base64"] }, { ...raw, data: ["", "base64", "extra"] }, { ...raw, rentEpoch: Infinity }]) { assert.throws(() => parseSolanaRpcAccount(value)); }
+});
+
+test("bounded RPC parser reports reader acquisition, read and cancellation failures as uncertain physical ownership", async () => {
+  for (const failure of ["locked", "read", "header-cancel", "size-cancel"] as const) {
+    let canceled = 0;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (failure === "read") { controller.error(new Error("Producer read failed")); }
+        else if (failure === "size-cancel") { controller.enqueue(new Uint8Array(TEST_RPC_RESPONSE_LIMIT + 1)); }
+      },
+      cancel() { canceled++; throw new Error("Producer cancellation failed"); },
+    }), { headers: failure === "header-cancel" ? { "content-length": String(TEST_RPC_RESPONSE_LIMIT + 1) } : {} });
+    const borrowedReader = failure === "locked" ? response.body?.getReader() : undefined;
+    await assert.rejects(readTestRpcJson(response), UndrainedTestRpcBody);
+    assert.equal(canceled, ["locked", "read"].includes(failure) ? 0 : 1);
+    borrowedReader?.releaseLock();
+    assert.equal(response.body?.locked, false);
+  }
+});
+
+test("RPC EOF and acknowledged bounded-body cancellation permit cleanup even when JSON or envelopes reject", async () => {
+  for (const failure of ["json", "envelope", "length", "size", "http", "redirect"] as const) {
+    let destroyed = 0, canceled = 0;
+    const lifetime = setupLifetime(async () => {
+      const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (failure === "size") { controller.enqueue(new Uint8Array(TEST_RPC_RESPONSE_LIMIT + 1)); }
+        else if (!["length", "http", "redirect"].includes(failure)) { controller.enqueue(Buffer.from(failure === "json" ? "{" : '{"jsonrpc":"2.0","id":99,"result":null}')); controller.close(); }
+      },
+      cancel() { canceled++; },
+      }), { status: failure === "http" ? 500 : 200, headers: failure === "length" ? { "content-length": "invalid" } : {} });
+      if (failure === "redirect") { Object.defineProperty(response, "redirected", { value: true }); }
+      return response;
+    });
+    await assert.rejects(lifetime.fetcher("https://api.devnet.solana.com", { method: "POST",
+      body: '{"jsonrpc":"2.0","id":1,"method":"getGenesisHash"}' }));
+    const close = lifetime.close(async () => { destroyed++; });
+    assert.equal(lifetime.close(async () => { destroyed++; }), close); await close;
+    assert.equal(destroyed, 1, failure); assert.equal(canceled, ["length", "size", "http", "redirect"].includes(failure) ? 1 : 0);
+  }
 });
 
 // Never invoked. Removing an enforced restriction makes an expect-error unused and the strict compiler fail.

@@ -53,7 +53,10 @@ approvedFetch))`. Saved recovery never acquires keys/signers or builds a
 replacement. Prepared bytes, message, blockhash, exact authenticated validity and
 required payer are checked before custody access; the returned packet is
 independently reinspected before its durable journal write. RPC bodies and sign
-work drain before the owning configuration SDK closes admission. Public execution
+work drain before the owning configuration SDK closes admission. Rejected body
+reads/cancels leave physical ownership uncertain: admission guards remain and
+cleanup debt requires dedicated-process termination. Function ingress redacts
+fixture-binding and expectation-capture failures before Host opening. Public execution
 still needs separate approval; this implementation is not native qualification.
 
 Each later operation requires a successful, freshly re-observed predecessor.

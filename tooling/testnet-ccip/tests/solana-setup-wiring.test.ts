@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
+import fs from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { execFile } from "node:child_process";
@@ -14,6 +15,7 @@ import { createPoolInitSdk, type UnsignedPoolInitSdk } from "../src/adapters/sol
 import { createRegistrationSdk, type UnsignedRegistrationSdk } from "../src/adapters/solana-registration-sdk.mjs";
 import { createPoolConfigSdk, createRegistrationInspector, type UnsignedPoolConfigSdk } from "../src/adapters/solana-pool-config-sdk.mjs";
 import { TEST_SDK_PROFILE } from "../src/adapters/test-sdk-policy.ts";
+import { createSdkTestFetch, DEFAULT_SOLANA_RPC } from "../src/adapters/test-rpc.ts";
 import { replacementFixture, fixtureNamespace } from "../src/domain/replacement-fixture.ts";
 import { setupObject, parseSetupCli, selectSetup } from "../src/composition/solana-setup-operator.ts";
 import type { MintSettings, InitSettings, RegistrationSettings, ConfigSettings } from "../src/composition/solana-setup-operator.ts";
@@ -279,6 +281,106 @@ test("derive and borrowed predecessor failures stop the successor before prepara
 });
 
 const inertFetch: typeof fetch = async () => { throw new Error("IO must remain inert"); };
+
+// Actual caller, bounded parser and close path. A rejected read/cancel is not physical completion.
+for (const mutation of ["settled-body", "abort-read", "read-error", "cancel-error", "wrapped-abort-read", "wrapped-cancel-error"] as const) {
+  test(`actual mint caller retains physical ownership: ${mutation}`, async context => {
+    const directory = await disposable();
+    let release!: () => void, enter!: () => void, failRead!: () => void;
+    const physical = new Promise<void>(_resolve => { release = _resolve; });
+    const entered = new Promise<void>(_resolve => { enter = _resolve; });
+    const readFailure = new Promise<void>(_resolve => { failRead = _resolve; });
+    let active = false, destroyed = 0, reads = 0, cancels = 0, closedWhileActive = false, opened = 0;
+    const core = createMintSdk(native);
+    const sdk: UnsignedMintSdk = { build: () => assert.fail("No build allowed"), inspectSigned: core.inspectSigned,
+      destroy: async () => { destroyed++; closedWhileActive = active; } };
+    const rawFetch: typeof fetch = async (_input, init) => {
+      if (++reads > 1) { throw new Error("Stop settled control before effects"); }
+      const request = setupObject(JSON.parse(String(init?.body)) as unknown);
+      return new Response(new ReadableStream<Uint8Array>({
+        async start(controller) {
+          active = true; enter();
+          init?.signal?.addEventListener("abort", () => controller.error(new Error("Logical read abort")), { once: true });
+          if (mutation === "read-error") { await readFailure; controller.error(new Error("Logical read failure")); }
+          await physical; active = false;
+          if (mutation === "settled-body") {
+            controller.enqueue(Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: request.id,
+              result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" })));
+            controller.close();
+          }
+        },
+        async cancel() { cancels++; throw new Error("Logical cancellation failure"); },
+      }), { status: mutation.endsWith("cancel-error") ? 500 : 200 });
+    };
+    const fetcher = mutation.startsWith("wrapped-") ? createSdkTestFetch(DEFAULT_SOLANA_RPC, rawFetch) : rawFetch;
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const operation = createTestMint(cases[0].settings(directory), { fetcher, openSdk: async () => { opened++; return sdk; },
+      signPrepared: async () => assert.fail("No signer acquisition allowed") });
+    const outcome = operation.then(() => assert.fail("No success handoff allowed"), error => {
+      assert.ok(error instanceof Error); return error.message;
+    });
+    try {
+      await Promise.race([entered, outcome.then(label => assert.fail(`Stopped before body: ${label}`))]);
+      assert.equal(active, true); assert.equal(destroyed, 0); assert.equal(opened, 1);
+      if (mutation === "settled-body") {
+        release(); await outcome;
+        assert.equal(active, false); assert.equal(destroyed, 1); assert.equal(closedWhileActive, false);
+      } else {
+        if (mutation.endsWith("abort-read")) { context.mock.timers.tick(20_000); }
+        if (mutation === "read-error") { failRead(); }
+        for (let i = 0; i < 5; i++) { await new Promise<void>(_resolve => { setImmediate(_resolve); }); }
+        assert.equal(active, true); assert.equal(destroyed, 0, "Physical producer still held despite rejected read/cancel");
+        assert.match(await outcome, /cleanup debt/); assert.equal(cancels, mutation.endsWith("cancel-error") ? 1 : 0);
+        release(); await new Promise<void>(_resolve => { setImmediate(_resolve); });
+        assert.equal(active, false); assert.equal(destroyed, 0, "Unacknowledged producer release cannot clear latched debt");
+      }
+    } finally { failRead(); release(); await outcome; context.mock.timers.reset(); await rm(directory, { recursive: true, force: true }); }
+  });
+}
+
+test("all four function ingresses redact ENAMETOOLONG, EACCES and expectation-capture failures before opening", async context => {
+  const directory = await disposable();
+  const marker = "private-operator-journal-marker";
+  let opened = 0, fetched = 0, signed = 0;
+  const io = { fetcher: async () => { fetched++; assert.fail("No transport allowed"); },
+    openSdk: async (): Promise<never> => { opened++; assert.fail("No Host open allowed"); },
+    signPrepared: async (): Promise<never> => { signed++; assert.fail("No key/sign work allowed"); } };
+  const invoke = (path: string, captureFailure = false) => {
+    const extra = captureFailure ? { privateBytes: () => marker } : {};
+    const mint = { ...expected, rentLamports: "1461600", ...extra }, pool = { ...poolExpected, ...extra };
+    return [
+      () => createTestMint({ ...selection, expected: mint, journalFile: path }, io),
+      () => initializeTestPool({ ...selection, expected: pool, journalFile: path }, io),
+      () => registerTestSolanaPool({ ...selection, expected: { ...pool, operation: "create-token-account" }, journalDirectory: path }, io),
+      () => configureTestSolanaPool({ ...selection, expected: { ...pool, operation: "init-chain-remote-config" }, journalDirectory: path, registrationJournalFile: path }, io),
+    ];
+  };
+  const check = async (callers: ReturnType<typeof invoke>) => {
+    for (const caller of callers) {
+      await assert.rejects(caller(), error => {
+        assert.ok(error instanceof Error); assert.equal(error.message, "TEST setup failed");
+        assert.ok(!error.message.includes(marker)); assert.ok(!("code" in error)); assert.ok(!("path" in error));
+        assert.ok(!("cause" in error), "Private exception objects must not escape through cause");
+        return true;
+      });
+    }
+  };
+  try {
+    await check(invoke(join(directory, `${marker}-${"x".repeat(300)}`)));
+    const deniedPath = join(directory, marker);
+    const original = fs.lstatSync;
+    const probe = context.mock.method(fs, "lstatSync", (...args: Parameters<typeof fs.lstatSync>) => {
+      if (args[0] === deniedPath) { throw Object.assign(new Error(`EACCES: lstat '${deniedPath}'`), { code: "EACCES", path: deniedPath }); }
+      return original(...args);
+    });
+    syncBuiltinESMExports();
+    try { await check(invoke(deniedPath)); }
+    finally { probe.mock.restore(); syncBuiltinESMExports(); }
+    await check(invoke(join(directory, "capture.json"), true));
+    assert.deepEqual({ opened, fetched, signed }, { opened: 0, fetched: 0, signed: 0 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test("four ingress functions reject invalid own profile/fetch/aliases before fixture symlink checks, locks or provider IO", async () => {
   const directory = await disposable();
   try {
