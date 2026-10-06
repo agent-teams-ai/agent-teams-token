@@ -283,8 +283,19 @@ export async function createSolanaReverseSdk(settings) {
       const value = await rawState.before(rpc, e, maximumLamports); session?.assertHealthy();
       if (!value || typeof value !== 'object' || !('approval' in value) || typeof value.approval !== 'boolean' ||
         !('sourceLamports' in value) || typeof value.sourceLamports !== 'string' || !('lookupTable' in value) ||
-        !(value.lookupTable instanceof provider.web3.AddressLookupTableAccount)) { throw new Error('Invalid finalized reverse state'); }
-      return { approval: value.approval, sourceLamports: value.sourceLamports, lookupTable: value.lookupTable };
+        !(value.lookupTable instanceof provider.web3.AddressLookupTableAccount) || !('slot' in value) || typeof value.slot !== 'string') { throw new Error('Invalid finalized reverse state'); }
+      const snapshot = { lookupTable: value.lookupTable, slot: value.slot }; finalized(e, snapshot);
+      return { approval: value.approval, sourceLamports: value.sourceLamports, ...snapshot };
+    }); },
+    /** @param {Rpc} rpc @param {ReverseExpectation} e */
+    lookup(rpc, e) { return readState(async () => {
+      /** @type {unknown} */
+      const value = await rawState.lookup(rpc, e);
+      if (!value || typeof value !== 'object' || !('lookupTable' in value) ||
+        !(value.lookupTable instanceof provider.web3.AddressLookupTableAccount) || !('slot' in value) || typeof value.slot !== 'string') {
+        throw new Error('Invalid finalized reverse lookup');
+      }
+      const snapshot = { lookupTable: value.lookupTable, slot: value.slot }; finalized(e, snapshot); return snapshot;
     }); },
   });
   /** @param {string} linkMint @param {Pick<ReverseExpectation, 'approval' | 'quotedFee' | 'sourceLamports'>} dynamic @returns {ReverseExpectation} */

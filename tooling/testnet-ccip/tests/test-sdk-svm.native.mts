@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openTestSdk, readTestSdkBytes } from '../src/adapters/test-sdk-admission.ts';
 import { TEST_SDK_PROFILE } from '../src/adapters/test-sdk-policy.ts';
 import { createSolanaMintSdk } from '../src/adapters/solana-sdk.mjs';
@@ -10,14 +11,18 @@ import { createSolanaPoolInitSdk, createPoolInitSdk } from '../src/adapters/sola
 import { createSolanaRegistrationSdk, createRegistrationSdk } from '../src/adapters/solana-registration-sdk.mjs';
 import { createSolanaPoolConfigSdk, createPoolConfigSdk } from '../src/adapters/solana-pool-config-sdk.mjs';
 import { createSolanaReverseSdk, createReverseTransactionSdk, type ReverseExpectation, type Candidate } from '../src/adapters/solana-reverse-sdk.mjs';
-import { deriveReverseAccounts, reverseRoute, reverseInstructions } from '../src/domain/solana-reverse.mjs';
+import { createReverseState } from '../src/adapters/solana-reverse-state.mjs';
+import { createJournalFile } from '../src/adapters/evm-journal-file.ts';
+import { transferSolanaReverse } from '../src/composition/solana-reverse-transfer.mjs';
+import { deriveReverseAccounts, reverseRoute, reverseInstructions, reverseContract } from '../src/domain/solana-reverse.mjs';
+import { fixtureNamespace } from '../src/domain/replacement-fixture.ts';
 import { DEFAULT_SOLANA_RPC } from '../src/adapters/test-rpc.ts';
 import { BURNMINT_PROGRAM, POOL_GLOBAL } from '../src/domain/solana-pool-init.ts';
 import { ROUTER_PROGRAM, REGISTRATION_OPERATIONS } from '../src/domain/solana-registration.ts';
 import { POOL_CONFIG_OPERATIONS, FEE_QUOTER_PROGRAM } from '../src/domain/solana-pool-config.ts';
 import { SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM, solanaPublicKeyBytes } from '../src/domain/solana-mint.ts';
 import type { ReplacementFixture } from '../src/domain/replacement-fixture.ts';
-interface SvmInputs { readonly root: string; readonly archives: string; readonly captures: string; readonly fixture: ReplacementFixture }
+interface SvmInputs { readonly root: string; readonly archives: string; readonly captures: string; readonly out: string; readonly fixture: ReplacementFixture }
 let signingEffects = 0;
 export const svmSigningEffects = (): number => signingEffects;
 const digest = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
@@ -49,6 +54,90 @@ function signingSentinels(web3: import('../src/adapters/test-sdk-admission.ts').
   const denied = (): never => { signingEffects++; throw new Error('Native TEST signing sentinel'); };
   web3.Transaction.prototype.sign = denied; web3.Transaction.prototype.partialSign = denied;
   web3.VersionedTransaction.prototype.sign = denied; web3.Keypair.fromSecretKey = denied;
+}
+type Native = import('../src/adapters/test-sdk-admission.ts').NativeSolanaProvider;
+const copyKey = (b: Buffer, offset: number, address: string) => solanaPublicKeyBytes(address).copy(b, offset);
+// These retained public layouts are rebound explicitly for controlled units, never qualification captures.
+function controlledStateAccounts(e: ReverseExpectation) {
+  const { alt, fixture, recentSlot } = e; assert.ok(alt && fixture && recentSlot);
+  const golden = readJson(fileURLToPath(new URL('./fixtures/dev-svm-call-plan-goldens.json', import.meta.url)));
+  const records = new Map<string, ReturnType<typeof account>>();
+  const state = object(object(golden.facts).state);
+  const bind = (name: string, address: string, mutate: (bytes: Buffer) => void) => {
+    const captured = object(state[name]); assert.equal(typeof captured.dataBase64, 'string'); assert.equal(typeof captured.owner, 'string');
+    const bytes = Buffer.from(String(captured.dataBase64), 'base64'); mutate(bytes); records.set(address, account(bytes, String(captured.owner)));
+  };
+  bind('mint', e.mint, b => { copyKey(b, 4, e.signer); uint64(BigInt(fixture.amount)).copy(b, 36); });
+  bind('sourceAta', e.sourceAta, b => { copyKey(b, 0, e.mint); copyKey(b, 32, e.payer); uint64(BigInt(fixture.amount)).copy(b, 64); b.fill(0, 72, 108); b.fill(0, 121, 129); });
+  bind('poolAta', e.ata, b => { copyKey(b, 0, e.mint); copyKey(b, 32, e.signer); b.fill(0, 64, 72); });
+  bind('pool', e.pool, b => { for (const [offset, address] of [[41, e.mint], [74, e.signer], [106, e.ata], [138, e.payer], [202, e.payer], [234, e.routerPoolSigner]] as const) { copyKey(b, offset, address); } });
+  bind('routerConfig', e.routerConfig, b => { copyKey(b, 146, e.linkMint); });
+  bind('registry', e.registry, b => { copyKey(b, 9, e.payer); copyKey(b, 73, alt); copyKey(b, 137, e.mint); });
+  bind('chain', e.chain, b => { Buffer.from(fixture.pool.slice(2), 'hex').copy(b, 16); Buffer.from(fixture.token.slice(2).padStart(64, '0'), 'hex').copy(b, 40); });
+  bind('alt', alt, b => { copyKey(b, 22, e.payer); uint64(BigInt(recentSlot)).copy(b, 12);
+    [alt, e.registry, BURNMINT_PROGRAM, e.pool, e.ata, e.signer, SPL_TOKEN_PROGRAM, e.mint, e.feeTokenConfig, e.routerPoolSigner].forEach((a, i) => copyKey(b, 56 + i * 32, a)); });
+  const global = Buffer.concat([discriminator('account', 'PoolConfig'), Buffer.from([1, 1]), solanaPublicKeyBytes(ROUTER_PROGRAM), solanaPublicKeyBytes(reverseRoute(fixture).rmn)]);
+  records.set(POOL_GLOBAL, account(global, BURNMINT_PROGRAM));
+  records.set(e.payer, { ...account(Buffer.alloc(0), SYSTEM_PROGRAM), lamports: Number(e.sourceLamports) });
+  return records;
+}
+async function compositionSnapshotRegression(native: Native, e: ReverseExpectation, candidate: Candidate, inputs: SvmInputs) {
+  assert.ok(e.alt);
+  const pool = createPoolInitSdk(native), rawState = createReverseState(native, pool, e.fixture);
+  const records = controlledStateAccounts(e), calls: string[][] = [];
+  let slot = 11;
+  const finalizedRead = async (method: string, params: readonly unknown[]) => {
+    assert.equal(method, 'getMultipleAccounts'); assert.deepEqual(params[1], { encoding: 'base64', commitment: 'finalized' });
+    assert.ok(Array.isArray(params[0])); const addresses: string[] = [];
+    const value = params[0].map((address: unknown) => { assert.equal(typeof address, 'string'); addresses.push(String(address)); const r = records.get(String(address)); assert.ok(r); return r; });
+    calls.push(addresses); return { context: { slot: slot++ }, value };
+  };
+  const compiler = createReverseTransactionSdk(native, expected => assert.deepEqual(expected, e));
+  const before = await rawState.before(finalizedRead, e, e.sourceLamports); assert.equal(before.slot, '11');
+  const sdk = { ...compiler, pool: e, state: rawState, validateExpected: (expected: ReverseExpectation) => assert.deepEqual(expected, e),
+    derive: (_link: string, dynamic: Partial<ReverseExpectation>) => ({ ...e, ...dynamic }), candidate: async () => ({ candidate, fee: e.quotedFee }) };
+  const journalFile = join(inputs.out, fixtureNamespace(inputs.fixture), 'reverse.json');
+  const settings = { testOnly: true, fixture: inputs.fixture, fixtureIdentity: inputs.fixture.identity, journalFile, maxNativeBalanceLamports: e.sourceLamports };
+  let prepared: ReturnType<typeof compiler.build> | undefined;
+  const readRpc = async (method: string, params: readonly unknown[]) => {
+    if (method === 'getMultipleAccounts') { return finalizedRead(method, params); }
+    if (method === 'getLatestBlockhash') { return { value: { blockhash: SYSTEM_PROGRAM, lastValidBlockHeight: 100 } }; }
+    assert.equal(method, 'simulateTransaction'); assert.equal(typeof params[0], 'string');
+    const tx = native.web3.VersionedTransaction.deserialize(Buffer.from(String(params[0]), 'base64'));
+    assert.ok(tx.signatures.every(bytes => bytes.every(byte => byte === 0)), 'Only unsigned preflight');
+    // Decode the packet that composition actually built using the independent finalized read.
+    const last = await rawState.lookup(finalizedRead, e); assert.equal(last.slot, '15');
+    prepared = compiler.build(candidate, e, { blockhash: SYSTEM_PROGRAM, lastValidBlockHeight: '100' }, last);
+    assert.equal(params[0], prepared.bytesBase64);
+    return { value: { err: { InstructionError: [0, 'controlled-preflight-refusal'] } } };
+  };
+  const ports = { sdk: async () => sdk, store: createJournalFile, rpc: () => ({ readRpc, chain: async () => {},
+    observe: async () => assert.fail('Invalid public packet must refuse before observation'), broadcast: async () => assert.fail('No broadcast in regression') }) };
+  await assert.rejects(transferSolanaReverse(settings, ports), /^Error: Unsigned reverse preflight simulation failed$/);
+  assert.ok(prepared); assert.equal(existsSync(journalFile), false, 'Failed unsigned preparation never creates a signed record');
+  const record = { schema: reverseContract(e).schema, intent: reverseContract(e).verify(prepared.intent, e),
+    signed: { ...prepared, signature: '1'.repeat(64) }, messageBase64: prepared.messageBase64, phase: 'submitting' };
+  // The zero-signature packet is deliberately invalid: native Ed25519 refusal is required, never a fake signed positive.
+  writeFileSync(journalFile, JSON.stringify(record), { mode: 0o600, flag: 'wx' }); const persisted = readFileSync(journalFile);
+  const source = records.get(e.sourceAta); assert.ok(source && typeof source.data[0] === 'string');
+  const progressed = Buffer.from(source.data[0], 'base64'); progressed.fill(0, 64, 72); records.set(e.sourceAta, account(progressed, SPL_TOKEN_PROGRAM));
+  await assert.rejects(rawState.before(finalizedRead, e, e.sourceLamports), /Wrong source token balance/);
+  calls.length = 0;
+  const recoveryPorts = { ...ports, sdk: async () => ({ ...sdk,
+    candidate: async () => assert.fail('No quote or new candidate during recovery'),
+    state: { ...rawState, before: async () => assert.fail('No full prerequisites during recovery'), config: async () => assert.fail('No new preparation') } }),
+    rpc: () => ({ ...ports.rpc(), readRpc: finalizedRead }) };
+  await assert.rejects(transferSolanaReverse(settings, recoveryPorts), /^Error: Invalid native Ed25519 signature$/);
+  assert.deepEqual(calls, [[e.alt]]); assert.deepEqual(readFileSync(journalFile), persisted);
+  const failedRead = { ...recoveryPorts, rpc: () => ({ ...ports.rpc(), readRpc: async () => { throw new Error('controlled-finalized-read-failed'); } }) };
+  await assert.rejects(transferSolanaReverse(settings, failedRead), /^Error: controlled-finalized-read-failed$/);
+  assert.deepEqual(readFileSync(journalFile), persisted);
+  const alt = records.get(e.alt); assert.ok(alt && typeof alt.data[0] === 'string');
+  const bad = Buffer.from(alt.data[0], 'base64'); bad[20] = 1; records.set(e.alt, account(bad, alt.owner));
+  await assert.rejects(transferSolanaReverse(settings, recoveryPorts), /Wrong finalized active ALT contents/);
+  assert.deepEqual(readFileSync(journalFile), persisted);
+  return { preparation: 'unsigned-preflight-refused-after-native-compilation', observedSlot: before.slot,
+    recovery: 'ALT-only-native-Ed25519-refusal-with-progressed-source', persistedRecordUnchanged: true, failedFinalizedReadRefused: true };
 }
 export async function svmFactoryUnit(name: string, inputs: SvmInputs) {
   const {root, fixture} = inputs, selection = selectionFor(inputs);
@@ -132,36 +221,58 @@ export async function svmReverseUnit(name: string, inputs: SvmInputs) {
   uint64(BigInt(fixture.forwardSelector)).copy(config, 10); solanaPublicKeyBytes(FEE_QUOTER_PROGRAM).copy(config, 82);
   solanaPublicKeyBytes('RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7').copy(config, 114);
   const linkMint = 'So11111111111111111111111111111111111111112'; solanaPublicKeyBytes(linkMint).copy(config, 146);
-  let e: ReverseExpectation | undefined, table: Buffer | undefined, calls = 0, simulations = 0, stages = 0, altReads = 0;
+  let e: ReverseExpectation | undefined, table: Buffer | undefined, calls = 0, simulations = 0, stages = 0, altReads = 0, views = 0;
+  let web3: typeof import('../../../.local/INPUT/provider/node_modules/@solana/web3.js/lib/index.js') | undefined;
+  function replayAccount(address: unknown, expected: ReverseExpectation) {
+    let data: Buffer, owner = SPL_TOKEN_PROGRAM;
+    if (address === expected.routerConfig) { data = config; owner = ROUTER_PROGRAM; }
+    else if (address === expected.alt) { assert.ok(table); data = table; owner = 'AddressLookupTab1e1111111111111111111111111'; altReads++; }
+    else if (address === expected.registry) { data = Buffer.alloc(170); discriminator('account', 'TokenAdminRegistry').copy(data); data[8] = 2;
+      solanaPublicKeyBytes(expected.payer).copy(data, 9); assert.ok(expected.alt); solanaPublicKeyBytes(expected.alt).copy(data, 73); solanaPublicKeyBytes(expected.mint).copy(data, 137); owner = ROUTER_PROGRAM; }
+    else if (address === expected.pool) { data = Buffer.alloc(368); discriminator('account', 'State').copy(data); data[8] = 1;
+      for (const [offset, key] of [[9, SPL_TOKEN_PROGRAM], [41, expected.mint], [74, expected.signer], [106, expected.ata], [138, expected.payer], [202, expected.payer], [234, expected.routerPoolSigner], [266, ROUTER_PROGRAM], [336, 'RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7']] as const) { solanaPublicKeyBytes(key).copy(data, offset); } data[73] = 9; owner = BURNMINT_PROGRAM; }
+    else if (address === expected.chain) { data = Buffer.concat([discriminator('account', 'ChainConfig'), uint32(1), uint32(20), Buffer.from(fixture.pool.slice(2), 'hex'), uint32(32), Buffer.from(fixture.token.slice(2).padStart(64, '0'), 'hex'), Buffer.from([9]),
+      ...[0, 1].map(() => Buffer.concat([uint64(10000000000n), uint64(0n), Buffer.from([1]), uint64(10000000000n), uint64(1000000000n)])), Buffer.alloc(32)]); owner = BURNMINT_PROGRAM; }
+    else if (address === fixture.mint) { data = Buffer.alloc(82); data.writeUInt32LE(1); solanaPublicKeyBytes(expected.signer).copy(data, 4); uint64(BigInt(fixture.amount)).copy(data, 36); data[44] = 9; data[45] = 1; }
+    else { assert.equal(address, expected.sourceAta); data = Buffer.alloc(165); solanaPublicKeyBytes(fixture.mint).copy(data); solanaPublicKeyBytes(fixture.payer).copy(data, 32); uint64(BigInt(fixture.amount)).copy(data, 64); data[108] = 1;
+      if (exact) { data.writeUInt32LE(1, 72); solanaPublicKeyBytes(expected.spender).copy(data, 76); uint64(BigInt(fixture.amount)).copy(data, 121); } }
+    return { context: { slot: 11 }, value: account(data, owner) };
+  }
   const replay: typeof fetch = async (_input, init) => {
     const r = object(JSON.parse(String(init?.body)) as unknown); calls++; assert.ok(Array.isArray(r.params)); let result: unknown;
     if (r.method === 'getGenesisHash') { assert.deepEqual(r.params, []); result = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG'; }
     else {
       assert.ok(e, 'derive must precede generation');
       if (r.method === 'getAccountInfo') {
-        const address = r.params[0]; let data: Buffer, owner = SPL_TOKEN_PROGRAM;
-        if (address === e.routerConfig) { data = config; owner = ROUTER_PROGRAM; }
-        else if (address === e.alt) { assert.ok(table); data = table; owner = 'AddressLookupTab1e1111111111111111111111111'; altReads++; }
-        else if (address === fixture.mint) { data = Buffer.alloc(82); data.writeUInt32LE(1); solanaPublicKeyBytes(e.signer).copy(data, 4); uint64(BigInt(fixture.amount)).copy(data, 36); data[44] = 9; data[45] = 1; }
-        else { assert.equal(address, e.sourceAta); data = Buffer.alloc(165); solanaPublicKeyBytes(fixture.mint).copy(data); solanaPublicKeyBytes(fixture.payer).copy(data, 32); uint64(BigInt(fixture.amount)).copy(data, 64); data[108] = 1;
-          if (exact) { data.writeUInt32LE(1, 72); solanaPublicKeyBytes(e.spender).copy(data, 76); uint64(BigInt(fixture.amount)).copy(data, 121); } }
-        result = { context: { slot: 11 }, value: account(data, owner) };
+        result = replayAccount(r.params[0], e);
       } else {
         assert.equal(r.method, 'simulateTransaction'); simulations++;
-        // Literal 1.6.0 IDL response layout: Vec<Meta>, Vec<Meta>, Vec<Key>, String, String.
+        assert.ok(web3 && typeof r.params[0] === 'string');
+        const tx = web3.VersionedTransaction.deserialize(Buffer.from(r.params[0], 'base64'));
+        const requests = tx.message.compiledInstructions.filter(ix => tx.message.staticAccountKeys[ix.programIdIndex]?.toBase58() !== 'ComputeBudget111111111111111111111111111111');
+        assert.equal(requests.length, 1); const ix = requests[0]; assert.ok(ix);
+        const program = tx.message.staticAccountKeys[ix.programIdIndex]?.toBase58(); assert.equal(program, ROUTER_PROGRAM);
+        const instruction = Buffer.from(ix.data), tag = instruction.subarray(0, 8);
+        // Actual SDK 1.13 uses Anchor .view() for typeVersion; returnData alone is insufficient.
         let returned: Buffer;
-        if (simulations === 1) { returned = Buffer.concat([uint64(5n), Buffer.alloc(16), solanaPublicKeyBytes(linkMint)]); }
+        if (tag.equals(discriminator('global', 'type_version'))) {
+          assert.equal(instruction.length, 8); views++; returned = borshString('ccip-router 1.6.0');
+        } else if (tag.equals(discriminator('global', 'get_fee'))) { returned = Buffer.concat([uint64(5n), Buffer.alloc(16), solanaPublicKeyBytes(linkMint)]); }
         else {
+          assert.deepEqual(tag, discriminator('global', 'derive_accounts_ccip_send'));
+          const first = instruction.subarray(-borshString('Start').length).equals(borshString('Start'));
+          assert.ok(first || instruction.subarray(-borshString('TokenTransferStaticAccounts/0/0').length).equals(borshString('TokenTransferStaticAccounts/0/0')), 'Unexpected derivation stage');
+          stages++;
           const main = [e.routerConfig, e.destChain, e.nonce, e.payer, SYSTEM_PROGRAM, SPL_TOKEN_PROGRAM, linkMint, SYSTEM_PROGRAM,
             e.feeReceiver, e.spender, FEE_QUOTER_PROGRAM, e.feeConfig, e.feeDest, e.nativeFeeConfig, e.linkFeeConfig,
             'RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7', e.curses, e.rmnConfig];
           const remaining = [e.sourceAta, e.perTokenConfig, e.chain, e.alt, e.registry, BURNMINT_PROGRAM, e.pool, e.ata, e.signer, SPL_TOKEN_PROGRAM, e.mint, e.feeTokenConfig, e.routerPoolSigner];
-          assert.ok(e.alt); const first = stages++ === 0, keys = first ? main : remaining;
+          assert.ok(e.alt); const keys = first ? main : remaining;
           const metas = keys.map((key, i) => { assert.ok(key); return Buffer.concat([solanaPublicKeyBytes(key), Buffer.from([Number(first && i === 3), Number(first ? [1, 2, 3, 7, 8].includes(i) : [0, 2, 6, 7, 10].includes(i))])]); });
           returned = Buffer.concat([uint32(0), uint32(metas.length), ...metas, uint32(first ? 0 : 1), ...(first ? [] : [solanaPublicKeyBytes(e.alt)]),
             borshString(first ? 'Start' : 'TokenTransferStaticAccounts/0/0'), borshString(first ? 'TokenTransferStaticAccounts/0/0' : '')]);
         }
-        result = { context: { slot: 11 }, value: { err: null, logs: [], accounts: null, unitsConsumed: 1000, returnData: { programId: ROUTER_PROGRAM, data: [returned.toString('base64'), 'base64'] } } };
+        result = { context: { slot: 11 }, value: { err: null, logs: ['Program return: ' + program + ' ' + returned.toString('base64')], accounts: null, unitsConsumed: 1000, returnData: { programId: ROUTER_PROGRAM, data: [returned.toString('base64'), 'base64'] } } };
       }
     }
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: r.id, result }));
@@ -172,7 +283,7 @@ export async function svmReverseUnit(name: string, inputs: SvmInputs) {
     assert.equal('sign' in client, false);
     e = client.derive(linkMint, { approval: !exact, quotedFee: '5', sourceLamports: '1000000' }); assert.ok(e.alt);
     const req = createRequire(join(root, 'package.json'));
-    const web3: typeof import('../../../.local/INPUT/provider/node_modules/@solana/web3.js/lib/index.js') = req('@solana/web3.js'); signingSentinels(web3);
+    web3 = req('@solana/web3.js'); assert.ok(web3); signingSentinels(web3);
     const addresses = [e.alt, e.registry, BURNMINT_PROGRAM, e.pool, e.ata, e.signer, SPL_TOKEN_PROGRAM, e.mint, e.feeTokenConfig, e.routerPoolSigner];
     table = Buffer.alloc(376); table.writeUInt32LE(1); table.writeBigUInt64LE((1n << 64n) - 1n, 4); table.writeBigUInt64LE(10n, 12); table[21] = 1;
     solanaPublicKeyBytes(fixture.payer).copy(table, 22); addresses.forEach((a, i) => solanaPublicKeyBytes(a).copy(table!, 56 + i * 32));
@@ -187,7 +298,19 @@ export async function svmReverseUnit(name: string, inputs: SvmInputs) {
       uint32(0), uint32(1), solanaPublicKeyBytes(fixture.mint), uint64(BigInt(fixture.amount)), solanaPublicKeyBytes(SYSTEM_PROGRAM), uint32(21), Buffer.from('181dcf100000000000000000000000000000000001', 'hex'), uint32(1), Buffer.from([0])]);
     assert.deepEqual(send.data, literalSend); assert.ok(Buffer.from(built.bytesBase64, 'base64').length <= 1232);
     assert.throws(() => client.inspectSigned(built.bytesBase64, e!, snapshot), /Ed25519 signature/);
-    assert.equal(stages, 2); assert.equal(altReads, 1); assert.equal(simulations, 3);
+    assert.equal(stages, 2); assert.equal(altReads, 2); assert.equal(views, 1); assert.equal(simulations, 4);
+    const observed = await client.state.lookup(async (method, params) => {
+      assert.equal(method, 'getMultipleAccounts'); assert.deepEqual(params, [[expected.alt], { encoding: 'base64', commitment: 'finalized' }]);
+      assert.ok(table); return { context: { slot: 11 }, value: [account(table, 'AddressLookupTab1e1111111111111111111111111')] };
+    }, expected);
+    assert.equal(observed.slot, '11'); assert.deepEqual(observed.lookupTable.state, snapshot.lookupTable.state);
+    const prerequisites = controlledStateAccounts(expected);
+    const before = await client.state.before(async (method, params) => {
+      assert.equal(method, 'getMultipleAccounts'); assert.ok(Array.isArray(params[0]));
+      return { context: { slot: 42 }, value: params[0].map((address: unknown) => { const raw = prerequisites.get(String(address)); assert.ok(raw); return raw; }) };
+    }, expected, '1000000');
+    assert.equal(before.slot, '42', 'Retain the independently observed finalized slot');
+    assert.deepEqual(before.lookupTable.state, snapshot.lookupTable.state);
     let release: ((value: unknown) => void) | undefined, started: (() => void) | undefined;
     const deferred = new Promise<unknown>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { started = resolve; });
     const pending = client.state.config(async (method, params) => {
@@ -202,7 +325,8 @@ export async function svmReverseUnit(name: string, inputs: SvmInputs) {
     assert.equal(closed, false, 'Admission remains installed until the finalized state read drains');
     assert.ok(release); release({ context: { slot: 11 }, value: [account(config, ROUTER_PROGRAM)] });
     await Promise.all([closing, rejected]);
-    return { classification: 'controlled-unit-only', approval: !exact, rpcCalls: calls, nativeSimulations: simulations, nativeAltReads: altReads, quoteBindingDriftCases: 2, finalizedStateDrainWitness: true };
+    await assert.rejects(client.state.lookup(async () => assert.fail('Closed lookup must not read'), expected), /session destroyed|busy\/destroyed/);
+    return { classification: 'controlled-unit-only', approval: !exact, rpcCalls: calls, nativeSimulations: simulations, anchorViews: views, nativeAltReads: altReads, quoteBindingDriftCases: 2, finalizedStateDrainWitness: true };
   } finally { await client.destroy(); }
 }
 export async function svmCompilerUnit(inputs: SvmInputs) {
@@ -254,9 +378,26 @@ export async function svmCompilerUnit(inputs: SvmInputs) {
       const tx = native.web3.VersionedTransaction.deserialize(Buffer.from(built.bytesBase64, 'base64')); mutate(tx);
       assert.throws(() => sdk.inspectSigned(Buffer.from(tx.serialize()).toString('base64'), e, snapshot), /global privileges/);
     }
-    const result = { classification: 'controlled-unit-only', actualCandidateCompilerWitness: true, altDriftCases: 6, wireDriftCases: 2 };
+    const composition = await compositionSnapshotRegression(native, e, candidate, inputs);
+    const result = { classification: 'controlled-unit-only', actualCandidateCompilerWitness: true, altDriftCases: 6, wireDriftCases: 2, composition };
     session.assertHealthy(); return { ...result, admission: session.evidence };
   } finally { session.close(); }
+}
+export async function svmLookupFailureUnit(inputs: SvmInputs) {
+  const replay: typeof fetch = async (_input, init) => {
+    const request = object(JSON.parse(String(init?.body)) as unknown); assert.equal(request.method, 'getGenesisHash');
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG' }));
+  };
+  const client = await createSolanaReverseSdk({ ...selectionFor(inputs), providerDirectory: inputs.root, ccipProviderDirectory: inputs.root, recentSlot: '10', replayFetch: replay });
+  assert.ok('destroy' in client);
+  try {
+    const e = client.derive('So11111111111111111111111111111111111111112', { approval: true, quotedFee: '5', sourceLamports: '1000000' });
+    let reads = 0;
+    await assert.rejects(client.state.lookup(async () => { reads++; throw new Error('controlled-finalized-read-failed'); }, e), /^Error: controlled-finalized-read-failed$/);
+    await assert.rejects(client.state.lookup(async () => { reads++; assert.fail('Failed read must close the client'); }, e), /session destroyed|busy\/destroyed/);
+    assert.equal(reads, 1);
+    return { classification: 'controlled-unit-only', failedReadClosesClient: true, finalizedReadAttempts: reads };
+  } finally { await client.destroy(); }
 }
 export async function svmCaptured(name: 'approval' | 'exact', inputs: SvmInputs) {
   const {root, fixture, captures} = inputs, selection = selectionFor(inputs);

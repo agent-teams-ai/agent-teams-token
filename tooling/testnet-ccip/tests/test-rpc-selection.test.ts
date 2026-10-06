@@ -54,9 +54,12 @@ test("TEST RPC selection keeps defaults and rejects credential, redirect and non
   for (const endpoint of ["", "http://sepolia.gateway.tenderly.co", "https://user:pass@sepolia.gateway.tenderly.co",
     PUBLIC_SEPOLIA_RPC + "/token", PUBLIC_SEPOLIA_RPC + "?key=synthetic", PUBLIC_SEPOLIA_RPC + "#fragment",
     PUBLIC_SEPOLIA_RPC + ":443", "https://mainnet.gateway.tenderly.co", "https://127.0.0.1", null]) {
-    assert.throws(() => selectSepoliaRpc({ sepoliaRpc: endpoint } as never));
-    await assert.rejects(readRemoteConfigSnapshot({ ...target, sepoliaRpc: endpoint } as never,
+    // @ts-expect-error null is an intentionally malformed selector
+    assert.throws(() => selectSepoliaRpc({ sepoliaRpc: endpoint }));
+    // @ts-expect-error null is intentionally malformed, preserving the real rejection
+    await assert.rejects(readRemoteConfigSnapshot({ ...target, sepoliaRpc: endpoint },
       async () => assert.fail("Invalid selection must precede fetch")));
+    // @ts-expect-error deliberately incomplete ingress must refuse before any port IO
     await assert.rejects(transferEvmForward({ sepoliaRpc: endpoint }, { exclusive: () => assert.fail("Invalid selection must precede journal"),
       sdk: async () => assert.fail("Invalid selection must precede SDK"), snapshot: async () => assert.fail("Invalid selection must precede snapshot"),
       execute: async () => assert.fail("Invalid selection must precede execution"), read: async () => assert.fail("Invalid selection must precede read") }));
@@ -135,14 +138,14 @@ test("wrong chain, changed nonce and insufficient funding reject before fake sig
 
 test("forward composition forwards the selected RPC to SDK, readiness, approval/send and submitted resume", async () => {
   for (const allowance of [0n, FORWARD.amount]) {
-    const settings = { testOnly: true, sepoliaRpc: PUBLIC_SEPOLIA_RPC, signer: signerConfig, approvalNonce: "7", sendNonce: "8",
+    const settings = { providerDirectory: "/unused", testOnly: true, sepoliaRpc: PUBLIC_SEPOLIA_RPC, signer: signerConfig, approvalNonce: "7", sendNonce: "8",
       approvalJournal: "/unused/approval", sendJournal: "/unused/send" };
     const snapshot = await readRemoteConfigSnapshot(target, transport().fetcher);
     const send = { from: FORWARD.administrator, to: FORWARD.router, value: 5n, data: "0x12345678" };
     const approval = { ...send, to: FORWARD.token, value: 0n };
     let stored: EvmJournalRecord | null = null;
     const selected: string[] = [];
-    const ports = { exclusive: async (_: string, work: () => Promise<unknown>) => work(),
+    const ports = { exclusive: async <T>(_: string, work: () => Promise<T>) => work(),
       sdk: async (_directory: unknown, _recipient: unknown, _fixture: unknown, endpoint = DEFAULT_SEPOLIA_RPC) => {
         selected.push(endpoint);
         return { allowance: async () => allowance, verify: () => {}, destroy: async () => {},
@@ -169,7 +172,7 @@ test("native status observation uses the selected endpoint and retains finality/
   const f = transport(c => c.method === "eth_chainId" ? "0x1" : assert.fail("Wrong chain must stop status reads"));
   const native = createNativeStatus(PUBLIC_SEPOLIA_RPC, DEFAULT_SOLANA_RPC, {}, f.fetcher);
   await assert.rejects(native.ethereum(hash, "lock"), /not successful finalized/);
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].endpoint, new URL(PUBLIC_SEPOLIA_RPC).href);
+  assert.equal(f.calls.length, 1); assert.ok(f.calls[0]); assert.equal(f.calls[0].endpoint, new URL(PUBLIC_SEPOLIA_RPC).href);
 });
 
 test("transport and SDK hook reject malformed, redirected, oversized and uncertain responses without retry", async () => {

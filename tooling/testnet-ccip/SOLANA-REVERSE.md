@@ -29,12 +29,25 @@ request/response rows and independent expectation files. Each expectation binds
 `observation` (recentSlot/linkMint/quotedFee/sourceLamports), `finalizedLookup`
 (slot/key/dataBase64), `unsignedPacket` (blockhash/lastValidBlockHeight/bytesBase64/
 messageBase64) and an externally supplied `publicSignedPacket`. Missing captures
-fail qualification. The current worker has no qualifying capture or pinned
-execution runtime; native behavior remains unqualified.
+fail qualification. The root supplied a pinned public runtime and a private
+copy of public dependencies for offline units. Genuine captures remain absent;
+these units do not qualify public execution or immutable runtime custody.
 
-Phase3's seven entrypoint selections, status wiring and finalized snapshot
-propagation remain pending. The operator CLI below does not yet select this new
-branch or supply its snapshot argument. Fresh public E→A→E plus E→B settlement
+The existing legacy composition retains each observed finalized slot and passes
+the repeated prerequisite read's native lookup account into preparation and
+signing. Journal inspection independently reads only the selected ALT at finalized
+commitment, so progressed source balances do not require a new preparation.
+Failed or closed reads refuse inspection; recovery never requotes or replaces
+the stored transaction. Native signature verification remains mandatory.
+
+Controlled replay dispatches actual router instruction discriminators and
+derivation stages, including SDK 1.13's Anchor view return log. Every successful
+native child requires zero attempted network, signing and unguarded loads;
+a caught network denial still fails and retains its attempted effect count.
+
+Phase3's seven explicit entrypoint selections and status wiring remain pending.
+The operator CLI below does not yet select the TEST branch.
+Fresh public E→A→E plus E→B settlement
 and exact accounting remain unproven. This checkpoint authorizes no signing,
 broadcast, journal replacement or Mainnet release.
 
