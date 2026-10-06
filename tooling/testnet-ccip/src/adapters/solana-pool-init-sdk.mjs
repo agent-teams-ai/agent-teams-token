@@ -1,14 +1,35 @@
+// @ts-check
 import { createHash } from "node:crypto";
+import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
+import { openTestSdk } from "./test-sdk-admission.ts";
+import { selectTestSdk } from "./test-sdk-policy.ts";
 import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transaction-sdk.mjs";
 import { verifySolanaPoolInitIntent, BURNMINT_PROGRAM, BURNMINT_PROGRAM_DATA, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
-export async function createSolanaPoolInitSdk(providerDirectory) {
+/** @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] */
+export async function createSolanaPoolInitSdk(providerDirectory, selection = {}) {
+  const selected = selectTestSdk(selection, providerDirectory, selection.fixture === undefined ? undefined : validateReplacementFixture(selection.fixture));
+  if (selected) {
+    const session = await openTestSdk({ root: providerDirectory, archives: selected.archives });
+    try {
+      const sdk = createPoolInitSdk(session.native);
+      return Object.freeze({
+        build: /** @param {Parameters<typeof sdk.build>} args */ (...args) => { session.assertHealthy(); const value = sdk.build(...args); session.assertHealthy(); return value; },
+        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { session.assertHealthy(); const value = sdk.inspectSigned(...args); session.assertHealthy(); return value; },
+        verifyState: /** @param {Parameters<typeof sdk.verifyState>} args */ (...args) => { session.assertHealthy(); const value = sdk.verifyState(...args); session.assertHealthy(); return value; },
+        verifyGlobal: /** @param {Parameters<typeof sdk.verifyGlobal>} args */ (...args) => { session.assertHealthy(); sdk.verifyGlobal(...args); session.assertHealthy(); },
+        destroy: async () => session.close(),
+      });
+    } catch (error) { session.close(); throw error; }
+  }
   const provider = await loadSolanaProvider(providerDirectory);
   return createPoolInitSdk(provider);
 }
+/** @param {import('./solana-transaction-sdk.mjs').NativeProvider} provider */
 export function createPoolInitSdk(provider) {
   const { PublicKey, SystemProgram, TransactionInstruction } = provider.web3;
   const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } = provider.spl;
   const program = new PublicKey(BURNMINT_PROGRAM);
+  /** @param {import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation} expected */
   function addresses(expected) {
     const mint = new PublicKey(expected.mint);
     const pool = PublicKey.findProgramAddressSync([Buffer.from("ccip_tokenpool_config"), mint.toBuffer()], program)[0];
@@ -17,17 +38,18 @@ export function createPoolInitSdk(provider) {
     return { mint, pool, signer, ata: getAssociatedTokenAddressSync(mint, signer, true) };
   }
   const { build, sign, inspectSigned } = createSolanaTransactionSdk(provider,
-    (intent, expected) => { addresses(expected); return verifySolanaPoolInitIntent(intent, expected); },
+    (intent, /** @type {import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation} */expected) => { addresses(expected); return verifySolanaPoolInitIntent(intent, expected); },
     expected => {
       addresses(expected);
       const keys = [expected.pool, expected.mint, expected.payer, SystemProgram.programId.toBase58(), BURNMINT_PROGRAM, BURNMINT_PROGRAM_DATA, POOL_GLOBAL];
       return new TransactionInstruction({ programId: program, data: Buffer.from("afaf6d1f0d989bed", "hex"),
         keys: keys.map((address, i) => ({ pubkey: new PublicKey(address), isSigner: i === 2, isWritable: i === 0 || i === 2 })) });
     });
+  /** @param {string} bytesBase64 @param {import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation} expected */
   function verifyState(bytesBase64, expected) {
     const a = addresses(expected), data = Buffer.from(bytesBase64, "base64");
     const discriminator = createHash("sha256").update("account:State").digest().subarray(0, 8);
-    const key = offset => new PublicKey(data.subarray(offset, offset + 32)).toBase58();
+    const key = (/** @type {number} */offset) => new PublicKey(data.subarray(offset, offset + 32)).toBase58();
     // Pinned official State: version followed by BaseConfig. Never accept a mint-only success.
     if (data.toString("base64") !== bytesBase64 || data.length !== 368 || !data.subarray(0, 8).equals(discriminator) || data[8] !== 1 ||
       key(9) !== TOKEN_PROGRAM_ID.toBase58() || key(41) !== expected.mint || data[73] !== 9 ||
@@ -39,6 +61,7 @@ export function createPoolInitSdk(provider) {
       key(336) !== "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7") { throw new Error("Wrong initialized pool state"); }
     return { address: expected.pool, mint: expected.mint, owner: expected.payer, verified: true };
   }
+  /** @param {string} bytesBase64 */
   function verifyGlobal(bytesBase64) {
     const data = Buffer.from(bytesBase64, "base64");
     if (data.toString("base64") !== bytesBase64 || data.length !== 74 ||

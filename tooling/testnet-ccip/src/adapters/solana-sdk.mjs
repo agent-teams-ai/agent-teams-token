@@ -1,13 +1,20 @@
+// @ts-check
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { verifySolanaMintIntent } from "../domain/solana-mint.ts";
+import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
+import { openTestSdk } from "./test-sdk-admission.ts";
+import { selectTestSdk } from "./test-sdk-policy.ts";
+/** @typedef {import('./solana-transaction-sdk.mjs').NativeProvider} NativeProvider */
+/** @typedef {import('../domain/solana-mint.ts').SolanaMintExpectation} Expectation */
 
+/** @param {InstanceType<NativeProvider['web3']['Transaction']>} transaction @param {Expectation} expected */
 function decode(transaction, expected) {
   const message = transaction.compileMessage();
   if (message.header.numRequiredSignatures !== 2 || message.accountKeys.length !== 4 ||
-    message.accountKeys[0].toBase58() !== expected.payer || message.accountKeys[1].toBase58() !== expected.mint) {
+    message.accountKeys[0]?.toBase58() !== expected.payer || message.accountKeys[1]?.toBase58() !== expected.mint || !transaction.feePayer) {
     throw new Error("Unexpected mint transaction signers/accounts");
   }
   const intent = {
@@ -20,8 +27,20 @@ function decode(transaction, expected) {
     messageBase64: transaction.serializeMessage().toString("base64") };
 }
 
-/** Loads the official provider's frozen dependency tree; no install or key generation. */
-export async function createSolanaMintSdk(providerDirectory) {
+/** @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] */
+export async function createSolanaMintSdk(providerDirectory, selection = {}) {
+  const selected = selectTestSdk(selection, providerDirectory, selection.fixture === undefined ? undefined : validateReplacementFixture(selection.fixture));
+  if (selected) {
+    const session = await openTestSdk({ root: providerDirectory, archives: selected.archives });
+    try {
+      const sdk = createMintSdk(session.native);
+      return Object.freeze({
+        build: /** @param {Parameters<typeof sdk.build>} args */ (...args) => { session.assertHealthy(); const value = sdk.build(...args); session.assertHealthy(); return value; },
+        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { session.assertHealthy(); const value = sdk.inspectSigned(...args); session.assertHealthy(); return value; },
+        destroy: async () => session.close(),
+      });
+    } catch (error) { session.close(); throw error; }
+  }
   const root = resolve(providerDirectory);
   const pins = {
     "package.json": "e19ff221b6ea124a2a05c9eefaf41a2d2b077d00689386dff56f482c393dde4d",
@@ -35,10 +54,12 @@ export async function createSolanaMintSdk(providerDirectory) {
   const require = createRequire(resolve(root, "package.json"));
   return createMintSdk({ web3: require("@solana/web3.js"), spl: require("@solana/spl-token"), bs58: require("bs58").default });
 }
+/** @param {NativeProvider} provider */
 export function createMintSdk(provider) {
   const { PublicKey, SystemProgram, Transaction, Keypair } = provider.web3;
   const { createInitializeMint2Instruction, TOKEN_PROGRAM_ID } = provider.spl;
   const { bs58 } = provider;
+  /** @param {Expectation} expected @param {import('./solana-transaction-sdk.mjs').BlockValidity} latestBlockhash */
   function build(expected, latestBlockhash) {
     if (!/^[1-9][0-9]*$/.test(latestBlockhash.lastValidBlockHeight)) { throw new Error("Invalid block validity height"); }
     if (new PublicKey(latestBlockhash.blockhash).toBase58() !== latestBlockhash.blockhash) { throw new Error("Invalid blockhash"); }
@@ -55,6 +76,7 @@ export function createMintSdk(provider) {
     return { bytesBase64: bytes.toString("base64"), blockhash: latestBlockhash.blockhash,
       lastValidBlockHeight: latestBlockhash.lastValidBlockHeight, ...decode(decoded, expected) };
   }
+  /** @param {string} bytesBase64 @param {Expectation} expected */
   function inspectSigned(bytesBase64, expected) {
     const bytes = Buffer.from(bytesBase64, "base64");
     if (bytes.length > 1232 || bytes.toString("base64") !== bytesBase64) { throw new Error("Invalid mint transaction bytes"); }
@@ -64,6 +86,7 @@ export function createMintSdk(provider) {
     }
     return { signature: bs58.encode(tx.signature), blockhash: tx.recentBlockhash, ...decode(tx, expected) };
   }
+  /** @param {import('./solana-transaction-sdk.mjs').PreparedTransaction} prepared @param {Expectation} expected @param {import('./solana-transaction-sdk.mjs').TestKeys & {mintFile: string}} testKeys */
   async function sign(prepared, expected, testKeys) {
     if (testKeys.testOnly !== true) { throw new Error("Test-only mint keys required"); }
     let payerBytes, mintBytes;

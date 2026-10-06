@@ -9,6 +9,11 @@
   },
   "include": [
     "src/adapters/test-sdk-*.ts", "src/adapters/evm-forward-sdk.mjs",
-    "tests/test-sdk-admission.test.ts", "tests/test-sdk-execution.native.mts"
+    "src/adapters/solana-sdk.mjs", "src/adapters/solana-transaction-sdk.mjs",
+    "src/adapters/solana-pool-init-sdk.mjs", "src/adapters/solana-registration-sdk.mjs",
+    "src/adapters/solana-pool-config-sdk.mjs", "src/adapters/solana-reverse-sdk.mjs",
+    "tests/test-sdk-admission.test.ts", "tests/test-sdk-svm.test.ts",
+    "tests/test-sdk-execution.native.mts", "tests/test-sdk-svm.native.mts",
+    "tests/solana-reverse-sdk.test.mts"
   ]
 }

@@ -1,8 +1,15 @@
+// @ts-check
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+/** @typedef {import('./test-sdk-admission.ts').NativeSolanaProvider} NativeProvider */
+/** @typedef {{blockhash: string, lastValidBlockHeight: string}} BlockValidity */
+/** @typedef {{bytesBase64: string, blockhash: string, messageBase64: string, lastValidBlockHeight: string}} PreparedTransaction */
+/** @typedef {{testOnly: true, payerFile: string}} TestKeys */
+/** @typedef {{owner: string, executable: boolean, lamports: number, rentEpoch?: number, data: [string, 'base64']}} RpcAccount */
 
+/** @param {string} providerDirectory @returns {Promise<NativeProvider>} */
 export async function loadSolanaProvider(providerDirectory) {
   const root = resolve(providerDirectory);
   const pins = {
@@ -17,12 +24,21 @@ export async function loadSolanaProvider(providerDirectory) {
   const require = createRequire(resolve(root, "package.json"));
   return { web3: require("@solana/web3.js"), spl: require("@solana/spl-token"), bs58: require("bs58").default };
 }
+/**
+ * @template {{payer: string}} E
+ * @template R
+ * @param {NativeProvider} provider
+ * @param {(intent: import('../domain/solana-mint.ts').SolanaMintIntent, expected: E) => R} validate
+ * @param {(expected: E) => import('../../../../.local/INPUT/provider/node_modules/@solana/web3.js/lib/index.js').TransactionInstruction | import('../../../../.local/INPUT/provider/node_modules/@solana/web3.js/lib/index.js').Transaction} instruction
+ */
 export function createSolanaTransactionSdk(provider, validate, instruction) {
   const { Transaction, PublicKey, Keypair } = provider.web3;
   const { bs58 } = provider;
+  /** @param {InstanceType<NativeProvider['web3']['Transaction']>} tx @param {E} expected */
   function decode(tx, expected) {
     const message = tx.compileMessage();
-    if (message.header.numRequiredSignatures !== 1 || message.accountKeys[0].toBase58() !== expected.payer) { throw new Error("Wrong Solana signer"); }
+    if (message.header.numRequiredSignatures !== 1 || message.accountKeys[0]?.toBase58() !== expected.payer) { throw new Error("Wrong Solana signer"); }
+    if (!tx.feePayer) { throw new Error("Missing Solana fee payer"); }
     const intent = { feePayer: tx.feePayer.toBase58(), instructions: tx.instructions.map(ix => ({
       programId: ix.programId.toBase58(), dataBase64: ix.data.toString("base64"),
       accounts: ix.keys.map(k => ({ address: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })) })) };
@@ -36,6 +52,7 @@ export function createSolanaTransactionSdk(provider, validate, instruction) {
     }
     return { intent, envelope: validate(intent, expected), messageBase64: tx.serializeMessage().toString("base64") };
   }
+  /** @param {E} expected @param {BlockValidity} latest */
   function build(expected, latest) {
     if (!/^[1-9][0-9]*$/.test(latest.lastValidBlockHeight) || new PublicKey(latest.blockhash).toBase58() !== latest.blockhash) { throw new Error("Invalid block validity"); }
     const tx = new Transaction({ feePayer: new PublicKey(expected.payer), recentBlockhash: latest.blockhash });
@@ -43,6 +60,7 @@ export function createSolanaTransactionSdk(provider, validate, instruction) {
     const bytes = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
     return { bytesBase64: bytes.toString("base64"), ...latest, ...decode(Transaction.from(bytes), expected) };
   }
+  /** @param {string} bytesBase64 @param {E} expected */
   function inspectSigned(bytesBase64, expected) {
     const bytes = Buffer.from(bytesBase64, "base64");
     if (bytes.length > 1232 || bytes.toString("base64") !== bytesBase64) { throw new Error("Invalid pool transaction encoding"); }
@@ -50,6 +68,7 @@ export function createSolanaTransactionSdk(provider, validate, instruction) {
     if (!tx.verifySignatures(true) || tx.signatures.length !== 1 || !tx.signature) { throw new Error("Invalid pool signature"); }
     return { signature: bs58.encode(tx.signature), blockhash: tx.recentBlockhash, ...decode(tx, expected) };
   }
+  /** @param {PreparedTransaction} prepared @param {E} expected @param {TestKeys} testKeys */
   async function sign(prepared, expected, testKeys) {
     if (testKeys.testOnly !== true) { throw new Error("Test-only pool key required"); }
     let secret;

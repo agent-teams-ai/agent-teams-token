@@ -1,5 +1,14 @@
 # Test-only Solana pool configuration
 
+Phase2's explicit TEST factory constructs pool, registration and configuration
+with one authenticated native provider/lifetime. Its borrowed
+`registrationVerifier` exposes derivation, registry decoding and snapshot checks,
+with no signer or disposer. The owning unsigned configuration view alone closes
+admission. Fresh operations and historical repair keep their existing separate
+policies and journal meanings. SPL 0.4.15 belongs to this TEST admission; legacy
+SPL 0.4.14/provider pins are unchanged. Phase3 composition/status wiring, native
+capture qualification and fresh public three-message acceptance remain pending.
+
 The bounded `src/composition/configure-solana-pool.mjs` entrypoint performs one
 explicit operation per invocation:
 

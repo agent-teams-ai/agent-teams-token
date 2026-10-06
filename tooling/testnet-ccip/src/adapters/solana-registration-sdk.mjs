@@ -1,29 +1,55 @@
+// @ts-check
 import { validateReplacementFixture } from "../domain/replacement-fixture.ts";
+import { openTestSdk } from "./test-sdk-admission.ts";
+import { selectTestSdk } from "./test-sdk-policy.ts";
 import { createHash } from "node:crypto";
 import { loadSolanaProvider, createSolanaTransactionSdk } from "./solana-transaction-sdk.mjs";
-import { createSolanaPoolInitSdk } from "./solana-pool-init-sdk.mjs";
+import { createSolanaPoolInitSdk, createPoolInitSdk } from "./solana-pool-init-sdk.mjs";
 import { BURNMINT_PROGRAM, POOL_GLOBAL } from "../domain/solana-pool-init.ts";
 import { ROUTER_PROGRAM, registrationInstruction, verifySolanaRegistrationIntent } from "../domain/solana-registration.ts";
+/** @typedef {import('../domain/solana-registration.ts').SolanaRegistrationExpectation} Expectation */
+/** @typedef {import('./solana-transaction-sdk.mjs').RpcAccount | null | undefined} Account */
+  /** @param {Buffer} data @param {string} name @param {number} size @param {number} [version] */
   function anchor(data, name, size, version = 1) {
     if (data.length !== size || !data.subarray(0, 8).equals(createHash("sha256").update("account:" + name).digest().subarray(0, 8)) || data[8] !== version) {
       throw new Error("Wrong " + name + " layout");
     }
   }
+  /** @param {Expectation} expected */
   function snapshotAddresses(expected) { return [expected.mint, expected.pool, expected.ata, expected.registry, POOL_GLOBAL, expected.routerConfig]; }
-export async function createSolanaRegistrationSdk(providerDirectory) {
+/** @param {string} providerDirectory @param {import('./test-sdk-policy.ts').TestSdkSelection} [selection] */
+export async function createSolanaRegistrationSdk(providerDirectory, selection = {}) {
+  const selected = selectTestSdk(selection, providerDirectory, selection.fixture === undefined ? undefined : validateReplacementFixture(selection.fixture));
+  if (selected) {
+    const session = await openTestSdk({ root: providerDirectory, archives: selected.archives });
+    try {
+      const pool = createPoolInitSdk(session.native), sdk = createRegistrationSdk(session.native, pool);
+      return Object.freeze({
+        build: /** @param {Parameters<typeof sdk.build>} args */ (...args) => { session.assertHealthy(); const value = sdk.build(...args); session.assertHealthy(); return value; },
+        inspectSigned: /** @param {Parameters<typeof sdk.inspectSigned>} args */ (...args) => { session.assertHealthy(); const value = sdk.inspectSigned(...args); session.assertHealthy(); return value; },
+        derive: /** @param {Parameters<typeof sdk.derive>} args */ (...args) => { session.assertHealthy(); const value = sdk.derive(...args); session.assertHealthy(); return value; },
+        snapshotAddresses: /** @param {Parameters<typeof snapshotAddresses>} args */ (...args) => { session.assertHealthy(); return snapshotAddresses(...args); },
+        decodeRegistry: /** @param {Parameters<typeof sdk.decodeRegistry>} args */ (...args) => { session.assertHealthy(); const value = sdk.decodeRegistry(...args); session.assertHealthy(); return value; },
+        verifySnapshot: /** @param {Parameters<typeof sdk.verifySnapshot>} args */ (...args) => { session.assertHealthy(); const value = sdk.verifySnapshot(...args); session.assertHealthy(); return value; },
+        destroy: async () => session.close(),
+      });
+    } catch (error) { session.close(); throw error; }
+  }
   const provider = await loadSolanaProvider(providerDirectory);
   const poolSdk = await createSolanaPoolInitSdk(providerDirectory);
   return createRegistrationSdk(provider, poolSdk);
 }
+/** @param {import('./solana-transaction-sdk.mjs').NativeProvider} provider @param {Pick<ReturnType<typeof createPoolInitSdk>, 'verifyState' | 'verifyGlobal'>} poolSdk */
 export function createRegistrationSdk(provider, poolSdk) {
   const { PublicKey, SystemProgram, TransactionInstruction } = provider.web3;
   const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, unpackMint, unpackAccount } = provider.spl;
   const zero = SystemProgram.programId.toBase58();
+  /** @param {import('../domain/solana-pool-init.ts').SolanaPoolInitExpectation & {operation: Expectation['operation']}} expected */
   function derive(expected) {
     const fixture = expected.fixture === undefined ? undefined : validateReplacementFixture(expected.fixture);
     if (fixture && (expected.payer !== fixture.payer || expected.mint !== fixture.mint || expected.pool !== fixture.solanaPool)) { throw new Error("Wrong registration fixture"); }
     const mint = new PublicKey(expected.mint), program = new PublicKey(BURNMINT_PROGRAM), router = new PublicKey(ROUTER_PROGRAM);
-    const pda = (seed, owner) => PublicKey.findProgramAddressSync([Buffer.from(seed), mint.toBuffer()], owner)[0];
+    const pda = (/** @type {string} */seed, /** @type {InstanceType<typeof PublicKey>} */owner) => PublicKey.findProgramAddressSync([Buffer.from(seed), mint.toBuffer()], owner)[0];
     const pool = pda("ccip_tokenpool_config", program).toBase58();
     if (expected.pool !== pool) { throw new Error("Wrong registration pool PDA"); }
     const signer = pda("ccip_tokenpool_signer", program);
@@ -32,9 +58,10 @@ export function createRegistrationSdk(provider, poolSdk) {
       registry: pda("token_admin_registry", router).toBase58(),
       routerConfig: PublicKey.findProgramAddressSync([Buffer.from("config")], router)[0].toBase58() };
   }
+  /** @param {import('../domain/solana-mint.ts').SolanaMintIntent} intent @param {Expectation} expected */
   function validate(intent, expected) {
     const derived = derive(expected);
-    for (const key of ["signer", "ata", "registry", "routerConfig"]) {
+    for (const key of /** @type {const} */(["signer", "ata", "registry", "routerConfig"])) {
       if (expected[key] !== derived[key]) { throw new Error("Wrong derived registration address"); }
     }
     return verifySolanaRegistrationIntent(intent, expected);
@@ -45,6 +72,7 @@ export function createRegistrationSdk(provider, poolSdk) {
     return new TransactionInstruction({ programId: new PublicKey(ix.programId), data: Buffer.from(ix.dataBase64, "base64"),
       keys: ix.accounts.map(a => ({ pubkey: new PublicKey(a.address), isSigner: a.isSigner, isWritable: a.isWritable })) });
   });
+  /** @param {Account} raw @param {string} owner */
   function account(raw, owner) {
     if (!raw || raw.owner !== owner || raw.executable !== false || !Array.isArray(raw.data) || raw.data.length !== 2 ||
       raw.data[1] !== "base64" || typeof raw.data[0] !== "string") { throw new Error("Wrong registration account owner or encoding"); }
@@ -52,7 +80,8 @@ export function createRegistrationSdk(provider, poolSdk) {
     if (data.toString("base64") !== raw.data[0]) { throw new Error("Noncanonical account data"); }
     return { ...raw, data, owner: new PublicKey(owner) };
   }
-  const key = (data, offset) => new PublicKey(data.subarray(offset, offset + 32)).toBase58();
+  const key = (/** @type {Buffer} */data, /** @type {number} */offset) => new PublicKey(data.subarray(offset, offset + 32)).toBase58();
+  /** @param {Account} rawRpcAccount */
   function decodeRegistry(rawRpcAccount) {
     const data = account(rawRpcAccount, ROUTER_PROGRAM).data;
     anchor(data, "TokenAdminRegistry", 170, 2);
@@ -60,16 +89,18 @@ export function createRegistrationSdk(provider, poolSdk) {
     return { administrator: key(data, 9), pendingAdministrator: key(data, 41), lookupTable: key(data, 73),
       writableIndexes: "0x" + data.subarray(105, 137).toString("hex"), mint: key(data, 137), supportsAutoDerivation: data[169] === 1 };
   }
+  /** @param {Account} mintRaw @param {Expectation} expected @param {boolean} before */
   function verifyMint(mintRaw, expected, before) {
     const tokenProgram = TOKEN_PROGRAM_ID.toBase58();
     const mintAccount = account(mintRaw, tokenProgram);
     if (mintAccount.data.length !== 82 || mintAccount.data.readUInt32LE(0) !== 1 || mintAccount.data.readUInt32LE(46) !== 0 || mintAccount.data[45] !== 1) { throw new Error("Wrong mint layout"); }
     const mint = unpackMint(new PublicKey(expected.mint), mintAccount, TOKEN_PROGRAM_ID);
     const authority = mint.mintAuthority?.toBase58();
-    const validAuthority = before ? authority === expected.payer : expected.operation === "transfer-mint-authority" ? authority === expected.signer : [expected.payer, expected.signer].includes(authority);
+    const validAuthority = before ? authority === expected.payer : expected.operation === "transfer-mint-authority" ? authority === expected.signer : authority !== undefined && [expected.payer, expected.signer].includes(authority);
     if (!mint.isInitialized || mint.decimals !== 9 || mint.supply !== 0n || mint.freezeAuthority !== null ||
       !validAuthority) { throw new Error("Wrong finalized mint prerequisite or outcome"); }
   }
+  /** @param {Account} ataRaw @param {Expectation} expected @param {boolean} before */
   function verifyAta(ataRaw, expected, before) {
     const tokenProgram = TOKEN_PROGRAM_ID.toBase58(), op = expected.operation;
     if (before && op === "create-token-account") {
@@ -82,6 +113,7 @@ export function createRegistrationSdk(provider, poolSdk) {
         ata.amount !== 0n || ata.delegate !== null || ata.delegatedAmount !== 0n || ata.closeAuthority !== null || ata.isNative) { throw new Error("Wrong pool ATA"); }
     }
   }
+  /** @param {Account} registryRaw @param {Expectation} expected @param {boolean} before */
   function verifyRegistry(registryRaw, expected, before) {
     const op = expected.operation;
     if (before && (op === "create-token-account" || op === "owner-propose-administrator")) {
@@ -99,6 +131,7 @@ export function createRegistrationSdk(provider, poolSdk) {
       }
     }
   }
+  /** @param {readonly Account[]} values @param {Expectation} expected @param {'before' | 'after'} phase */
   function verifySnapshot(values, expected, phase) {
     validate({ feePayer: expected.payer, instructions: [registrationInstruction(expected)] }, expected);
     if (!["before", "after"].includes(phase) || !Array.isArray(values) || values.length !== 6) { throw new Error("Incomplete registration snapshot"); }

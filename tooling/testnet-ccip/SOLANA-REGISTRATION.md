@@ -1,5 +1,13 @@
 # Test-only Solana registration checkpoints
 
+The additive phase2 directory factory accepts explicit TEST SDK selection and
+uses authenticated web3/SPL 0.4.15 constructors. Pool and registration borrow one
+admitted provider. The frozen worker view has no signing method; its `destroy`
+closes the owning admission. Existing checkpoint/predecessor and finalized-state
+policies remain at their current owners. Phase3 entrypoint wiring and genuine
+native capture qualification are pending; synthetic unsigned unit replies do
+not prove deployed registration or authorize a public operation.
+
 `src/composition/register-solana-pool.mjs` executes one explicitly selected Devnet
 operation per invocation, after finalized account and predecessor journal checks:
 

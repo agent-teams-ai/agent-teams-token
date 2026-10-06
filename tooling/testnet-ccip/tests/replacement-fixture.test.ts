@@ -153,7 +153,7 @@ test('replacement reciprocal setup and forward ABI use actual actor/mint/recipie
   const mint = createMintSdk(provider).build({ testOnly: true, cluster: 'solana-devnet', payer: fixture.payer, mint: fixture.mint, rentLamports: '1000000' }, latest);
   assert.equal(mint.envelope.decimals, 9); assert.equal(mint.envelope.initialSupply, '0'); assert.equal(mint.envelope.freezeAuthority, null);
   const initialized = pool.build({ testOnly: true, cluster: 'solana-devnet', payer: fixture.payer, mint: fixture.mint, pool: fixture.solanaPool, fixture }, latest);
-  assert.equal(initialized.envelope.pool, fixture.solanaPool); assert.equal(initialized.envelope.fixture.identity, fixture.identity);
+  assert.equal(initialized.envelope.pool, fixture.solanaPool); assert.equal(initialized.envelope.fixture?.identity, fixture.identity);
 
   const iface = new Interface(['function approve(address,uint256)', 'function ccipSend(uint64,(bytes receiver,bytes data,(address token,uint256 amount)[] tokenAmounts,address feeToken,bytes extraArgs)) payable returns(bytes32)']);
   const extra = '0x1f3b3aba' + coder.encode(['tuple(uint32,uint64,bool,bytes32,bytes32[])'], [[0n, 0n, true, '0x' + solanaPublicKeyBytes(fixture.payer).toString('hex'), []]]).slice(2);
@@ -209,8 +209,12 @@ test('replacement raw wire rejects receiver/amount/global signer/writable/ALT mu
   assert.deepEqual(Buffer.from(instructions[1].dataBase64, 'base64'), raw);
   const candidate = { family: 'SVM', mainIndex: 1, instructions: instructions.map(ix => new TransactionInstruction({ programId: new PublicKey(ix.programId),
     data: Buffer.from(ix.dataBase64, 'base64'), keys: ix.accounts.map(a => ({ pubkey: new PublicKey(a.address), isSigner: a.isSigner, isWritable: a.isWritable })) })),
-    lookupTables: [new AddressLookupTableAccount({ key: new PublicKey(e.alt), state: { deactivationSlot: (1n << 64n) - 1n, lastExtendedSlot: 0, lastExtendedSlotStartIndex: 0, authority: new PublicKey(e.payer), addresses: altAddresses(e).map(a => new PublicKey(a)) } })] };
-  const built = sdk.build(candidate, e, { blockhash: SYSTEM_PROGRAM, lastValidBlockHeight: '100' });
+    lookupTables: [new AddressLookupTableAccount({ key: new PublicKey(e.alt), state: { deactivationSlot: (1n << 64n) - 1n, lastExtendedSlot: Number(e.recentSlot), lastExtendedSlotStartIndex: 0, authority: new PublicKey(e.payer), addresses: altAddresses(e).map(a => new PublicKey(a)) } })] };
+  // Independently selected synthetic finalized unit snapshot, never public-chain evidence.
+  const snapshot = { slot: (BigInt(e.recentSlot) + 1n).toString(), lookupTable: new AddressLookupTableAccount({ key: new PublicKey(e.alt), state: {
+    deactivationSlot: (1n << 64n) - 1n, lastExtendedSlot: Number(e.recentSlot), lastExtendedSlotStartIndex: 0,
+    authority: new PublicKey(e.payer), addresses: altAddresses(e).map(a => new PublicKey(a)) } }) };
+  const built = sdk.build(candidate, e, { blockhash: SYSTEM_PROGRAM, lastValidBlockHeight: '100' }, snapshot);
   const tableBytes = Buffer.alloc(376); tableBytes.writeUInt32LE(1); tableBytes.writeBigUInt64LE((1n << 64n) - 1n, 4); tableBytes[21] = 1; solanaPublicKeyBytes(e.payer).copy(tableBytes, 22);
   altAddresses(e).forEach((address, index) => solanaPublicKeyBytes(address).copy(tableBytes, 56 + index * 32));
   const table = { key: e.alt, dataBase64: tableBytes.toString('base64') };
@@ -230,7 +234,7 @@ test('replacement raw wire rejects receiver/amount/global signer/writable/ALT mu
   const wrongTable = Buffer.from(tableBytes); solanaPublicKeyBytes(e.payer).copy(wrongTable, 56 + 3 * 32);
   assert.throws(() => verify(built.bytesBase64, { ...table, dataBase64: wrongTable.toString('base64') }));
   candidate.lookupTables[0].state.addresses[7] = new PublicKey(REVERSE.mint);
-  assert.throws(() => sdk.build(candidate, e, { blockhash: SYSTEM_PROGRAM, lastValidBlockHeight: '100' }), /ALT/);
+  assert.throws(() => sdk.build(candidate, e, { blockhash: SYSTEM_PROGRAM, lastValidBlockHeight: '100' }, snapshot), /ALT/);
   const legacy = setup(provider, false).e;
   const captured = '6cd886bff9ea2154d91ad9c94fba41de20000000000000000000000000000000275ee728c49100b56d4aa37c00e2dc8ffc5e5df60000000001000000009d49372ba9140a49e384e7a023a8f5273e7b1b9f87033ceb5ce59c116e900200ca9a3b00000000000000000000000000000000000000000000000000000000000000000000000015000000181dcf1000000000000000000000000000000000010100000000';
   assert.equal(Buffer.from(reverseInstructions(legacy).at(-1)!.dataBase64, 'base64').toString('hex'), captured);

@@ -94,8 +94,8 @@ export function verifySolanaPoolConfigIntent(intent: SolanaMintIntent, expected:
   const instructions = poolConfigInstructions(expected);
   if (intent.feePayer !== expected.payer || intent.instructions.length !== instructions.length || intent.instructions.some((ix, i) => {
     const allowed = instructions[i];
-    return ix.programId !== allowed.programId || ix.dataBase64 !== allowed.dataBase64 || ix.accounts.length !== allowed.accounts.length ||
-      ix.accounts.some((a, j) => a.address !== allowed.accounts[j].address || a.isSigner !== allowed.accounts[j].isSigner || a.isWritable !== allowed.accounts[j].isWritable);
+    return !allowed || ix.programId !== allowed.programId || ix.dataBase64 !== allowed.dataBase64 || ix.accounts.length !== allowed.accounts.length ||
+      ix.accounts.some((a, j) => a.address !== allowed.accounts[j]?.address || a.isSigner !== allowed.accounts[j]?.isSigner || a.isWritable !== allowed.accounts[j]?.isWritable);
   })) { throw new Error("Invalid exact pool config instructions"); }
   return { schema: "agtmai-solana-pool-config-v1", ...expected, instructions };
 }
