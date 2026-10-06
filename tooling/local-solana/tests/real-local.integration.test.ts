@@ -5,6 +5,7 @@ import { dirname, join, resolve as pathResolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/composition/index.ts";
 import childProcesses, { spawn, type ChildProcess } from "node:child_process";
+import type { BigIntStats } from "node:fs";
 import { once } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
@@ -125,13 +126,31 @@ test(`genuine Agave cleanup preserves the primary failure after custodian exit: 
 }, async (t) => {
   assert.equal(available, true);
   const { genuineAgaveRecovery } = await import("./helpers/agave-recovery.ts");
-  const originalSpawn = childProcesses.spawn; const originalFork = childProcesses.fork; const originalRead = fs.readFile;
+  const originalSpawn = childProcesses.spawn; const originalFork = childProcesses.fork; const originalRead = fs.readFile; const originalMkdtemp = fs.mkdtemp;
+  let fixture: { directory: string; identity: BigIntStats } | undefined;
+  let validatorPid: number | undefined; let recovery: Promise<unknown> | undefined;
   const children: { child: ChildProcess; closed: Promise<unknown> }[] = [];
-  const observe = (child: ChildProcess): ChildProcess => { children.push({ child, closed: once(child, "close") }); return child; };
+  const observe = (child: ChildProcess): ChildProcess => {
+    children.push({ child, closed: once(child, "close") });
+    child.on("message", (message: { type?: string; identity?: { pid: number } }) => {
+      if (message.type === "captured") { validatorPid = message.identity?.pid; }
+    });
+    return child;
+  };
   let custodian: { pid: number; start: string; directory: string } | undefined;
   const primary = new Error("genuine recovery primary fixture failure"); let injected = false; let raced = false;
   const denied = Object.assign(new Error("injected recovery signal denial"), { code: "EACCES" });
   let timer: NodeJS.Timeout | undefined;
+  t.mock.method(fs, "mkdtemp", (async (...args: Parameters<typeof originalMkdtemp>) => {
+    const directory = await originalMkdtemp(...args);
+    if (args[0] === join(tmpdir(), "agtmai-genuine-agave-recovery-")) {
+      assert.ok(typeof directory === "string");
+      // Creation grants teardown authority, even if a later assertion fails.
+      // Custody records and their derived paths grant no deletion authority.
+      fixture = { directory, identity: await lstat(directory, { bigint: true }) };
+    }
+    return directory;
+  }) as typeof fs.mkdtemp);
   if (signalFailure === "EACCES") {
     const originalKill = process.kill;
     // Fault injection checks that non-ESRCH failures retain real snapshots;
@@ -173,11 +192,11 @@ test(`genuine Agave cleanup preserves the primary failure after custodian exit: 
   }) as typeof fs.readFile);
   syncBuiltinESMExports();
   try {
-    const recovery = genuineAgaveRecovery(repositoryRoot);
+    recovery = genuineAgaveRecovery(repositoryRoot).then(() => null, (failure: unknown) => failure);
     const deadline = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => { reject(new Error("genuine recovery failed to drain owned children")); }, 4_000);
     });
-    const cause = await Promise.race([recovery, deadline]).then(() => null, (failure: unknown) => failure);
+    const cause = await Promise.race([recovery, deadline]).catch((failure: unknown) => failure);
     assert.equal(raced, true, `fixture must reach the authenticated custodian race: ${String(cause)}`); assert.equal(children.length, 2);
     if (signalFailure === "ESRCH" && cause !== primary) {
       const neighbour = children[0]!.child; assert.ok(neighbour.pid); process.kill(neighbour.pid, 0);
@@ -190,6 +209,7 @@ test(`genuine Agave cleanup preserves the primary failure after custodian exit: 
     for (const { child, closed } of children) { await closed; assert.equal(child.signalCode, "SIGKILL"); }
     assert.ok(custodian);
     const fixtureRoot = dirname(dirname(custodian.directory));
+    assert.ok(fixture); assert.equal(fixtureRoot, fixture.directory);
     if (signalFailure === "ESRCH") { await assert.rejects(lstat(fixtureRoot), { code: "ENOENT" }); }
     else {
       const runs = join(fixtureRoot, "runs"); const entries = await fs.readdir(runs);
@@ -203,6 +223,22 @@ test(`genuine Agave cleanup preserves the primary failure after custodian exit: 
     for (const { child, closed } of children) {
       if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); }
       await closed;
+    }
+    // A deadline is not settlement. Drain the helper before removing its fixture.
+    await recovery;
+    if (fixture !== undefined) {
+      for (const pid of [validatorPid, custodian?.pid]) {
+        assert.ok(pid, "uncaptured process custody must retain the fixture");
+        assert.throws(() => { process.kill(pid, 0); }, { code: "ESRCH" });
+      }
+      const current = await lstat(fixture.directory, { bigint: true }).catch((cause: NodeJS.ErrnoException) => {
+        if (cause.code === "ENOENT") { return null; } throw cause;
+      });
+      if (current !== null) {
+        assert.ok(current.isDirectory());
+        for (const key of ["dev", "ino", "uid", "mode"] as const) { assert.equal(current[key], fixture.identity[key], "fixture identity must survive until teardown"); }
+        await rm(fixture.directory, { recursive: true });
+      }
     }
   }
 });
