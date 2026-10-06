@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { IncomingMessage } from "node:http";
+import { Socket } from "node:net";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { encodeAllocationCommitment, encodeAllocationId } from "@agent-teams/supply/genesis-manifest";
@@ -14,21 +15,75 @@ import { createRealProductionPackage, type RealProductionPackage } from "./helpe
 
 type RpcFacts = Record<string, unknown>;
 const isRpcFacts = (value: unknown): value is RpcFacts => value !== null && typeof value === "object" && !Array.isArray(value);
-const iterateRpcResponse = IncomingMessage.prototype[Symbol.asyncIterator];
 
 function transformRpcResult(context: TestContext, transform: (result: unknown) => unknown): void {
-  const transformed = context.mock.method(IncomingMessage.prototype, Symbol.asyncIterator, async function* (this: IncomingMessage) {
-    const chunks: Buffer[] = [];
-    const iterator: AsyncIterableIterator<unknown> = iterateRpcResponse.call(this);
-    for await (const chunk of { [Symbol.asyncIterator]: () => iterator }) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
-    }
-    const envelope: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    assert.ok(isRpcFacts(envelope));
-    envelope.result = transform(envelope.result);
-    yield Buffer.from(JSON.stringify(envelope), "utf8");
+  const originalDescriptor = Object.getOwnPropertyDescriptor(IncomingMessage.prototype, Symbol.asyncIterator);
+  const iterateRpcResponse = IncomingMessage.prototype[Symbol.asyncIterator];
+  // Pinned Node's mock.method cannot restore Symbol keys. Restore the exact own
+  // descriptor, or remove the shadow when the iterator was inherited.
+  context.after(() => {
+    if (originalDescriptor) { Object.defineProperty(IncomingMessage.prototype, Symbol.asyncIterator, originalDescriptor); }
+    else { assert.ok(Reflect.deleteProperty(IncomingMessage.prototype, Symbol.asyncIterator)); }
   });
-  context.after(() => transformed.mock.restore());
+  Object.defineProperty(IncomingMessage.prototype, Symbol.asyncIterator, {
+    configurable: true, enumerable: originalDescriptor?.enumerable ?? false, writable: true,
+    value: async function* (this: IncomingMessage) {
+      const chunks: Buffer[] = [];
+      const iterator: AsyncIterableIterator<unknown> = iterateRpcResponse.call(this);
+      for await (const chunk of { [Symbol.asyncIterator]: () => iterator }) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+      }
+      const envelope: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      assert.ok(isRpcFacts(envelope));
+      envelope.result = transform(envelope.result);
+      yield Buffer.from(JSON.stringify(envelope), "utf8");
+    },
+  });
+}
+
+async function readBufferedResponse(body: string): Promise<string> {
+  const socket = new Socket();
+  const response = new IncomingMessage(socket);
+  try {
+    response.push(Buffer.from(body, "utf8"));
+    response.push(null);
+    const chunks: Buffer[] = [];
+    for await (const chunk of response) {
+      assert.ok(Buffer.isBuffer(chunk));
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } finally {
+    response.destroy();
+    socket.destroy();
+  }
+}
+
+for (const ownProperty of [false, true]) {
+for (const rejecting of [false, true]) {
+test(`HTTP fixture restores ${ownProperty ? "own descriptor" : "inherited iterator"} after ${rejecting ? "rejection" : "success"}`, async context => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(IncomingMessage.prototype, Symbol.asyncIterator);
+  if (ownProperty) {
+    Object.defineProperty(IncomingMessage.prototype, Symbol.asyncIterator, {
+      configurable: true, enumerable: true, writable: false, value: IncomingMessage.prototype[Symbol.asyncIterator],
+    });
+    context.after(() => {
+      if (originalDescriptor) { Object.defineProperty(IncomingMessage.prototype, Symbol.asyncIterator, originalDescriptor); }
+      else { assert.ok(Reflect.deleteProperty(IncomingMessage.prototype, Symbol.asyncIterator)); }
+    });
+  }
+  const expectedDescriptor = Object.getOwnPropertyDescriptor(IncomingMessage.prototype, Symbol.asyncIterator);
+  const rejection = new Error("EXPLICIT_RPC_TRANSFORM_REJECTION");
+  await context.test("intercepted response", async child => {
+    transformRpcResult(child, result => { if (rejecting) { throw rejection; } return { received: result }; });
+    const response = readBufferedResponse('{"result":"real buffered bytes"}');
+    if (rejecting) { await assert.rejects(response, error => error === rejection); }
+    else { assert.equal(await response, '{"result":{"received":"real buffered bytes"}}'); }
+  });
+  assert.equal(await readBufferedResponse("unrelated plaintext after interception\n"), "unrelated plaintext after interception\n");
+  assert.deepEqual(Object.getOwnPropertyDescriptor(IncomingMessage.prototype, Symbol.asyncIterator), expectedDescriptor);
+});
+}
 }
 
 for (const pendingIndex of [false, true]) {
@@ -137,6 +192,10 @@ test(pendingIndex
 
 });
 }
+
+test("unrelated plaintext stream is consumable after real successful Anvil interception", async () => {
+  assert.equal(await readBufferedResponse("plaintext after actual successful proof\n"), "plaintext after actual successful proof\n");
+});
 
 test("public proof entrypoint rejects every external signer and prepared-package path", async () => {
   await assert.rejects(runLocalExecutionProof({ repositoryRoot: resolve("."), preparedDirectory: "/tmp/external-package", signerKeystorePath: "/tmp/external-key", signerPasswordPath: "/tmp/external-password", outputDirectory: "/tmp/unreachable", preparePackage: async () => {} } as never), /PROOF_EXTERNAL_SIGNER_OR_PACKAGE_INJECTION_UNSUPPORTED/);
@@ -254,4 +313,8 @@ test("receipt-bound block evidence fails closed on identity, inclusion, input, n
       await assert.rejects(lstat(join(outputDirectory, "READY")), { code: "ENOENT" });
     });
   }
+});
+
+test("unrelated plaintext stream is consumable after real rejecting Anvil interceptions", async () => {
+  assert.equal(await readBufferedResponse("plaintext after actual rejected proofs\n"), "plaintext after actual rejected proofs\n");
 });
