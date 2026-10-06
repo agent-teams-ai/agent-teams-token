@@ -77,6 +77,11 @@ jobs:
           ./dev doctor --scope=core
           test "$(command -v pnpm)" = "$PWD/.tools/bin/pnpm"
           test "$(pnpm --version)" = "11.24.0"
+      - name: Stage finite public SDK check inputs
+        env: *rollback-runner-environment
+        id: stage-pinned-sdk-inputs
+        shell: bash
+        run: ./dev bootstrap sdk-inputs --fetch
       - name: Install frozen workspace
         env: *rollback-runner-environment
         id: install-frozen-source-workspace-and-populate-store

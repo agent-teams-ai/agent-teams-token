@@ -93,6 +93,10 @@ export function copyAndInstallOfflineEnvironment({
     pnpmOfflineInstallArguments(trustedStore),
     { cwd: checkout, env: commandEnvironment, timeout: 600_000 },
   );
+  recorder.run(group, "sdk-inputs-offline-stage", tools.node, [
+    join(checkout, "tooling/testnet-ccip/src/adapters/test-sdk-inputs.ts"),
+    "--offline", "--cache", join(sourceRoot, ".tools/downloads/test-sdk-inputs-v1"),
+  ], { cwd: checkout, env: commandEnvironment, timeout: 600_000 });
   const links = recorder.stage(
     group,
     "pnpm-workspace-link-validation",

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": [
+    "src/adapters/test-sdk-*.ts", "src/adapters/evm-forward-sdk.mjs",
+    "tests/test-sdk-admission.test.ts", "tests/test-sdk-execution.native.mts"
+  ]
+}
