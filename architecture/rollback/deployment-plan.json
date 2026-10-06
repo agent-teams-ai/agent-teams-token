@@ -101,7 +101,7 @@
     },
     {
       "path": "scripts/deployment/local-execution-proof.ts",
-      "beforeSha256": "e45c4c73c3dad09957eee5306a8299083d00990ba00db373a4c93ec60ea84466",
+      "beforeSha256": "4e5b3084be2a489e9ea4ef0b3dde20b4cb51799bd95e432d4a6f4cca25b1007a",
       "afterSha256": "absent"
     },
     {

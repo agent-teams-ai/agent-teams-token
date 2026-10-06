@@ -238,7 +238,13 @@ async function claimRunQuarantine(root: string, directory: string, validated: Va
       throw new LocalSolanaError("SOLANA_STARTUP_CUSTODY", "startup custody has not settled");
     }
     if (stale && validated.lease.validator !== null) { await terminateAuthenticatedValidator(validated.lease, directory); }
-    const before = await validateOwnedRun(root, directory, true, validated);
+    let before: ValidatedRun;
+    try { before = await validateOwnedRun(root, directory, true, validated); }
+    catch (cause) {
+      // A competing claim can unlink a lease we already opened or are reading.
+      if (stale && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }
+      throw cause;
+    }
     if (before.lease.token !== validated.lease.token) { throw new LocalSolanaError("SOLANA_CLEANUP_IDENTITY", "run identity changed before quarantine"); }
     if (await exists(quarantine)) {
       if (stale && await staleRunIsAbsent(root, directory, validated.rootIdentity)) { return false; }

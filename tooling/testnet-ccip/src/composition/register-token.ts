@@ -9,17 +9,20 @@ import type { EvmJournalRecord } from "../application/evm-journal.ts";
 import { runEvmJournal } from "../application/evm-journal.ts";
 import { nextRegistrationStep } from "../domain/evm-registration.ts";
 import type { RegistrationTarget } from "../domain/evm-registration.ts";
-import type { SepoliaIntentInput } from "../domain/evm-intent.ts";
+import type { SepoliaIntentInput, DeploymentBinding } from "../domain/evm-intent.ts";
 import { lockReleaseConstructor } from "../domain/evm-pool.ts";
 import { testTokenConstructor } from "./deploy-token.ts";
 import { loadOfficialPoolArtifact } from "./deploy-pool.ts";
 import { executeSepoliaIntent } from "./execute-sepolia.ts";
 import { createTestRpcRequest, selectSepoliaRpc } from "../adapters/test-rpc.ts";
 import type { TestRpcSettings } from "../adapters/test-rpc.ts";
+import { selectPoolArtifact } from "../adapters/pool-artifact-selection.ts";
+import type { PoolArtifactSelection, PoolArtifact } from "../adapters/pool-artifact-selection.ts";
 
 const kinds = ["register-admin", "accept-admin", "set-pool"] as const;
 type Kind = typeof kinds[number];
 export interface RegistrationSettings extends RegistrationTarget, TestRpcSettings {
+  readonly poolArtifactProfile?: PoolArtifactSelection["poolArtifactProfile"];
   readonly signer: CastSignerConfig;
   readonly tokenDeployment: { readonly journalFile: string; readonly intent: SepoliaIntentInput };
   readonly poolDeployment: { readonly artifactFile: string; readonly journalFile: string; readonly intent: SepoliaIntentInput };
@@ -31,6 +34,8 @@ const defaults = {
   observe: (hash: string, settings: TestRpcSettings = {}) => createSepoliaRpc(selectSepoliaRpc(settings)).observe(hash),
   snapshot: readRegistrationSnapshot,
   execute: executeSepoliaIntent,
+  tokenDecimals: (token: string, blockHash: string, settings: TestRpcSettings) =>
+    createTestRpcRequest(selectSepoliaRpc(settings))("eth_call", [{ to: token, data: "0x313ce567" }, { blockHash, requireCanonical: true }]),
   async address(record: EvmJournalRecord, settings: TestRpcSettings = {}): Promise<string> {
     const receipt = await createTestRpcRequest(selectSepoliaRpc(settings))("eth_getTransactionReceipt", [record.signed.hash]) as {
       transactionHash: string; blockHash: string; status: string; contractAddress: string;
@@ -42,10 +47,21 @@ const defaults = {
     return receipt.contractAddress.toLowerCase();
   },
 };
-async function verifyDeployments(settings: RegistrationSettings, ports: typeof defaults): Promise<void> {
+type RegistrationPorts = Omit<typeof defaults, "tokenDecimals"> & Partial<Pick<typeof defaults, "tokenDecimals">>;
+function verifyPoolCalldata(binding: DeploymentBinding, artifact: PoolArtifact, constructorBytes: string, planned: string, observed: string): void {
+  if (binding.administratorBinding !== "sender") { throw new Error("Pool owner must bind deployment sender"); }
+  const calldata = artifact.creationBytecode + constructorBytes.slice(2);
+  if (binding.artifactSha256 !== artifact.artifactSha256 || binding.creationBytecode.toLowerCase() !== artifact.creationBytecode.toLowerCase() ||
+    planned.toLowerCase() !== calldata.toLowerCase() || observed.toLowerCase() !== calldata.toLowerCase()) {
+    throw new Error("Authenticated pool deployment calldata mismatch");
+  }
+}
+async function verifyDeployments(settings: RegistrationSettings, ports: RegistrationPorts,
+  selected: ReturnType<typeof selectPoolArtifact>): Promise<void> {
+  const admitted = Object.hasOwn(settings, "poolArtifactProfile") ? await selected.load(settings.poolDeployment.artifactFile) : undefined;
   for (const [deployment, expectedAddress, artifactId, constructorBytes] of [
     [settings.tokenDeployment, settings.token, "AGTMAICCIPToken", testTokenConstructor(settings.administrator)],
-    [settings.poolDeployment, settings.pool, "@chainlink/contracts-ccip@1.6.1/LockReleaseTokenPool", lockReleaseConstructor(settings.token)],
+    [settings.poolDeployment, settings.pool, selected.artifactId, lockReleaseConstructor(settings.token)],
   ] as const) {
     const binding = deployment.intent.deployment;
     if (deployment.intent.kind !== "deploy" || deployment.intent.value !== "0" ||
@@ -59,13 +75,8 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
     const observed = await ports.observe(record.signed.hash, settings);
     if (deployment === settings.poolDeployment) {
       if (observed.kind !== "observed") { throw new Error("Pool deployment observation unavailable: " + observed.kind); }
-      const artifact = await ports.poolArtifact(settings.poolDeployment.artifactFile);
-      const calldata = artifact.creationBytecode + constructorBytes.slice(2);
-      if (binding.artifactSha256 !== artifact.artifactSha256 ||
-        binding.creationBytecode.toLowerCase() !== artifact.creationBytecode.toLowerCase() ||
-        observed.transaction.data.toLowerCase() !== calldata.toLowerCase()) {
-        throw new Error("Authenticated pool deployment calldata mismatch");
-      }
+      const artifact = admitted ?? await selected.load(settings.poolDeployment.artifactFile);
+      verifyPoolCalldata(binding, artifact, constructorBytes, deployment.intent.data, observed.transaction.data);
     }
     const result = await runEvmJournal(deployment.intent, deployment.intent, {
       exclusive: work => work(), read: async () => record, observe: async () => observed,
@@ -79,10 +90,14 @@ async function verifyDeployments(settings: RegistrationSettings, ports: typeof d
     if (result.status !== "succeeded" || await ports.address(record, settings) !== expectedAddress.toLowerCase()) {
       throw new Error("Finalized deployment/address mismatch");
     }
+    if (admitted && deployment === settings.tokenDeployment &&
+      await (ports.tokenDecimals ?? defaults.tokenDecimals)(settings.token, record.receipt!.blockHash, settings) !== "0x" + "9".padStart(64, "0")) {
+      throw new Error("Finalized replacement token decimals mismatch");
+    }
   }
 }
 /** One bounded step per invocation. Existing journals reconcile before any later step can start. */
-export async function registerTestToken(settings: RegistrationSettings, ports = defaults): Promise<{
+export async function registerTestToken(settings: RegistrationSettings, ports: RegistrationPorts = defaults): Promise<{
   status: string; reason: string; transactionHash?: string; step?: Kind;
 }> {
   const sepoliaRpc = selectSepoliaRpc(settings);
@@ -90,6 +105,7 @@ export async function registerTestToken(settings: RegistrationSettings, ports = 
   const files = [settings.tokenDeployment.journalFile, settings.poolDeployment.journalFile,
     ...kinds.map(kind => settings.steps[kind].journalFile)];
   bindFixture(settings, files);
+  const selected = selectPoolArtifact(settings, ports.poolArtifact, files);
   // Normalize existing symlinks as well as lexical aliases before checking separation.
   const paths = await Promise.all(files.map(async file => {
     try { return await realpath(file); }
@@ -101,7 +117,7 @@ export async function registerTestToken(settings: RegistrationSettings, ports = 
     kinds.some(kind => !/^(0|[1-9][0-9]*)$/.test(settings.steps[kind].nonce))) {
     throw new Error("Distinct registration journals and nonces required");
   }
-  await verifyDeployments(settings, ports);
+  await verifyDeployments(settings, ports, selected);
   // Reconcile ALL prior step journals, including steps already reflected by finalized registry state.
   // Never advance past an unknown/reverted transaction merely because contract state changed externally.
   const initial = nextRegistrationStep(await ports.snapshot(settings), settings);

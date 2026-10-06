@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import fs, { access, chmod, lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve as pathResolve } from "node:path";
+import { dirname, join, resolve as pathResolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/composition/index.ts";
-import { spawn } from "node:child_process";
+import childProcesses, { spawn, type ChildProcess } from "node:child_process";
+import type { BigIntStats } from "node:fs";
+import { once } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { setTimeout as delay } from "node:timers/promises";
+import { processStartIdentity } from "../src/adapters/process-identity.ts";
 
 const repositoryRoot = pathResolve(import.meta.dirname, "../../..");
 const platform = process.platform === "linux" && process.arch === "x64" ? "linux-x64"
@@ -113,3 +118,128 @@ test("genuine pinned Agave owner SIGKILL preserves pre-registration custody befo
   const { genuineAgaveRecovery } = await import("./helpers/agave-recovery.ts");
   await genuineAgaveRecovery(repositoryRoot);
 });
+
+for (const signalFailure of ["ESRCH", "EACCES"] as const) {
+test(`genuine Agave cleanup preserves the primary failure after custodian exit: ${signalFailure}`, {
+  skip: process.platform !== "linux" ? "race uses Linux procfs" : available ? false : required ? false : "checksum-pinned Agave fixture binaries are not installed",
+  timeout: 10_000,
+}, async (t) => {
+  assert.equal(available, true);
+  const { genuineAgaveRecovery } = await import("./helpers/agave-recovery.ts");
+  const originalSpawn = childProcesses.spawn; const originalFork = childProcesses.fork; const originalRead = fs.readFile; const originalMkdtemp = fs.mkdtemp;
+  let fixture: { directory: string; identity: BigIntStats } | undefined;
+  let validatorPid: number | undefined; let recovery: Promise<unknown> | undefined;
+  const children: { child: ChildProcess; closed: Promise<unknown> }[] = [];
+  const observe = (child: ChildProcess): ChildProcess => {
+    children.push({ child, closed: once(child, "close") });
+    child.on("message", (message: { type?: string; identity?: { pid: number } }) => {
+      if (message.type === "captured") { validatorPid = message.identity?.pid; }
+    });
+    return child;
+  };
+  let custodian: { pid: number; start: string; directory: string } | undefined;
+  const primary = new Error("genuine recovery primary fixture failure"); let injected = false; let raced = false;
+  const denied = Object.assign(new Error("injected recovery signal denial"), { code: "EACCES" });
+  let timer: NodeJS.Timeout | undefined;
+  t.mock.method(fs, "mkdtemp", (async (...args: Parameters<typeof originalMkdtemp>) => {
+    const directory = await originalMkdtemp(...args);
+    if (args[0] === join(tmpdir(), "agtmai-genuine-agave-recovery-")) {
+      assert.ok(typeof directory === "string");
+      // Creation grants teardown authority, even if a later assertion fails.
+      // Custody records and their derived paths grant no deletion authority.
+      fixture = { directory, identity: await lstat(directory, { bigint: true }) };
+    }
+    return directory;
+  }) as typeof fs.mkdtemp);
+  if (signalFailure === "EACCES") {
+    const originalKill = process.kill;
+    // Fault injection checks that non-ESRCH failures retain real snapshots;
+    // all other signals and every process/filesystem effect remain genuine.
+    t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+      if (raced && pid === custodian?.pid && signal === "SIGCONT") { throw denied; }
+      return originalKill(pid, signal);
+    });
+  }
+  t.mock.method(childProcesses, "spawn", (...args: Parameters<typeof originalSpawn>) => {
+    const child = originalSpawn(...args); return args[0] === process.execPath ? observe(child) : child;
+  });
+  t.mock.method(childProcesses, "fork", (...args: Parameters<typeof originalFork>) => observe(originalFork(...args)));
+  t.mock.method(fs, "readFile", (async (...args: Parameters<typeof originalRead>) => {
+    const value = await originalRead(...args);
+    if (typeof args[0] === "string" && args[0].endsWith("/.agtmai-validator-startup.json")) {
+      const record = JSON.parse(String(value)); custodian = { ...record.supervisor, directory: record.directory };
+    }
+    if (custodian !== undefined && args[0] === join(custodian.directory, ".agtmai-local-solana-lease.json") && !injected) {
+      injected = true; throw primary;
+    }
+    if (injected && !raced && custodian !== undefined && args[0] === `/proc/${custodian.pid}/stat`) {
+      raced = true;
+      // Hold a real, exact identity observation across orderly native shutdown.
+      // The still-live owner reaps the custodian; no syscall result is fabricated.
+      assert.equal(await processStartIdentity(custodian.pid), custodian.start);
+      process.kill(custodian.pid, "SIGTERM");
+      let absent = false;
+      for (let attempt = 0; attempt < 200 && !absent; attempt += 1) {
+        absent = await originalRead(...args).then(() => false, (cause: NodeJS.ErrnoException) => {
+          if (cause.code === "ENOENT" || cause.code === "ESRCH") { return true; } throw cause;
+        });
+        if (!absent) { await delay(10); }
+      }
+      assert.equal(absent, true, "owned custodian must be reaped before the stale observation returns");
+      assert.throws(() => { process.kill(custodian!.pid, 0); }, { code: "ESRCH" });
+    }
+    return value;
+  }) as typeof fs.readFile);
+  syncBuiltinESMExports();
+  try {
+    recovery = genuineAgaveRecovery(repositoryRoot).then(() => null, (failure: unknown) => failure);
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => { reject(new Error("genuine recovery failed to drain owned children")); }, 4_000);
+    });
+    const cause = await Promise.race([recovery, deadline]).catch((failure: unknown) => failure);
+    assert.equal(raced, true, `fixture must reach the authenticated custodian race: ${String(cause)}`); assert.equal(children.length, 2);
+    if (signalFailure === "ESRCH" && cause !== primary) {
+      const neighbour = children[0]!.child; assert.ok(neighbour.pid); process.kill(neighbour.pid, 0);
+      t.diagnostic(`cleanup failure left the genuine fixture neighbour live: ${String(cause)}`);
+    }
+    if (signalFailure === "ESRCH") { assert.equal(cause, primary, "cleanup must preserve the original failure instead of kill ESRCH"); }
+    else {
+      assert.ok(cause instanceof AggregateError); assert.deepEqual(cause.errors, [primary, denied]); assert.equal(cause.cause, primary);
+    }
+    for (const { child, closed } of children) { await closed; assert.equal(child.signalCode, "SIGKILL"); }
+    assert.ok(custodian);
+    const fixtureRoot = dirname(dirname(custodian.directory));
+    assert.ok(fixture); assert.equal(fixtureRoot, fixture.directory);
+    if (signalFailure === "ESRCH") { await assert.rejects(lstat(fixtureRoot), { code: "ENOENT" }); }
+    else {
+      const runs = join(fixtureRoot, "runs"); const entries = await fs.readdir(runs);
+      assert.equal(entries.length, 3, "signal denial retains both runs and the authenticated snapshot inventory");
+      for (const entry of entries) { assert.equal((await lstat(join(runs, entry))).isDirectory(), true); }
+      t.diagnostic(`signal denial retains genuine fixture state and snapshots: ${fixtureRoot}`);
+    }
+  } finally {
+    if (timer !== undefined) { clearTimeout(timer); }
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    for (const { child, closed } of children) {
+      if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); }
+      await closed;
+    }
+    // A deadline is not settlement. Drain the helper before removing its fixture.
+    await recovery;
+    if (fixture !== undefined) {
+      for (const pid of [validatorPid, custodian?.pid]) {
+        assert.ok(pid, "uncaptured process custody must retain the fixture");
+        assert.throws(() => { process.kill(pid, 0); }, { code: "ESRCH" });
+      }
+      const current = await lstat(fixture.directory, { bigint: true }).catch((cause: NodeJS.ErrnoException) => {
+        if (cause.code === "ENOENT") { return null; } throw cause;
+      });
+      if (current !== null) {
+        assert.ok(current.isDirectory());
+        for (const key of ["dev", "ino", "uid", "mode"] as const) { assert.equal(current[key], fixture.identity[key], "fixture identity must survive until teardown"); }
+        await rm(fixture.directory, { recursive: true });
+      }
+    }
+  }
+});
+}
