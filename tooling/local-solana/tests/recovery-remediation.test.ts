@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import childProcesses, { fork, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import type { BigIntStats } from "node:fs";
 import fs, { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -20,8 +21,11 @@ for (const cleanup of ["settled", "uncertain"] as const) {
   test(`genuine recovery finalization observes an already closed neighbour: ${cleanup}`, { timeout: 5_000 }, async (t) => {
     const { genuineAgaveRecovery } = await import("./helpers/agave-recovery.ts");
     const root = await boundary(); const missingRepository = join(root, "missing-repository");
-    const originalSpawn = childProcesses.spawn; const originalLstat = fs.lstat; const originalMkdtemp = fs.mkdtemp;
+    const rootIdentity = await lstat(root, { bigint: true });
+    const originalSpawn = childProcesses.spawn; const originalFork = childProcesses.fork; const originalLstat = fs.lstat; const originalMkdtemp = fs.mkdtemp;
     let child: ChildProcess | undefined; let closed: Promise<unknown> | undefined; let fixtureRoot: string | undefined;
+    let fixture: { directory: string; identity: BigIntStats } | undefined; let recovery: Promise<void> | undefined;
+    const owners: { child: ChildProcess; closed: Promise<unknown> }[] = [];
     let timer: NodeJS.Timeout | undefined;
     // Delegate every effect to the real OS. Hold the resolver's failed path read
     // until the actual neighbour has closed, rather than faking close/exit state.
@@ -30,9 +34,17 @@ for (const cleanup of ["settled", "uncertain"] as const) {
       child = originalSpawn(...args); closed = once(child, "close");
       return child;
     });
+    t.mock.method(childProcesses, "fork", (...args: Parameters<typeof originalFork>) => {
+      const owner = originalFork(...args); owners.push({ child: owner, closed: once(owner, "close") }); return owner;
+    });
     t.mock.method(fs, "mkdtemp", (async (...args: Parameters<typeof originalMkdtemp>) => {
       const path = await originalMkdtemp(...args);
-      if (args[0] === join(tmpdir(), "agtmai-genuine-agave-recovery-")) { fixtureRoot = await realpath(path); }
+      if (args[0] === join(tmpdir(), "agtmai-genuine-agave-recovery-")) {
+        assert.ok(typeof path === "string");
+        // Only the original creation return and identity authorize TEST teardown.
+        fixture = { directory: path, identity: await originalLstat(path, { bigint: true }) };
+        fixtureRoot = await realpath(path);
+      }
       return path;
     }) as typeof fs.mkdtemp);
     t.mock.method(fs, "lstat", (async (...args: Parameters<typeof originalLstat>) => {
@@ -45,7 +57,7 @@ for (const cleanup of ["settled", "uncertain"] as const) {
     }) as typeof fs.lstat);
     syncBuiltinESMExports();
     try {
-      const recovery = genuineAgaveRecovery(missingRepository);
+      recovery = genuineAgaveRecovery(missingRepository);
       const deadline = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => { reject(new Error("recovery waited for a close event that already happened")); }, 2_000);
       });
@@ -72,7 +84,33 @@ for (const cleanup of ["settled", "uncertain"] as const) {
       if (timer !== undefined) { clearTimeout(timer); }
       t.mock.restoreAll(); syncBuiltinESMExports();
       if (child !== undefined && child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); }
-      await closed; await rm(root, { recursive: true, force: true });
+      await closed;
+      for (const { child: owner, closed: ownerClosed } of owners) {
+        if (owner.exitCode === null && owner.signalCode === null) { owner.kill("SIGKILL"); }
+        await ownerClosed;
+      }
+      // A deadline is not settlement. Missing repository admission must precede
+      // any owner/custodian/validator startup; unexpected custody retains state.
+      await recovery?.catch(() => {});
+      assert.equal(owners.length, 0, "unexpected recovery custody must retain the fixture");
+      const pid = child?.pid; assert.ok(pid, "uncaptured neighbour must retain the fixture");
+      assert.throws(() => { process.kill(pid, 0); }, { code: "ESRCH" });
+      assert.ok(fixture, "unknown fixture creation identity must retain state");
+      const ownedRoots = [fixture, { directory: root, identity: rootIdentity }];
+      for (const owned of ownedRoots) {
+        const current = await originalLstat(owned.directory, { bigint: true }).catch((cause: NodeJS.ErrnoException) => {
+          if (cause.code === "ENOENT") { return null; } throw cause;
+        });
+        if (current !== null) {
+          assert.ok(current.isDirectory());
+          for (const key of ["dev", "ino", "uid", "mode"] as const) { assert.equal(current[key], owned.identity[key], "test root identity must survive until teardown"); }
+        }
+      }
+      for (const owned of ownedRoots) {
+        await rm(owned.directory, { recursive: true }).catch((cause: NodeJS.ErrnoException) => {
+          if (cause.code !== "ENOENT") { throw cause; }
+        });
+      }
     }
   });
 }
