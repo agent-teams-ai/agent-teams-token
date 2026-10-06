@@ -147,6 +147,7 @@ test("two separately spawned reclaimers settle a genuine dead lease and their in
         const reclaimed = await store.reclaimStale(); const paths = await store.create(); await store.cleanup(paths);
         console.log(JSON.stringify({ reclaimed, directory: paths.directory }));`;
       const children = [0, 1].map(() => spawn(process.execPath, ["--input-type=module", "--eval", source], { stdio: ["ignore", "pipe", "pipe", "ipc"], timeout: 10_000, killSignal: "SIGKILL" }));
+      const closed = children.map((child) => new Promise<void>((resolve) => { child.once("close", () => { resolve(); }); }));
       const results = children.map(async (child) => {
         let stdout = ""; let stderr = "";
         child.stdout!.on("data", (chunk) => { stdout += String(chunk); }); child.stderr!.on("data", (chunk) => { stderr += String(chunk); });
@@ -160,13 +161,14 @@ test("two separately spawned reclaimers settle a genuine dead lease and their in
         }));
         for (const child of children) { child.send("reclaim"); }
         const settled = await Promise.allSettled(results);
-        const values = settled.map((result) => { assert.ok(result.status === "fulfilled", JSON.stringify(result)); return result.value; });
+        const values = settled.map((result) => { if (result.status === "rejected") { throw result.reason; } return result.value; });
         assert.deepEqual(values.map((value) => value.reclaimed).toSorted(), [0, 1]);
         assert.notEqual(values[0]!.directory, values[1]!.directory); assert.deepEqual(await readdir(runs), []);
       } finally {
         const liveChildren = children.filter((child) => child.exitCode === null && child.signalCode === null);
         for (const child of liveChildren) { child.kill("SIGKILL"); }
         await Promise.allSettled(results);
+        await Promise.all(closed);
       }
     }
   } finally { await rm(boundary, { recursive: true, force: true }); }
@@ -215,20 +217,27 @@ test("a stale reclaimer tolerates an in-progress claim without counting or delet
   } finally { finish.resolve(); await winner?.catch(() => {}); t.mock.restoreAll(); syncBuiltinESMExports(); await rm(boundary, { recursive: true, force: true }); }
 });
 
-test("a stale reclaimer tolerates a completed claim during pre-claim validation", async (t) => {
+for (const window of ["opening", "opened", "reading"] as const) {
+test(`a stale reclaimer tolerates a completed claim during pre-claim validation: ${window}`, async (t) => {
   const boundary = await realpath(await mkdtemp(join(tmpdir(), "agtmai-fs-lost-validation-")));
   const runs = join(boundary, "runs"); const output = join(boundary, "out"); const originalOpen = fs.open;
   try {
-    const dead = await createDeadRun(runs, output); const marker = join(dead.directory, ".agtmai-local-solana-lease.json"); let reads = 0;
+    const dead = await createDeadRun(runs, output); const marker = join(dead.directory, ".agtmai-local-solana-lease.json"); let reads = 0; let raced = false;
+    const compete = async (): Promise<void> => { raced = true; assert.equal(await new PrivateRunStore(runs, output).reclaimStale(), 1); };
     t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
-      if (args[0] === marker && ++reads === 2) { assert.equal(await new PrivateRunStore(runs, output).reclaimStale(), 1); }
-      return originalOpen(...args);
+      const selected = args[0] === marker && !raced && ++reads === 2;
+      if (selected && window === "opening") { await compete(); }
+      const handle = await originalOpen(...args);
+      if (selected && window === "opened") { await compete(); assert.equal((await handle.stat()).nlink, 0); }
+      if (selected && window === "reading") { t.mock.method(handle, "read", new Proxy(handle.read, { async apply(method, receiver, values) { if (!raced) { await compete(); } return Reflect.apply(method, receiver, values); } })); }
+      return handle;
     });
     syncBuiltinESMExports();
-    assert.equal(await new PrivateRunStore(runs, output).reclaimStale(), 0); assert.ok(reads >= 2);
+    assert.equal(await new PrivateRunStore(runs, output).reclaimStale(), 0); assert.equal(reads, 2); assert.equal(raced, true);
     assert.deepEqual(await readdir(runs), []);
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(boundary, { recursive: true, force: true }); }
 });
+}
 
 for (const substitution of ["missing-marker", "marker-inode", "token", "directory", "dangling-symlink", "root", "missing-root"] as const) {
   test(`stale reclaim preserves foreign state after pre-claim ${substitution} substitution`, async (t) => {
