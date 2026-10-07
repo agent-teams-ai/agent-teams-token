@@ -132,6 +132,13 @@ it is not reported as passed. Independent technical review satisfies the owner's
 non-blocking router instruction. Publication qualifies the bounded DEV source,
 not current public-chain settlement or production readiness.
 
+CONTENT-P2-001 is corrected locally in the existing DEV report: conflicting
+block hashes or heights for one `chain:transaction` now make all past, current
+and later message owners `inconsistent`, including later observations matching
+the first block. Focused helper regressions cover EVM/SVM destinations and
+preserve coherent observations and mixed-index uncertainty. Independent review
+and canonical qualification of this patch remain pending; Mainnet remains deferred.
+
 The three real CCIP settled messages at historical 100 supply remain historical.
 Current actual provider codecs and preview/report CLI persistence/reopening are
 local evidence; the product100M monetary vertical is `local-event-simulation`,

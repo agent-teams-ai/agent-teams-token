@@ -36,10 +36,15 @@ function claimInventory(message, owner, tables, mark) {
   }
 }
 function claimTransaction(event, owner, tables, mark) {
-  const tx = event.chain + ':' + event.transactionId, previousBlock = tables.blocks.get(tx);
-  const block = JSON.stringify([event.blockHash, event.blockHeight]);
-  if (previousBlock && previousBlock.fingerprint !== block) { mark([owner, previousBlock.owner], 'inconsistent', 'conflicting-transaction-block-provenance'); }
-  else if (!previousBlock) { tables.blocks.set(tx, { fingerprint: block, owner }); }
+  const tx = event.chain + ':' + event.transactionId, block = JSON.stringify([event.blockHash, event.blockHeight]);
+  let previousBlock = tables.blocks.get(tx);
+  if (!previousBlock) {
+    previousBlock = { fingerprint: block, owners: new Set(), contradicted: false };
+    tables.blocks.set(tx, previousBlock);
+  }
+  previousBlock.owners.add(owner);
+  if (previousBlock.fingerprint !== block) { previousBlock.contradicted = true; }
+  if (previousBlock.contradicted) { mark([...previousBlock.owners], 'inconsistent', 'conflicting-transaction-block-provenance'); }
   const previousScheme = tables.schemes.get(tx);
   if (previousScheme && previousScheme.scheme !== event.indexScheme) { mark([owner, ...previousScheme.owners], 'unknown', 'mixed-index-schemes'); }
   if (previousScheme) { previousScheme.owners.add(owner); }
