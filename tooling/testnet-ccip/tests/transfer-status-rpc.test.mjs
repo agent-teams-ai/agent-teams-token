@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { jsonRpc } from '../src/adapters/transfer-status-native.mjs';
+import { UndrainedTestRpcBody } from '../src/adapters/test-rpc.ts';
 import { accountTransfers } from '../src/domain/transfer-status.mjs';
 import { projectMessage } from '../../../packages/domain/src/features/ccip-status/message.ts';
 
@@ -85,7 +86,7 @@ test('native RPC rejects malformed RPC 429 envelopes and general server errors w
     assert.equal(f.requests.length, 1); assert.deepEqual(f.delays, []);
   }
 });
-test('native RPC retries plain HTTP 429 but propagates cancelled response reads', async () => {
+test('native RPC retries plain HTTP 429 but reports unresolved cancelled body ownership', async () => {
   const f = retryFixture(({ id }, attempt) => attempt === 1 ? new Response('rate limited', { status: 429 }) :
     new Response(JSON.stringify({ jsonrpc: '2.0', id, result: null })));
   assert.equal(await f.rpc('getTransaction', []), null);
@@ -94,7 +95,7 @@ test('native RPC retries plain HTTP 429 but propagates cancelled response reads'
   const cancelled = retryFixture(() => new Response(new ReadableStream({
     start(controller) { controller.error(error); },
   }), { status: 429 }));
-  await assert.rejects(cancelled.rpc('getTransaction', []), error);
+  await assert.rejects(cancelled.rpc('getTransaction', []), UndrainedTestRpcBody);
   assert.equal(cancelled.requests.length, 1); assert.deepEqual(cancelled.delays, []);
 });
 
