@@ -1,9 +1,10 @@
 // @ts-check
 import { bindFixture } from './fixture-binding.ts';
+import { createReverseSigning } from './solana-reverse-operator.ts';
 import { openTestSdk } from './test-sdk-admission.ts';
 import { selectTestSdk } from './test-sdk-policy.ts';
 import { validateReplacementFixture } from '../domain/replacement-fixture.ts';
-import { createSdkTestFetch, selectSolanaRpc, TEST_RPC_RESPONSE_LIMIT } from './test-rpc.ts';
+import { createSdkTestFetch, selectSolanaRpc, TEST_RPC_RESPONSE_LIMIT, UndrainedTestRpcBody } from './test-rpc.ts';
 import { unsignedSvmPrimitives } from './dev-provider-primitives.mjs';
 import { verifySvmWirePacket } from './dev-svm-call-plan.mjs';
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
@@ -78,6 +79,7 @@ export function createReverseTransactionSdk(provider, validateExpected) {
   }
   /** @param {InstanceType<NativeProvider['web3']['VersionedTransaction']>} tx @param {ReverseExpectation} e @param {FinalizedLookup | undefined} snapshot @param {readonly import('../domain/solana-mint.ts').MintInstruction[]} [instructions] */
   function decode(tx,e,snapshot,instructions = reverseInstructions(e)) {
+    if (!snapshot || !(snapshot.lookupTable instanceof AddressLookupTableAccount)) { throw new Error('Native finalized reverse ALT required'); }
     const lookup = finalized(e, snapshot);
     if (tx.version !== 0 || tx.signatures.length !== 1 || tx.message.header.numRequiredSignatures !== 1 ||
       tx.message.staticAccountKeys[0]?.toBase58() !== e.payer ||
@@ -125,25 +127,43 @@ export function createReverseTransactionSdk(provider, validateExpected) {
     if (!signature || !verifySignature(null,tx.message.serialize(),key,signature)) {throw new Error('Invalid native Ed25519 signature');}
     return {...inspected,signature:provider.bs58.encode(signature)};
   }
+  /** Native unsigned packet check; the height remains captured validity metadata.
+   * @param {import('./solana-transaction-sdk.mjs').PreparedTransaction} prepared
+   * @param {ReverseExpectation} e @param {FinalizedLookup} snapshot
+   */
+  function inspectPrepared(prepared, e, snapshot) {
+    const bytes = Buffer.from(prepared.bytesBase64, 'base64');
+    if (!bytes.length || bytes.length > 1232 || bytes.toString('base64') !== prepared.bytesBase64 ||
+      !/^[1-9][0-9]*$/.test(prepared.lastValidBlockHeight) || BigInt(prepared.lastValidBlockHeight) >= 1n << 64n) {
+      throw new Error('Invalid reverse prepared encoding/validity');
+    }
+    const tx = VersionedTransaction.deserialize(bytes), inspected = decode(tx, e, snapshot);
+    if (!Buffer.from(tx.serialize()).equals(bytes) || tx.signatures.some(s => s.some(b => b !== 0)) ||
+      inspected.messageBase64 !== prepared.messageBase64 || inspected.blockhash !== prepared.blockhash) {
+      throw new Error('Invalid unsigned reverse prepared identity');
+    }
+    return tx;
+  }
   /** @param {import('./solana-transaction-sdk.mjs').PreparedTransaction} prepared @param {ReverseExpectation} e @param {import('./solana-transaction-sdk.mjs').TestKeys} keys @param {FinalizedLookup} snapshot */
   async function sign(prepared,e,keys,snapshot) {
     if(keys.testOnly!==true) {throw new Error('Test-only reverse signer required');}
-    let secret,payer;
+    let secret,payer,signingSecret;
+    /** @type {unknown[] | undefined} */ let raw;
     try {
-      const raw=JSON.parse(await readFile(keys.payerFile,'utf8'));
-      if(!Array.isArray(raw)||raw.length!==64||raw.some(n=>!Number.isInteger(n)||n<0||n>255)){throw new Error('Invalid key');}
-      secret=Uint8Array.from(raw);raw.fill(0);payer=Keypair.fromSecretKey(secret);
+      const tx=inspectPrepared(prepared,e,snapshot);
+      const parsed=/** @type {unknown} */(JSON.parse(await readFile(keys.payerFile,'utf8')));
+      if(Array.isArray(parsed)){raw=parsed;}
+      if(!Array.isArray(parsed)||parsed.length!==64||parsed.some(n=>typeof n!=='number'||!Number.isInteger(n)||n<0||n>255)){throw new Error('Invalid key');}
+      secret=Uint8Array.from(parsed);raw?.fill(0);payer=Keypair.fromSecretKey(secret);
       if(payer.publicKey.toBase58()!==e.payer){throw new Error('Wrong test payer');}
-      const tx=VersionedTransaction.deserialize(Buffer.from(prepared.bytesBase64,'base64'));
-      const decoded=decode(tx,e,snapshot);
-      if(decoded.blockhash!==prepared.blockhash || decoded.messageBase64!==prepared.messageBase64){throw new Error('Prepared message mismatch');}
-      tx.sign([payer]);
+      signingSecret=payer.secretKey;
+      tx.sign([{publicKey:payer.publicKey,secretKey:signingSecret}]);
       const bytesBase64=Buffer.from(tx.serialize()).toString('base64'),inspected=inspectSigned(bytesBase64,e,snapshot);
       return {bytesBase64,signature:inspected.signature,blockhash:inspected.blockhash,lastValidBlockHeight:prepared.lastValidBlockHeight};
     } catch {throw new Error('Test-only reverse signing failed');}
-    finally {secret?.fill(0);payer?.secretKey.fill(0);}
+    finally {raw?.fill(0);secret?.fill(0);signingSecret?.fill(0);}
   }
-  return {build,inspectSigned,sign};
+  return {build,inspectSigned,inspectPrepared,sign};
 }
 /** @typedef {import('./test-sdk-policy.ts').TestSdkSelection & {providerDirectory: string, ccipProviderDirectory: string, recentSlot: string, journalFile?: string, solanaRpc?: string, replayFetch?: typeof fetch}} ReverseSettings */
 /** @param {unknown} params @param {NativeProvider} provider */
@@ -186,9 +206,46 @@ function reverseSelection(settings, replayFetch) {
   if (selected && typeof replayFetch !== 'function') { throw new Error('TEST reverse requires injected unsigned transport'); }
   return selected;
 }
-/** @param {ReverseSettings} settings */
+/** Public TEST view stays unsigned; legacy callers retain their existing signer. @param {ReverseSettings} settings */
 export async function createSolanaReverseSdk(settings) {
+  return (await materializeReverse(settings, false)).sdk;
+}
+/** One private operator attempt using the same admission and native compiler as its unsigned view.
+ * @param {ReverseSettings} settings
+ */
+export async function createSolanaReverseOperatorAttempt(settings) {
+  const attempt = await materializeReverse(settings, true);
+  if (!('acquireSigner' in attempt) || typeof attempt.acquireSigner !== 'function' || !('destroy' in attempt.sdk)) {
+    if ('destroy' in attempt.sdk) { await attempt.sdk.destroy(); }
+    throw new Error('Explicit TEST reverse operator attempt required');
+  }
+  return Object.freeze({ sdk: attempt.sdk, acquireSigner: attempt.acquireSigner });
+}
+/** Load only the already admitted provider or the existing pinned legacy dependencies.
+ * @param {ReverseSettings} settings
+ * @param {Awaited<ReturnType<typeof openTestSdk>> | undefined} session
+ */
+async function reverseDependencies(settings,session) {
+  const provider = session?.native ?? await loadSolanaProvider(settings.providerDirectory);
+  const poolSdk = session ? createPoolInitSdk(provider) : await createSolanaPoolInitSdk(settings.providerDirectory);
+  const poolConfig = session ? createPoolConfigSdk(provider, createRegistrationSdk(provider, poolSdk), poolSdk) : await createSolanaPoolConfigSdk(settings.providerDirectory);
+  /** @type {typeof import('../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/solana/index.js')} */
+  let sdk;
+  if (session) { sdk = session.solana; }
+  else {
+  const root=resolve(settings.ccipProviderDirectory);
+  for(const [file,hash] of Object.entries({'package.json':'8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb',
+    'package-lock.json':'1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f'})) {
+    if(createHash('sha256').update(await readFile(resolve(root,file))).digest('hex')!==hash){throw new Error('Wrong CCIP provider pin');}
+  }
+  const require=createRequire(resolve(root,'package.json')); sdk=await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk')).href);
+  }
+  return {provider,poolSdk,poolConfig,sdk};
+}
+/** @param {ReverseSettings} settings @param {boolean} operator */
+async function materializeReverse(settings, operator) {
   const replayFetch = settings.replayFetch, selected = reverseSelection(settings, replayFetch);
+  if (operator && !selected) { throw new Error('Explicit TEST reverse operator selection required'); }
   const fixture = selected?.fixture ?? bindFixture({ ...settings, testOnly: settings.testOnly === true }, settings.journalFile ? [settings.journalFile] : []), route = reverseRoute(fixture);
   const endpoint = selectSolanaRpc(settings);
   const session = selected ? await openTestSdk({ root: settings.providerDirectory, archives: selected.archives }) : undefined;
@@ -205,7 +262,8 @@ export async function createSolanaReverseSdk(settings) {
   let busy;
   /** @type {Promise<void> | undefined} */
   let destroyPromise;
-  let closing = false;
+  /** @type {(() => Promise<void>) | undefined} */ let drainSigning;
+  let closing = false, physicalDebt = false;
   const destroy = () => {
     if (destroyPromise) { return destroyPromise; }
     closing = true; abort.abort(); const active = busy;
@@ -215,7 +273,9 @@ export async function createSolanaReverseSdk(settings) {
       try {
         await Promise.race([(async () => {
           if (active) { await active.catch(() => {}); }
+          await drainSigning?.();
           await Promise.allSettled(transports);
+          if (physicalDebt) { throw new Error('Unresolved TEST SDK reverse body drain'); }
           chain?.destroy(); session?.close();
         })(), new Promise((_resolve, reject) => { deadline = setTimeout(() => reject(new Error('Unresolved TEST SDK reverse drain')), 20_000); })]);
       } finally { clearTimeout(deadline); }
@@ -223,27 +283,17 @@ export async function createSolanaReverseSdk(settings) {
     return destroyPromise;
   };
   try {
-  const provider = session?.native ?? await loadSolanaProvider(settings.providerDirectory);
-  const poolSdk = session ? createPoolInitSdk(provider) : await createSolanaPoolInitSdk(settings.providerDirectory);
-  const poolConfig = session ? createPoolConfigSdk(provider, createRegistrationSdk(provider, poolSdk), poolSdk) : await createSolanaPoolConfigSdk(settings.providerDirectory);
-  /** @type {typeof import('../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/solana/index.js')} */
-  let sdk;
-  if (session) { sdk = session.solana; }
-  else {
-  const root=resolve(settings.ccipProviderDirectory);
-  for(const [file,hash] of Object.entries({'package.json':'8cf7da517123c8be46f0a5fa14ef67904bf45bf4cfb972fc2c54be4b91cb56fb',
-    'package-lock.json':'1477c1d04940f9556ff87eaf82de6f0f2eaa6f3585deea0f09bfdab8fba7f50f'})) {
-    if(createHash('sha256').update(await readFile(resolve(root,file))).digest('hex')!==hash){throw new Error('Wrong CCIP provider pin');}
-  }
-  const require=createRequire(resolve(root,'package.json')); sdk=await import(pathToFileURL(require.resolve('@chainlink/ccip-sdk')).href);
-  }
+  const {provider,poolSdk,poolConfig,sdk}=await reverseDependencies(settings,session);
   if (session) {
     const checked = unsignedReverseFetch(endpoint, replayFetch, provider);
     /** @type {typeof fetch} */
     const ownedFetch = (input, init) => {
       if (closing) { throw new Error('Closed TEST reverse transport'); }
       const result = checked(input, { ...init, signal: init?.signal ? AbortSignal.any([abort.signal, init.signal]) : abort.signal });
-      transports.add(result); void result.then(() => transports.delete(result), () => transports.delete(result)); return result;
+      transports.add(result); void result.then(() => transports.delete(result), error => {
+        if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; }
+        transports.delete(result);
+      }); return result;
     };
     chain = await sdk.SolanaChain.fromUrl(endpoint, { fetch: ownedFetch, abort: abort.signal, apiClient: null,
       logger: { debug() {}, info() {}, warn() {}, error() {} } });
@@ -252,6 +302,7 @@ export async function createSolanaReverseSdk(settings) {
   }
   const pool=poolConfig.derive({testOnly:true,cluster:'solana-devnet',payer:route.payer,mint:route.mint,
     pool:fixture?.solanaPool ?? new provider.web3.PublicKey(Buffer.from(SOLANA_REMOTE.pool.slice(2),'hex')).toBase58(),operation:'set-pool',recentSlot:settings.recentSlot});
+  if (session) { Object.freeze(pool); }
   const rawState=createReverseState(provider,poolSdk,fixture);
   /** @template T @param {() => Promise<T>} work @returns {Promise<T>} */
   async function readState(work) {
@@ -263,7 +314,7 @@ export async function createSolanaReverseSdk(settings) {
       const value = await operation; session.assertHealthy();
       if (closing) { throw new Error('Reverse client busy/destroyed'); }
       return value;
-    } catch (error) { await destroy(); throw error; }
+    } catch (error) { if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; } await destroy(); throw error; }
     finally { busy = undefined; }
   }
   /** @typedef {(method: string, params: readonly unknown[]) => Promise<unknown>} Rpc */
@@ -307,6 +358,11 @@ export async function createSolanaReverseSdk(settings) {
     reverseInstructions(e);
   }
   const transaction=createReverseTransactionSdk(provider,validateExpected);
+  const signing = operator ? createReverseSigning(provider, transaction, () => {
+    session?.assertHealthy();
+    if (closing || busy) { throw new Error('Reverse client busy/destroyed'); }
+  }) : undefined;
+  drainSigning = signing?.drain;
   /** @returns {Promise<Readonly<{fee: string, candidate: Candidate}>>} */
   async function candidate() {
       session?.assertHealthy(); if (closing || busy) { throw new Error('Reverse client busy/destroyed'); }
@@ -326,19 +382,20 @@ export async function createSolanaReverseSdk(settings) {
       });
       busy = operation;
       try { const value = await operation; session?.assertHealthy(); if (closing) { throw new Error('Reverse client busy/destroyed'); } return value; }
-      catch (error) { await destroy(); throw error; } finally { busy = undefined; }
+      catch (error) { if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; } await destroy(); throw error; } finally { busy = undefined; }
   }
-  if (!session) { return { ...transaction, state, pool, derive, validateExpected, candidate }; }
-  return Object.freeze({ state, pool,
+  if (!session) { return { sdk: { ...transaction, state, pool, derive, validateExpected, candidate } }; }
+  const sdkView = Object.freeze({ state, pool,
     derive: /** @param {Parameters<typeof derive>} args */(...args) => { session.assertHealthy(); return derive(...args); },
     validateExpected: /** @param {ReverseExpectation} e */e => { session.assertHealthy(); validateExpected(e); },
     build: /** @param {Parameters<typeof transaction.build>} args */(...args) => {
       session.assertHealthy();
       if (quotes.get(args[0]) !== args[1].quotedFee) { throw new Error('Missing or mismatched native SDK candidate quote'); }
-      const value = transaction.build(...args); session.assertHealthy(); return value;
+      const value = (signing?.build ?? transaction.build)(...args); session.assertHealthy(); return value;
     },
     inspectSigned: /** @param {Parameters<typeof transaction.inspectSigned>} args */(...args) => { session.assertHealthy(); const value = transaction.inspectSigned(...args); session.assertHealthy(); return value; },
     candidate, destroy,
   });
-  } catch (error) { await destroy(); throw error; }
+  return signing ? { sdk: sdkView, acquireSigner: signing.acquireSigner } : { sdk: sdkView };
+  } catch (error) { if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; } await destroy(); throw error; }
 }
