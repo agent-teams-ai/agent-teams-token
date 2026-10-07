@@ -85,4 +85,3 @@ test('legacy native compiler rejects hidden instructions, lookup substitution, s
   assert.throws(() => sdk.build(candidate, expected, latest, snapshot), /ALT/);
   assert.throws(() => sdk.validateExpected({ ...expected, spender: expected.payer }), /derived identity/);
 });
-

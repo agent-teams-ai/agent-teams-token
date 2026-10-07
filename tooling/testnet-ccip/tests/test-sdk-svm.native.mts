@@ -331,7 +331,7 @@ export async function svmReverseUnit(name: string, inputs: SvmInputs) {
 }
 export async function svmCompilerUnit(inputs: SvmInputs) {
   const {root, archives, fixture} = inputs;
-  assert.ok(fixture); const session = await openTestSdk({ root, archives }); 
+  assert.ok(fixture); const session = await openTestSdk({ root, archives });
   try {
     const native = session.native; signingSentinels(native.web3);
     const pool = createPoolInitSdk(native), registration = createRegistrationSdk(native, pool), configuration = createPoolConfigSdk(native, registration, pool);
