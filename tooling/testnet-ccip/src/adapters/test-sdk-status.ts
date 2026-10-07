@@ -126,8 +126,8 @@ function request(value: CCIPRequest): StatusRequest {
     message: { data: m.data, messageId: m.messageId, sourceChainSelector: m.sourceChainSelector, destChainSelector: m.destChainSelector,
       sender: m.sender, receiver: m.receiver, sequenceNumber: m.sequenceNumber,
       ...('tokenReceiver' in m && typeof m.tokenReceiver === 'string' ? { tokenReceiver: m.tokenReceiver } : {}),
-      tokenAmounts: m.tokenAmounts.map(token => {
-        if (!('destTokenAddress' in token) || !('sourcePoolAddress' in token) || typeof token.destTokenAddress !== 'string' || typeof token.sourcePoolAddress !== 'string') {
+      tokenAmounts: m.tokenAmounts.map((token: unknown) => {
+        if (!record(token) || typeof token.amount !== 'bigint' || typeof token.destTokenAddress !== 'string' || typeof token.sourcePoolAddress !== 'string') {
           throw new Error('Status requires decoded SDK token route');
         }
         return { amount: token.amount, destTokenAddress: token.destTokenAddress, sourcePoolAddress: token.sourcePoolAddress };
