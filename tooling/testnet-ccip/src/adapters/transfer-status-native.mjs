@@ -289,19 +289,23 @@ export function authenticatedSolanaEffect(tx, kind, recipient, expectedAta, { la
   }
   return match.index;
 }
+/** @param {Record<string, unknown>} info @param {string | undefined} signer */
+function exactPoolMintAuthority(info, signer) {
+  // Solana's parser labels an extra, repeated authority meta as multisig.
+  // Accept only the exact pool PDA repeated once, never arbitrary multisig keys.
+  if (!signer) { return false; }
+  if (Object.hasOwn(info, 'multisigMintAuthority')) {
+    return info.multisigMintAuthority === signer && info.mintAuthority === undefined && info.authority === undefined &&
+      Array.isArray(info.signers) && info.signers.length === 1 && info.signers[0] === signer;
+  }
+  return info.mintAuthority === signer && info.signers === undefined &&
+    (info.authority === undefined || info.authority === info.mintAuthority);
+}
 /** @param {InstructionPosition} match @param {Record<string, unknown>} info @param {NativeStatusLane} lane @param {bigint} expectedAmount */
 function verifyMintInstruction(match, info, lane, expectedAmount) {
   const fixture = lane.fixture;
   const tokenAmount = isObject(info.tokenAmount) ? info.tokenAmount : undefined;
-  // Solana's parser labels an extra, repeated authority meta as multisig.
-  // Accept only the exact pool PDA repeated once, never arbitrary multisig keys.
-  const repeated = Object.hasOwn(info, 'multisigMintAuthority');
-  const exactAuthority = repeated
-    ? info.multisigMintAuthority === lane.solanaSigner && info.mintAuthority === undefined && info.authority === undefined &&
-      Array.isArray(info.signers) && info.signers.length === 1 && info.signers[0] === lane.solanaSigner
-    : info.mintAuthority === lane.solanaSigner && info.signers === undefined &&
-      (info.authority === undefined || info.authority === info.mintAuthority);
-  if (amount(info.amount ?? tokenAmount?.amount) !== expectedAmount || fixture && !exactAuthority ||
+  if (amount(info.amount ?? tokenAmount?.amount) !== expectedAmount || fixture && !exactPoolMintAuthority(info, lane.solanaSigner) ||
       fixture && match.ix.parsed?.type === 'mintToChecked' && tokenAmount?.decimals !== 9) { throw new Error('Wrong SPL mint amount/authority/decimals'); }
 }
 /** @param {unknown} tx @param {string} account @param {string} owner @param {NativeStatusLane} lane */

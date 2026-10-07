@@ -11,7 +11,7 @@ const lane:NativeStatusLane={fixture,solanaPool:fixture.solanaPool,solanaSigner:
 type NativeTransaction={meta:{innerInstructions:{instructions:{parsed?:{type:string,info:Record<string,unknown>}}[]}[]}};
 function original():NativeTransaction{return structuredClone(capture.response.result);}
 function mintInfo(tx:NativeTransaction):Record<string,unknown>{
- const ix=tx.meta.innerInstructions.flatMap(g=>g.instructions).find(ix=>ix.parsed?.type==='mintTo');
+ const ix=tx.meta.innerInstructions.flatMap(g=>g.instructions).find(candidate=>candidate.parsed?.type==='mintTo');
  assert.ok(ix?.parsed);return ix.parsed.info;
 }
 const prove=(tx:NativeTransaction)=>authenticatedSolanaEffect(tx,'mint',fixture.recipient,ata,{lane,event:capture.event});
@@ -38,6 +38,6 @@ const rejects:[string,(info:Record<string,unknown>)=>void][]=[
  ['no authority proof',i=>{delete i.multisigMintAuthority;delete i.signers;}],
  ['direct authority with repeated signer array',i=>{delete i.multisigMintAuthority;i.mintAuthority=signer;}],
 ];
-for(const [name,mutate] of rejects)test(name+' cannot qualify a mint',()=>{
+for(const [name,mutate] of rejects){test(name+' cannot qualify a mint',()=>{
  const tx=original();mutate(mintInfo(tx));assert.throws(()=>prove(tx),/mint amount\/authority\/decimals/);
-});
+});}
