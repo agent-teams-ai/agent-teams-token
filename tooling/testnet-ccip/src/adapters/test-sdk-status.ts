@@ -1,7 +1,7 @@
 import { openTestSdk } from './test-sdk-admission.ts';
 import { selectTestSdk, type ExplicitTestSdkSelection } from './test-sdk-policy.ts';
 import { selectSepoliaRpc, selectSolanaRpc, TEST_RPC_RESPONSE_LIMIT } from './test-rpc.ts';
-import { createNativeStatus, type NativeStatusLane, type StatusWait } from './transfer-status-native.mjs';
+import { createOwnedNativeStatus, type NativeStatusLane, type StatusWait } from './transfer-status-native.mjs';
 import { FORWARD_RECIPIENT_B } from '../domain/evm-forward.mjs';
 import { selectedFixture } from '../domain/replacement-fixture.ts';
 import { BURNMINT_PROGRAM } from '../domain/solana-pool-init.ts';
@@ -33,6 +33,83 @@ const EVM_READS = new Set(['eth_chainId', 'eth_call', 'eth_getBlockByNumber',
 const SOLANA_READS = new Set(['getGenesisHash', 'getTransaction', 'getAccountInfo',
   'getSignatureStatuses', 'getBlock', 'getSlot', 'getTokenSupply', 'getBlockTime', 'simulateTransaction']);
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+function track<T>(set: Set<Promise<unknown>>, promise: Promise<T>): Promise<T> {
+  set.add(promise); void promise.then(() => set.delete(promise), () => set.delete(promise)); return promise;
+}
+type Refuse = (message: string) => never;
+function validateViewSimulation(params: unknown[], refuse: Refuse): void {
+  if (params.length !== 2 || typeof params[0] !== 'string' || !record(params[1]) ||
+      params[1].sigVerify !== false || params[1].replaceRecentBlockhash !== true || params[1].encoding !== 'base64' || params[1].commitment !== 'confirmed') {
+    refuse('Unexpected TEST status view simulation');
+  }
+}
+function rpcRequestId(row: unknown, methods: ReadonlySet<string>, refuse: Refuse): string | number {
+  if (!record(row) || row.jsonrpc !== '2.0' || typeof row.method !== 'string' || !methods.has(row.method) || !Array.isArray(row.params) ||
+      Object.keys(row).some(key => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+      !(typeof row.id === 'number' && Number.isSafeInteger(row.id) && row.id >= 0 || typeof row.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(row.id))) {
+    return refuse('Non-read or malformed TEST status RPC request');
+  }
+  // The actual Solana source decoder reads typeVersion via an unsigned
+  // view simulation. It neither signs nor submits a transaction.
+  if (row.method === 'simulateTransaction') { validateViewSimulation(row.params, refuse); }
+  return row.id;
+}
+function rpcRequestBody(body: RequestInit['body'], headers: Headers, methods: ReadonlySet<string>, refuse: Refuse) {
+  if (body instanceof Uint8Array) {
+    if (body.byteLength > TEST_RPC_RESPONSE_LIMIT) { return refuse('TEST status SDK request bytes exceed bound'); }
+    try { body = new TextDecoder('utf-8', { fatal: true }).decode(body); } catch { return refuse('Invalid UTF-8 TEST status SDK request'); }
+  }
+  if (typeof body !== 'string' || Buffer.byteLength(body) > TEST_RPC_RESPONSE_LIMIT) { return refuse('Unexpected TEST status RPC body'); }
+  if (headers.has('content-length') && headers.get('content-length') !== String(Buffer.byteLength(body))) { return refuse('Mismatched TEST status request length'); }
+  headers.delete('content-length');
+  let payload: unknown;
+  try { payload = JSON.parse(body); } catch { return refuse('Invalid TEST status RPC JSON'); }
+  const batch = Array.isArray(payload), rows: readonly unknown[] = Array.isArray(payload) ? payload : [payload];
+  if (!rows.length || rows.length > 20) { return refuse('Invalid TEST status RPC batch'); }
+  const ids = rows.map(row => rpcRequestId(row, methods, refuse));
+  if (new Set(ids).size !== ids.length) { return refuse('Duplicate TEST status RPC request ID'); }
+  return { body, ids, batch };
+}
+function validateApiRequest(url: URL, init: RequestInit | undefined, body: RequestInit['body'], refuse: Refuse, input: string | URL): void {
+  if (url.origin !== API_ORIGIN || String(input) !== url.href || !/^\/v2\/messages\/0x[0-9a-fA-F]{64}$/.test(url.pathname) || url.search ||
+      (init?.method ?? 'GET').toUpperCase() !== 'GET' || body !== undefined && body !== null) { refuse('Unexpected TEST status API discovery request'); }
+}
+function requestHeaders(init: RequestInit | undefined, methods: ReadonlySet<string> | undefined, refuse: Refuse): Headers {
+  const headers = new Headers(init?.headers);
+  for (const key of headers.keys()) {
+    const allowed = methods ? ['content-type', 'accept-encoding', 'content-length', 'solana-client'] : ['content-type', 'x-sdk-version'];
+    if (!allowed.includes(key)) { return refuse('Unexpected TEST status request header: ' + key); }
+  }
+  return headers;
+}
+function transportRequest(input: Parameters<typeof fetch>[0], init: RequestInit | undefined, endpoint: string, methods: ReadonlySet<string> | undefined, refuse: Refuse) {
+  if (typeof input !== 'string' && !(input instanceof URL)) { return refuse('Unexpected TEST status request input'); }
+  const url = new URL(String(input));
+  if (url.username || url.password || url.hash || init?.credentials && init.credentials !== 'omit') { return refuse('Credentialled/noncanonical TEST status request'); }
+  const headers = requestHeaders(init, methods, refuse);
+  const body = init?.body;
+  if (methods) {
+    if (String(input) !== endpoint && String(input) !== new URL(endpoint).href || init?.method?.toUpperCase() !== 'POST') { return refuse('Unexpected TEST status RPC endpoint/method'); }
+    return { url, headers, ...rpcRequestBody(body, headers, methods, refuse) };
+  }
+  validateApiRequest(url, init, body, refuse, input);
+  return { url, headers, body, ids: [] as readonly (string | number)[], batch: false };
+}
+function validRpcReply(row: unknown, ids: readonly (string | number)[], replyIds: ReadonlySet<string | number>): row is Record<string, unknown> & { id: string | number } {
+  return record(row) && row.jsonrpc === '2.0' && (typeof row.id === 'number' || typeof row.id === 'string') && ids.includes(row.id) && !replyIds.has(row.id) &&
+    ('result' in row) !== ('error' in row) && (!('error' in row) || record(row.error) && Number.isSafeInteger(row.error.code) && typeof row.error.message === 'string');
+}
+function validateRpcResponse(bytes: Uint8Array, batch: boolean, ids: readonly (string | number)[], refuse: Refuse): void {
+  let decoded: unknown;
+  try { decoded = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return refuse('Invalid TEST status RPC response JSON'); }
+  const rows: readonly unknown[] = Array.isArray(decoded) ? decoded : [decoded];
+  const replyIds = new Set<string | number>();
+  if (Array.isArray(decoded) !== batch || rows.length !== ids.length) { return refuse('Mismatched TEST status RPC response batch'); }
+  for (const row of rows) {
+    if (!validRpcReply(row, ids, replyIds)) { return refuse('Invalid TEST status RPC response envelope'); }
+    replyIds.add(row.id);
+  }
+}
 function log(value: ChainLog): StatusLog {
   if (typeof value.data !== 'string') { throw new Error('Unsupported status SDK log data'); }
   return { transactionHash: value.transactionHash, index: value.index, address: value.address, data: value.data, topics: [...value.topics],
@@ -83,9 +160,6 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
   const latch = (message: string): Error => { const error = new Error(message); violation ??= error; logger.error(message); return violation; };
   const refuse = (message: string): never => { throw latch(message); };
   function healthy(): void { session.assertHealthy(); if (violation) { throw violation; } if (closing) { throw new Error('TEST status lifetime closed'); } abort.signal.throwIfAborted(); }
-  function track<T>(set: Set<Promise<unknown>>, promise: Promise<T>): Promise<T> {
-    set.add(promise); void promise.then(() => set.delete(promise), () => set.delete(promise)); return promise;
-  }
   function run<T>(operation: () => Promise<T>): Promise<T> {
     healthy();
     return track(operations, (async () => {
@@ -126,68 +200,13 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
   }
   const transport = (endpoint: string, methods?: ReadonlySet<string>): typeof fetch => (input, init) => track(transports, (async () => {
     healthy();
-    if (typeof input !== 'string' && !(input instanceof URL)) { return refuse('Unexpected TEST status request input'); }
-    const url = new URL(String(input));
-    if (url.username || url.password || url.hash || init?.credentials && init.credentials !== 'omit') { return refuse('Credentialled/noncanonical TEST status request'); }
-    const headers = new Headers(init?.headers);
-    for (const key of headers.keys()) {
-      const allowed = methods ? ['content-type', 'accept-encoding', 'content-length', 'solana-client'] : ['content-type', 'x-sdk-version'];
-      if (!allowed.includes(key)) { return refuse('Unexpected TEST status request header: ' + key); }
-    }
-    let body = init?.body;
-    let ids: readonly (string | number)[] = [], batch = false;
-    if (methods) {
-      if (String(input) !== endpoint && String(input) !== new URL(endpoint).href || init?.method?.toUpperCase() !== 'POST') { return refuse('Unexpected TEST status RPC endpoint/method'); }
-      if (body instanceof Uint8Array) {
-        if (body.byteLength > TEST_RPC_RESPONSE_LIMIT) { return refuse('TEST status SDK request bytes exceed bound'); }
-        try { body = new TextDecoder('utf-8', { fatal: true }).decode(body); } catch { return refuse('Invalid UTF-8 TEST status SDK request'); }
-      }
-      if (typeof body !== 'string' || Buffer.byteLength(body) > TEST_RPC_RESPONSE_LIMIT) { return refuse('Unexpected TEST status RPC body'); }
-      if (headers.has('content-length') && headers.get('content-length') !== String(Buffer.byteLength(body))) { return refuse('Mismatched TEST status request length'); }
-      headers.delete('content-length');
-      let payload: unknown;
-      try { payload = JSON.parse(body); } catch { return refuse('Invalid TEST status RPC JSON'); }
-      batch = Array.isArray(payload);
-      const rows: readonly unknown[] = Array.isArray(payload) ? payload : [payload];
-      if (!rows.length || rows.length > 20) { return refuse('Invalid TEST status RPC batch'); }
-      ids = rows.map(row => {
-        if (!record(row) || row.jsonrpc !== '2.0' || typeof row.method !== 'string' || !methods.has(row.method) || !Array.isArray(row.params) ||
-            Object.keys(row).some(key => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
-            !(typeof row.id === 'number' && Number.isSafeInteger(row.id) && row.id >= 0 || typeof row.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(row.id))) {
-          return refuse('Non-read or malformed TEST status RPC request');
-        }
-        // The actual Solana source decoder reads typeVersion via an unsigned
-        // view simulation. It neither signs nor submits a transaction.
-        if (row.method === 'simulateTransaction' && (row.params.length !== 2 || typeof row.params[0] !== 'string' || !record(row.params[1]) ||
-            row.params[1].sigVerify !== false || row.params[1].replaceRecentBlockhash !== true || row.params[1].encoding !== 'base64' || row.params[1].commitment !== 'confirmed')) {
-          return refuse('Unexpected TEST status view simulation');
-        }
-        return row.id;
-      });
-      if (new Set(ids).size !== ids.length) { return refuse('Duplicate TEST status RPC request ID'); }
-    } else {
-      if (url.origin !== API_ORIGIN || String(input) !== url.href || !/^\/v2\/messages\/0x[0-9a-fA-F]{64}$/.test(url.pathname) || url.search ||
-          (init?.method ?? 'GET').toUpperCase() !== 'GET' || body !== undefined && body !== null) { return refuse('Unexpected TEST status API discovery request'); }
-    }
+    const { url, headers, body, ids, batch } = transportRequest(input, init, endpoint, methods, refuse);
     const signal = init?.signal ? AbortSignal.any([abort.signal, init.signal, AbortSignal.timeout(20_000)]) : AbortSignal.any([abort.signal, AbortSignal.timeout(20_000)]);
     const response = await fetcher(url.href, { method: methods ? 'POST' : 'GET', headers, ...(typeof body === 'string' ? { body } : {}),
       credentials: 'omit', redirect: 'error', cache: 'no-store', signal });
     const bytes = await consume(response);
     if (response.url && response.url !== url.href) { return refuse('TEST status response endpoint changed'); }
-    if (methods && response.ok) {
-      let decoded: unknown;
-      try { decoded = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return refuse('Invalid TEST status RPC response JSON'); }
-      const rows: readonly unknown[] = Array.isArray(decoded) ? decoded : [decoded];
-      const replyIds = new Set<string | number>();
-      if (Array.isArray(decoded) !== batch || rows.length !== ids.length) { return refuse('Mismatched TEST status RPC response batch'); }
-      for (const row of rows) {
-        if (!record(row) || row.jsonrpc !== '2.0' || typeof row.id !== 'number' && typeof row.id !== 'string' || !ids.includes(row.id) || replyIds.has(row.id) ||
-            ('result' in row) === ('error' in row) || 'error' in row && (!record(row.error) || !Number.isSafeInteger(row.error.code) || typeof row.error.message !== 'string')) {
-          return refuse('Invalid TEST status RPC response envelope');
-        }
-        replyIds.add(row.id);
-      }
-    }
+    if (methods && response.ok) { validateRpcResponse(bytes, batch, ids, refuse); }
     // Native jsonRpc owns its one bounded 429 retry. SDK/API receive the original HTTP error.
     return new Response(new Uint8Array(bytes), { status: response.status, statusText: response.statusText, headers: response.headers });
   })());
@@ -245,7 +264,7 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
         return { ...log(value), level: value.level };
       } });
     const nativeFetch: typeof fetch = (input, init) => String(input) === sepolia || String(input) === new URL(sepolia).href ? rpcEvm(input, init) : rpcSolana(input, init);
-    const native = createNativeStatus(sepolia, solana, lane, nativeFetch, now, options.wait, abort.signal);
+    const native = createOwnedNativeStatus({ sepolia, solana, lane, fetcher: nativeFetch, now, wait: options.wait, signal: abort.signal });
     function chainPort(chain: EVMChain | SolanaChain, normalize: (address: string) => string): StatusChainPort {
       const view = statusChainView(chain, normalize);
       return Object.freeze({ getMessagesInTx: hash => run(() => view.getMessagesInTx(hash)),

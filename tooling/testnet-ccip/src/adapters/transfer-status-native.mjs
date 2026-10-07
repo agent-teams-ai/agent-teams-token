@@ -113,7 +113,7 @@ export function evmEffect(receipt, kind, fixture) {
 /** @param {unknown} value @returns {ParsedInstruction} */
 function instruction(value) {
   const ix = object(value), parsed = ix.parsed;
-  return { programId: text(ix.programId), ...(ix.stackHeight == null ? {} : { stackHeight: integer(ix.stackHeight) }),
+  return { programId: text(ix.programId), ...(ix.stackHeight === null || ix.stackHeight === undefined ? {} : { stackHeight: integer(ix.stackHeight) }),
     ...(isObject(parsed) ? { parsed: { type: text(parsed.type), info: object(parsed.info) } } : {}) };
 }
 /** Canonical top-level instruction, then its ordered CPI instructions. @param {unknown} tx @param {boolean} [strict] */
@@ -157,19 +157,14 @@ function invocationOwnership(tx, positions, event) {
       if (depth === 1) {
         // Some builtins omit trace lines. Only ungrouped top-level instructions
         // can be skipped; no token CPI or its parent can disappear this way.
-        while (positions[cursor]?.innerIndex === null && positions[cursor]?.ix.programId !== invoke[1] &&
-          positions[cursor + 1]?.topIndex !== positions[cursor]?.topIndex) { cursor++; }
+        cursor = skipUntracedBuiltins(positions, cursor, invoke[1]);
       }
       const position = positions[cursor++], parent = stack.at(-1);
-      if (!position || position.ix.programId !== invoke[1] || (depth === 1 ? position.innerIndex !== null || position.ix.stackHeight !== undefined && position.ix.stackHeight !== 1 :
-        position.innerIndex === null || position.ix.stackHeight !== depth || position.topIndex !== parent?.position.topIndex)) { throw new Error('Solana instruction/invocation coordinates disagree'); }
+      if (!validInvocationPosition(position, invoke[1], depth, parent)) { throw new Error('Solana instruction/invocation coordinates disagree'); }
       const frame = { position, start: index, end: -1, ...(parent ? { parent } : {}) };
       frames.push(frame); stack.push(frame);
     } else if (finish) {
-      const frame = stack.pop();
-      if (!frame || frame.position.ix.programId !== finish[1] || finish[2] !== 'success' ||
-        !stack.length && positions[cursor]?.innerIndex !== null && positions[cursor]?.topIndex === frame.position.topIndex) { throw new Error('Invalid/incomplete Solana invocation return'); }
-      frame.end = index;
+      finishInvocation(stack, positions[cursor], finish, index);
     }
     if (index === event.index) { owner = stack.at(-1); }
   }
@@ -178,6 +173,26 @@ function invocationOwnership(tx, positions, event) {
   if (stack.length || !owner || owner.position.ix.programId !== event.address || event.level !== level ||
     positions.slice(cursor).some(position => position.innerIndex !== null)) { throw new Error('Unproven Solana invocation ancestry'); }
   return { frames, owner, eventIndex: event.index };
+}
+/** @param {readonly InstructionPosition[]} positions @param {number} cursor @param {string | undefined} program */
+function skipUntracedBuiltins(positions, cursor, program) {
+  while (positions[cursor]?.innerIndex === null && positions[cursor]?.ix.programId !== program &&
+    positions[cursor + 1]?.topIndex !== positions[cursor]?.topIndex) { cursor++; }
+  return cursor;
+}
+/** @param {InstructionPosition | undefined} position @param {string | undefined} program @param {number} depth @param {InvocationFrame | undefined} parent
+ * @returns {position is InstructionPosition} */
+function validInvocationPosition(position, program, depth, parent) {
+  return !!position && position.ix.programId === program && (depth === 1 ? position.innerIndex === null &&
+    (position.ix.stackHeight === undefined || position.ix.stackHeight === 1) :
+    position.innerIndex !== null && position.ix.stackHeight === depth && position.topIndex === parent?.position.topIndex);
+}
+/** @param {InvocationFrame[]} stack @param {InstructionPosition | undefined} next @param {RegExpExecArray} finish @param {number} index */
+function finishInvocation(stack, next, finish, index) {
+  const frame = stack.pop();
+  if (!frame || frame.position.ix.programId !== finish[1] || finish[2] !== 'success' ||
+    !stack.length && next?.innerIndex !== null && next?.topIndex === frame.position.topIndex) { throw new Error('Invalid/incomplete Solana invocation return'); }
+  frame.end = index;
 }
 /** @param {InvocationFrame | undefined} frame @param {InvocationFrame} ancestor */
 function descendsFrom(frame, ancestor) { for (; frame; frame = frame.parent) { if (frame === ancestor) { return true; } } return false; }
@@ -212,61 +227,84 @@ function verifyPoolBurnBalances(tx, owner, expectedAta, lane, fixture) {
     if (before.length !== 1 || after.length !== 1 || before[0] !== pre || after[0] !== post) { throw new Error('SPL pool burn balances do not reconcile'); }
   }
 }
-/** The official reverse CPI transfers A's tokens to the pool before burning.
- * @param {unknown} tx @param {string} owner @param {string | undefined} expectedAta @param {NativeStatusLane} lane @param {ReplacementFixture} [fixture] @param {InvocationLog} [event] */
-function solanaPoolBurn(tx, owner, expectedAta, lane, fixture, event) {
-  const reverse = reverseRoute(fixture);
-  if (owner !== forwardRoute(fixture).recipient) { throw new Error('B reverse is not supported'); }
-  if (!expectedAta || !lane.solanaPoolAta || !lane.solanaSigner || !lane.solanaSpender || expectedAta === lane.solanaPoolAta) { throw new Error('Missing canonical burn lane'); }
-  const instructions = orderedSolanaInstructions(tx);
+/** @param {readonly InstructionPosition[]} instructions @param {string} mint */
+function poolBurnPair(instructions, mint) {
   /** @param {readonly string[]} types */
   const candidates = types => instructions.filter(({ ix }) =>
-    ix.programId === TOKEN && ix.parsed && types.includes(ix.parsed.type) && ix.parsed.info.mint === reverse.mint);
+    ix.programId === TOKEN && ix.parsed && types.includes(ix.parsed.type) && ix.parsed.info.mint === mint);
   const transfers = candidates(['transferChecked']), burns = candidates(['burn', 'burnChecked']);
   const first = transfers[0], last = burns[0], transfer = first?.ix.parsed?.info, burn = last?.ix.parsed?.info;
   if (transfers.length !== 1 || burns.length !== 1 || !first || !last || !transfer || !burn) { throw new Error('Exact unique SPL pool transfer/burn missing'); }
+  return { first, last, transfer, burn };
+}
+/** @param {ReturnType<typeof poolBurnPair>} pair @param {string} expectedAta @param {NativeStatusLane} lane @param {bigint} expectedAmount */
+function verifyPoolBurnPair({ first, last, transfer, burn }, expectedAta, lane, expectedAmount) {
   const tokenAmount = object(transfer.tokenAmount);
   if (first.index >= last.index || transfer.source !== expectedAta || transfer.destination !== lane.solanaPoolAta ||
-      transfer.authority !== lane.solanaSpender || tokenAmount.amount !== reverse.amount.toString() || tokenAmount.decimals !== 9 ||
-      last.ix.parsed?.type !== 'burn' || burn.account !== lane.solanaPoolAta || burn.authority !== lane.solanaSigner || burn.amount !== reverse.amount.toString()) { throw new Error('Wrong canonical SPL pool transfer/burn'); }
+      transfer.authority !== lane.solanaSpender || tokenAmount.amount !== expectedAmount.toString() || tokenAmount.decimals !== 9 ||
+      last.ix.parsed?.type !== 'burn' || burn.account !== lane.solanaPoolAta || burn.authority !== lane.solanaSigner || burn.amount !== expectedAmount.toString()) { throw new Error('Wrong canonical SPL pool transfer/burn'); }
+}
+/** The official reverse CPI transfers A's tokens to the pool before burning.
+ * @param {unknown} tx @param {string} owner @param {string | undefined} expectedAta @param {{ lane: NativeStatusLane, event?: InvocationLog | undefined }} context */
+function solanaPoolBurn(tx, owner, expectedAta, { lane, event }) {
+  const fixture = lane.fixture, reverse = reverseRoute(fixture);
+  if (owner !== forwardRoute(fixture).recipient) { throw new Error('B reverse is not supported'); }
+  if (!expectedAta || !lane.solanaPoolAta || !lane.solanaSigner || !lane.solanaSpender || expectedAta === lane.solanaPoolAta) { throw new Error('Missing canonical burn lane'); }
+  const instructions = orderedSolanaInstructions(tx), pair = poolBurnPair(instructions, reverse.mint);
+  verifyPoolBurnPair(pair, expectedAta, lane, reverse.amount);
   if (fixture) {
     const trace = invocationOwnership(tx, instructions, event);
-    const transferFrame = trace.frames.find(frame => frame.position.index === first.index), pool = poolInvocation(trace, last.index);
+    const transferFrame = trace.frames.find(frame => frame.position.index === pair.first.index), pool = poolInvocation(trace, pair.last.index);
     // Router transfers to the pool, then invokes that pool to burn. Both belong
     // to the exact router frame emitting this decoded send, not another call to it.
     if (trace.owner.position.ix.programId !== ROUTER_PROGRAM || !transferFrame || transferFrame.parent !== trace.owner || pool.parent !== trace.owner) { throw new Error('Split Solana router transfer/burn execution'); }
   }
   verifyPoolBurnBalances(tx, owner, expectedAta, lane, fixture);
-  return last.index;
+  return pair.last.index;
 }
 /** Parsed instructions are native RPC decoding of actual transaction bytes, not CCIP metadata.
- * @param {unknown} tx @param {EffectKind} kind @param {unknown} [recipient] @param {string} [expectedAta] @param {NativeStatusLane} [lane] @param {InvocationLog} [event] */
-export function solanaEffect(tx, kind, recipient, expectedAta, lane = {}, event) {
+ * @param {unknown} tx @param {EffectKind} kind @param {unknown} [recipient] @param {string} [expectedAta] @param {NativeStatusLane} [lane] */
+export function solanaEffect(tx, kind, recipient, expectedAta, lane = {}) {
+  return authenticatedSolanaEffect(tx, kind, recipient, expectedAta, { lane });
+}
+/** @param {unknown} tx @param {EffectKind} kind @param {unknown} recipient @param {string | undefined} expectedAta
+ * @param {{ lane: NativeStatusLane, event?: InvocationLog | undefined }} context */
+export function authenticatedSolanaEffect(tx, kind, recipient, expectedAta, { lane, event }) {
   if (kind !== 'mint' && kind !== 'burn') { throw new Error('Invalid SPL effect kind'); }
   const fixture = lane.fixture, reverse = reverseRoute(fixture), owner = forwardRecipient(recipient, fixture);
   if (fixture && (!expectedAta || lane.recipientAtas?.[owner] !== expectedAta || !lane.solanaSigner || expectedAta === lane.solanaPoolAta)) { throw new Error('Missing canonical recipient ATA/authority'); }
-  if (kind === 'burn') { return solanaPoolBurn(tx, owner, expectedAta, lane, fixture, event); }
+  if (kind === 'burn') { return solanaPoolBurn(tx, owner, expectedAta, { lane, event }); }
   const instructions = orderedSolanaInstructions(tx, fixture !== undefined);
   const matches = instructions.filter(({ ix }) => ix.programId === TOKEN &&
     ix.parsed && ['mintTo', 'mintToChecked'].includes(ix.parsed.type) && ix.parsed.info.mint === reverse.mint);
   const match = matches[0], info = match?.ix.parsed?.info;
   if (matches.length !== 1 || !match || !info) { throw new Error('Exact unique SPL mint instruction missing'); }
-  const tokenAmount = isObject(info.tokenAmount) ? info.tokenAmount : undefined;
-  if (amount(info.amount ?? tokenAmount?.amount) !== reverse.amount || fixture && info.mintAuthority !== lane.solanaSigner ||
-      fixture && info.mintAuthority !== undefined && info.authority !== undefined && info.mintAuthority !== info.authority ||
-      fixture && match.ix.parsed?.type === 'mintToChecked' && tokenAmount?.decimals !== 9) { throw new Error('Wrong SPL mint amount/authority/decimals'); }
+  verifyMintInstruction(match, info, lane, reverse.amount);
   const account = text(info.account);
   if (expectedAta !== undefined && account !== expectedAta) { throw new Error('Wrong canonical recipient ATA'); }
-  const keys = accountKeys(tx), index = keys.indexOf(account), meta = object(object(tx).meta);
-  if (index < 0 || keys.lastIndexOf(account) !== index) { throw new Error('Missing exact SPL account ownership'); }
-  const before = balanceAt(meta.preTokenBalances, index, reverse.mint, owner, fixture !== undefined);
-  const after = balanceAt(meta.postTokenBalances, index, reverse.mint, owner, fixture !== undefined);
-  if (after.length !== 1 || after[0] === undefined || after[0] - (before[0] ?? 0n) !== reverse.amount) { throw new Error('SPL token effect does not reconcile'); }
+  verifyMintBalances(tx, account, owner, lane);
   if (fixture) {
     const trace = invocationOwnership(tx, instructions, event);
     if (poolInvocation(trace, match.index).parent !== trace.owner) { throw new Error('Split Solana offRamp/pool execution'); }
   }
   return match.index;
+}
+/** @param {InstructionPosition} match @param {Record<string, unknown>} info @param {NativeStatusLane} lane @param {bigint} expectedAmount */
+function verifyMintInstruction(match, info, lane, expectedAmount) {
+  const fixture = lane.fixture;
+  const tokenAmount = isObject(info.tokenAmount) ? info.tokenAmount : undefined;
+  if (amount(info.amount ?? tokenAmount?.amount) !== expectedAmount || fixture && info.mintAuthority !== lane.solanaSigner ||
+      fixture && info.mintAuthority !== undefined && info.authority !== undefined && info.mintAuthority !== info.authority ||
+      fixture && match.ix.parsed?.type === 'mintToChecked' && tokenAmount?.decimals !== 9) { throw new Error('Wrong SPL mint amount/authority/decimals'); }
+}
+/** @param {unknown} tx @param {string} account @param {string} owner @param {NativeStatusLane} lane */
+function verifyMintBalances(tx, account, owner, lane) {
+  const fixture = lane.fixture, reverse = reverseRoute(fixture);
+  const keys = accountKeys(tx), index = keys.indexOf(account), meta = object(object(tx).meta);
+  if (index < 0 || keys.lastIndexOf(account) !== index) { throw new Error('Missing exact SPL account ownership'); }
+  const before = balanceAt(meta.preTokenBalances, index, reverse.mint, owner, fixture !== undefined);
+  const after = balanceAt(meta.postTokenBalances, index, reverse.mint, owner, fixture !== undefined);
+  if (after.length !== 1 || after[0] === undefined || after[0] - (before[0] ?? 0n) !== reverse.amount) { throw new Error('SPL token effect does not reconcile'); }
 }
 /** @param {unknown} account @param {NativeStatusLane} lane */
 function verifyMint(account, lane) {
@@ -305,9 +343,52 @@ function solanaTransaction(tx) {
     const key = object(value); return { pubkey: text(key.pubkey), ...(typeof key.signer === 'boolean' ? { signer: key.signer } : {}) };
   }), instructions: array(message.instructions).map(value => ({ programId: text(object(value).programId) })) } };
 }
-/** @param {string} sepolia @param {string} solana @param {NativeStatusLane} [lane] @param {typeof fetch} [fetcher]
- * @param {() => number} [now] @param {StatusWait} [wait] @param {AbortSignal} [signal] */
-export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, now = Date.now, wait = defaultWait, signal) {
+/** @param {Record<string, unknown>} meta @param {Record<string, unknown>} status @param {Record<string, unknown>} transaction @param {number} slot @param {string} hash */
+function verifySuccessfulSolana(meta, status, transaction, slot, hash) {
+  if (meta.err !== null || status.err !== null || status.confirmationStatus !== 'finalized' || status.slot !== slot || array(transaction.signatures)[0] !== hash) { throw new Error('Solana transaction not successful finalized'); }
+}
+/** @param {unknown} observed @param {{ ata: string, recipient: string, mint: string, minimum: number }} expected */
+function recipientAccount(observed, { ata, recipient, mint, minimum }) {
+  const accountSlot = contextSlot(observed), value = object(object(observed).value), parsed = object(object(value.data).parsed), info = object(parsed.info), ui = object(info.tokenAmount);
+  if (value.owner !== TOKEN || value.executable !== false || parsed.type !== 'account' || info.state !== 'initialized' || info.mint !== mint || info.owner !== recipient || ui.decimals !== 9 || accountSlot < minimum) { throw new Error('Wrong observed recipient account metadata'); }
+  return { ata, owner: text(info.owner), mint: text(info.mint), amount: amount(ui.amount), decimals: integer(ui.decimals), slot: accountSlot };
+}
+/** @param {ReturnType<typeof jsonRpc>} svm @param {NativeStatusLane} lane
+ * @param {{ fixture: ReplacementFixture, mintAccount: unknown, mint: Record<string, unknown>, first: Record<string, unknown>, slot: number, firstSlot: number }} initial */
+async function replacementAccounts(svm, lane, { fixture, mintAccount, mint, first, slot, firstSlot }) {
+  const route = forwardRoute(fixture), reverse = reverseRoute(fixture);
+  let minimum = firstSlot;
+  let metadataCoherent = contextSlot(mintAccount) >= slot && contextSlot(mintAccount) <= firstSlot && amount(mint.supply) === amount(first.amount);
+  /** @type {Record<string, ReturnType<typeof recipientAccount>>} */
+  const recipientAccounts = {};
+  for (const recipient of [route.recipient, FORWARD_RECIPIENT_B]) {
+    const ata = lane.recipientAtas?.[recipient];
+    if (!ata || ata === lane.solanaPoolAta || lane.recipientAtas?.[route.recipient] === lane.recipientAtas?.[FORWARD_RECIPIENT_B]) { throw new Error('Missing canonical selected ATA map'); }
+    const observed = await svm('getAccountInfo', [ata, { commitment: 'finalized', encoding: 'jsonParsed', minContextSlot: minimum }]);
+    const account = recipientAccount(observed, { ata, recipient, mint: reverse.mint, minimum });
+    minimum = account.slot;
+    recipientAccounts[recipient] = account;
+  }
+  // These independently read accounts are only a subset of the mint's
+  // holdings. A sum above its observed supply is a conflicting snapshot,
+  // even when each account's owner/program/decimals is individually valid.
+  metadataCoherent &&= Object.values(recipientAccounts).reduce((sum, account) => sum + account.amount, 0n) <= amount(first.amount);
+  const endMintAccount = await svm('getAccountInfo', [reverse.mint, { commitment: 'finalized', encoding: 'jsonParsed', minContextSlot: minimum }]);
+  const endMint = verifyMint(endMintAccount, lane), endMintSlot = contextSlot(endMintAccount);
+  metadataCoherent &&= endMintSlot >= minimum && amount(endMint.supply) === amount(mint.supply);
+  return { minimum: endMintSlot, metadataCoherent, recipientAccounts };
+}
+/** @param {Record<string, unknown>} block @param {Record<string, unknown>} end */
+function sameCanonicalBlock(block, end) { return end.hash === block.hash && end.number === block.number && end.timestamp === block.timestamp; }
+/** @param {unknown} timestamp */
+function ethereumTimestamp(timestamp) { return typeof timestamp === 'string' && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(timestamp) ? Number(timestamp) : null; }
+/** @param {string} sepolia @param {string} solana @param {NativeStatusLane} [lane] @param {typeof fetch} [fetcher] @param {() => number} [now] */
+export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, now = Date.now) {
+  return createOwnedNativeStatus({ sepolia, solana, lane, fetcher, now });
+}
+/** @param {{ sepolia: string, solana: string, lane?: NativeStatusLane, fetcher?: typeof fetch, now?: () => number,
+ * wait?: StatusWait | undefined, signal?: AbortSignal }} options */
+export function createOwnedNativeStatus({ sepolia, solana, lane = {}, fetcher = fetch, now = Date.now, wait = defaultWait, signal }) {
   const fixture = lane.fixture, route = forwardRoute(fixture), reverse = reverseRoute(fixture);
   const evm = jsonRpc(sepolia, fetcher, wait, signal), svm = jsonRpc(solana, fetcher, wait, signal), observer = createSepoliaRpc(sepolia, fetcher);
   return {
@@ -339,7 +420,7 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, 
       const tx = object(await svm('getTransaction', [hash, { commitment: 'finalized', encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]));
       const statuses = object(await svm('getSignatureStatuses', [[hash], { searchTransactionHistory: true }])), status = object(array(statuses.value)[0]);
       const meta = object(tx.meta), transaction = object(tx.transaction), slot = integer(tx.slot);
-      if (meta.err !== null || status.err !== null || status.confirmationStatus !== 'finalized' || status.slot !== slot || array(transaction.signatures)[0] !== hash) { throw new Error('Solana transaction not successful finalized'); }
+      verifySuccessfulSolana(meta, status, transaction, slot, hash);
       const params = [slot, { commitment: 'finalized', transactionDetails: 'signatures', rewards: false, maxSupportedTransactionVersion: 0 }];
       const block = object(await svm('getBlock', params));
       if (!array(block.signatures).includes(hash)) { throw new Error('Solana canonical block does not contain transaction'); }
@@ -356,7 +437,7 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, 
         if (!event || event.address === BURNMINT_PROGRAM || event.address === ROUTER_PROGRAM) { throw new Error('Missing official offRamp execution owner'); }
         await this.authorizeOffRamp('solana', event.address, BigInt(fixture.reverseSelector));
       }
-      return { transaction: solanaTransaction(tx), ...(meta.logMessages === undefined ? {} : { programLogs: array(meta.logMessages).map(text) }), eventIndex: solanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient], lane, event), blockHash: text(block.blockhash), blockHeight: BigInt(slot) };
+      return { transaction: solanaTransaction(tx), ...(meta.logMessages === undefined ? {} : { programLogs: array(meta.logMessages).map(text) }), eventIndex: authenticatedSolanaEffect(tx, kind, recipient, lane.recipientAtas?.[recipient], { lane, event }), blockHash: text(block.blockhash), blockHeight: BigInt(slot) };
     },
     /** @returns {Promise<StatusSnapshot & { recipientAccounts?: Readonly<Record<string, { ata: string, owner: string, mint: string, amount: bigint, decimals: number, slot: number }>> }>} */
     async snapshot() {
@@ -372,27 +453,10 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, 
       const firstSlot = contextSlot(supply), first = object(supply.value);
       let minimum = firstSlot, metadataCoherent = true;
       /** @type {Record<string, { ata: string, owner: string, mint: string, amount: bigint, decimals: number, slot: number }>} */
-      const recipientAccounts = {};
+      let recipientAccounts = {};
       if (fixture) {
         if (hexUint(await call('0x313ce567')) !== 9n) { throw new Error('Wrong independently observed EVM decimals'); }
-        metadataCoherent = contextSlot(mintAccount) >= slot && contextSlot(mintAccount) <= firstSlot && amount(mint.supply) === amount(first.amount);
-        for (const recipient of [route.recipient, FORWARD_RECIPIENT_B]) {
-          const ata = lane.recipientAtas?.[recipient];
-          if (!ata || ata === lane.solanaPoolAta || lane.recipientAtas?.[route.recipient] === lane.recipientAtas?.[FORWARD_RECIPIENT_B]) { throw new Error('Missing canonical selected ATA map'); }
-          const observed = await svm('getAccountInfo', [ata, { commitment: 'finalized', encoding: 'jsonParsed', minContextSlot: minimum }]);
-          const accountSlot = contextSlot(observed), value = object(object(observed).value), parsed = object(object(value.data).parsed), info = object(parsed.info), ui = object(info.tokenAmount);
-          if (value.owner !== TOKEN || value.executable !== false || parsed.type !== 'account' || info.state !== 'initialized' || info.mint !== reverse.mint || info.owner !== recipient || ui.decimals !== 9 || accountSlot < minimum) { throw new Error('Wrong observed recipient account metadata'); }
-          minimum = accountSlot;
-          recipientAccounts[recipient] = { ata, owner: text(info.owner), mint: text(info.mint), amount: amount(ui.amount), decimals: integer(ui.decimals), slot: accountSlot };
-        }
-        // These independently read accounts are only a subset of the mint's
-        // holdings. A sum above its observed supply is a conflicting snapshot,
-        // even when each account's owner/program/decimals is individually valid.
-        metadataCoherent &&= Object.values(recipientAccounts).reduce((sum, account) => sum + account.amount, 0n) <= amount(first.amount);
-        const endMintAccount = await svm('getAccountInfo', [reverse.mint, { commitment: 'finalized', encoding: 'jsonParsed', minContextSlot: minimum }]);
-        const endMint = verifyMint(endMintAccount, lane), endMintSlot = contextSlot(endMintAccount);
-        metadataCoherent &&= endMintSlot >= minimum && amount(endMint.supply) === amount(mint.supply);
-        minimum = endMintSlot;
+        ({ minimum, metadataCoherent, recipientAccounts } = await replacementAccounts(svm, lane, { fixture, mintAccount, mint, first, slot, firstSlot }));
       }
       const end = object(await evm('eth_getBlockByNumber', [block.number, false]));
       const endSupply = object(await svm('getTokenSupply', [reverse.mint, { commitment: 'finalized', minContextSlot: minimum }]));
@@ -401,13 +465,13 @@ export function createNativeStatus(sepolia, solana, lane = {}, fetcher = fetch, 
       const endSupplyTime = repeatedSlot === firstSlot ? supplyTime : await svm('getBlockTime', [repeatedSlot]);
       const observedAt = now();
       if (!Number.isSafeInteger(observedAt) || observedAt < 0) { throw new Error('Invalid snapshot clock'); }
-      const ethereumTime = typeof block.timestamp === 'string' && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(block.timestamp) ? Number(block.timestamp) : null;
+      const ethereumTime = ethereumTimestamp(block.timestamp);
       const freshness = { ethereum: blockFreshness(ethereumTime, observedAt, 1800), solana: { slot: firstSlot, ...blockFreshness(supplyTime, observedAt, 300) }, solanaRepeated: { slot: repeatedSlot, ...blockFreshness(endSupplyTime, observedAt, 300) } };
       if (total !== 100_000_000_000n || first.decimals !== 9 || fixture && repeated.decimals !== 9) { throw new Error('Immutable supply/decimals mismatch'); }
       if (fixture) { hexHash(block.hash); hexQuantity(block.number); }
       return { fixedSupply: total, lockedOnEthereum: locked, supplyOnSolana: amount(first.amount), decimals: integer(first.decimals),
         ...(fixture ? { fixtureIdentity: fixture.identity, recipientAccounts } : {}), ethereumBlock: text(block.hash), ethereumHeight: hexQuantity(block.number), solanaSlot: firstSlot, freshness,
-        coherent: metadataCoherent && Object.values(freshness).every(value => value.fresh) && end.hash === block.hash && end.number === block.number && end.timestamp === block.timestamp && firstSlot >= slot && repeatedSlot >= minimum && repeated.amount === first.amount,
+        coherent: metadataCoherent && Object.values(freshness).every(value => value.fresh) && sameCanonicalBlock(block, end) && firstSlot >= slot && repeatedSlot >= minimum && repeated.amount === first.amount,
         observedAt: new Date(observedAt).toISOString() };
     },
   };

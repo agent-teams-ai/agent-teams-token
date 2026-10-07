@@ -90,6 +90,11 @@ function validForwardReceiver(forward, message, recipient, route) { return messa
 function validSourcePool(forward, message, fixture) {
   return fixture === undefined || forward || equal(message.tokenAmounts?.[0]?.sourcePoolAddress, fixture.solanaPool);
 }
+/** @param {StatusRequest} request @param {bigint} source @param {bigint} destination */
+function matchingSelectors(request, source, destination) {
+  return request.lane.sourceChainSelector === source && request.lane.destChainSelector === destination &&
+    request.message.sourceChainSelector === source && request.message.destChainSelector === destination;
+}
 /** @param {StatusRequest} request @param {Direction} direction @param {string} hash @param {unknown=} recipient @param {ReplacementFixture=} fixture */
 export function matchRequest(request, direction, hash, recipient, fixture) {
   const route = forwardRoute(fixture), reverse = reverseRoute(fixture);
@@ -98,8 +103,7 @@ export function matchRequest(request, direction, hash, recipient, fixture) {
   const source = forward ? 16015286601757825753n : route.selector;
   const destination = forward ? route.selector : 16015286601757825753n;
   const token = message.tokenAmounts?.[0];
-  return [request.tx.hash, request.log.transactionHash].every(value => fixture && forward ? equal(value, hash.toLowerCase()) : value === hash) && request.lane.sourceChainSelector === source &&
-    request.lane.destChainSelector === destination && message.sourceChainSelector === source && message.destChainSelector === destination &&
+  return [request.tx.hash, request.log.transactionHash].every(value => fixture && forward ? equal(value, hash.toLowerCase()) : value === hash) && matchingSelectors(request, source, destination) &&
     equal(message.sender, forward ? route.administrator : reverse.payer) &&
     equal(message.receiver, forward ? '11111111111111111111111111111111' : reverse.recipient) &&
     validForwardReceiver(forward, message, selectedRecipient, route) && message.tokenAmounts?.length === 1 &&
@@ -209,6 +213,15 @@ async function discoverReceipt(api, messageId, destinationReceipt, forward) {
   catch { discoveryError = 'CCIP discovery unavailable; no retry authorized'; }
   return { metadata, discoveryError, ...selectReceipt(metadata, destinationReceipt, forward) };
 }
+/** @param {ReplacementFixture | undefined} fixture @param {StatusRequest} request @param {string} selectedRecipient */
+function transferAssociation(fixture, request, selectedRecipient) {
+  const sourcePool = request.message.tokenAmounts[0]?.sourcePoolAddress;
+  if (fixture && !sourcePool) { throw new Error('Replacement source pool observation missing'); }
+  return fixture && sourcePool ? { fixtureIdentity: fixture.identity, selectedRecipient,
+    route: { sourceSelector: request.lane.sourceChainSelector, destinationSelector: request.lane.destChainSelector,
+      sourcePool, sender: request.message.sender, receiver: request.message.receiver,
+      ...(request.message.tokenReceiver === undefined ? {} : { tokenReceiver: request.message.tokenReceiver }) } } : {};
+}
 /** @param {StatusTransferInput} transfer @param {{ ethereum: StatusChainPort, solana: StatusChainPort }} chains
  * @param {StatusNativePort} native @param {StatusApiPort} api @param {number} successState @returns {Promise<StatusTransferReport>} */
 export async function inspectTransfer({ sourceHash, direction, recipient, destinationReceipt }, chains, native, api, successState) {
@@ -252,13 +265,7 @@ export async function inspectTransfer({ sourceHash, direction, recipient, destin
   const accounting = progress.pendingAmount === 0n ? progress : {
     ...progress, pendingAmount: null, reasons: [...progress.reasons, 'destination-settlement-unresolved'],
   };
-  const sourcePool = request.message.tokenAmounts[0]?.sourcePoolAddress;
-  if (fixture && !sourcePool) { throw new Error('Replacement source pool observation missing'); }
-  return { sourceHash, ...accounting,
-    ...(fixture && sourcePool ? { fixtureIdentity: fixture.identity, selectedRecipient,
-      route: { sourceSelector: request.lane.sourceChainSelector, destinationSelector: request.lane.destChainSelector,
-        sourcePool, sender: request.message.sender, receiver: request.message.receiver,
-        ...(request.message.tokenReceiver === undefined ? {} : { tokenReceiver: request.message.tokenReceiver }) } } : {}),
+  return { sourceHash, ...accounting, ...transferAssociation(fixture, request, selectedRecipient),
     events, ...(discoveryOrigin ? { discoveryOrigin } : {}), discoveryStatus: metadata?.status ?? 'UNKNOWN', discoveryError, destinationError };
 }
 // A finalized source does not prove that its destination is still unsettled.
@@ -283,33 +290,55 @@ function canonicalBlock(chain, value) {
 }
 /** @param {unknown} value */
 function observationTime(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) { return undefined; }
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) { return; }
   const timestamp = Date.parse(value);
-  return Number.isSafeInteger(timestamp) && timestamp >= 0 && new Date(timestamp).toISOString() === value ? timestamp / 1000 : undefined;
+  if (Number.isSafeInteger(timestamp) && timestamp >= 0 && new Date(timestamp).toISOString() === value) { return timestamp / 1000; }
 }
-/** No clock is read here. Collection/finalization supply the observed times.
- * @param {StatusSnapshot} snapshot @param {ReplacementFixture} fixture */
-function replacementSnapshot(snapshot, fixture) {
+/** @param {StatusSnapshot} snapshot @param {ReplacementFixture} fixture */
+function replacementSnapshotValues(snapshot, fixture) {
   if (snapshot.fixtureIdentity !== fixture.identity || snapshot.decimals !== fixture.decimals ||
       snapshot.fixedSupply !== BigInt(fixture.supply) || snapshot.lockedOnEthereum !== BigInt(fixture.amount) ||
       snapshot.supplyOnSolana !== BigInt(fixture.amount) || !canonicalEvmHash(snapshot.ethereumBlock) ||
       typeof snapshot.ethereumHeight !== 'bigint' || snapshot.ethereumHeight < 0n ||
       !Number.isSafeInteger(snapshot.solanaSlot) || snapshot.solanaSlot < 0) { return false; }
+  return true;
+}
+/** @param {StatusFreshness | undefined} observation @param {number} limit @param {number} observedAt @param {number} checkedAt */
+function validFreshnessObservation(observation, limit, observedAt, checkedAt) {
+  const timestamp = observation?.timestamp;
+  return !!observation && observation.fresh === true && observation.maxAgeSeconds === limit &&
+    typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp >= 0 &&
+    timestamp <= observedAt && checkedAt - timestamp <= limit;
+}
+/** @param {StatusSnapshot} snapshot @param {number} observedAt @param {number} checkedAt */
+function replacementFreshness(snapshot, observedAt, checkedAt) {
+  for (const chain of ['ethereum', 'solana', 'solanaRepeated']) {
+    const limit = chain === 'ethereum' ? 1800 : 300;
+    const observation = chain === 'ethereum' ? snapshot.freshness?.ethereum : chain === 'solana' ? snapshot.freshness?.solana : snapshot.freshness?.solanaRepeated;
+    if (!validFreshnessObservation(observation, limit, observedAt, checkedAt)) { return false; }
+  }
+  const first = snapshot.freshness?.solana.slot, repeated = snapshot.freshness?.solanaRepeated.slot;
+  return first === snapshot.solanaSlot && typeof repeated === 'number' && Number.isSafeInteger(repeated) && repeated >= first;
+}
+/** No clock is read here. Collection/finalization supply the observed times.
+ * @param {StatusSnapshot} snapshot @param {ReplacementFixture} fixture */
+function replacementSnapshot(snapshot, fixture) {
+  if (!replacementSnapshotValues(snapshot, fixture)) { return false; }
   if (Object.hasOwn(snapshot, 'pendingEthereumToSolana') && snapshot.pendingEthereumToSolana !== 0n ||
       Object.hasOwn(snapshot, 'pendingSolanaToEthereum') && snapshot.pendingSolanaToEthereum !== 0n) { return false; }
   const observedAt = observationTime(snapshot.observedAt);
   const checkedAt = snapshot.freshnessCheckedAt === undefined ? observedAt : observationTime(snapshot.freshnessCheckedAt);
   if (observedAt === undefined || checkedAt === undefined || checkedAt < observedAt) { return false; }
-  for (const chain of ['ethereum', 'solana', 'solanaRepeated']) {
-    const limit = chain === 'ethereum' ? 1800 : 300;
-    const observation = chain === 'ethereum' ? snapshot.freshness?.ethereum : chain === 'solana' ? snapshot.freshness?.solana : snapshot.freshness?.solanaRepeated;
-    const timestamp = observation?.timestamp;
-    if (!observation || observation.fresh !== true || observation.maxAgeSeconds !== limit ||
-        typeof timestamp !== 'number' || !Number.isSafeInteger(timestamp) || timestamp < 0 ||
-        timestamp > observedAt || checkedAt - timestamp > limit) { return false; }
-  }
-  const first = snapshot.freshness?.solana.slot, repeated = snapshot.freshness?.solanaRepeated.slot;
-  return first === snapshot.solanaSlot && typeof repeated === 'number' && Number.isSafeInteger(repeated) && repeated >= first;
+  return replacementFreshness(snapshot, observedAt, checkedAt);
+}
+/** @param {StatusRouteAssociation | undefined} route @param {boolean} forward @param {string} recipient @param {ReplacementFixture} fixture */
+function replacementRoute(route, forward, recipient, fixture) {
+  return !!route && route.sourceSelector === BigInt(forward ? fixture.reverseSelector : fixture.forwardSelector) &&
+    route.destinationSelector === BigInt(forward ? fixture.forwardSelector : fixture.reverseSelector) &&
+    equal(route.sourcePool, forward ? fixture.pool : fixture.solanaPool) &&
+    equal(route.sender, forward ? fixture.administrator : fixture.payer) &&
+    equal(route.receiver, forward ? '11111111111111111111111111111111' : fixture.administrator) &&
+    (!forward || route.tokenReceiver === recipient);
 }
 /** @param {StatusTransferReport} transfer @param {ReplacementFixture} fixture */
 function replacementAssociation(transfer, fixture) {
@@ -319,13 +348,28 @@ function replacementAssociation(transfer, fixture) {
     statusRecipient(identity.direction, recipient, fixture) === recipient &&
     identity.amount === BigInt(fixture.amount) && equal(identity.sourceToken, forward ? fixture.token : fixture.mint) &&
     equal(identity.destinationToken, forward ? fixture.mint : fixture.token) &&
-    equal(identity.recipient, forward ? recipient : fixture.administrator) && !!route &&
-    route.sourceSelector === BigInt(forward ? fixture.reverseSelector : fixture.forwardSelector) &&
-    route.destinationSelector === BigInt(forward ? fixture.forwardSelector : fixture.reverseSelector) &&
-    equal(route.sourcePool, forward ? fixture.pool : fixture.solanaPool) &&
-    equal(route.sender, forward ? fixture.administrator : fixture.payer) &&
-    equal(route.receiver, forward ? '11111111111111111111111111111111' : fixture.administrator) &&
-    (!forward || route.tokenReceiver === recipient);
+    equal(identity.recipient, forward ? recipient : fixture.administrator) && replacementRoute(route, forward, recipient, fixture);
+}
+/** @param {TransferEvent} event @param {StatusSnapshot} snapshot */
+function physicalEventLocation(event, snapshot) {
+  const transaction = canonicalTransaction(event.chain, event.transactionId), block = canonicalBlock(event.chain, event.blockHash);
+  const height = event.blockHeight;
+  if (!transaction || !block || typeof height !== 'bigint' || height < 0n ||
+      !Number.isSafeInteger(event.eventIndex) || event.eventIndex < 0 || event.finality !== 'finalized' ||
+      height > (event.chain === 'ethereum' ? snapshot.ethereumHeight : BigInt(snapshot.solanaSlot))) { return; }
+  return { transaction, block, height };
+}
+/** @param {TransferEvent} event @param {NonNullable<ReturnType<typeof physicalEventLocation>>} observation @param {StatusSnapshot} snapshot
+ * @param {{ transactions: Map<string, string>, blocks: Map<string, string>, heights: Map<string, bigint> }} locations */
+function recordEventLocation(event, { transaction, block, height }, snapshot, { transactions, blocks, heights }) {
+  // A transaction cannot move blocks, and one height cannot name conflicting canonical blocks.
+  const transactionKey = `${event.chain}:${transaction}`, blockKey = `${event.chain}:${height}`, location = `${height}:${block}`;
+  const hashKey = `${event.chain}:${block}`;
+  if (transactions.has(transactionKey) && transactions.get(transactionKey) !== location ||
+      blocks.has(blockKey) && blocks.get(blockKey) !== block || heights.has(hashKey) && heights.get(hashKey) !== height || event.chain === 'ethereum' &&
+      height === snapshot.ethereumHeight && block !== canonicalEvmHash(snapshot.ethereumBlock)) { return false; }
+  transactions.set(transactionKey, location); blocks.set(blockKey, block); heights.set(hashKey, height);
+  return true;
 }
 /** A finite inventory seal over supplied native facts; this function cannot authenticate an observer.
  * In particular it never fills absent physical metadata from fixture values or message labels.
@@ -355,21 +399,12 @@ function replacementInventory(transfers, snapshot, fixture) {
     const sourceEffect = transfer.events.find(event => event.chain === sourceName && event.kind === sourceKind);
     if (!sourceEffect || canonicalTransaction(sourceName, sourceEffect.transactionId) !== source) { return false; }
     for (const event of transfer.events) {
-      const transaction = canonicalTransaction(event.chain, event.transactionId), block = canonicalBlock(event.chain, event.blockHash);
-      const height = event.blockHeight;
-      if (!transaction || !block || typeof height !== 'bigint' || height < 0n ||
-          !Number.isSafeInteger(event.eventIndex) || event.eventIndex < 0 || event.finality !== 'finalized' ||
-          height > (event.chain === 'ethereum' ? snapshot.ethereumHeight : BigInt(snapshot.solanaSlot))) { return false; }
-      const key = `${event.chain}:${transaction}:${event.eventIndex}`;
+      const location = physicalEventLocation(event, snapshot);
+      if (!location) { return false; }
+      const key = `${event.chain}:${location.transaction}:${event.eventIndex}`;
       if (physical.has(key)) { return false; }
       physical.add(key);
-      // A transaction cannot move blocks, and one height cannot name conflicting canonical blocks.
-      const transactionKey = `${event.chain}:${transaction}`, blockKey = `${event.chain}:${height}`, location = `${height}:${block}`;
-      const hashKey = `${event.chain}:${block}`;
-      if (transactions.has(transactionKey) && transactions.get(transactionKey) !== location ||
-          blocks.has(blockKey) && blocks.get(blockKey) !== block || heights.has(hashKey) && heights.get(hashKey) !== height || event.chain === 'ethereum' &&
-          height === snapshot.ethereumHeight && block !== canonicalEvmHash(snapshot.ethereumBlock)) { return false; }
-      transactions.set(transactionKey, location); blocks.set(blockKey, block); heights.set(hashKey, height);
+      if (!recordEventLocation(event, location, snapshot, { transactions, blocks, heights })) { return false; }
     }
   }
   return expected.size === 0 && physical.size === 6;

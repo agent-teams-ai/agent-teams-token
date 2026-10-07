@@ -20,12 +20,12 @@ function validateSettings(settings: FixtureSettings, fixture: ReplacementFixture
   }
   if (recipientUse === "forward") { forwardRecipient(settings.recipient, fixture); }
   else if (settings.recipient !== undefined && settings.recipient !== fixture.recipient) { throw new Error("Wrong replacement recipient"); }
-  if (settings.expected) {
-    const e = settings.expected;
-    if (e.testOnly !== true || e.cluster !== fixture.cluster || e.payer !== fixture.payer || e.mint !== fixture.mint ||
-      e.pool !== undefined && e.pool !== fixture.solanaPool || e.fixture !== undefined &&
-      validateReplacementFixture(e.fixture).identity !== fixture.identity) { throw new Error("Wrong replacement Solana authority/peer"); }
-  }
+  if (settings.expected) { validateExpected(settings.expected, fixture); }
+}
+function validateExpected(e: NonNullable<FixtureSettings["expected"]>, fixture: ReplacementFixture): void {
+  if (e.testOnly !== true || e.cluster !== fixture.cluster || e.payer !== fixture.payer || e.mint !== fixture.mint ||
+    e.pool !== undefined && e.pool !== fixture.solanaPool || e.fixture !== undefined &&
+    validateReplacementFixture(e.fixture).identity !== fixture.identity) { throw new Error("Wrong replacement Solana authority/peer"); }
 }
 function isSymlink(path: string): boolean {
   try { return lstatSync(path).isSymbolicLink(); }
