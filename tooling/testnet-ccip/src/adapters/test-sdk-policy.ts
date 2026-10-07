@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path";
 import { selectedFixture, validateReplacementFixture, type FixtureSelection, type ReplacementFixture } from "../domain/replacement-fixture.ts";
 export const TEST_SDK_PROFILE = "agtmai-test-sdk-execution-v1";
 export const TEST_SDK_ROOT_HASHES = Object.freeze({
@@ -136,25 +137,32 @@ export interface TestSdkSelection extends FixtureSelection {
   readonly providerProfile?: unknown; readonly testOnly?: boolean;
   readonly providerArchives?: string; readonly providerDirectory?: string;
   readonly ccipProviderDirectory?: string; readonly sdkDirectory?: string;
+  readonly replayFetch?: typeof fetch;
 }
 export interface ExplicitTestSdkSelection extends TestSdkSelection {
   readonly providerProfile: typeof TEST_SDK_PROFILE; readonly testOnly: true;
   readonly fixture: ReplacementFixture; readonly fixtureIdentity: string; readonly providerArchives: string;
 }
-export interface TestSdkForwardSelection extends TestSdkSelection { readonly replayFetch?: typeof fetch }
+export interface TestSdkForwardSelection extends TestSdkSelection {}
 export interface SelectedTestSdk { readonly fixture: Readonly<ReplacementFixture>; readonly archives: string }
+function canonicalDirectory(value: unknown): value is string {
+  return typeof value === "string" && value.trim() === value && !value.includes("\0") && isAbsolute(value) && resolve(value) === value;
+}
 /** Presence alone chooses the explicit route, before any asynchronous IO. */
 export function selectTestSdk(selection: TestSdkSelection, directory: string, fixture?: ReplacementFixture): SelectedTestSdk | undefined {
   if (!Object.hasOwn(selection, "providerProfile")) { return undefined; }
   if (selection.providerProfile !== TEST_SDK_PROFILE || selection.testOnly !== true) {
     throw new Error("Unknown or non-TEST SDK profile");
   }
+  if (!canonicalDirectory(directory)) { throw new Error("Canonical TEST SDK directory required"); }
   const selected = selectedFixture(selection), supplied = fixture === undefined ? undefined : validateReplacementFixture(fixture);
   if (!selected || supplied?.identity !== selected.identity || typeof selection.providerArchives !== "string" || !selection.providerArchives.startsWith("/")) {
     throw new Error("TEST SDK requires exact selected fixture and retained archives");
   }
-  for (const alias of [selection.providerDirectory, selection.ccipProviderDirectory, selection.sdkDirectory]) {
-    if (alias !== undefined && alias !== directory) { throw new Error("Divergent TEST SDK root alias"); }
+  for (const key of ["providerDirectory", "ccipProviderDirectory", "sdkDirectory"] as const) {
+    if (Object.hasOwn(selection, key) && (!canonicalDirectory(selection[key]) || selection[key] !== directory)) {
+      throw new Error("Divergent or invalid TEST SDK root alias");
+    }
   }
   return Object.freeze({ fixture: selected, archives: selection.providerArchives });
 }

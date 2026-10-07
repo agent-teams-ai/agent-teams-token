@@ -14,8 +14,10 @@ export async function transferSolanaReverse(settings,ports=defaults) {
     BigInt(settings.maxNativeBalanceLamports)>10000000000n) {throw new Error('Explicit test-only reverse settings and native exposure required');}
   bindFixture(settings, [settings.journalFile]);
   const sdk=await ports.sdk(settings),store=ports.store(resolve(settings.journalFile));
+  /** @type {import('../adapters/solana-reverse-sdk.mjs').FinalizedLookup | undefined} */
+  let finalizedLookup;
   const expectedFrom=stored=>sdk.derive(stored.linkMint,{approval:stored.approval,quotedFee:stored.quotedFee,sourceLamports:stored.sourceLamports});
-  const rpc=ports.rpc((bytes,intent)=>sdk.inspectSigned(bytes,expectedFrom(intent)).messageBase64,
+  const rpc=ports.rpc((bytes,intent)=>sdk.inspectSigned(bytes,expectedFrom(intent),finalizedLookup).messageBase64,
     async()=>({sourceReceiptVerified:true}));
   return store.exclusive(async()=>{
     const prior=await store.read();
@@ -32,7 +34,8 @@ export async function transferSolanaReverse(settings,ports=defaults) {
       if(again.approval!==snapshot.approval || again.sourceLamports!==snapshot.sourceLamports){throw new Error('Source changed during reverse preparation');}
       const latest=await rpc.readRpc('getLatestBlockhash',[{commitment:'finalized'}]);
       if(!Number.isSafeInteger(latest?.value?.lastValidBlockHeight)||latest.value.lastValidBlockHeight<1){throw new Error('Invalid reverse block validity');}
-      prepared=sdk.build(generated.candidate,expected,{blockhash:latest.value.blockhash,lastValidBlockHeight:String(latest.value.lastValidBlockHeight)});
+      finalizedLookup=again;
+      prepared=sdk.build(generated.candidate,expected,{blockhash:latest.value.blockhash,lastValidBlockHeight:String(latest.value.lastValidBlockHeight)},again);
       const simulation=await rpc.readRpc('simulateTransaction',[prepared.bytesBase64,{encoding:'base64',commitment:'finalized',sigVerify:false,replaceRecentBlockhash:false}]);
       if(!simulation?.value || simulation.value.err!==null){throw new Error('Unsigned reverse preflight simulation failed');}
       await rpc.chain();
@@ -43,13 +46,18 @@ export async function transferSolanaReverse(settings,ports=defaults) {
       const snapshot=await sdk.state.before(rpc.readRpc,expected,settings.maxNativeBalanceLamports);
       if(BigInt(snapshot.sourceLamports)>BigInt(expected.sourceLamports)){throw new Error('Native exposure increased since intent');}
       if(snapshot.approval!==expected.approval){throw new Error('Delegation changed since signed intent');}
+      finalizedLookup=snapshot;
+      return snapshot;
     };
     const result=await runSolanaTransactionJournal(expected,{...store,...rpc,exclusive:work=>work(),
-      inspectSigned:async bytes=>sdk.inspectSigned(bytes,expected),
+      inspectSigned:async bytes=>{
+        finalizedLookup=await sdk.state.lookup(rpc.readRpc,expected);
+        return sdk.inspectSigned(bytes,expected,finalizedLookup);
+      },
       async sign(){
         if(prior||!prepared){throw new Error('Existing reverse journal cannot be replaced');}
-        await beforeEffect();
-        return sdk.sign(prepared,expected,{testOnly:true,payerFile:settings.payerFile});
+        const snapshot=await beforeEffect();
+        return sdk.sign(prepared,expected,{testOnly:true,payerFile:settings.payerFile},snapshot);
       },
       async broadcast(bytes){await beforeEffect();return rpc.broadcast(bytes);},
     },reverseContract(expected));

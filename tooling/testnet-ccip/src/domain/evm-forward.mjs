@@ -1,4 +1,11 @@
-import { selectedFixture, validateReplacementFixture } from './replacement-fixture.ts';
+// @ts-check
+import { REPLACEMENT, selectedFixture, validateReplacementFixture } from './replacement-fixture.ts';
+/** @typedef {import('./replacement-fixture.ts').ReplacementFixture} ReplacementFixture */
+/** @typedef {typeof REPLACEMENT.recipient | typeof FORWARD_RECIPIENT_B} ReplacementForwardRecipient */
+/** @typedef {import('./replacement-fixture.ts').FixtureSelection & {
+ * testOnly: boolean, signer: { testOnly: boolean }, recipient?: unknown,
+ * approvalNonce: string, sendNonce: string, approvalJournal: string, sendJournal: string
+ * }} ForwardSettings */
 /** Feature-local fixed testnet lane, independently checked before the existing signer. */
 export const FORWARD = Object.freeze({ token: '0xbee91ba3ca94dd7c639ee6c1b1c2fc1a1996cdc9',
   pool: '0x24508e2eb3bedc086318abc054153fd83823a4e2', administrator: '0x275ee728c49100b56d4aa37c00e2dc8ffc5e5df6',
@@ -7,22 +14,28 @@ export const FORWARD = Object.freeze({ token: '0xbee91ba3ca94dd7c639ee6c1b1c2fc1
 /** Receive-only second fixture; default A remains byte-for-byte compatible with old journals. */
 export const FORWARD_RECIPIENT_B = 'QBqP2WraLUKU1G6tohJusxQ7iG15utpXLVZvvks3sNV';
 export const FORWARD_RECIPIENT_B_ATA = '2HGSh7v8thLVyxVSizQtvicsfKFrbYeL2sTSGjWzbCDE';
+/** @param {ReplacementFixture=} fixture @returns {import('./replacement-fixture.ts').ForwardRoute} */
 export function forwardRoute(fixture) {
   if (fixture === undefined) { return FORWARD; }
   const f = validateReplacementFixture(fixture);
   return Object.freeze({ ...FORWARD, token: f.token, pool: f.pool, administrator: f.administrator,
     recipient: f.recipient, amount: BigInt(f.amount) });
 }
+/** @overload @param {unknown} recipient @param {ReplacementFixture} fixture @returns {ReplacementForwardRecipient} */
+/** @overload @param {unknown=} recipient @param {ReplacementFixture=} fixture @returns {string} */
+/** @param {unknown=} recipient @param {ReplacementFixture=} fixture */
 export function forwardRecipient(recipient, fixture) {
   if (fixture !== undefined) {
     const route = forwardRoute(fixture);
+    if (recipient === FORWARD_RECIPIENT_B) { return recipient; }
     if (recipient !== undefined && recipient !== route.recipient) { throw new Error('Wrong replacement forward recipient'); }
-    return route.recipient;
+    return REPLACEMENT.recipient;
   }
   if (recipient === undefined) { recipient = FORWARD.recipient; }
   if (recipient !== FORWARD.recipient && recipient !== FORWARD_RECIPIENT_B) { throw new Error('Only fixed forward recipients A or B are allowed'); }
   return recipient;
 }
+/** @param {ForwardSettings} settings */
 export function forwardTarget(settings) {
   const fixture = selectedFixture(settings), route = forwardRoute(fixture);
   forwardRecipient(settings.recipient, fixture);

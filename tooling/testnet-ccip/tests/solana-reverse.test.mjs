@@ -45,7 +45,7 @@ function fixture(){
   let record=null,broadcasts=0,candidates=0,checks=0;
   const signed={bytesBase64:'AQID',signature:'1'.repeat(88),blockhash:'1'.repeat(32),lastValidBlockHeight:'100'};
   const sdk={pool:{routerConfig:address},derive:(_link,dynamic)=>({...expected,...dynamic}),validateExpected:()=>{},
-    state:{config:async()=>address,before:async()=>{checks++;return {approval:true,sourceLamports:'1000000'};}},
+    state:{lookup:async()=>({slot:'100',lookupTable:{}}),config:async()=>address,before:async()=>{checks++;return {approval:true,sourceLamports:'1000000'};}},
     candidate:async()=>{candidates++;return {fee:'5',candidate:{}};},build:()=>({bytesBase64:'AQID'}),sign:async()=>signed,
     inspectSigned:()=>({signature:signed.signature,blockhash:signed.blockhash,messageBase64:'BAUG',intent:{feePayer:REVERSE.payer,instructions:reverseInstructions(expected)}})};
   const rpc={chain:async()=>{},readRpc:async method=>method==='getLatestBlockhash'?{value:{blockhash:signed.blockhash,lastValidBlockHeight:100}}:{value:{err:null}},

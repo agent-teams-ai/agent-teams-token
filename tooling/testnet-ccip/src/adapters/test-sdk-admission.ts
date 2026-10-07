@@ -13,12 +13,32 @@ import type * as Solana from "../../../../.local/INPUT/provider/node_modules/@ch
 import type * as Api from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/api/index.js";
 import type * as Types from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/types.js";
 import type * as Abi from "../../../../.local/INPUT/provider/node_modules/ethers/lib.esm/abi/index.js";
+import type * as Address from "../../../../.local/INPUT/provider/node_modules/ethers/lib.esm/address/index.js";
 import type * as Contract from "../../../../.local/INPUT/provider/node_modules/ethers/lib.esm/contract/index.js";
+import type * as Web3 from "../../../../.local/INPUT/provider/node_modules/@solana/web3.js/lib/index.js";
+import type * as Spl from "../../../../.local/INPUT/provider/node_modules/@solana/spl-token/lib/types/index.js";
+import type Bs58 from "../../../../.local/INPUT/provider/node_modules/bs58/src/cjs/index.js";
+
+/** Internal constructor record, never a worker capability or signing view. */
+export interface NativeSolanaProvider {
+  readonly web3: Pick<typeof Web3, "PublicKey" | "SystemProgram" | "Transaction" | "TransactionInstruction" |
+    "TransactionMessage" | "VersionedTransaction" | "AddressLookupTableAccount" | "Keypair">;
+  readonly spl: Pick<typeof Spl, "TOKEN_PROGRAM_ID" | "ASSOCIATED_TOKEN_PROGRAM_ID" | "createInitializeMint2Instruction" |
+    "getAssociatedTokenAddressSync" | "unpackMint" | "unpackAccount">;
+  readonly bs58: Pick<typeof Bs58, "encode">;
+}
+// PR71's actual main source replaces the tree-equivalent reviewed candidate.
+export const TEST_SDK_ADMISSION_SOURCE = Object.freeze({
+  commit: "1bba690f26bc6b966b2329c2860999f1acf90269",
+  tree: "842ee64fc7701f780a51f8edfc2e0ed2af0b02d4",
+  priorEquivalentSource: "30e008ac053b22ba6278d90c08efece3c5f6ce45",
+});
 
 function fail(reason: string): never { throw new Error("TEST SDK admission: " + reason); }
 export interface PayloadEntry { type: "file" | "directory"; mode: number; bytes?: Buffer; sha256?: string }
 export interface AdmissionOptions { readonly root: string; readonly archives: string }
 export interface AdmissionEvidence {
+  readonly sourceBaseline: typeof TEST_SDK_ADMISSION_SOURCE;
   readonly qualification: "complete-byte-admission"; readonly owners: number; readonly uniqueArchives: number;
   readonly members: number; readonly memberInventorySha256: string; readonly archives: Readonly<Record<string, string>>; readonly root: string;
   readonly rootHashes: typeof TEST_SDK_ROOT_HASHES;
@@ -279,6 +299,7 @@ function admit(options: AdmissionOptions) {
   if (unique.size !== 95) { fail("archive uniqueness drift"); }
   checkResolutions(root);
   const evidence: AdmissionEvidence = Object.freeze({ qualification: "complete-byte-admission", root,
+    sourceBaseline: TEST_SDK_ADMISSION_SOURCE,
     owners: 99, uniqueArchives: unique.size, members: members.size,
     memberInventorySha256: payloadHash(Buffer.from(JSON.stringify([...members].map(([url, member]) => [url.slice(pathToFileURL(root + "/").href.length), member.format, payloadHash(member.bytes)]).toSorted((a, b) => String(a[0]).localeCompare(String(b[0])))))), archives: Object.freeze(archiveIds), rootHashes: TEST_SDK_ROOT_HASHES });
   return { members, evidence };
@@ -349,9 +370,21 @@ export async function openTestSdk(options: AdmissionOptions) {
     const types: typeof Types = await import(pathToFileURL(require.resolve(TEST_SDK_ENTRIES.types[0])).href);
     if (typeof solana.SolanaChain !== "function" || typeof api.CCIPAPIClient !== "function" || !types.ExecutionState) { fail("selected exports missing"); }
     const abi: typeof Abi = await import(pathToFileURL(require.resolve("ethers/abi")).href);
+    const address: typeof Address = await import(pathToFileURL(require.resolve("ethers/address")).href);
     const contract: typeof Contract = await import(pathToFileURL(require.resolve("ethers/contract")).href);
+    const web3: typeof Web3 = require("@solana/web3.js");
+    const spl: typeof Spl = require("@solana/spl-token");
+    const bs58: { default: typeof Bs58 } = require("bs58");
+    const native: NativeSolanaProvider = Object.freeze({
+      web3: Object.freeze({ PublicKey: web3.PublicKey, SystemProgram: web3.SystemProgram, Transaction: web3.Transaction,
+        TransactionInstruction: web3.TransactionInstruction, TransactionMessage: web3.TransactionMessage,
+        VersionedTransaction: web3.VersionedTransaction, AddressLookupTableAccount: web3.AddressLookupTableAccount, Keypair: web3.Keypair }),
+      spl: Object.freeze({ TOKEN_PROGRAM_ID: spl.TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID: spl.ASSOCIATED_TOKEN_PROGRAM_ID, createInitializeMint2Instruction: spl.createInitializeMint2Instruction,
+        getAssociatedTokenAddressSync: spl.getAssociatedTokenAddressSync, unpackMint: spl.unpackMint, unpackAccount: spl.unpackAccount }),
+      bs58: Object.freeze({ encode: bs58.default.encode }),
+    });
     assertHealthy();
-    return Object.freeze({ evm, abi, contract, evidence, assertHealthy, close,
+    return Object.freeze({ evm, solana, api, types, native, abi, address: Object.freeze({ getAddress: address.getAddress }), contract, evidence, assertHealthy, close,
       counters });
   } catch (error) { close(); throw error; }
 }

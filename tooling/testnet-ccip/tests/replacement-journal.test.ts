@@ -14,6 +14,9 @@ import { runSolanaPoolInitJournal } from "../src/application/solana-pool-init-jo
 import type { SolanaPoolInitJournalRecord, SolanaPoolInitJournalPorts } from "../src/application/solana-pool-init-journal.ts";
 import { createJournalFile } from "../src/adapters/evm-journal-file.ts";
 import { verifyPoolConfigPredecessor } from "../src/composition/configure-solana-pool.mjs";
+import type { SolanaPoolConfigExpectation } from "../src/domain/solana-pool-config.ts";
+import type { ConfigInput, UnsignedPoolConfigSdk } from "../src/adapters/solana-pool-config-sdk.mjs";
+import type { RegistrationInput, RegistrationPredecessorVerifier } from "../src/adapters/solana-registration-sdk.mjs";
 
 // Public synthetic peers; signatures and decoded observations are in-memory test evidence.
 const fixture = replacementFixture("0x" + "11".repeat(20), "0x" + "22".repeat(20));
@@ -24,6 +27,10 @@ const messageBase64 = "bWVzc2FnZQ==";
 const registration: SolanaRegistrationExpectation = { ...expected, operation: "transfer-mint-authority",
   signer: "1".repeat(31) + "2", ata: "1".repeat(31) + "3", registry: "1".repeat(31) + "4", routerConfig: "1".repeat(31) + "5" };
 const registrationIntent = { feePayer: expected.payer, instructions: [registrationInstruction(registration)] };
+const configExpected: SolanaPoolConfigExpectation = { ...registration, operation: "init-chain-remote-config",
+  chain: "1".repeat(31) + "6", feeTokenConfig: "1".repeat(31) + "7", routerPoolSigner: "1".repeat(31) + "8",
+  alt: null, recentSlot: null, altBump: null };
+const unusedConfigRpc = async (): Promise<never> => assert.fail("Initial predecessor cannot use configuration RPC, repair observer or send");
 
 // The real registration writer and file adapter feed the actual composition predecessor boundary.
 test("selected registration journal survives finalized pool-config predecessor reconciliation", async () => {
@@ -41,10 +48,28 @@ test("selected registration journal survives finalized pool-config predecessor r
       sign: async () => signed, broadcast: async () => assert.fail("Finalized checkpoint cannot send") });
     assert.equal(result.status, "succeeded");
     const persisted = await file.exclusive(() => file.read());
-    const provider = { derive: (intent: SolanaRegistrationExpectation) => intent, inspectSigned };
+    const registrationSdk: RegistrationPredecessorVerifier = {
+      derive: (input: RegistrationInput) => { assert.equal(input.operation, registration.operation); return { ...registration, ...input }; },
+      inspectSigned: (bytes, e) => {
+        assert.equal(bytes, signed.bytesBase64);
+        return { ...signed, messageBase64, intent: registrationIntent, envelope: verifySolanaRegistrationIntent(registrationIntent, e) };
+      },
+      snapshotAddresses: () => assert.fail("Controlled finalized observation does not read accounts"),
+      decodeRegistry: () => assert.fail("Controlled finalized observation does not decode registry"),
+      verifySnapshot: () => assert.fail("Controlled finalized observation supplies state"),
+    };
+    const sdk: Pick<UnsignedPoolConfigSdk, "derive" | "inspectSigned"> = {
+      derive: (input: ConfigInput) => { assert.equal(input.operation, configExpected.operation); return { ...configExpected, ...input }; },
+      inspectSigned: () => assert.fail("Initial predecessor must use the borrowed registration inspector"),
+    };
+    const registrationRpc: Parameters<typeof verifyPoolConfigPredecessor>[2]["registrationRpc"] = {
+      ...rpc, chain: unusedConfigRpc, readRpc: unusedConfigRpc, broadcast: unusedConfigRpc,
+    };
+    const configRpc: Parameters<typeof verifyPoolConfigPredecessor>[2]["rpc"] = {
+      chain: unusedConfigRpc, readRpc: unusedConfigRpc, broadcast: unusedConfigRpc, observe: unusedConfigRpc, observeRepairPredecessor: unusedConfigRpc,
+    };
     await verifyPoolConfigPredecessor({ registrationJournalFile: path, journalDirectory: directory },
-      { ...expected, operation: "init-chain-remote-config" },
-      { sdk: provider, rpc, registrationSdk: provider, registrationRpc: rpc });
+      configExpected, { sdk, rpc: configRpc, registrationSdk, registrationRpc });
     assert.deepEqual(persisted?.intent.fixture, fixture);
     assert.equal(observations, 2, "Predecessor must re-observe the finalized checkpoint");
     assert.deepEqual(await file.exclusive(() => file.read()), persisted);
