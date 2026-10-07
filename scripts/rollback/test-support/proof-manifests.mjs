@@ -1,4 +1,5 @@
 import * as proofSupport from "./proof-fixture.mjs";
+import { assertCandidateDirtRejected, assertCandidateInventory } from "./proof-manifest-inventory.mjs";
 import { deploymentPlanSharedEditBaseline } from "../slices/config.mjs";
 import { restoreDeploymentPlanSharedEdits } from "../slices/transforms.mjs";
 import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
@@ -241,6 +242,55 @@ test("deployment-plan retains every Supply assembly and passive Safe custody byt
   }
 });
 
+test("Node 26 workflow drift is rejected before any slice rollback writes", () => {
+  for (const manifest of manifests()) {
+    const boundary = temporaryDirectory(`agtmai-rollback-node26-drift-${manifest.sliceId}-`);
+    const checkout = join(boundary, "checkout");
+    const quarantineRoot = join(boundary, "gate-tmp");
+    let workspaceHandle;
+    try {
+      cloneRepository(repositoryRoot, checkout, boundary);
+      copyCurrentRollbackSharedState(checkout, manifest);
+      mkdirSync(quarantineRoot, { mode: 0o700 });
+      workspaceHandle = createRollbackWorkspaceHandle(checkout, quarantineRoot);
+      const workflowPath = join(checkout, ".github/workflows/node26-compatibility.yml");
+      const packagePath = join(checkout, "package.json");
+      const packageBefore = readFileSync(packagePath);
+      const changedWorkflow = readFileSync(workflowPath, "utf8").replace(
+        "          pnpm rollback:test\n",
+        "          pnpm rollback:test --if-present\n",
+      );
+      writeFileSync(workflowPath, changedWorkflow);
+      assert.throws(
+        () => applyManifest(checkout, manifest, { workspaceHandle }),
+        /ROLLBACK_SHARED_EDIT_SOURCE_DRIFT.*node26-compatibility\.yml/u,
+        manifest.sliceId,
+      );
+      assert.deepEqual(readFileSync(packagePath), packageBefore);
+      assert.equal(readFileSync(workflowPath, "utf8"), changedWorkflow);
+    } finally {
+      closeRollbackWorkspaceHandle(workspaceHandle);
+      rmSync(boundary, { recursive: true, force: true });
+    }
+  }
+});
+
+test("Node 26 policy test remains exact retained authority in every slice", () => {
+  for (const [index, manifest] of manifests().entries()) {
+    const forged = structuredClone(manifests());
+    const retained = forged[index].retainedSharedPaths.find(
+      ({ path }) => path === "scripts/tests/node26-compatibility.test.mjs",
+    );
+    assert.ok(retained, manifest.sliceId);
+    retained.sha256 = "0".repeat(64);
+    assert.throws(
+      () => validateManifestSet(forged),
+      /ROLLBACK_RETAINED_SHARED_PATH_DRIFT.*node26-compatibility\.test\.mjs/u,
+      manifest.sliceId,
+    );
+  }
+});
+
 test("held shared ancestor descriptors reject an equal-shape replacement", {
   skip: process.platform !== "linux",
 }, () => {
@@ -480,57 +530,6 @@ test("hierarchical and category ownership overlap fails closed", () => {
   assert.throws(() => validateManifestSet(retainedShared), /ROLLBACK_PATH_OVERLAP/u);
 });
 
-test("exact candidate enforcement rejects tracked, staged and untracked dirt", () => {
-  for (const mode of ["tracked", "staged", "untracked"]) {
-    const fixture = gitFixture();
-    try {
-      assert.equal(assertExactCleanCandidate(fixture.root, fixture.sha), fixture.sha);
-      if (mode === "untracked") {
-        writeFileSync(join(fixture.root, "sentinel.untracked"), "must refuse\n");
-      } else {
-        writeFileSync(join(fixture.root, "alpha.txt"), mode + "\n");
-        if (mode === "staged") {
-          git(fixture.root, ["add", "alpha.txt"]);
-        }
-      }
-      assert.throws(
-        () => assertExactCleanCandidate(fixture.root, fixture.sha),
-        /ROLLBACK_CANDIDATE_DIRTY/u,
-      );
-    } finally {
-      rmSync(fixture.boundary, { recursive: true, force: true });
-    }
-  }
-});
+test("exact candidate enforcement rejects tracked, staged and untracked dirt", assertCandidateDirtRejected);
 
-test("complete inventory covers binary, executable and symlink bytes and detects mismatch", () => {
-  const fixture = gitFixture();
-  try {
-    const expected = trackedCandidateInventory(fixture.root, fixture.sha);
-    assert.equal(expected.entryCount, 4);
-    assert.deepEqual(
-      expected.entries.map(({ path, mode }) => [path, mode]),
-      [
-        ["alpha-link", "120000"],
-        ["alpha.txt", "100644"],
-        ["binary.bin", "100644"],
-        ["executable.sh", "100755"],
-      ],
-    );
-    const clone = join(fixture.boundary, "clone");
-    basicRun(gitExecutable(), ["clone", "--quiet", "--no-hardlinks", fixture.root, clone], {
-      cwd: fixture.boundary,
-    });
-    const actual = trackedCandidateInventory(clone, fixture.sha);
-    assertInventoryEqual(expected, actual);
-
-    writeFileSync(join(clone, "binary.bin"), Buffer.from([9, 8, 7]));
-    const tampered = trackedCandidateInventory(clone, fixture.sha);
-    assert.throws(
-      () => assertInventoryEqual(expected, tampered, "tampered"),
-      /ROLLBACK_INVENTORY_MISMATCH/u,
-    );
-  } finally {
-    rmSync(fixture.boundary, { recursive: true, force: true });
-  }
-});
+test("complete inventory covers binary, executable and symlink bytes and detects mismatch", assertCandidateInventory);

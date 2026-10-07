@@ -130,6 +130,38 @@ test("the full plan names every genuine common and strict survivor gate", () => 
   );
 });
 
+test("production cleanup and removal traverse directories with bounded incremental reads", () => {
+  const cleanup = readFileSync(
+    join(repositoryRoot, "scripts/rollback/runtime/cleanup-tree.mjs"),
+    "utf8",
+  );
+  const removal = readFileSync(
+    join(repositoryRoot, "scripts/rollback/slices/removal-quarantine.mjs"),
+    "utf8",
+  );
+  const shapeTraversal = readFileSync(
+    join(repositoryRoot, "scripts/rollback/runtime/directory-shape.mjs"),
+    "utf8",
+  );
+  const cleanupTraversal = cleanup.slice(
+    cleanup.indexOf("export function sortedDirectoryEntries"),
+    cleanup.indexOf("export function openDirectoryDescriptor"),
+  );
+  const removalTraversal = removal.slice(
+    removal.indexOf("function rollbackDirectoryHasEntries"),
+    removal.indexOf("function assertRollbackRemovalIdentity"),
+  );
+  assert.match(cleanupTraversal, /opendirSync[\s\S]*directory\.readSync\(\)/u);
+  assert.match(cleanupTraversal, /entries\.length >= CLEANUP_MAX_ENTRIES/u);
+  assert.doesNotMatch(cleanupTraversal, /readdirSync/u);
+  assert.match(removalTraversal, /opendirSync[\s\S]*directory\.readSync\(\) !== null/u);
+  assert.doesNotMatch(removalTraversal, /readdirSync/u);
+  assert.match(shapeTraversal, /opendirSync[\s\S]*directory\.readSync\(\)/u);
+  assert.match(shapeTraversal, /SHAPE_MAX_ENTRIES[\s\S]*SHAPE_MAX_FILE_BYTES/u);
+  assert.match(shapeTraversal, /readSync\(descriptor/u);
+  assert.doesNotMatch(shapeTraversal, /readdirSync|readFileSync/u);
+});
+
 test("production proof orders capture, slice application, rollback and exact equivalence per slice", () => {
   const source = readFileSync(
     join(repositoryRoot, "scripts/rollback/slices/proof-slice.mjs"),

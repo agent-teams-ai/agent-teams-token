@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "runtimePolicy": {
+    "productionDefault": "24.20.0",
+    "productionRange": ">=24.20.0 <25",
+    "compatibilityVersion": "26.10.0",
+    "compatibilityRange": ">=26.10.0 <27",
+    "skippedMajor": 25,
+    "cutover": "Node 26 must be official LTS and the owner must authorize the production cutover"
+  },
+  "workspaceEngines": {
+    "node": ">=24.18.0 <25 || >=26.10.0 <27",
+    "pnpm": ">=11.24.0 <12"
+  },
+  "strictInstall": {
+    "command": "pnpm install --frozen-lockfile --config.engine-strict=true",
+    "status": "qualified",
+    "blockers": []
+  },
+  "focusedCompatibility": {
+    "install": "pnpm install --frozen-lockfile --config.engine-strict=true",
+    "reason": "Exercise repository and dependency behavior on Node 24 and Node 26 with strict package engines",
+    "checks": [
+      "pnpm check:fast",
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm test",
+      "node --test scripts/tests/node26-compatibility.test.mjs",
+      "pnpm test:linux-parity",
+      "pnpm genesis:vector:check",
+      "pnpm rollback:test"
+    ]
+  },
+  "publishedArtifactAudit": {
+    "workspacePackagesPrivate": true,
+    "runtimeDependencies": [
+      {
+        "name": "@noble/hashes",
+        "version": "2.4.0",
+        "nodeEngine": ">= 20.19.0"
+      },
+      {
+        "name": "yaml",
+        "version": "2.9.0",
+        "nodeEngine": ">= 14.6"
+      }
+    ],
+    "runtimeDependencyBlockers": []
+  }
+}

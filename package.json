@@ -7,7 +7,7 @@
   "type": "module",
   "packageManager": "pnpm@11.24.0",
   "engines": {
-    "node": ">=24.18.0 <25",
+    "node": ">=24.18.0 <25 || >=26.10.0 <27",
     "pnpm": ">=11.24.0 <12"
   },
   "scripts": {
@@ -40,9 +40,9 @@
     "security:solidity:prepare-image": ".tools/bin/node tooling/security/slither/src/composition/prepare-image.ts",
     "solana:fixture:local": ".tools/bin/node scripts/solana/local-fixture.ts",
     "test": "pnpm build && pnpm --filter @agent-teams/token-domain test:built && pnpm --filter @agent-teams/supply test:built",
-    "test:linux-parity": ".tools/bin/node --test scripts/tests/root-entrypoint.test.mjs scripts/tests/toolchain.test.mjs scripts/tests/toolchain-archive-finalization.test.mjs scripts/tests/toolchain-hardening.test.mjs scripts/tests/toolchain-execution.test.mjs scripts/tests/toolchain-publication-transaction.test.mjs scripts/tests/tooling-boundaries.test.mjs scripts/tests/workflow.test.mjs && docker compose -f compose.yaml config --quiet",
+    "test:linux-parity": ".tools/bin/node --test scripts/tests/root-entrypoint.test.mjs scripts/tests/toolchain.test.mjs scripts/tests/toolchain-archive-finalization.test.mjs scripts/tests/toolchain-hardening.test.mjs scripts/tests/toolchain-execution.test.mjs scripts/tests/toolchain-publication-transaction.test.mjs scripts/tests/tooling-boundaries.test.mjs scripts/tests/workflow.test.mjs scripts/tests/node26-compatibility.test.mjs && docker compose -f compose.yaml config --quiet",
     "test:local-evm": "pnpm build && pnpm test:local-evm:built",
-    "test:local-evm:built": ".tools/bin/node --test tooling/local-evm/tests/cleanup.test.ts tooling/local-evm/tests/lease-concurrency.test.ts tooling/local-evm/tests/lease-initialization.test.ts tooling/local-evm/tests/lease-deletion.test.ts tooling/local-evm/tests/constructor.test.ts tooling/local-evm/tests/process.test.ts tooling/local-evm/tests/rpc.test.ts tooling/local-evm/tests/safe-fs.test.ts tooling/local-evm/tests/toolchain.test.ts tooling/local-evm/tests/verifier.adversarial.test.ts tooling/local-evm/tests/verify-cli.test.ts",
+    "test:local-evm:built": ".tools/bin/node --test tooling/local-evm/tests/cleanup.test.ts tooling/local-evm/tests/lease-concurrency.test.ts tooling/local-evm/tests/lease-initialization.test.ts tooling/local-evm/tests/lease-deletion.test.ts tooling/local-evm/tests/constructor.test.ts tooling/local-evm/tests/process.test.ts tooling/local-evm/tests/rpc.test.ts tooling/local-evm/tests/runner-scratch.test.ts tooling/local-evm/tests/safe-fs.test.ts tooling/local-evm/tests/toolchain.test.ts tooling/local-evm/tests/verifier.adversarial.test.ts tooling/local-evm/tests/verify-cli.test.ts",
     "test:local-evm:integration": "pnpm build && .tools/bin/node --test tooling/local-evm/tests/runner.integration.test.ts",
     "test:local-solana": ".tools/bin/node --test tooling/local-solana/tests/*.test.ts",
     "test:deployment-plan": ".tools/bin/node --test tooling/deployment-plan/tests/*.test.ts",
@@ -69,9 +69,9 @@
     "test:custody:local": ".tools/bin/node --test tooling/testnet-ccip/tests/custody-*.test.ts"
   },
   "devDependencies": {
-    "@agent-teams/docs-protocol": "0.6.0",
-    "@agent-teams/docs-protocol-agent-teams": "0.2.9",
-    "@agent-teams/engineering-foundation": "1.4.0",
+    "@agent-teams/docs-protocol": "0.6.2",
+    "@agent-teams/docs-protocol-agent-teams": "0.3.2",
+    "@agent-teams/engineering-foundation": "1.7.2",
     "@types/node": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:",

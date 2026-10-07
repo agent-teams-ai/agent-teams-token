@@ -448,34 +448,6 @@ test("real parent SIGKILL reclaim authenticates, terminates and awaits its valid
   }
 });
 
-test("pre-registration SIGKILL cannot orphan an unregistered validator", { skip: process.platform !== "linux" ? "fault injector uses a Linux validator shim" : false }, async () => {
-  const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-preregister-sigkill-")); await chmod(boundary, 0o700);
-  const runRoot = join(boundary, "runs"); const outputRoot = join(boundary, "out"); const readyPath = join(boundary, "spawned-before-registration.json");
-  const executable = await buildValidator(boundary);
-  const fixture = spawn(process.execPath, [join(import.meta.dirname, "helpers/start-unregistered-validator.ts"), runRoot, outputRoot, readyPath, executable], { stdio: ["ignore", "pipe", "pipe"] });
-  let diagnostics = ""; fixture.stdout.on("data", (chunk) => { diagnostics += String(chunk); }); fixture.stderr.on("data", (chunk) => { diagnostics += String(chunk); });
-  let validatorPid: number | undefined;
-  try {
-    let ready: { readonly validatorPid: number; readonly runDirectory: string } | undefined;
-    for (let attempt = 0; attempt < 200 && ready === undefined && fixture.exitCode === null; attempt += 1) {
-      try { ready = JSON.parse(await readFile(readyPath, "utf8")); } catch { await new Promise((resolve) => { setTimeout(resolve, 25); }); }
-    }
-    assert.ok(ready, `fixture did not enter the injected pre-registration window: ${diagnostics}`);
-    validatorPid = ready.validatorPid;
-    const lease = JSON.parse(await readFile(join(ready.runDirectory, ".agtmai-local-solana-lease.json"), "utf8"));
-    assert.equal(lease.validator, null, "fault must occur before durable validator registration");
-    fixture.kill("SIGKILL"); await new Promise<void>((resolve) => { fixture.once("close", () => { resolve(); }); });
-    for (let attempt = 0; attempt < 200 && processAlive(validatorPid); attempt += 1) { await new Promise((resolve) => { setTimeout(resolve, 25); }); }
-    assert.equal(processAlive(validatorPid), false, "supervisor must terminate the validator when the unacknowledged control channel closes");
-    assert.equal(await new PrivateRunStore(runRoot, outputRoot).reclaimStale(), 1);
-    await assert.rejects(lstat(ready.runDirectory));
-  } finally {
-    if (fixture.exitCode === null) { fixture.kill("SIGKILL"); }
-    if (validatorPid !== undefined && processAlive(validatorPid)) { process.kill(validatorPid, "SIGKILL"); }
-    await rm(boundary, { recursive: true, force: true });
-  }
-});
-
 test("a copied lease in a substituted run directory never authorizes deletion", async () => {
   const boundary = await mkdtemp(join(tmpdir(), "agtmai-fs-copied-lease-")); await chmod(boundary, 0o700); const store = new PrivateRunStore(join(boundary, "runs"), join(boundary, "out"));
   try {
@@ -492,8 +464,6 @@ test("marker inode replacement is rejected even when lease bytes are identical",
     await assert.rejects(store.cleanup(paths), /SOLANA_CLEANUP_IDENTITY/u); assert.equal((await lstat(paths.directory)).isDirectory(), true);
   } finally { await rm(boundary, { recursive: true, force: true }); }
 });
-
-async function buildValidator(directory: string): Promise<string> { const source = join(directory, "validator.c"); const executable = join(directory, "validator"); await writeFile(source, "#include <unistd.h>\nint main(void){for(;;) pause();}\n"); await new Promise<void>((resolve, reject) => { execFile("/usr/bin/cc", [source, "-o", executable], (cause) => { if (cause) { reject(cause); } else { resolve(); } }); }); return executable; }
 
 function processAlive(pid: number): boolean {
   try {

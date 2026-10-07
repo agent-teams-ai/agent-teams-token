@@ -17,7 +17,10 @@ import {
   validatePnpmWorkspaceLinks,
 } from "../proof-runtime.mjs";
 import { parseStrictTap } from "./gate-contract.mjs";
-import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
+import {
+  allowlistedChildEnvironment,
+  derivePrivateGateChildEnvironment,
+} from "../../toolchain-environment.mjs";
 import {
   assertRollbackWorkspaceHandle,
   closeRollbackWorkspaceHandle,
@@ -243,7 +246,7 @@ export function runCommonGates(root, recorder, group, tools, environment) {
   recorder.run(group, "forge-build", tools.forge, [
     "build", "--offline", "--no-auto-detect", "--sizes", "--use", tools.solc,
   ], { cwd: contracts, env: environment, phase: "gate", timeout: 300_000 });
-  const foundryEnvironment = { ...environment, FOUNDRY_PROFILE: "ci" };
+  const foundryEnvironment = derivePrivateGateChildEnvironment(environment, { FOUNDRY_PROFILE: "ci" });
   recorder.run(group, "forge-unit-fuzz", tools.forge, [
     "test",
     "--offline",
@@ -288,10 +291,9 @@ export function runSurvivorGate({
     recorder.run(group, "solana-offline-toolchain-verify", "/bin/bash", [
       "./dev", "bootstrap", "verify", "--offline", "--scope=solana",
     ], { cwd: root, env: environment, phase: "gate", timeout: 600_000 });
-    const strictEnvironment = {
-      ...environment,
+    const strictEnvironment = derivePrivateGateChildEnvironment(environment, {
       AGTMAI_SOLANA_REAL_TESTS_REQUIRED: "1",
-    };
+    });
     runPnpm(
       recorder,
       group,
@@ -363,8 +365,7 @@ export function runSurvivorGate({
     const slitherTools = tools;
     runPnpm(recorder, group, "slither-unit", slitherTools, root, environment, ["security:slither:test"]);
     const output = join(recorder.prepareSurvivorDirectory("slither"), group);
-    const slitherEnvironment = {
-      ...environment,
+    const slitherEnvironment = derivePrivateGateChildEnvironment(environment, {
       GITHUB_SHA: rollbackSha,
       PATH: toolPath(slitherTools),
       SLITHER_CANDIDATE_SHA: rollbackSha,
@@ -373,7 +374,7 @@ export function runSurvivorGate({
       SLITHER_FORGE_PATH: slitherTools.forge,
       SLITHER_REPOSITORY_ROOT: root,
       SLITHER_SOLC_PATH: slitherTools.solc,
-    };
+    });
     runPnpm(
       recorder,
       group,

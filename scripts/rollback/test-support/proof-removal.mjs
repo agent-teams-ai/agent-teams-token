@@ -1,6 +1,6 @@
-import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies, assertRestoredSdkWorkflow } from "./proof-workflow.mjs";
+import { workflowPolicyTitle, workflowPolicyFixture, checkWorkflowPolicies, checkNode26Policies, rejectNode26PolicyMutation, assertRestoredSdkWorkflow } from "./proof-workflow.mjs";
 import { snapshotRollbackSharedPaths } from "../slices/shared-paths.mjs";
-import { editWorkflowTest, removeWorkflowJob } from "../slices/transforms.mjs";
+import { editWorkflowTest, removeNode26RollbackTest, removeWorkflowJob } from "../slices/transforms.mjs";
 import * as proofSupport from "./proof-fixture.mjs";
 const { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture } = proofSupport;
 export { assert, spawnSync, createHash, appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, basename, dirname, join, resolve, test, applyManifest, applyExactSliceState, assertRollbackWorkspaceHandle, closeRollbackWorkspaceHandle, createRollbackWorkspaceHandle, editPackage, expectedGateIds, finalizeRollbackTemporaryParent, gateCoverageSnapshot, parseCliArguments, parseStrictTap, preflightPinnedSlitherImage, removeOwnedEmptyDirectories, rollbackGateCoverage, validateManifestSet, verifyAppliedState, EvidenceRecorder, abandonCleanupHandle, assertExactDirectoryShape, assertExactCleanCandidate, assertGitStatusSnapshotEqual, assertInventoryEqual, assertPinnedNodeRuntime, assertPathsAbsent, basicRun, captureCleanupTreeSnapshot, captureGitStatusSnapshot, cleanupIdentityBoundDirectoryWithSnapshot, createCleanupHandle, gitExecutable, pnpmOfflineInstallArguments, strictToolPaths, trackedCandidateInventory, validatePnpmWorkspaceLinks, repositoryRoot, manifestDirectory, names, historicalLedgerLength, historicalLedgerSha256, proofRuntimeModuleUrl, manifests, copyCurrentRollbackSharedState, temporaryDirectory, cleanupIdentityBoundDirectory, writeExecutable, digestFile, pinnedRuntimeFixture, invokePinnedRuntime, git, gitFixture };
@@ -282,38 +282,6 @@ test("staged removal custody authenticates its destination and preserves replace
   }
 });
 
-test("production cleanup and removal traverse directories with bounded incremental reads", () => {
-  const cleanup = readFileSync(
-    join(repositoryRoot, "scripts/rollback/runtime/cleanup-tree.mjs"),
-    "utf8",
-  );
-  const removal = readFileSync(
-    join(repositoryRoot, "scripts/rollback/slices/removal-quarantine.mjs"),
-    "utf8",
-  );
-  const shapeTraversal = readFileSync(
-    join(repositoryRoot, "scripts/rollback/runtime/directory-shape.mjs"),
-    "utf8",
-  );
-  const cleanupTraversal = cleanup.slice(
-    cleanup.indexOf("export function sortedDirectoryEntries"),
-    cleanup.indexOf("export function openDirectoryDescriptor"),
-  );
-  const removalTraversal = removal.slice(
-    removal.indexOf("function rollbackDirectoryHasEntries"),
-    removal.indexOf("function assertRollbackRemovalIdentity"),
-  );
-  assert.match(cleanupTraversal, /opendirSync[\s\S]*directory\.readSync\(\)/u);
-  assert.match(cleanupTraversal, /entries\.length >= CLEANUP_MAX_ENTRIES/u);
-  assert.doesNotMatch(cleanupTraversal, /readdirSync/u);
-  assert.match(removalTraversal, /opendirSync[\s\S]*directory\.readSync\(\) !== null/u);
-  assert.doesNotMatch(removalTraversal, /readdirSync/u);
-  assert.match(shapeTraversal, /opendirSync[\s\S]*directory\.readSync\(\)/u);
-  assert.match(shapeTraversal, /SHAPE_MAX_ENTRIES[\s\S]*SHAPE_MAX_FILE_BYTES/u);
-  assert.match(shapeTraversal, /readSync\(descriptor/u);
-  assert.doesNotMatch(shapeTraversal, /readdirSync|readFileSync/u);
-});
-
 test("owned-root shape verification rejects symlink escape and entry overflow", () => {
   const boundary = temporaryDirectory("agtmai-rollback-shape-bounds-");
   const checkout = join(boundary, "checkout");
@@ -355,10 +323,12 @@ for (const manifest of manifests()) {
     const { checkout, workspaceHandle, parse } = workflowPolicyFixture(context, manifest);
     const packagePath = "package.json";
     const workflowPath = ".github/workflows/ci.yml";
+    const node26WorkflowPath = ".github/workflows/node26-compatibility.yml";
     const testPath = "scripts/tests/workflow.test.mjs";
     const candidatePackage = JSON.parse(readFileSync(join(checkout, packagePath), "utf8"));
     const candidateWorkflow = parse(readFileSync(join(checkout, workflowPath), "utf8"));
     const candidateSource = readFileSync(join(checkout, testPath), "utf8");
+    const candidateTestCount = [...candidateSource.matchAll(/^test\("/gmu)].length;
     const candidateImports = candidateSource.match(/^import .*;$/gmu);
     const candidateNodePolicy = candidateSource.match(workflowNodePolicyBlock);
     assert.equal(candidateNodePolicy?.length, 1);
@@ -381,12 +351,17 @@ for (const manifest of manifests()) {
         step.id === "run-root-check-with-exact-rollback-proof" ? { ...step, run: "pnpm check" } : step) },
     } });
 
-    const sharedPlan = snapshotRollbackSharedPaths(checkout, [packagePath, workflowPath, testPath], workspaceHandle);
+    const sharedPlan = snapshotRollbackSharedPaths(checkout, [packagePath, workflowPath, node26WorkflowPath, testPath], workspaceHandle);
     editPackage(checkout, manifest.sliceId, { sharedPlan, workspaceHandle });
     removeWorkflowJob(checkout, manifest, sharedPlan, workspaceHandle);
+    removeNode26RollbackTest(checkout, sharedPlan, workspaceHandle);
     editWorkflowTest(checkout, manifest, sharedPlan, workspaceHandle);
+    const node26Workflow = readFileSync(join(checkout, node26WorkflowPath), "utf8");
+    assert.doesNotMatch(node26Workflow, /pnpm rollback:test/u);
+    checkNode26Policies(checkout);
+    rejectNode26PolicyMutation(checkout);
     const slitherRemoved = manifest.sliceId === "slither";
-    checkWorkflowPolicies(checkout, slitherRemoved ? ".*" : workflowPolicyPattern, slitherRemoved ? 14 : 11);
+    checkWorkflowPolicies(checkout, slitherRemoved ? ".*" : workflowPolicyPattern, slitherRemoved ? candidateTestCount - 2 : 11);
     assert.deepEqual(
       readFileSync(join(checkout, testPath), "utf8").match(workflowNodePolicyBlock),
       manifest.sliceId === "slither" ? null : candidateNodePolicy,
@@ -457,7 +432,7 @@ for (const manifest of manifests()) {
         ...restoredWorkflow.jobs, "foundation-and-typescript": { ...foundation, steps },
       } });
     }
-    context.diagnostic(`12 candidate and ${slitherRemoved ? 14 : 11} restored policy tests; 21 policy mutations rejected; Slither Node policy removed only with Slither`);
+    context.diagnostic(`12 candidate and ${slitherRemoved ? candidateTestCount - 2 : 11} restored policy tests; 5 Node 26 tests execute and an injected failure propagates; 21 policy mutations rejected; Slither Node policy removed only with Slither`);
   });
 
   test(`workflow rollback ${manifest.sliceId} rejects missing or duplicated slice-only tests and assertions without writing`, (context) => {

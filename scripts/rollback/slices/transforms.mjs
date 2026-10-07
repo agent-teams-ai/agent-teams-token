@@ -97,7 +97,7 @@ export function editPackage(root, sliceId, options = {}) {
       check: " && pnpm test:local-solana",
     },
     "deployment-plan": {
-      remove: ["deployment:estimate:local", "deployment:readiness", "deployment:contributor-commitment", "test:deployment-plan"],
+      remove: ["deployment:estimate:local", "deployment:readiness", "deployment:contributor-commitment", "deployment:preflight", "deployment:production-preflight", "test:deployment-plan"],
       typecheck: " && tsc -p tooling/deployment-plan/tsconfig.json --pretty false",
       check: " && pnpm test:deployment-plan",
     },
@@ -210,6 +210,16 @@ export function removeWorkflowJob(root, manifest, sharedPlan, workspaceHandle) {
     result = `${result.slice(0, start)}${next < 0 ? "\n" : result.slice(next)}`;
     return result;
   });
+}
+
+export function removeNode26RollbackTest(root, sharedPlan, workspaceHandle) {
+  const path = ".github/workflows/node26-compatibility.yml";
+  editRollbackSharedText(root, path, sharedPlan, workspaceHandle, (source) => replaceExactly(
+    source,
+    "          pnpm rollback:test\n",
+    "",
+    "node26:removed-rollback-test",
+  ));
 }
 
 function removeTestBlock(source, titlePrefix) {

@@ -63,6 +63,32 @@ complete shared reversals, and for every removed slice the unique exact
 two-slice survivor complement. Missing, unknown, self-referencing or duplicate
 survivor gates fail validation.
 
+The Node 26 focused checkout needs complete history because `rollback:test`
+reads this exact baseline. Each slice removal also deletes that package script.
+Its reverse edit removes the one `pnpm rollback:test` line from the surviving
+Node 26 workflow. The workflow is an exact shared path in all three manifests;
+its source and result hashes are checked before and after application. The Node
+26 policy test remains retained in all three removals and requires the workflow
+command exactly when the package script exists. A changed workflow or retained
+test fingerprint invalidates the manifests before proof.
+
+After final candidate bytes are fixed by the authorized integrator, calculate
+every `retainedSharedPaths` SHA-256 from those bytes, including the Node 26
+policy test, and review each reason. Put these fingerprints and the exact new
+shared-path coverage in all three manifests before creating a clean integration
+commit. For that exact commit, run the pinned Node 24 proof runtime with
+`scripts/rollback/prove-slices.mjs --print-hashes=<slice>
+--expected-sha=<commit>` for each slice using complete history. Compare each
+proposed transition with the `sharedPaths` set and transformed disposable tree.
+If a reviewed transition differs, update only its `beforeSha256` or
+`afterSha256`, create a successor clean candidate commit, and repeat against
+that successor. Keep the fixed
+`b7a868f85d89c4bb7a9aeed1d854a5f949306a45` baseline, owned-path
+inventory, exact survivor complement and foreign-file drift checks. Then run
+the clean exact-head `--validate-only` and production apply regressions before
+the full Linux proof. Hash printing and worktree tests are maintenance evidence,
+not a passed full rollback proof.
+
 Final-manifest state at this documentation edit:
 `REHASHED_WORKTREE_VALIDATED_PENDING_EXACT_HEAD_FULL_PROOF`. The semantic repair
 uses checkpoint `c8d5d35a412ac85a69185201540ceab227a87148` (tree

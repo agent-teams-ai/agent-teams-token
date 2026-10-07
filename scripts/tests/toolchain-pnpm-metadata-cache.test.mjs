@@ -88,9 +88,44 @@ snapshots:
 
 export function registerPnpmMetadataCacheTests() {
   registerPnpmOfflineMetadataTests();
+  registerPnpmScriptArgumentTests();
   registerPnpmCacheAuthorityTests();
   registerPnpmCacheCreationTests();
   registerPnpmMetadataUmaskTests();
+}
+
+function registerPnpmScriptArgumentTests() {
+  test("pinned pnpm keeps trusted authority options out of nested package-script arguments", (context) => {
+    const previousUmask = process.umask(0o022);
+    context.after(() => process.umask(previousUmask));
+    const fixture = installedFixture(context, true);
+    const project = join(fixture.root, "nested-script-project");
+    const scripts = join(fixture.root, "scripts");
+    fs.mkdirSync(project);
+    fs.mkdirSync(scripts);
+    fs.writeFileSync(join(fixture.root, "fixture-lock.json"), JSON.stringify(fixture.lock));
+    fs.writeFileSync(join(scripts, "bootstrap.sh"), [
+      "#!/bin/sh",
+      `TOKEN_BOOTSTRAP_TEST_MODE=1 TOKEN_TOOLCHAIN_LOCK='${join(fixture.root, "fixture-lock.json")}' TOKEN_TOOLS_ROOT='${fixture.toolsRoot}' exec '${process.execPath}' '${join(repository, "scripts/toolchain.mjs")}' run-pnpm "$@"`,
+      "",
+    ].join("\n"), { mode: 0o700 });
+    fs.writeFileSync(join(project, "package.json"), JSON.stringify({
+      name: "nested-script-project", private: true, packageManager: "pnpm@11.24.0",
+      scripts: { check: "pnpm --version > nested-version" },
+    }));
+
+    const forbidden = pnpm(fixture, project, ["--config.store-dir=/tmp/forbidden", "--version"]);
+    assert.notEqual(forbidden.status, 0);
+    assert.match(forbidden.stderr, /TOOLCHAIN_PNPM_AUTHORITY_ARGUMENT_FORBIDDEN/u);
+    assert.equal(fs.existsSync(join(project, "nested-version")), false);
+
+    const cwd = process.cwd();
+    try {
+      process.chdir(project);
+      assert.equal(runPnpm({ ...fixture, platform, args: ["check"] }), 0);
+    } finally {process.chdir(cwd);}
+    assert.equal(fs.readFileSync(join(project, "nested-version"), "utf8").trim(), "11.24.0");
+  });
 }
 
 function registerPnpmOfflineMetadataTests() {
@@ -333,19 +368,43 @@ function assertMetadataInvocationUmask(context, fixture, callerUmask, outcome) {
       // Linux symlinks always use 0777, so check the actual extraction boundary.
       extractions.push(process.umask());
     }
-    if (args[1] === "--agtmai-toolchain-process-supervisor") {
-      const config = JSON.parse(Buffer.from(args[2], "base64url").toString());
+    // Linux prefixes the observer argv with the native watchdog contract.
+    // Keep this explicit so protocol drift cannot bypass lifecycle assertions.
+    const supervisorArgument = process.platform === "linux" ? 5 : 1;
+    if (args[supervisorArgument] === "--agtmai-toolchain-process-supervisor") {
+      const config = JSON.parse(Buffer.from(args[supervisorArgument + 1], "base64url").toString());
       if (config.args.includes("--metadata-probe")) {
         invocations.push(process.umask());
         privateRoot = dirname(options.env.HOME);
+        if (process.platform === "linux") {
+          assert.equal(command, `/proc/self/fd/${config.statusFd + 1}`);
+          assert.equal(args[3], process.execPath);
+        }
         if (outcome === "throw") {throw new Error("injected pnpm spawn failure");}
         const result = spawn(command, args, options);
         childRan = true;
+        assert.equal(fs.statSync(options.env.HOME).mode & 0o777, 0o700);
+        const metadata = join(options.env.HOME, "child-metadata");
+        assert.equal(fs.statSync(metadata).mode & 0o777, 0o600);
+        assert.equal(fs.readFileSync(metadata, "utf8"), "private invocation data");
+        if (process.platform === "linux") {
+          // Read the real subreaper report before invocation cleanup removes it.
+          assert.deepEqual(JSON.parse(fs.readFileSync(join(privateRoot, "native-status"), "utf8")), {
+            custody: "completed",
+            error: null,
+            signal: null,
+            signalledCount: 0,
+            status: outcome === "nonzero" ? 7 : 0,
+            uncertainty: null,
+          });
+        }
         return result;
       }
     }
     return spawn(command, args, options);
   };
+  // The execution modules import spawnSync as a named builtin export.
+  syncBuiltinESMExports();
   const observation = observeConsumerDescriptors({
     closeTarget(record) {
       if (!record.identity.isDirectory() || !basename(record.path).startsWith(".install-part-")) {return false;}

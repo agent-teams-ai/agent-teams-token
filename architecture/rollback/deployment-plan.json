@@ -85,14 +85,19 @@
       "afterSha256": "b259b0ea5936b205df69dbb2ac927ec92fe97e8a704713cfece23fe1c71ff68e"
     },
     {
+      "path": ".github/workflows/node26-compatibility.yml",
+      "beforeSha256": "3e6a1d712c51af1656d29b3eb927c34f8d7db2974d9a1d36958bdbcaa9de935e",
+      "afterSha256": "2cf87a63dea932a31615c2475b6235c470b55918b781612cbd0ad1f7403fb569"
+    },
+    {
       "path": "architecture/foundation/source-dependencies.yaml",
       "beforeSha256": "52e80a3c7c9c312a0fa31af1c944cadf761c8986ca96bb1b18375bb5c8fc555c",
       "afterSha256": "62dee96597997eec4dc0696c55bece82d59fcf819442d99abd2fc1507373476a"
     },
     {
       "path": "package.json",
-      "beforeSha256": "e8acbe645471a8acb83736a440480f41ce142f916dfda66d7d01dc47de446d69",
-      "afterSha256": "2ded81b376f1d141db90166fcc7b0afffb46c331fa43c18bcba8172582eb1034"
+      "beforeSha256": "abdd0943a66be4ce8adcbf919239db1c00f02da6fbb74ec8974fcf7631a08041",
+      "afterSha256": "0ac6d8f9254a295461ac4043a08e83fa5e7dad0e94c404158014ee9bc675763b"
     },
     {
       "path": "scripts/deployment/estimate-local.ts",
@@ -127,6 +132,7 @@
   ],
   "sharedPaths": [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "scripts/deployment/estimate-local.ts",
@@ -186,6 +192,11 @@
       "path": "packages/contexts/supply/tests/production-deployment.test.ts",
       "sha256": "5828e3b45d22add5f570924bc688e6697f43f523e9d5b85f2729b06dffd73c76",
       "reason": "Independent Supply full Ethereum assembly preparation, authenticated candidate admission and public package regressions survive deployment-plan removal without historical restoration."
+    },
+    {
+      "path": "scripts/tests/node26-compatibility.test.mjs",
+      "sha256": "9bb1d4a1066a8bfc070c3a7ccb6e02cbfcb0256b2f7ecfac8e789b051a900f18",
+      "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",

@@ -36,7 +36,7 @@ import {
 import {
   assertRollbackWorkspaceHandle,
 } from "./workspace-handle.mjs";
-import { allowlistedChildEnvironment } from "../../toolchain-environment.mjs";
+import { allowlistedChildEnvironment, privateGateChildEnvironment } from "../../toolchain-environment.mjs";
 
 function run(command, commandArguments, options = {}) {
   return basicRun(command === "git" ? gitExecutable() : command, commandArguments, {
@@ -443,7 +443,7 @@ export function gateEnvironment(root, gateTemporaryDirectory, tools) {
   for (const path of [privateHome, xdgCache, xdgConfig, xdgData, xdgRuntime]) {
     mkdirSync(path, { mode: 0o700 });
   }
-  return allowlistedChildEnvironment(process.env, {
+  return privateGateChildEnvironment(process.env, {
     AGTMAI_ANVIL_BINARY: tools.anvil,
     AGTMAI_FORGE_BINARY: tools.forge,
     AGTMAI_SOLC_BINARY: tools.solc,
@@ -461,5 +461,5 @@ export function gateEnvironment(root, gateTemporaryDirectory, tools) {
     XDG_CONFIG_HOME: xdgConfig,
     XDG_DATA_HOME: xdgData,
     XDG_RUNTIME_DIR: xdgRuntime,
-  });
+  }, gateTemporaryDirectory);
 }

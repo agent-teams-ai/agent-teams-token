@@ -35,6 +35,7 @@
     "tooling/local-solana/tests/helpers/agave-recovery.ts",
     "tooling/local-solana/tests/helpers/captured-validator.ts",
     "tooling/local-solana/tests/helpers/cli-boundary.ts",
+    "tooling/local-solana/tests/helpers/fail-stopping-write.ts",
     "tooling/local-solana/tests/helpers/hold-port-lease.ts",
     "tooling/local-solana/tests/helpers/observations.ts",
     "tooling/local-solana/tests/helpers/start-owned-validator.ts",
@@ -50,9 +51,12 @@
     "tooling/local-solana/tests/recovery-remediation.test.ts",
     "tooling/local-solana/tests/rpc.test.ts",
     "tooling/local-solana/tests/runner.test.ts",
+    "tooling/local-solana/tests/startup-custody-concurrency.test.ts",
+    "tooling/local-solana/tests/startup-diagnostics.test.ts",
     "tooling/local-solana/tests/tool-snapshots.test.ts",
     "tooling/local-solana/tests/toolchain.test.ts",
     "tooling/local-solana/tests/transaction.test.ts",
+    "tooling/local-solana/tests/validator-supervisor-stop.test.ts",
     "tooling/local-solana/tests/verifier.test.ts",
     "tooling/local-solana/tsconfig.json"
   ],
@@ -66,14 +70,19 @@
       "afterSha256": "03e8561b5da77a336beff276462457ede9f230435dfedfd715a777d7ab07ed3f"
     },
     {
+      "path": ".github/workflows/node26-compatibility.yml",
+      "beforeSha256": "3e6a1d712c51af1656d29b3eb927c34f8d7db2974d9a1d36958bdbcaa9de935e",
+      "afterSha256": "2cf87a63dea932a31615c2475b6235c470b55918b781612cbd0ad1f7403fb569"
+    },
+    {
       "path": "architecture/foundation/source-dependencies.yaml",
       "beforeSha256": "52e80a3c7c9c312a0fa31af1c944cadf761c8986ca96bb1b18375bb5c8fc555c",
       "afterSha256": "9a79ac3bdf411ce5d07de51fed66cc6fe70bcc8c2f6b6768cb4a75dcca1d264c"
     },
     {
       "path": "package.json",
-      "beforeSha256": "e8acbe645471a8acb83736a440480f41ce142f916dfda66d7d01dc47de446d69",
-      "afterSha256": "586582a3432aaeca8ceaa0093af7d2e6c4e6b9bde7086454ee94e239ae15cbad"
+      "beforeSha256": "abdd0943a66be4ce8adcbf919239db1c00f02da6fbb74ec8974fcf7631a08041",
+      "afterSha256": "d71075d085e94494d6af6b505e582187a60c3e37383b45fed253324a814dc076"
     },
     {
       "path": "scripts/solana/local-fixture.ts",
@@ -98,6 +107,7 @@
   ],
   "sharedPaths": [
     ".github/workflows/ci.yml",
+    ".github/workflows/node26-compatibility.yml",
     "architecture/foundation/source-dependencies.yaml",
     "package.json",
     "scripts/solana/local-fixture.ts",
@@ -110,6 +120,11 @@
       "path": "architecture/foundation/repository-agent-workflow.yaml",
       "sha256": "8413d3e29613ccea223fc35588c380ccce334fb6d4b95287897b6586eb25113a",
       "reason": "Barrier 0.5 root remains governed through its restored prerequisite stub; current-main Docs Protocol authoring paths retain full-scan enforcement"
+    },
+    {
+      "path": "scripts/tests/node26-compatibility.test.mjs",
+      "sha256": "9bb1d4a1066a8bfc070c3a7ccb6e02cbfcb0256b2f7ecfac8e789b051a900f18",
+      "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {
       "path": "scripts/tests/tooling-boundaries.test.mjs",

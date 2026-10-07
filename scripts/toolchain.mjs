@@ -19,6 +19,9 @@ import { descriptorRoot, executeOpenedNode, executeVerifiedFile } from "./toolch
 import { fileURLToPath } from "node:url";
 import { parseToolchainJson, TOOLCHAIN_JSON_LIMITS } from "./toolchain-json.mjs";
 import {
+  assertPnpmCacheTree, assertPnpmDirectoryIdentity, preparePnpmDirectory,
+} from "./toolchain-pnpm-cache.mjs";
+import {
   checkedRegularDescriptor, hashDescriptor, readVerifiedBytes, sameIdentity,
 } from "./toolchain-files.mjs";
 import {
@@ -30,6 +33,7 @@ import {
   inspectInstallation,
   installPreparedArtifact,
 } from "./toolchain-installation.mjs";
+import { validateSafeArtifactEnvironment } from "./toolchain-safe-artifact-environment.mjs";
 
 export {
   canonicalizeTrustedPath,
@@ -276,11 +280,12 @@ export function verifyCache({ lock, platform, toolsRoot, offline, scope = "core"
   }
 }
 
-export function runPnpm({ lock, platform, toolsRoot, args }) {
+export function runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironment }) {
   assertSupported(lock, platform);
   toolsRoot = canonicalizeTrustedPath(toolsRoot);
   assertOwnedDirectoryChain(toolsRoot);
   assertPnpmArguments(args);
+  const safeArtifacts = validateSafeArtifactEnvironment(safeArtifactEnvironment);
 
   const preparedAuthorities = [];
   let primaryFailure;
@@ -339,6 +344,17 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     const nodeArtifact = nodeTool.platforms[platform];
     const nodeAuthority = authorities.get("node");
     const pnpmAuthority = authorities.get("pnpm");
+    const authenticatedBinaryPath = (name, leaf) => {
+      const authority = authorities.get(name);
+      const entry = authority?.inventory[leaf];
+      if (entry?.type !== "file" || authority.files[leaf] !== entry.sha256) {
+        throw new Error(`TOOLCHAIN_RUN_INVALID tool=${name} reason=entry-missing:${leaf}`);
+      }
+      return containedPath(
+        containedPath(toolsRoot, lock.tools[name].platforms[platform].installDirectory),
+        leaf,
+      );
+    };
     const pnpmEntrypoint = "dist/pnpm.mjs";
     const pnpmEntrypointAuthority = pnpmAuthority.inventory[pnpmEntrypoint];
     if (pnpmEntrypointAuthority?.type !== "file") {
@@ -365,7 +381,7 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
         sha256: pnpmEntrypointAuthority.sha256,
       },
       args: [
-        ...args,
+        // Pnpm forwards options after a script name to that package script.
         `--config.store-dir=${store}`,
         `--config.cache-dir=${cache}`,
         "--config.ignore-pnpmfile=true",
@@ -373,9 +389,18 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
         "--config.globalconfig=/dev/null",
         "--config.auto-install-peers=false",
         "--config.verify-deps-before-run=false",
+        ...args,
       ],
       stdio: "inherit",
       subprocessPath: [...new Set(authenticatedPath)],
+      // These paths come from the installations inspected above, never from
+      // the caller's environment. The EVM tests require the exact pin names.
+      authenticatedToolBinaries: {
+        anvil: authenticatedBinaryPath("foundry", "anvil"),
+        forge: authenticatedBinaryPath("foundry", "forge"),
+        solc: authenticatedBinaryPath("solc", "solc"),
+      },
+      safeArtifactEnvironment: safeArtifacts,
     });
   } catch (error) {
     primaryFailure = error;
@@ -395,46 +420,6 @@ export function runPnpm({ lock, platform, toolsRoot, args }) {
     );
   }
   return result;
-}
-
-function preparePnpmDirectory(path, kind) {
-  assertOwnedDirectoryChain(path);
-  try {mkdirSync(path, { mode: 0o700 });}
-  catch (error) {if (error?.code !== "EEXIST") {throw error;}}
-  assertOwnedDirectoryChain(path);
-  const identity = lstatSync(path);
-  if (!identity.isDirectory() || identity.isSymbolicLink()
-    || (identity.mode & 0o777) !== 0o700
-    || (typeof process.getuid === "function" && identity.uid !== process.getuid())) {
-    throw new Error(`TOOLCHAIN_PNPM_${kind}_UNSAFE`);
-  }
-  return identity;
-}
-
-function assertPnpmCacheTree(path) {
-  const entry = lstatSync(path);
-  if ((typeof process.getuid === "function" && entry.uid !== process.getuid())
-    || (entry.isDirectory() ? (entry.mode & 0o777) !== 0o700
-      : !entry.isFile() || entry.nlink !== 1 || (entry.mode & 0o777) !== 0o600)) {
-    throw new Error("TOOLCHAIN_PNPM_CACHE_UNSAFE");
-  }
-  if (entry.isDirectory()) {
-    for (const leaf of readdirSync(path)) {assertPnpmCacheTree(join(path, leaf));}
-  }
-  const current = lstatSync(path);
-  if (current.dev !== entry.dev || current.ino !== entry.ino || current.mode !== entry.mode
-    || current.uid !== entry.uid || current.nlink !== entry.nlink) {
-    throw new Error("TOOLCHAIN_PNPM_CACHE_UNSAFE");
-  }
-}
-
-function assertPnpmDirectoryIdentity(path, identity) {
-  assertOwnedDirectoryChain(path);
-  const current = lstatSync(path);
-  if (current.dev !== identity.dev || current.ino !== identity.ino
-    || current.mode !== identity.mode || current.uid !== identity.uid) {
-    throw new Error("TOOLCHAIN_PNPM_CACHE_UNSAFE");
-  }
 }
 
 function prepareRunInstallation({ name, tool, artifact, platform, toolsRoot, lock }) {
@@ -519,7 +504,17 @@ function cli() {
   if (command === "fetch") {return fetchArtifacts({ lock, platform, toolsRoot, scope });}
   if (command === "install") {return installArtifacts({ lock, platform, toolsRoot, offline, scope });}
   if (command === "verify") {return verifyCache({ lock, platform, toolsRoot, offline, scope });}
-  if (command === "run-pnpm") { process.exitCode = runPnpm({ lock, platform, toolsRoot, args }); return; }
+  if (command === "run-pnpm") {
+    const safeArtifactEnvironment = process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY !== undefined
+      || process.env.AGTMAI_SAFE_PINS_SHA256 !== undefined
+      ? {
+        directory: process.env.AGTMAI_SAFE_ARTIFACT_DIRECTORY,
+        pinsSha256: process.env.AGTMAI_SAFE_PINS_SHA256,
+      }
+      : undefined;
+    process.exitCode = runPnpm({ lock, platform, toolsRoot, args, safeArtifactEnvironment });
+    return;
+  }
   throw new Error(
     "Usage: ./dev bootstrap fetch [--scope=solana] | install --offline [--scope=solana]"
     + " | verify --offline [--scope=solana] | run-pnpm [args...]",

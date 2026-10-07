@@ -5,6 +5,8 @@ packages:
 
 catalogMode: strict
 autoInstallPeers: false
+publicHoistPattern:
+  - '@agent-teams/repository-mutation'
 catalog:
   "@types/node": 24.13.3
   "@noble/hashes": 2.4.0
@@ -12,3 +14,9 @@ catalog:
   typescript: 7.0.2
   yaml: 2.9.0
 minimumReleaseAge: 0
+minimumReleaseAgeExclude:
+  - "@agent-teams/repository-mutation@0.2.2"
+  - "@agent-teams/document-authoring@0.3.2"
+  - "@agent-teams/docs-protocol@0.6.2"
+  - "@agent-teams/docs-protocol-agent-teams@0.3.2"
+  - "@agent-teams/engineering-foundation@1.7.2"

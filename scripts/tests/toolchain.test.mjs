@@ -27,6 +27,8 @@ import {
 } from "../toolchain.mjs";
 import { registerBootstrapTests } from "./toolchain-bootstrap.test.mjs";
 import { registerExecutionTests } from "./toolchain-invocation.test.mjs";
+import { registerPinnedEnvTests } from "./toolchain-pinned-env.test.mjs";
+import { registerSafeEnvTests } from "./toolchain-safe-env.test.mjs";
 import { runDoctor } from "../doctor.mjs";
 import {
   assertProtectedPnpmResolvesAuthenticatedTools,
@@ -40,6 +42,8 @@ registerToolchainPathOwnershipTests();
 registerToolchainAuthorityTests();
 registerBootstrapTests();
 registerExecutionTests();
+registerPinnedEnvTests();
+registerSafeEnvTests();
 
 const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 

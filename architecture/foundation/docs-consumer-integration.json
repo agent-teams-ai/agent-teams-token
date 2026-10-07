@@ -20,50 +20,54 @@
   ],
   "cohort": {
     "schemaVersion": 2,
-    "cohortId": "docs-2026-09-16-stable25",
+    "cohortId": "docs-2026-10-03-stable31",
     "channel": "stable",
-    "recordDigest": "sha256:105c34ecc7fc422939b43daaca513f9ce630ce69d4a2820d39423fcdc13dcc61",
-    "qualificationEventDigest": "sha256:090325fe7992c7ca15e03a5375188d006d8c410f7a895a219fafb4e735f5d28b",
-    "eligibleAfter": "2026-09-19T15:22:11Z",
+    "recordDigest": "sha256:15ef4d89c312593f5ecee9e0c9890f4ffa487e4d869682dec688460f2f4fc0c8",
+    "qualificationEventDigest": "sha256:7273eab4e9b555bde22a2c89f4b98735c0d668afb6144b5983e030ee942c420f",
+    "eligibleAfter": "2026-10-03T01:37:42Z",
     "upgradeFrom": [
-      "docs-2026-09-12-stable21"
+      "docs-2026-09-12-stable21",
+      "docs-2026-09-15-stable24",
+      "docs-2026-09-16-stable25",
+      "docs-2026-09-21-stable26",
+      "docs-2026-09-24-stable28"
     ],
     "rollbackTo": [
-      "docs-2026-09-12-stable21"
+      "docs-2026-09-21-stable26"
     ],
     "packages": {
       "repositoryMutation": {
-        "version": "0.2.0",
-        "integrity": "sha512-a02kzLlWtQjPAG2fFo/HyC+T6D+hW+FJ+aNCYoTLuTdKqeuL50hIvSnQLMUbGajWBb4nAvaINvW2jvmJ+Qku0g=="
+        "version": "0.2.2",
+        "integrity": "sha512-4G6kkQKA7ua4z9mxxn1XNrBUgngWeQ+UufDnQ34YdYv26DZi1/pUYwGoKajFluhUNDXhvqf4fMJQu0nI6m6jdg=="
       },
       "documentAuthoring": {
-        "version": "0.3.0",
-        "integrity": "sha512-LdNT8VHPQxXvuyXsCblFSeCmbEEZcXwiCTY1E+c0ZEWWJG0V2qoi95F8fHAwI4ngZLDmLr/yzHGyDqwkd9GBrA=="
+        "version": "0.3.2",
+        "integrity": "sha512-GzdetjP25KJfThxNk7UhtAZ28rOb6T/rTRrjYSrp2rYaEt0do5XF4pGjIVdeSzh+zXH0ULu58TZsuhOJi0Q0Mw=="
       },
       "docsProtocol": {
-        "version": "0.6.0",
-        "integrity": "sha512-xSlc0DFTGh0jed9581LoToHAXwxxZMhzlItbPeoc67YNBSDxLCP8XNwK0LCMs4w8MLqY6silJDtpzsHFw2XSVg=="
+        "version": "0.6.2",
+        "integrity": "sha512-kqE4pA9/V/MgbOm2nTyfRWU+CuwtAX6pB6WGQauKvvozwS4CzFfJwARTgd91R3yCf6bi5l/kU+mcAe6WVID7aA=="
       },
       "docsProtocolAgentTeams": {
-        "version": "0.2.9",
-        "integrity": "sha512-3wFo/xK/l0eLNseN2H8xrdPHWmjVIyZFy3OkAvyfLfMYVTT0Rm9L/R+33U4h2JeN5Mqb9kK8nCEvEfMY9Vxq0Q=="
+        "version": "0.3.2",
+        "integrity": "sha512-JgNRR4x+3ckfzCqadNEJrqIwdZ7Lz1p981sWcqDObviWoK5hmOwu13v8/PO03d1WWUdnunDp8T95PnRbuYfjiQ=="
       },
       "engineeringFoundation": {
-        "version": "1.4.0",
-        "integrity": "sha512-m8rLOvctyXu+kqN4LyCW4LIz303a7p+ZIvx+oieYIwst6DNBpsWUu/Ux7UZM3fZH5JTYhB4eSEBEfi5lUTt4vQ=="
+        "version": "1.7.2",
+        "integrity": "sha512-2wmq4g8rWgXQ2qBVY2Tb7HVP9LFsuBAUMcDhgCqixLA0RA9H3OrwXy7b7jK2gS6SggK9XCplNb03mVLR2EyzRg=="
       }
     },
     "workflow": {
       "repository": "agent-teams-ai/.github",
       "path": ".github/workflows/docs-protocol-check.yml",
-      "revision": "757122cb08ed15aba6c9eef1b1f655b77d1ac54b",
-      "blobSha": "9bcbe54dfec6280045ac596e55c1f14ce5f176e1"
+      "revision": "b30455e32cf5d54ade6d8301637701347e4ce57c",
+      "blobSha": "f1492257de281f40a262042eb989291558147d5f"
     },
     "assets": {
       "skillDigest": "sha256:a86d8c9b990124f11b50b1c6703e1aeb5e3b981d51f7e8f5c163c4f5b987d7c5",
-      "callerWorkflowDigest": "sha256:d8d3b1281990179ee25ded67ba160f0e7573d2f70707b8c5b312d70b68d85125",
+      "callerWorkflowDigest": "sha256:27d2ec2d28219b5d0a3aeaf2bf45480694ea317003799e9e43c04f8d3b73d8b7",
       "assetCatalogDigest": "sha256:3ec380a1a6dd8534824ba82ff23affba993e19e9cb6b3c5e424ea9973ad686da",
-      "transitionCatalogDigest": "sha256:3b8d0895ed9fe39dfe14a90518bdc2c03fdb38e782bcd70411e0b7af0412f535"
+      "transitionCatalogDigest": "sha256:cefd8c24e93f452884dbff0e94939f694d2c217dedb6a5c8eec97a63e2fc219c"
     },
     "schemas": {
       "consumerIntegration": 3,
@@ -73,7 +77,7 @@
     "runtime": {
       "node": ">=24.18.0 <25",
       "pnpm": ">=11.17.0 <12",
-      "runtimeClosureDigest": "sha256:87cb5e3495848f453c1ac0e4dc8caa7d66828f0cab270cefd46d73dee2ea341a"
+      "runtimeClosureDigest": "sha256:48dcadfa67bcf5f32e8aa7a510d83e9475335d7153b145ff84f00e9b5da993e2"
     }
   }
 }
