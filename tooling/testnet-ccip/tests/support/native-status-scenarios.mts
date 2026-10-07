@@ -5,7 +5,7 @@ import { runStatus } from '../../src/composition/transfer-status.mjs';
 import { inspectTransfer, matchRequest } from '../../src/domain/transfer-status.mjs';
 import { createTestSdkStatus } from '../../src/adapters/test-sdk-status.ts';
 import { testSdkCounters } from '../../src/adapters/test-sdk-admission.ts';
-import { solanaEffect, type InvocationLog } from '../../src/adapters/transfer-status-native.mjs';
+import { authenticatedSolanaEffect, type InvocationLog } from '../../src/adapters/transfer-status-native.mjs';
 import { DEFAULT_SEPOLIA_RPC, DEFAULT_SOLANA_RPC, TEST_RPC_RESPONSE_LIMIT } from '../../src/adapters/test-rpc.ts';
 import { BURNMINT_PROGRAM } from '../../src/domain/solana-pool-init.ts';
 import { FORWARD_RECIPIENT_B, FORWARD_RECIPIENT_B_ATA } from '../../src/domain/evm-forward.mjs';
@@ -112,10 +112,10 @@ async function checkObserver(s: ScenarioState, ports: Ports): Promise<void> {
         postTokenBalances: [{ accountIndex: 0, mint: fixture.mint, owner: recipient, programId: token, uiTokenAmount: { amount: '1000000000', decimals: 9 } }] } };
       const event = present(present(parseLogs)(tx.meta.logMessages).find(log => log.type === 'data'));
       const invocation: InvocationLog = { ...event, transactionHash: '1'.repeat(64) };
-      assert.equal(solanaEffect(tx, 'mint', recipient, ata, lane, invocation), 2);
+      assert.equal(authenticatedSolanaEffect(tx, 'mint', recipient, ata, { lane, event: invocation }), 2);
       const early = structuredClone(tx); early.meta.logMessages.splice(5, 1); early.meta.logMessages.splice(1, 0, 'Program data: ' + data);
       const earlyEvent = present(present(parseLogs)(early.meta.logMessages).find(log => log.type === 'data'));
-      assert.throws(() => solanaEffect(early, 'mint', recipient, ata, lane, { ...earlyEvent, transactionHash: '1'.repeat(64) }), /effect\/event order/);
+      assert.throws(() => authenticatedSolanaEffect(early, 'mint', recipient, ata, { lane, event: { ...earlyEvent, transactionHash: '1'.repeat(64) } }), /effect\/event order/);
       for (const mutate of [
         (t: typeof tx) => { present(t.meta.postTokenBalances[0]).owner = 'wrong'; },
         (t: typeof tx) => { present(present(t.meta.innerInstructions[0]).instructions[0]).programId = 'wrong'; },
@@ -129,7 +129,7 @@ async function checkObserver(s: ScenarioState, ports: Ports): Promise<void> {
         (t: typeof tx) => { present(t.meta.innerInstructions[0]).index = 9; },
         (t: typeof tx) => { present(t.meta.postTokenBalances[0]).uiTokenAmount.amount = '2000000000'; },
         (t: typeof tx) => { t.meta.postTokenBalances.push(present(t.meta.postTokenBalances[0])); },
-      ]) { const changed = structuredClone(tx); mutate(changed); assert.throws(() => solanaEffect(changed, 'mint', recipient, ata, lane, invocation)); }
+      ]) { const changed = structuredClone(tx); mutate(changed); assert.throws(() => authenticatedSolanaEffect(changed, 'mint', recipient, ata, { lane, event: invocation })); }
     }
     s.mutations.endHash = '0x' + 'cd'.repeat(32); assert.equal((await ports.native.snapshot()).coherent, false); s.mutations.endHash = hash;
     s.mutations.endTimestamp = time / 1000 - 1; assert.equal((await ports.native.snapshot()).coherent, false); delete s.mutations.endTimestamp;
