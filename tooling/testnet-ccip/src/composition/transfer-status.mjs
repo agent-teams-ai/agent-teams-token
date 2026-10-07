@@ -116,6 +116,17 @@ export async function runStatus(settings, now = Date.now) {
     acquired.push(ethereum);
     const solanaChain = await sdk.SolanaChain.fromUrl(solana, { ...context, fetch: createSdkTestFetch(solana) });
     acquired.push(solanaChain);
+    lane.solanaLog = async (hash, kind, slot) => {
+      const transaction = await solanaChain.getTransaction(hash);
+      if (transaction.hash !== hash || transaction.tx.slot !== slot || transaction.error !== null) { throw new Error('SDK/native Solana execution location disagrees'); }
+      const matches = transaction.logs.filter(value => value.type === 'data' && (kind === 'mint' ? sdk.SolanaChain.decodeReceipt(value)?.state === sdk.ExecutionState.Success :
+        value.address === ROUTER_PROGRAM && sdk.SolanaChain.decodeMessage(value) !== undefined));
+      const value = matches[0];
+      if (matches.length !== 1 || !value) { throw new Error('Unique official Solana execution log missing'); }
+      if (typeof value.data !== 'string') { throw new Error('Unsupported status SDK log data'); }
+      return { transactionHash: value.transactionHash, index: value.index, address: value.address, data: value.data,
+        topics: [...value.topics], type: value.type, level: value.level };
+    };
     return collectStatus(settings.transfers, { chains: {
       ethereum: evmStatusChain({ ...statusChainView(ethereum, address => address), destroy: () => ethereum.destroy() }, getAddress),
       solana: statusChainView(solanaChain, address => address) }, native, api, successState: sdk.ExecutionState.Success });
