@@ -63,6 +63,7 @@ test("TEST RPC selection keeps defaults and rejects credential, redirect and non
     await assert.rejects(transferEvmForward({ sepoliaRpc: endpoint }, { exclusive: () => assert.fail("Invalid selection must precede journal"),
       sdk: async () => assert.fail("Invalid selection must precede SDK"), snapshot: async () => assert.fail("Invalid selection must precede snapshot"),
       execute: async () => assert.fail("Invalid selection must precede execution"), read: async () => assert.fail("Invalid selection must precede read") }));
+    // @ts-expect-error intentional null RPC and incomplete status input must refuse before IO
     await assert.rejects(runStatus({ sepoliaRpc: endpoint, testOnly: true, sdkDirectory: "/unavailable" }), /TEST RPC/);
   }
   for (const endpoint of ["http://api.devnet.solana.com", "https://api.mainnet-beta.solana.com", DEFAULT_SOLANA_RPC + "?key=synthetic"]) {
