@@ -42,8 +42,18 @@ integration source. [PR #74](https://github.com/agent-teams-ai/agent-teams-token
 merged as `85285148676ca52c4e44e883dafdac58b9399fb4`; its exact source passed
 all six canonical jobs in
 [CI 37621855667](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37621855667).
-PR #75 current-head review and CI are separate delivery gates; the on-chain
-evidence does not imply their success.
+PR #75 merged as `d00b2dad8f40d3731b29a5cad5f38c14ccd964ae`, with the
+same reviewed tree. Independent current-head source/evidence review and current
+Engineering Quality Standard supplement both returned ACCEPT, P0-P3=0.
+[CI 37636684567](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37636684567)
+passed all six canonical jobs; docs, owner identity, applicable CodeQL and
+Node24/26 checks passed. CI tested merge commit
+`b3e9f738718737b94e113f9a094a3290509752c0`, whose parents are the stated base
+and accepted head and whose tree is identical. Full Linux rollback proof passed
+for the three declared legacy slices; it is not an on-chain CCIP reversal.
+ReviewRouter OAuth failed and is not reported as passed. Independent technical
+review satisfies the owner's non-blocking router instruction. The on-chain
+observations and code/CI qualification remain separate evidence.
 
 A later [read-only native capture](reports/AGTMAI-TESTNET-NATIVE-RECEIPTS-2026-10-07.json)
 at `2026-10-07T15:48:57.117Z` retains four successful Ethereum receipts,

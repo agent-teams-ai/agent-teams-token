@@ -9,9 +9,9 @@ and exact conservation: F=100, E=99, locked=1, Solana=1, A=0, B=1.
 See [dated evidence and source limits](STATUS.md#fresh-public-test-ccip-qualification-2026-10-07).
 This closes the fresh public TEST acceptance gap described in the older dated
 checkpoints below. Historical local simulations and their rollback proofs remain
-separate evidence. The source delivery still requires the PR #75 current-head
-review, canonical CI and verified merge; no further TEST broadcasts are needed
-to repeat this proved three-transfer slice.
+separate evidence. PR #75 source delivery now has independent current-head ACCEPT, all six
+canonical CI jobs successful and verified merge `d00b2dad8f40d3731b29a5cad5f38c14ccd964ae`.
+No further TEST broadcasts are needed to repeat this proved three-transfer slice.
 
 Remaining production work is conditional on the owner's later Mainnet scope:
 accepted protocol/backing policy and Fee Quoter provenance, actual public Safe
