@@ -1,5 +1,64 @@
 # AGTMAI release status
 
+## Fresh public TEST CCIP qualification, 2026-10-07
+
+A new real Sepolia -> Solana Devnet -> Sepolia round trip, followed by a
+second Sepolia -> Devnet transfer to a separate receive-only holder, completed.
+The three distinct CCIP messages have finalized native source and destination
+effects. The [captured authenticated status report](reports/AGTMAI-TESTNET-E2E-2026-10-07.json)
+records all three as settled, zero pending amount, exact conservation and zero
+backing surplus. This supersedes the older no-fresh-delivery statement below
+for this bounded TEST fixture only.
+
+- Fixture identity: `e0b6597cdd2f58af9a5240bee3ea2be144c4b3c438fbe5d16ddb7b059d7572a9`;
+  fixed supply 100 AGTMAI, decimals 9. This is not the production 100M allocation.
+- Final state: Ethereum total supply 100, holder 99 and locked pool balance 1;
+  Solana total supply 1, holder A balance 0 and holder B balance 1.
+  Unlocked Ethereum plus Solana supply is 100; the locked Ethereum token backs
+  the Solana token and must not be counted twice.
+- Ethereum locks on outbound transfer and releases on return; the official
+  Solana pool mints and burns. The Ethereum token is not burned.
+- Snapshot observed at `2026-10-07T14:22:14.193Z`, freshness checked at
+  `2026-10-07T14:22:45.693Z`. Ethereum block `11863473`, Solana slot
+  `508483263`; freshness is a property of that observation, not a live guarantee.
+- Report SHA256:
+  `f7d8640c2f36d5377537b2f381c435ae9b6b504aa9556132488a80f0c1ea5046`.
+  Complete inventory means the operator-declared bounded TEST fixture, not
+  discovery of every production holder or a global supply audit.
+
+| Direction | CCIP message ID | Native source transaction | Native destination transaction |
+| --- | --- | --- | --- |
+| Sepolia -> Devnet A | `0x2ea5ed559c22b673d01d87867cb9a41c3a9595adb174e6e7f102af7f3033ae97` | `0xc9536a7af6737536d164d9c325a2e35828dc0846093bc064851b17228bfcd648` | `5cBwjXGsMHsFtKouisdj8xMqRPd167MN6LKhNyZVfcnRqrJUnq1noTuxVpczWYYBvYk8HqUZBfEsMPMuuRjN8PZ9` |
+| Devnet A -> Sepolia | `0x3f3c2db3c164cbb6e5dfa97d5d5bb5de4bdc28aeaeda624b240ab8dda6c4adc9` | `QSptZeQ6vNHyJtoE5RbY4XFT9diFA7fsUyH2LhxaAw9DsmrQ5Y6sK5e7VZ2b5xcMQqizexNguPSrxaeB4DktaoP` | `0x69ff9a95726c035366759c3cbaeacc9a45e07149a7d0a852a8f603ef1868ee25` |
+| Sepolia -> Devnet B | `0xe66343d2669b6fe95ba3abe44bd8c2a11e6d936d80cea40adc068591c9bb357c` | `0x8c1a4a8ee12f4b50095ef43b91b86599e08606201404f65fbe6f1ba152ecb90b` | `2D6YHuvA8QrtJTbaFWPg2iVki6mxS8TMM54EoVBMfk3kZF5ime3uGLE5yrnXGG6ra9CV2WmAoiwLRq8oUXkABYf9` |
+
+The reverse signer executed source `431c302f07dd7ba647dd6f9b53a552e2f9c5fb42`
+([PR #75](https://github.com/agent-teams-ai/agent-teams-token/pull/75)).
+Its current integration head `beafc9edb75b71f7867159482cbc6defdf9e8298` has the
+same tree `2b518402efda5207f1c2a744821cc00b44d81c71`.
+Native status was read with `fde65254bfb79e6b9abd1e9ce6be6607d2557334`;
+the six relevant status/domain files were byte-compared with the current
+integration source. [PR #74](https://github.com/agent-teams-ai/agent-teams-token/pull/74)
+merged as `85285148676ca52c4e44e883dafdac58b9399fb4`; its exact source passed
+all six canonical jobs in
+[CI 37621855667](https://github.com/agent-teams-ai/agent-teams-token/actions/runs/37621855667).
+PR #75 current-head review and CI are separate delivery gates; the on-chain
+evidence does not imply their success.
+
+A later [read-only native capture](reports/AGTMAI-TESTNET-NATIVE-RECEIPTS-2026-10-07.json)
+at `2026-10-07T15:48:57.117Z` retains four successful Ethereum receipts,
+matching block hashes below the finalized head, and all three Solana
+transactions with separate finalized signature statuses and block records.
+Its SHA256 is `9e5babf306669006de8f7fa1dc4c15ecc8139275c386a978852beb84442a0ebd`.
+Actual network fees are retained in wei/lamports, with transaction values
+separate. These exclude a complete setup-rent budget and do not turn a TEST
+fee into a Mainnet price. This later read does not refresh the earlier balance
+snapshot or independently attest private execution provenance.
+
+No Mainnet transaction, production Fee Quoter provenance qualification,
+production policy approval or production canary is established by this TEST
+proof. Mainnet remains deferred, with `broadcastAllowed: false`.
+
 ## Current release status, 2026-10-02
 
 The full DEV-only local Ethereum assembly is complete for the merged source
