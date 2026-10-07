@@ -239,8 +239,8 @@
         "scripts/tests/workflow.test.mjs",
         "tooling/toolchain.lock.json"
       ],
-      "instruction": "the final integrator regenerated all three exact before/after SHA-256 transitions and manifest fingerprints after the feature and CI bytes were fixed; any later integration must immediately invalidate this status and repeat the regeneration",
-      "evidenceLimit": "the regenerated manifests pass exact current-worktree coverage and production apply regressions; no commit was authorized here, so clean exact-head validation, full per-slice gate proof and hosted exact-head CI execution remain pending and are not claimed"
+      "instruction": "refresh all three retained Node 26 policy-test fingerprints and package.json before/after SHA-256 pairs from the supplied current source and actual Node 24.21.0 operational projections produced by the unchanged canonical compiler; any later integration must immediately invalidate this status and repeat the regeneration",
+      "evidenceLimit": "Root supplied actual package projection bytes and SHA-256 values for all three slices on Node 24.21.0 with source bytes unchanged; current-worktree coverage and production apply regressions for the repaired manifests, clean exact-head validation, full per-slice gate proof and hosted exact-head CI execution remain pending and are not claimed"
     },
     "finalIntegrationManifestRegeneration": {
       "required": false,
@@ -259,7 +259,7 @@
         "every retainedSharedPaths digest and reason",
         "the exact unique two-slice survivingGates complement and shared-path coverage"
       ],
-      "acceptance": "exact current-worktree coverage and production apply regressions pass after regeneration; the externally created clean candidate must still pass validation, the full exact-head per-slice gate proof and hosted CI, and any later integration must return this status to pending before evidence can be cited"
+      "acceptance": "after applying this data repair, the final integrator must rerun exact current-worktree coverage and production apply regressions; the clean candidate must also pass validation, the full exact-head per-slice gate proof and hosted CI, and any later integration must invalidate this status before evidence can be cited"
     }
   }
 }
