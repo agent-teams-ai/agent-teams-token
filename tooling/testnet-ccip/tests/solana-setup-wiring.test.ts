@@ -15,7 +15,7 @@ import { createPoolInitSdk, type UnsignedPoolInitSdk } from "../src/adapters/sol
 import { createRegistrationSdk, type UnsignedRegistrationSdk } from "../src/adapters/solana-registration-sdk.mjs";
 import { createPoolConfigSdk, createRegistrationInspector, type UnsignedPoolConfigSdk } from "../src/adapters/solana-pool-config-sdk.mjs";
 import { TEST_SDK_PROFILE } from "../src/adapters/test-sdk-policy.ts";
-import { createSdkTestFetch, DEFAULT_SOLANA_RPC } from "../src/adapters/test-rpc.ts";
+import { createSdkTestFetch, DEFAULT_SOLANA_RPC, UndrainedTestRpcBody } from "../src/adapters/test-rpc.ts";
 import { replacementFixture, fixtureNamespace } from "../src/domain/replacement-fixture.ts";
 import { setupObject, parseSetupCli, selectSetup } from "../src/composition/solana-setup-operator.ts";
 import type { MintSettings, InitSettings, RegistrationSettings, ConfigSettings } from "../src/composition/solana-setup-operator.ts";
@@ -281,6 +281,98 @@ test("derive and borrowed predecessor failures stop the successor before prepara
 });
 
 const inertFetch: typeof fetch = async () => { throw new Error("IO must remain inert"); };
+
+// Actual compositions and parser, with controlled signing/acquisition ports. No wallet signing.
+for (const stage of ["mint-sign", "config-sign", "mint-acquire"] as const) {
+  for (const mode of ["eof", "cancel", "read-error", "cancel-error"] as const) {
+    test(`${stage} owned port retains explicit physical debt: ${mode}`, async () => {
+      const directory = await disposable(), h = controlled();
+      const entered = Promise.withResolvers<void>(), failure = Promise.withResolvers<void>(),
+        physical = Promise.withResolvers<void>(), settled = Promise.withResolvers<void>();
+      const uncertain = mode === "read-error" || mode === "cancel-error";
+      let active = false, cancels = 0, portCalls = 0, markerObserved = false;
+      const transport = createSdkTestFetch(DEFAULT_SOLANA_RPC, async () => new Response(new ReadableStream<Uint8Array>({
+        async start(controller) {
+          active = true; entered.resolve();
+          if (mode === "eof" || mode === "read-error") {
+            await failure.promise;
+            if (mode === "read-error") { controller.error(new Error("/private/sign-port read failed")); }
+          }
+          await physical.promise; active = false;
+          if (mode === "eof") { controller.enqueue(Buffer.from("{")); controller.close(); }
+          settled.resolve();
+        },
+        async cancel() {
+          cancels++; await failure.promise;
+          if (mode === "cancel-error") { throw new Error("/private/sign-port cancel failed"); }
+          await physical.promise; active = false;
+        },
+      }), { status: mode === "cancel" || mode === "cancel-error" ? 500 : 200 }));
+      const rejectPort = async (): Promise<never> => {
+        portCalls++;
+        try {
+          await transport(DEFAULT_SOLANA_RPC, { method: "POST", body: '{"jsonrpc":"2.0","id":1,"method":"getGenesisHash"}' });
+        } catch (error) {
+          markerObserved = error instanceof UndrainedTestRpcBody;
+          // A failed materializer owns resources before it can return its SDK.
+          if (stage === "mint-acquire" && !markerObserved) { await h.mintSdk.destroy(); }
+          throw error;
+        }
+        return assert.fail("No signature, acquired SDK or success handoff permitted");
+      };
+      const predecessorFile = join(directory, "transfer-mint-authority.json"), predecessor = JSON.stringify({ schema: "agtmai-solana-registration-journal-v1", phase: "succeeded",
+        intent: h.prior.envelope, messageBase64: h.prior.messageBase64,
+        signed: { bytesBase64: priorPacket, signature: previousSignature, ...latest } });
+      if (stage === "config-sign") { await writeFile(predecessorFile, predecessor, { mode: 0o600 }); }
+      h.signPrepared = rejectPort;
+      const operation = stage === "config-sign" ? cases[3].run(directory, h) : stage === "mint-acquire" ?
+        createTestMint(cases[0].settings(directory), { fetcher: h.fetcher, openSdk: rejectPort,
+          signPrepared: async () => assert.fail("Acquisition failed before signing") }) : cases[0].run(directory, h);
+      const outcome = operation.then(() => assert.fail("No success handoff permitted"), error => { assert.ok(error instanceof Error); return error.message; });
+      const borrowed = h.configSdk.registrationVerifier;
+      const priorExpected = borrowed.derive({ ...poolExpected, operation: "transfer-mint-authority" });
+      try {
+        await Promise.race([entered.promise, outcome.then(label => assert.fail(`Stopped before owned port: ${label}`))]);
+        assert.equal(active, true); assert.equal(h.counts.destroy, 0); assert.equal(portCalls, 1);
+        if (stage === "config-sign") { assert.ok(h.counts.predecessor >= 2); }
+        failure.resolve();
+        if (!uncertain) {
+          // Logical rejection must await the producer's EOF or successful cancellation.
+          await new Promise<void>(_resolve => { setImmediate(_resolve); });
+          assert.equal(active, true); assert.equal(h.counts.destroy, 0); physical.resolve();
+        }
+        const label = await outcome, primary = stage === "mint-acquire" ? "TEST setup provider unavailable" : "TEST setup failed";
+        assert.equal(label, primary + (uncertain ? "; unresolved cleanup debt" : ""));
+        assert.equal(markerObserved, uncertain); assert.equal(active, uncertain);
+        assert.equal(cancels, mode === "cancel" || mode === "cancel-error" ? 1 : 0);
+        assert.equal(h.counts.destroy, uncertain ? 0 : 1);
+        assert.equal(h.counts.build, stage === "mint-acquire" ? 0 : 1); assert.equal(h.counts.sign, 0);
+        assert.ok(!h.counts.methods.includes("sendTransaction"));
+        await assert.rejects(access(join(directory, stage === "config-sign" ? "init-chain-remote-config.json" : "mint.json")));
+        if (stage === "config-sign") {
+          assert.equal(await readFile(predecessorFile, "utf8"), predecessor);
+          if (uncertain) {
+            assert.equal(borrowed.derive(priorExpected).operation, "transfer-mint-authority");
+            assert.equal(borrowed.snapshotAddresses(priorExpected).length, 6);
+            assert.equal(borrowed.inspectSigned(priorPacket, priorExpected).signature, previousSignature);
+            assert.equal(borrowed.verifySnapshot([], priorExpected, "after").verified, true);
+          } else {
+            for (const use of [() => borrowed.derive(priorExpected), () => borrowed.snapshotAddresses(priorExpected),
+              () => borrowed.inspectSigned(priorPacket, priorExpected), () => borrowed.decodeRegistry(null),
+              () => borrowed.verifySnapshot([], priorExpected, "after")]) { assert.throws(use); }
+          }
+        }
+        physical.resolve(); await settled.promise;
+        await new Promise<void>(_resolve => { setImmediate(_resolve); });
+        assert.equal(active, false); assert.equal(h.counts.destroy, uncertain ? 0 : 1,
+          "Unacknowledged producer settlement cannot clear latched debt or repeat destruction");
+      } finally {
+        failure.resolve(); physical.resolve(); if (active) { await settled.promise; } await outcome;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+}
 
 // Actual caller, bounded parser and close path. A rejected read/cancel is not physical completion.
 for (const mutation of ["settled-body", "abort-read", "read-error", "cancel-error", "wrapped-abort-read", "wrapped-cancel-error"] as const) {

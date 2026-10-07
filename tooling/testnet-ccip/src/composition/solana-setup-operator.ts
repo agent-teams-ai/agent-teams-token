@@ -137,7 +137,12 @@ export function setupLifetime(fetcher: typeof fetch, drainMs = 20_000) {
   const track = <T>(work: () => Promise<T>): Promise<T> => {
     if (closing) { return Promise.reject(new Error("TEST setup attempt closing")); }
     const result = Promise.resolve().then(() => { assertOpen(); return work(); }); pending.add(result);
-    void result.then(() => pending.delete(result), () => pending.delete(result));
+    void result.then(() => pending.delete(result), error => {
+      // Signing and acquisition can reject with body debt without using ownedFetch.
+      // Latch it before logical removal or the caller's fixed-label redaction.
+      if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; }
+      pending.delete(result);
+    });
     let timer: ReturnType<typeof setTimeout>;
     // A timed-out observer does not release its outstanding body/sign work or admission guards.
     return Promise.race([result, new Promise<never>((_resolve, reject) => {
@@ -145,15 +150,8 @@ export function setupLifetime(fetcher: typeof fetch, drainMs = 20_000) {
     })]).finally(() => clearTimeout(timer));
   };
   const checked = createSdkTestFetch(DEFAULT_SOLANA_RPC, fetcher);
-  const ownedFetch: typeof fetch = (input, init) => track(async () => {
-    try { return await checked(input, { ...init,
-      signal: init?.signal ? AbortSignal.any([abort.signal, init.signal]) : abort.signal }); }
-    catch (error) {
-      // The marker also crosses a pre-buffering operator transport's rejected promise.
-      if (error instanceof UndrainedTestRpcBody) { physicalDebt = true; }
-      throw error;
-    }
-  });
+  const ownedFetch: typeof fetch = (input, init) => track(() => checked(input, { ...init,
+    signal: init?.signal ? AbortSignal.any([abort.signal, init.signal]) : abort.signal }));
   const close = (destroy: () => Promise<void>): Promise<void> => {
     if (closePromise) { return closePromise; }
     closing = true; abort.abort();
