@@ -112,12 +112,20 @@ test("Node 26 lane requires strict engines and runs observable regression suites
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
   const lock = parse(readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8"));
   const workspace = parse(readFileSync(join(repositoryRoot, "pnpm-workspace.yaml"), "utf8"));
+  assert.ok(docsCohortPackages, "accepted cohort packages are required");
+  assert.ok(lock.packages, "frozen lock packages are required");
   const lockBlockers = Object.entries(lock.packages)
     .filter(([, value]) => value.engines?.node === ">=24.18.0 <25")
     .map(([name]) => name)
     .toSorted();
   assert.deepEqual(lockBlockers, [], "the frozen lock contains no old Node 24-only package engines");
   const managedPackages = JSON.parse(readFileSync(join(repositoryRoot, "architecture/foundation/docs-protocol-managed-state.json"), "utf8")).packages;
+  assert.ok(managedPackages, "managed state packages are required");
+  assert.ok(lock.importers, "frozen lock importers are required");
+  const rootImporter = lock.importers["."];
+  assert.ok(rootImporter, "frozen lock root importer is required");
+  assert.ok(rootImporter.devDependencies, "frozen lock root devDependencies are required");
+  assert.ok(packageJson.devDependencies, "root package devDependencies are required");
   for (const [role, name] of Object.entries({
     docsProtocol: "@agent-teams/docs-protocol",
     docsProtocolAgentTeams: "@agent-teams/docs-protocol-agent-teams",
@@ -125,27 +133,38 @@ test("Node 26 lane requires strict engines and runs observable regression suites
     engineeringFoundation: "@agent-teams/engineering-foundation",
     repositoryMutation: "@agent-teams/repository-mutation",
   })) {
-    const accepted = docsCohortPackages?.[role];
-    assert.ok(typeof accepted?.version === "string" && accepted.version.length > 0, `${role}: accepted cohort version is required`);
-    assert.ok(typeof accepted.integrity === "string" && accepted.integrity.length > 0, `${role}: accepted cohort integrity is required`);
+    const accepted = docsCohortPackages[role];
+    assert.ok(accepted, `${role}: accepted cohort record is required`);
+    assert.equal(typeof accepted.version, "string", `${role}: accepted cohort version must be a string`);
+    assert.ok(accepted.version.length > 0, `${role}: accepted cohort version is required`);
+    assert.equal(typeof accepted.integrity, "string", `${role}: accepted cohort integrity must be a string`);
+    assert.ok(accepted.integrity.length > 0, `${role}: accepted cohort integrity is required`);
     const { version } = accepted;
-    const metadata = lock.packages?.[`${name}@${version}`];
+    const metadata = lock.packages[`${name}@${version}`];
     assert.ok(metadata, `${name}@${version}: frozen lock package metadata is required`);
-    assert.equal(metadata.engines?.node, "^24.18.0 || ^26.0.0", name);
-    assert.equal(metadata.resolution?.integrity, accepted.integrity, `${name}: frozen lock integrity matches cohort`);
-    assert.deepEqual(managedPackages?.[role], accepted, `${role}: managed state matches cohort`);
+    assert.ok(metadata.engines, `${name}@${version}: frozen lock engines are required`);
+    assert.equal(metadata.engines.node, "^24.18.0 || ^26.0.0", name);
+    assert.ok(metadata.resolution, `${name}@${version}: frozen lock resolution is required`);
+    assert.equal(metadata.resolution.integrity, accepted.integrity, `${name}: frozen lock integrity matches cohort`);
+    assert.deepEqual(managedPackages[role], accepted, `${role}: managed state matches cohort`);
     if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation"].includes(name)) {
-      const directPin = lock.importers?.["."]?.devDependencies?.[name];
-      assert.equal(directPin?.specifier, version, `${name}: root lock specifier matches cohort`);
-      assert.equal(directPin?.version?.split("(")[0], version, `${name}: root lock resolution matches cohort`);
+      const directPin = rootImporter.devDependencies[name];
+      assert.ok(directPin, `${name}: root lock direct pin is required`);
+      assert.equal(directPin.specifier, version, `${name}: root lock specifier matches cohort`);
+      assert.equal(typeof directPin.version, "string", `${name}: root lock resolution must be a string`);
+      assert.equal(directPin.version.split("(")[0], version, `${name}: root lock resolution matches cohort`);
       assert.equal(packageJson.devDependencies[name], version, name);
     }
   }
   // Docs Cohort owns this published dependency transitively; Foundation rejects a direct root role.
   assert.equal(packageJson.devDependencies["@agent-teams/repository-mutation"], undefined);
-  assert.equal(lock.importers["."].devDependencies["@agent-teams/repository-mutation"], undefined);
+  assert.equal(rootImporter.devDependencies["@agent-teams/repository-mutation"], undefined);
   assert.deepEqual(workspace.publicHoistPattern, ["@agent-teams/repository-mutation"]);
-  assert.equal(lock.snapshots?.[`@agent-teams/docs-protocol@${docsCohortPackages.docsProtocol.version}`]?.dependencies?.["@agent-teams/repository-mutation"], docsCohortPackages.repositoryMutation.version, "Docs Protocol lock snapshot resolves cohort repository mutation");
+  assert.ok(lock.snapshots, "frozen lock snapshots are required");
+  const docsProtocolSnapshot = lock.snapshots[`@agent-teams/docs-protocol@${docsCohortPackages.docsProtocol.version}`];
+  assert.ok(docsProtocolSnapshot, "Docs Protocol lock snapshot is required");
+  assert.ok(docsProtocolSnapshot.dependencies, "Docs Protocol lock snapshot dependencies are required");
+  assert.equal(docsProtocolSnapshot.dependencies["@agent-teams/repository-mutation"], docsCohortPackages.repositoryMutation.version, "Docs Protocol lock snapshot resolves cohort repository mutation");
   assert.deepEqual(node26Policy.strictInstall, {
     command: "pnpm install --frozen-lockfile --config.engine-strict=true",
     status: "qualified",
@@ -182,8 +201,12 @@ test("docs gate resolves transitive repository mutation v2 from the root physica
   const physical = realpathSync(installed);
   const manifest = JSON.parse(readFileSync(join(physical, "package.json"), "utf8"));
   assert.equal(manifest.name, "@agent-teams/repository-mutation");
-  const version = docsCohortPackages?.repositoryMutation?.version;
-  assert.ok(typeof version === "string" && version.length > 0, "repositoryMutation: accepted cohort version is required");
+  assert.ok(docsCohortPackages, "accepted cohort packages are required");
+  const accepted = docsCohortPackages.repositoryMutation;
+  assert.ok(accepted, "repositoryMutation: accepted cohort record is required");
+  assert.equal(typeof accepted.version, "string", "repositoryMutation: accepted cohort version must be a string");
+  const { version } = accepted;
+  assert.ok(version.length > 0, "repositoryMutation: accepted cohort version is required");
   assert.equal(manifest.version, version);
   assert.ok(physical.endsWith(`/node_modules/.pnpm/@agent-teams+repository-mutation@${version}/node_modules/@agent-teams/repository-mutation`), "root repository mutation resolves to the cohort pnpm package");
 });
