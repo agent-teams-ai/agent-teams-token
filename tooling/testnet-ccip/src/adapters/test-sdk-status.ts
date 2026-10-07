@@ -152,7 +152,7 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
   if (!selected || typeof fetcher !== 'function') { throw new Error('Explicit TEST status selection and replay fetch required'); }
   const sepolia = selectSepoliaRpc({ sepoliaRpc: options.sepolia }), solana = selectSolanaRpc({ solanaRpc: options.solana });
   const abort = new AbortController(), operations = new Set<Promise<unknown>>(), transports = new Set<Promise<unknown>>();
-  const cancellationDebt: unknown[] = [];
+  const physicalDebt: Error[] = [];
   let closing = false, violation: Error | undefined, destruction: Promise<void> | undefined;
   // The owner and its work sets exist before admission or the first constructor.
   const session = await openTestSdk({ root: directory, archives: selected.archives });
@@ -173,12 +173,19 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
       if (response.redirected || response.status >= 300 && response.status < 400) { return refuse('Invalid/redirected TEST status response'); }
       return new Uint8Array();
     }
-    const reader = response.body.getReader();
+    let reader: ReadableStreamDefaultReader<Uint8Array>;
+    try { reader = response.body.getReader(); }
+    catch {
+      // A foreign lock/acquisition failure supplies no physical release witness.
+      const error = new Error('TEST status response reader acquisition failed');
+      physicalDebt.push(error);
+      throw latch(error.message);
+    }
     const chunks: Uint8Array[] = []; let size = 0;
     async function cancelRefused(message: string): Promise<never> {
       const error = latch(message);
       try { await reader.cancel(); }
-      catch (cause) { cancellationDebt.push(cause); }
+      catch { physicalDebt.push(new Error('TEST status response cancellation not acknowledged')); }
       // A rejected cancellation ends the JS promise, not the physical resource.
       // This Response has no independent release witness; its owner survives to process exit.
       throw error;
@@ -189,7 +196,10 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
         return await cancelRefused('Invalid/redirected/over-bound TEST status response');
       }
       for (;;) {
-        const { done, value } = await reader.read();
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try { next = await reader.read(); }
+        catch { return await cancelRefused('TEST status response read failed'); }
+        const { done, value } = next;
         if (done) { break; }
         size += value.byteLength;
         if (size > TEST_RPC_RESPONSE_LIMIT) { return await cancelRefused('TEST status response exceeds byte bound'); }
@@ -217,7 +227,7 @@ export async function createTestSdkStatus(options: TestStatusOptions): Promise<R
       const released = await Promise.allSettled(acquired.map(chain => Promise.resolve().then(() => chain.destroy())));
       // An SDK timeout or abort can settle an operation while its fetch/body is still held.
       while (operations.size || transports.size) { await Promise.allSettled([...operations, ...transports]); }
-      if (cancellationDebt.length) { throw new AggregateError(cancellationDebt, 'Unresolved TEST status physical cancellation; admission guard retained until process exit'); }
+      if (physicalDebt.length) { throw new AggregateError(physicalDebt, 'Unresolved TEST status physical cancellation/release; admission guard retained until process exit'); }
       session.close();
       const errors = released.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
       if (errors.length) { throw new AggregateError(errors, 'TEST status chain cleanup failed'); }
