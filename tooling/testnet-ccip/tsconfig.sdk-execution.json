@@ -19,6 +19,7 @@
     "src/adapters/transfer-status-native.mjs", "src/composition/transfer-status.mjs",
     "tests/test-sdk-status.native.mts", "tests/test-sdk-status.test.ts",
     "tests/solana-setup-operator.test.ts", "tests/solana-setup-wiring.test.ts",
+    "tests/solana-setup-operator.native.mts", "tests/solana-setup-wiring.native.mts",
     "tests/test-sdk-admission.test.ts", "tests/test-sdk-svm.test.ts",
     "tests/test-sdk-execution.native.mts", "tests/test-sdk-svm.native.mts",
     "tests/solana-reverse-sdk.test.mts", "tests/replacement-fixture.test.ts", "tests/test-rpc-selection.test.ts"
