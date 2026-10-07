@@ -327,7 +327,8 @@ export function createFetcher(s: ScenarioState): typeof fetch {
     assert.ok(init.signal instanceof AbortSignal);
     s.signals.push(init.signal);
     const url = String(input);
-    if (url.startsWith('https://api.ccip.chain.link')) { return apiReply(s, url, init); }
+    const parsed = new URL(url);
+    if (url === parsed.href && parsed.origin === 'https://api.ccip.chain.link' && !parsed.username && !parsed.password) { return apiReply(s, url, init); }
     assert.ok(url === DEFAULT_SEPOLIA_RPC + '/' || url === DEFAULT_SOLANA_RPC + '/');
     assert.equal(init.method, 'POST'); assert.equal(typeof init.body, 'string');
     const payload: unknown = JSON.parse(String(init.body));
