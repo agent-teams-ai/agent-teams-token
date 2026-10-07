@@ -14,6 +14,7 @@ const node26WorkflowPath = join(repositoryRoot, ".github/workflows/node26-compat
 const node26WorkflowText = readFileSync(node26WorkflowPath, "utf8");
 const node26Workflow = parse(node26WorkflowText);
 const node26Policy = JSON.parse(readFileSync(join(repositoryRoot, "tooling/compatibility/node26-policy.json"), "utf8"));
+const docsCohortPackages = JSON.parse(readFileSync(join(repositoryRoot, "architecture/foundation/docs-consumer-integration.json"), "utf8")).cohort?.packages;
 
 function pinnedPnpmCli() {
   const candidates = [
@@ -116,16 +117,27 @@ test("Node 26 lane requires strict engines and runs observable regression suites
     .map(([name]) => name)
     .toSorted();
   assert.deepEqual(lockBlockers, [], "the frozen lock contains no old Node 24-only package engines");
-  for (const [name, version] of Object.entries({
-    "@agent-teams/docs-protocol": "0.6.2",
-    "@agent-teams/docs-protocol-agent-teams": "0.2.13",
-    "@agent-teams/document-authoring": "0.3.2",
-    "@agent-teams/engineering-foundation": "1.7.0",
-    "@agent-teams/repository-mutation": "0.2.2",
+  const managedPackages = JSON.parse(readFileSync(join(repositoryRoot, "architecture/foundation/docs-protocol-managed-state.json"), "utf8")).packages;
+  for (const [role, name] of Object.entries({
+    docsProtocol: "@agent-teams/docs-protocol",
+    docsProtocolAgentTeams: "@agent-teams/docs-protocol-agent-teams",
+    documentAuthoring: "@agent-teams/document-authoring",
+    engineeringFoundation: "@agent-teams/engineering-foundation",
+    repositoryMutation: "@agent-teams/repository-mutation",
   })) {
-    assert.equal(lock.packages[`${name}@${version}`].engines.node, "^24.18.0 || ^26.0.0", name);
+    const accepted = docsCohortPackages?.[role];
+    assert.ok(typeof accepted?.version === "string" && accepted.version.length > 0, `${role}: accepted cohort version is required`);
+    assert.ok(typeof accepted.integrity === "string" && accepted.integrity.length > 0, `${role}: accepted cohort integrity is required`);
+    const { version } = accepted;
+    const metadata = lock.packages?.[`${name}@${version}`];
+    assert.ok(metadata, `${name}@${version}: frozen lock package metadata is required`);
+    assert.equal(metadata.engines?.node, "^24.18.0 || ^26.0.0", name);
+    assert.equal(metadata.resolution?.integrity, accepted.integrity, `${name}: frozen lock integrity matches cohort`);
+    assert.deepEqual(managedPackages?.[role], accepted, `${role}: managed state matches cohort`);
     if (["@agent-teams/docs-protocol", "@agent-teams/docs-protocol-agent-teams", "@agent-teams/engineering-foundation"].includes(name)) {
-      assert.equal(lock.importers["."].devDependencies[name].specifier, version, name);
+      const directPin = lock.importers?.["."]?.devDependencies?.[name];
+      assert.equal(directPin?.specifier, version, `${name}: root lock specifier matches cohort`);
+      assert.equal(directPin?.version?.split("(")[0], version, `${name}: root lock resolution matches cohort`);
       assert.equal(packageJson.devDependencies[name], version, name);
     }
   }
@@ -133,7 +145,7 @@ test("Node 26 lane requires strict engines and runs observable regression suites
   assert.equal(packageJson.devDependencies["@agent-teams/repository-mutation"], undefined);
   assert.equal(lock.importers["."].devDependencies["@agent-teams/repository-mutation"], undefined);
   assert.deepEqual(workspace.publicHoistPattern, ["@agent-teams/repository-mutation"]);
-  assert.equal(lock.snapshots["@agent-teams/docs-protocol@0.6.2"].dependencies["@agent-teams/repository-mutation"], "0.2.2");
+  assert.equal(lock.snapshots?.[`@agent-teams/docs-protocol@${docsCohortPackages.docsProtocol.version}`]?.dependencies?.["@agent-teams/repository-mutation"], docsCohortPackages.repositoryMutation.version, "Docs Protocol lock snapshot resolves cohort repository mutation");
   assert.deepEqual(node26Policy.strictInstall, {
     command: "pnpm install --frozen-lockfile --config.engine-strict=true",
     status: "qualified",
@@ -170,8 +182,10 @@ test("docs gate resolves transitive repository mutation v2 from the root physica
   const physical = realpathSync(installed);
   const manifest = JSON.parse(readFileSync(join(physical, "package.json"), "utf8"));
   assert.equal(manifest.name, "@agent-teams/repository-mutation");
-  assert.equal(manifest.version, "0.2.2");
-  assert.match(physical, /\/node_modules\/\.pnpm\/@agent-teams\+repository-mutation@0\.2\.2\/node_modules\/@agent-teams\/repository-mutation$/u);
+  const version = docsCohortPackages?.repositoryMutation?.version;
+  assert.ok(typeof version === "string" && version.length > 0, "repositoryMutation: accepted cohort version is required");
+  assert.equal(manifest.version, version);
+  assert.ok(physical.endsWith(`/node_modules/.pnpm/@agent-teams+repository-mutation@${version}/node_modules/@agent-teams/repository-mutation`), "root repository mutation resolves to the cohort pnpm package");
 });
 
 test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen install", () => {
