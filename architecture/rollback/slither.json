@@ -143,8 +143,8 @@
     },
     {
       "path": "tooling/toolchain.lock.json",
-      "beforeSha256": "b9ddc21e667242342ba9cea9383f0f6b980dbfd8c4af1881f42bcb405f6db286",
-      "afterSha256": "24c672ad06db3f57a990839a00a98c83e3912d4fc2ee4c80c075e659481b61a6"
+      "beforeSha256": "a5439ce151a3634200b5fb0d3d5b9d8f6ed3cbcd0b647a31725947604fdda0c8",
+      "afterSha256": "69108fe49fe139d5d3977c649ec07806fb16e656fb82f8f9427c15711a826177"
     },
     {
       "path": "tooling/security/slither/src/README.md",
