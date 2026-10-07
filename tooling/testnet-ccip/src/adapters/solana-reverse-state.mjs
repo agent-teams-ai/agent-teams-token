@@ -81,9 +81,18 @@ export function createReverseState(provider, poolSdk, fixture) {
   function lookup(altRaw,e,slot) {
     const alt = account(altRaw,ALT_PROGRAM).data;
     if (alt.length !== 376 || alt.readUInt32LE(0) !== 1 || alt.readBigUInt64LE(4) !== (1n<<64n)-1n || alt[21] !== 1 ||
-      key(alt,22) !== e.payer || alt.readBigUInt64LE(12) >= BigInt(slot) ||
+      key(alt,22) !== e.payer || !e.recentSlot || alt.readBigUInt64LE(12) < BigInt(e.recentSlot) ||
+      alt.readBigUInt64LE(12) >= BigInt(slot) || alt[20] !== 0 ||
       altAddresses(e).some((a,i) => key(alt,56+32*i) !== a)) { throw new Error('Wrong finalized active ALT contents'); }
     return new AddressLookupTableAccount({ key: new PublicKey(e.alt), state: AddressLookupTableAccount.deserialize(alt) });
+  }
+  // Recovery validates only the selected ALT; source balances may already have progressed.
+  async function finalizedLookup(rpc, e) {
+    if (e.payer !== route.payer || e.mint !== route.mint || JSON.stringify(e.fixture) !== JSON.stringify(fixture) || !e.alt) {
+      throw new Error('Wrong reverse state route');
+    }
+    const result = await read(rpc, [e.alt]);
+    return { lookupTable: lookup(result.value[0], e, result.context.slot), slot: String(result.context.slot) };
   }
   async function before(rpc, e, maximumLamports) {
     if (e.payer !== route.payer || e.mint !== route.mint || JSON.stringify(e.fixture) !== JSON.stringify(fixture)) { throw new Error('Wrong reverse state route'); }
@@ -99,7 +108,7 @@ export function createReverseState(provider, poolSdk, fixture) {
     const lookupTable = lookup(altRaw,e,result.context.slot);
     payer(payerRaw,maximumLamports);
     return { approval: source.delegate === null || source.delegatedAmount < route.amount,
-      sourceLamports: String(payerRaw.lamports), lookupTable };
+      sourceLamports: String(payerRaw.lamports), lookupTable, slot: String(result.context.slot) };
   }
-  return { config, before };
+  return { config, before, lookup: finalizedLookup };
 }

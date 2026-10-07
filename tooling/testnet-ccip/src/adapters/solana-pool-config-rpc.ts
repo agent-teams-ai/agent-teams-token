@@ -1,21 +1,18 @@
-import { createSolanaTransactionRpc } from "./solana-transaction-rpc.ts";
+import { createSolanaTransactionRpc, parseSolanaRpcSnapshot } from "./solana-transaction-rpc.ts";
 import type { SolanaRpcRead } from "./solana-transaction-rpc.ts";
 import type { SolanaPoolConfigEnvelope, SolanaPoolConfigExpectation } from "../domain/solana-pool-config.ts";
 import type { PoolConfigStateEvidence } from "../application/solana-pool-config-journal.ts";
+import type { RpcAccount } from "./solana-transaction-sdk.mjs";
 export interface PoolConfigVerifier {
   snapshotAddresses(e: SolanaPoolConfigExpectation): string[];
-  verifySnapshot(values: unknown[], e: SolanaPoolConfigExpectation, phase: "before" | "after", slot: number, transactionSlot: number): PoolConfigStateEvidence;
+  verifySnapshot(values: readonly (RpcAccount | null)[], e: SolanaPoolConfigExpectation, phase: "before" | "after", slot: number, transactionSlot?: number): PoolConfigStateEvidence;
 }
 export async function readPoolConfigSnapshot(read: SolanaRpcRead, sdk: PoolConfigVerifier,
   expected: SolanaPoolConfigExpectation, phase: "before" | "after", minContextSlot = 0): Promise<PoolConfigStateEvidence> {
   const addresses = sdk.snapshotAddresses(expected);
-  const result = await read("getMultipleAccounts", [addresses, { encoding: "base64", commitment: "finalized", minContextSlot }]) as {
-    context: { slot: number }; value: unknown[];
-  };
-  if (!Number.isSafeInteger(result.context?.slot) || result.context.slot < minContextSlot || !Array.isArray(result.value) || result.value.length !== addresses.length) {
-    throw new Error("Invalid coherent finalized pool config snapshot");
-  }
-  return sdk.verifySnapshot(result.value, expected, phase, result.context.slot, minContextSlot);
+  const result = await read("getMultipleAccounts", [addresses, { encoding: "base64", commitment: "finalized", minContextSlot }]);
+  const snapshot = parseSolanaRpcSnapshot(result, addresses.length, minContextSlot);
+  return sdk.verifySnapshot(snapshot.accounts, expected, phase, snapshot.slot, minContextSlot);
 }
 export function createSolanaPoolConfigRpc(message: (bytes: string, intent: SolanaPoolConfigEnvelope) => string,
   sdk: PoolConfigVerifier, fetcher: typeof fetch = globalThis.fetch) {

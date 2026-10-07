@@ -2,40 +2,45 @@ import { lstatSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fixtureNamespace, selectedFixture, validateReplacementFixture } from "../domain/replacement-fixture.ts";
 import type { FixtureSelection, ReplacementFixture } from "../domain/replacement-fixture.ts";
+import { forwardRecipient } from "../domain/evm-forward.mjs";
 export interface FixtureSettings extends FixtureSelection {
   readonly testOnly: boolean; readonly chainId?: string; readonly cluster?: string;
   readonly expected?: { readonly testOnly?: boolean; readonly cluster?: string; readonly payer?: string;
     readonly mint?: string; readonly pool?: string; readonly fixture?: unknown };
-  readonly administrator?: string; readonly token?: string; readonly pool?: string; readonly recipient?: string;
+  readonly administrator?: string; readonly token?: string; readonly pool?: string; readonly recipient?: unknown;
 }
-function validateSettings(settings: FixtureSettings, fixture: ReplacementFixture): void {
+function validateSettings(settings: FixtureSettings, fixture: ReplacementFixture, recipientUse: "fixture" | "forward"): void {
   if (settings.testOnly !== true || settings.chainId !== undefined && settings.chainId !== fixture.chainId ||
     settings.cluster !== undefined && settings.cluster !== fixture.cluster) { throw new Error("Wrong replacement TESTNET chain"); }
-  for (const key of ["administrator", "token", "pool", "recipient"] as const) {
+  for (const key of ["administrator", "token", "pool"] as const) {
     const actual = settings[key];
-    if (actual !== undefined && (key === "recipient" ? actual !== fixture[key] : actual.toLowerCase() !== fixture[key])) {
+    if (actual !== undefined && actual.toLowerCase() !== fixture[key]) {
       throw new Error("Wrong replacement " + key);
     }
   }
-  if (settings.expected) {
-    const e = settings.expected;
-    if (e.testOnly !== true || e.cluster !== fixture.cluster || e.payer !== fixture.payer || e.mint !== fixture.mint ||
-      e.pool !== undefined && e.pool !== fixture.solanaPool || e.fixture !== undefined &&
-      validateReplacementFixture(e.fixture).identity !== fixture.identity) { throw new Error("Wrong replacement Solana authority/peer"); }
-  }
+  if (recipientUse === "forward") { forwardRecipient(settings.recipient, fixture); }
+  else if (settings.recipient !== undefined && settings.recipient !== fixture.recipient) { throw new Error("Wrong replacement recipient"); }
+  if (settings.expected) { validateExpected(settings.expected, fixture); }
+}
+function validateExpected(e: NonNullable<FixtureSettings["expected"]>, fixture: ReplacementFixture): void {
+  if (e.testOnly !== true || e.cluster !== fixture.cluster || e.payer !== fixture.payer || e.mint !== fixture.mint ||
+    e.pool !== undefined && e.pool !== fixture.solanaPool || e.fixture !== undefined &&
+    validateReplacementFixture(e.fixture).identity !== fixture.identity) { throw new Error("Wrong replacement Solana authority/peer"); }
 }
 function isSymlink(path: string): boolean {
   try { return lstatSync(path).isSymbolicLink(); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") { return false; } throw error; }
 }
 /** Run before loading a signer/provider, acquiring locks or creating journal files. */
-export function bindFixture(settings: FixtureSettings, journals: readonly string[] = []): Readonly<ReplacementFixture> | undefined {
+export function bindFixture(settings: FixtureSettings, journals: readonly string[] = [],
+  recipientUse: "fixture" | "forward" = "fixture"): Readonly<ReplacementFixture> | undefined {
+  if (recipientUse !== "fixture" && recipientUse !== "forward") { throw new Error("Unknown fixture recipient use"); }
   const fixture = selectedFixture(settings);
   if (!fixture) {
     if (settings.expected && Object.hasOwn(settings.expected, "fixture")) { throw new Error("Unbound nested fixture"); }
     return undefined;
   }
-  validateSettings(settings, fixture);
+  validateSettings(settings, fixture, recipientUse);
   const namespace = fixtureNamespace(fixture);
   for (const file of journals) {
     if (typeof file !== "string" || !resolve(file).split(sep).includes(namespace)) {

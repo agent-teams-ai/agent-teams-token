@@ -1,5 +1,17 @@
 # Test-only Solana pool configuration
 
+Phase2's explicit TEST factory constructs pool, registration and configuration
+with one authenticated native provider/lifetime. Its borrowed
+`registrationVerifier` exposes derivation, signed inspection, snapshot addresses,
+registry decoding and snapshot verification,
+with no signer or disposer. The owning unsigned configuration view alone closes
+admission. Fresh operations and historical repair keep their existing separate
+policies and journal meanings. SPL 0.4.15 belongs to this TEST admission; legacy
+SPL 0.4.14/provider pins are unchanged. The TEST setup composition now borrows
+that five-method view for its first finalized `transfer-mint-authority`
+predecessor and registration RPC, without another loader or disposer. Native
+capture qualification and fresh public three-message acceptance remain pending.
+
 The bounded `src/composition/configure-solana-pool.mjs` entrypoint performs one
 explicit operation per invocation:
 
@@ -32,6 +44,21 @@ Settings contain `testOnly: true`, `providerDirectory`, `payerFile`, dedicated
 `journalDirectory`, `registrationJournalFile`, and `expected: { testOnly: true,
 cluster: "solana-devnet", payer, mint, pool, operation }`. The first operation
 requires the existing successful `transfer-mint-authority` registration journal.
+The explicit TEST JSON invocation adds `--operator-test` and requires the
+`solanaRpc: "https://api.devnet.solana.com"` transport choice. Its inert Host
+initializer extracts existing key references and retains private same-session
+signer acquisition; the worker view has no signing or provider constructors.
+Function callers pass `(publicSettings, createPoolConfigOperatorIO(testKeys,
+approvedFetch))`. Saved recovery never acquires keys/signers or builds a
+replacement. Prepared bytes, message, blockhash, exact authenticated validity and
+required payer are checked before custody access; the returned packet is
+independently reinspected before its durable journal write. RPC bodies and sign
+work drain before the owning configuration SDK closes admission. Rejected body
+reads/cancels leave physical ownership uncertain: admission guards remain and
+cleanup debt requires dedicated-process termination. Function ingress redacts
+fixture-binding and expectation-capture failures before Host opening. Public execution
+still needs separate approval; this implementation is not native qualification.
+
 Each later operation requires a successful, freshly re-observed predecessor.
 All journals remain distinct `<operation>.json` files. Unknown, expired,
 unreadable or failed predecessors do not permit a new signature.

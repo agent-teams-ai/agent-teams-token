@@ -37,6 +37,33 @@ Ethereum/Supply; it is neither on-chain reversal nor a new CCIP three-slice seal
 Protocol/backing policy, real inputs, approved canary and release approvals remain
 conditional under proposed ADR-0007 and accepted ADR-0010; Mainnet stays deferred.
 
+## TEST setup/operator wiring correction, 2026-10-06
+
+The four setup consumers now select explicit TEST admission and injected transport
+before fixture path IO. Worker SDKs remain unsigned. A separately initialized
+Host acquires the existing native signer only for a new journal operation, from
+that same admission; JSON CLI use requires `--operator-test` and an explicit
+Devnet transport choice. Persisted recovery performs no build, signer acquisition,
+key read or fresh quote, and uncertain submissions retain their original bytes.
+Configuration borrows exactly five registration inspection methods, including
+signed-packet inspection, to reconcile the finalized mint-authority predecessor.
+Only the configuration SDK owns disposal. Independent actual-caller probes
+confirmed that a rejected body read could release logical pending work while
+its physical producer remained active (SETUP-R1), and fixture-binding errors
+could expose private paths before function redaction (SETUP-R2). Setup cleanup
+must require acknowledged body completion/cancellation and drained sign work.
+Uncertain physical ownership retains admission guards and cleanup debt until
+dedicated-process termination. Function redaction must cover expectation capture
+and fixture binding while preserving early selection and safe domain diagnostics.
+
+This corrects the missing TEST signer caller and predecessor inspection route;
+it does not qualify deployment. Controlled synthetic-public units and strict
+contracts are separate from genuine selected-fixture native capture replay,
+root gates/CI after integration and fresh approved public acceptance. Those
+qualification boundaries remain open. See the
+[registration](../tooling/testnet-ccip/SOLANA-REGISTRATION.md) and
+[pool configuration](../tooling/testnet-ccip/SOLANA-POOL-CONFIG.md) runbooks.
+
 ## Full Ethereum assembly correction, 2026-10-01
 
 The owner authorized the scoped E2E work. Implementation follows the exact-base

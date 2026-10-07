@@ -1,3 +1,4 @@
+import { svmFactoryUnit, svmReverseUnit, svmCompilerUnit, svmLookupFailureUnit, svmCaptured, svmSigningEffects } from './test-sdk-svm.native.mts';
 // Direct node:test entry. Public args belong to this script, never to `node --test`.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -34,7 +35,7 @@ function arg(key: string): string { const value = args.get(key); if (!value) { t
 const phase = arg("--phase"), root = arg("--root"), archives = arg("--archives"), fixturePath = arg("--fixture"), captures = arg("--captures"), out = arg("--out");
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 for (const path of [root, archives, fixturePath, captures, out]) { if (resolve(path) !== path) { throw new Error("Absolute public runner paths required"); } }
-if (!out.startsWith(join(repo, ".local") + "/") || !["admission", "forward", "contract"].includes(phase)) { throw new Error("Owned .local evidence and explicit implemented phase required"); }
+if (!out.startsWith(join(repo, ".local") + "/") || !["admission", "forward", "contract", "svm"].includes(phase)) { throw new Error("Owned .local evidence and explicit implemented phase required"); }
 mkdirSync(out, { recursive: true, mode: 0o700 });
 const scenario = args.get("--scenario");
 const results: { name: string; passed: boolean; reason?: string }[] = [];
@@ -52,6 +53,7 @@ assert.ok(fixture, "Required exact replacement fixture");
 const selection = { providerProfile: TEST_SDK_PROFILE, testOnly: true, fixture, fixtureIdentity: fixture.identity, providerArchives: archives };
 let admission: ReturnType<typeof admitTestSdk> | undefined;
 const metrics: Record<string, unknown> = {};
+const svmInputs = {root, archives, captures, out, fixture};
 const custodyPath = join(dirname(root), "OPERATOR-SNAPSHOT-CUSTODY.json");
 const mount = readFileSync("/proc/self/mountinfo", "utf8").split("\n").map(line => line.split(" ")).find(fields => fields[4] === root);
 metrics.custody = { descriptorSha256: existsSync(custodyPath) ? digest(readTestSdkBytes(custodyPath)) : null,
@@ -59,9 +61,37 @@ metrics.custody = { descriptorSha256: existsSync(custodyPath) ? digest(readTestS
   boundary: "Held source; metadata requires operator lifetime custody. Disposable mutation copies are quiescent test inputs, not immutable-execution proof." };
 async function check(name: string, work: () => void | Promise<void>): Promise<void> {
   await test(name, async () => {
-    try { await work(); results.push({ name, passed: true }); }
+    try {
+      await work();
+      assert.equal(networkEffects, 0, 'Attempted network effects must be zero');
+      assert.equal(svmSigningEffects(), 0, 'Attempted signing effects must be zero');
+      assert.equal(unguardedLoadAttempts, 0, 'Unguarded provider load attempts must be zero');
+      results.push({ name, passed: true });
+    }
     catch (error) { results.push({ name, passed: false, reason: error instanceof Error ? error.message : String(error) }); throw error; }
   });
+}
+// This deliberate negative child catches the denial after a real admitted factory unit.
+// The parent regression must observe refusal, with the attempted count retained.
+async function caughtNetworkUnit(): Promise<void> {
+  metrics.svm = await svmFactoryUnit('svm-mint-unit', svmInputs);
+  assert.throws(() => globalThis.fetch('https://api.devnet.solana.com'), /Native TEST network sentinel/);
+  assert.equal(networkEffects, 1);
+}
+async function networkSentinelRegression(): Promise<void> {
+  const childOut = join(out, 'caught-child');
+  const command = [fileURLToPath(import.meta.url), '--phase', 'svm', '--root', root, '--archives', archives,
+    '--fixture', fixturePath, '--captures', captures, '--out', childOut, '--scenario', 'svm-caught-network-unit'];
+  const child = spawnSync(process.execPath, command, { env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', TMPDIR: out },
+    encoding: 'utf8', timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+  writeFileSync(join(out, 'caught-child.log'), child.stdout + child.stderr);
+  assert.equal(child.status, 1, 'A caught network attempt must fail the child');
+  const evidence = readJson(join(childOut, 'result.json'));
+  assert.equal(evidence.networkEffects, 1); assert.equal(evidence.signingEffects, 0); assert.equal(evidence.unguardedLoadAttempts, 0);
+  assert.ok(Array.isArray(evidence.results)); const result = object(evidence.results[0]);
+  assert.equal(result.passed, false); assert.equal(typeof result.reason, 'string');
+  assert.match(String(result.reason), /^Attempted network effects must be zero/);
+  metrics.caughtNetworkRegression = evidence;
 }
 function modes(source: string, destination: string): void {
     chmodSync(destination, lstatSync(source).mode & 0o7777);
@@ -429,7 +459,8 @@ async function forwardCaptured(name: string): Promise<void> {
 try {
   checkTestSdkRuntime();
   if (!scenario) {
-    const scenarios = phase === "admission" ? ["authentication", "optional", "guard", "held"] : phase === "contract" ? ["constructor-unit", "unsigned-zero-unit", "unsigned-exact-unit", "invalid-allowance-unit", "invalid-fee-unit", "invalid-discovery-unit", "invalid-chain-unit", "destroy-unit", "destroy-drain-unit"] : ["allowance-zero", "allowance-exact"];
+    const scenarios = phase === "admission" ? ["authentication", "optional", "guard", "held"] : phase === "contract" ? ["constructor-unit", "unsigned-zero-unit", "unsigned-exact-unit", "invalid-allowance-unit", "invalid-fee-unit", "invalid-discovery-unit", "invalid-chain-unit", "destroy-unit", "destroy-drain-unit"] : phase === 'svm' ?
+      ['svm-mint-unit', 'svm-pool-unit', 'svm-registration-unit', 'svm-configuration-unit', 'svm-reverse-approval-unit', 'svm-reverse-exact-unit', 'svm-compiler-unit', 'svm-reverse-lookup-failure-unit', 'svm-network-sentinel-unit', 'svm-approval-captured', 'svm-exact-captured'] : ["allowance-zero", "allowance-exact"];
     for (const name of scenarios) {
       await check(name, () => {
         const command = [fileURLToPath(import.meta.url), ...process.argv.slice(2), "--scenario", name, "--out", join(out, name)];
@@ -442,22 +473,34 @@ try {
     }
   } else {
     const jobs: Record<string, () => Promise<void>> = { authentication, optional, guard, held, "constructor-unit": constructorUnit,
+      'svm-caught-network-unit': caughtNetworkUnit, 'svm-network-sentinel-unit': networkSentinelRegression,
       "destroy-unit": () => destroyUnit(), "destroy-drain-unit": () => destroyUnit(true),
+      'svm-mint-unit': async () => { metrics.svm = await svmFactoryUnit('svm-mint-unit', svmInputs); }, 'svm-pool-unit': async () => { metrics.svm = await svmFactoryUnit('svm-pool-unit', svmInputs); },
+      'svm-registration-unit': async () => { metrics.svm = await svmFactoryUnit('svm-registration-unit', svmInputs); }, 'svm-configuration-unit': async () => { metrics.svm = await svmFactoryUnit('svm-configuration-unit', svmInputs); },
+      'svm-reverse-approval-unit': async () => { metrics.svm = await svmReverseUnit('svm-reverse-approval-unit', svmInputs); }, 'svm-reverse-exact-unit': async () => { metrics.svm = await svmReverseUnit('svm-reverse-exact-unit', svmInputs); },
+      'svm-compiler-unit': async () => { metrics.svm = await svmCompilerUnit(svmInputs); },
+      'svm-reverse-lookup-failure-unit': async () => { metrics.svm = await svmLookupFailureUnit(svmInputs); },
+      'svm-approval-captured': async () => { metrics.svm = await svmCaptured('approval', svmInputs); }, 'svm-exact-captured': async () => { metrics.svm = await svmCaptured('exact', svmInputs); },
       "allowance-zero": () => forwardCaptured("allowance-zero"), "allowance-exact": () => forwardCaptured("allowance-exact") };
-    const job = scenario.endsWith("-unit") && scenario !== "constructor-unit" && !scenario.startsWith("destroy-") ? () => generatorUnit(scenario) : jobs[scenario]; assert.ok(job, "Unknown implemented scenario"); await check(scenario, job);
+    const job = scenario.endsWith("-unit") && scenario !== "constructor-unit" && !scenario.startsWith("destroy-") && !scenario.startsWith('svm-') ? () => generatorUnit(scenario) : jobs[scenario]; assert.ok(job, "Unknown implemented scenario"); await check(scenario, job);
   }
 } finally {
   count.deregister();
   const admitted = testSdkCounters();
+  try {
   if (admitted) { assert.ok(admitted.loads > 500); assert.equal(admitted.closed, true); }
-  assert.equal(unguardedLoadAttempts, 0, "No candidate target reached the unguarded loader");
+  assert.equal(unguardedLoadAttempts, 0, "No candidate target reached the unguarded loader"); assert.equal(svmSigningEffects(), 0);
+  assert.equal(networkEffects, 0, 'Attempted network effects must be zero');
+  } finally {
   writeFileSync(join(out, "result.json"), JSON.stringify({ schema: "agtmai-test-sdk-checkpoint-evidence-v1", phase, scenario: scenario ?? "all", results,
-    qualification: "UNQUALIFIED", skipped: 0, networkEffects, candidateLoads: admitted?.loads ?? 0,
+    qualification: "UNQUALIFIED", skipped: 0, networkEffects, signingEffects: svmSigningEffects(), candidateLoads: admitted?.loads ?? 0,
     loadCountScope: "this dedicated process; parent runners report each child in its scenario/result.json",
     admittedLoads: admitted, unguardedLoadAttempts, metrics, admission: admission ?? null,
     runtime: { version: process.version, binarySha256: TEST_SDK_NODE_HASH }, rootHashes: TEST_SDK_ROOT_HASHES,
-    prerequisite: "New replacement pool not deployed/registered; full real forward captures absent. Controlled unit/module checks are not captured qualification.",
-    cleanup: "owned snapshot copies removed; hooks closed in finally; operator read-only mount retained" }, null, 2) + "\n");
+    prerequisite: phase === 'svm' ? "Genuine SVM capture qualification, phase3 composition/status wiring and fresh public three-message acceptance remain pending. Controlled native units are not public E2E evidence." :
+      "New replacement pool not deployed/registered; full real forward captures absent. Controlled unit/module checks are not captured qualification.",
+    cleanup: "owned snapshot copies removed; hooks closed in finally; snapshot custody observations recorded in metrics" }, null, 2) + "\n");
+  }
 }
 
 // Checked only under the strict .mts configuration, never executed.

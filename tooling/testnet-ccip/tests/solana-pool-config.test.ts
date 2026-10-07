@@ -6,6 +6,9 @@ import { runSolanaPoolConfigJournal } from "../src/application/solana-pool-confi
 import type { SolanaPoolConfigRecord, SolanaPoolConfigPorts, PoolConfigStateEvidence } from "../src/application/solana-pool-config-journal.ts";
 import type { SolanaObservation } from "../src/application/solana-transaction-journal.ts";
 import { readPoolConfigSnapshot } from "../src/adapters/solana-pool-config-rpc.ts";
+import type { PoolConfigVerifier } from "../src/adapters/solana-pool-config-rpc.ts";
+import type { RpcAccount } from "../src/adapters/solana-transaction-sdk.mjs";
+import type { SolanaRpcRead } from "../src/adapters/solana-transaction-rpc.ts";
 const key = (n: number) => "1".repeat(31) + "123456789ABCDEFG"[n];
 function expectation(operation: SolanaPoolConfigExpectation["operation"]): SolanaPoolConfigExpectation {
   const withAlt = ["create-lookup-table", "set-pool", "repair-remote-pool-encoding"].includes(operation);
@@ -79,17 +82,21 @@ test("stored ALT recentSlot changes and foreign operation outcomes cannot author
 });
 test("coherent pool config read propagates actual finalized slot and rejects stale or partial evidence", async () => {
   const e = expectation("set-pool"), addresses = Array.from({ length: 8 }, (_, i) => key(i + 1));
+  const values = addresses.map((owner, index): RpcAccount => ({ owner, executable: false, lamports: 1,
+    data: [Buffer.from([index]).toString("base64"), "base64"] }));
   let called = 0;
-  const sdk = { snapshotAddresses: () => addresses, verifySnapshot: (_values: unknown[], _e: SolanaPoolConfigExpectation, phase: string, slot: number, txSlot: number) => {
+  const sdk: PoolConfigVerifier = { snapshotAddresses: () => addresses, verifySnapshot: (accounts, observed, phase, slot, txSlot = 0) => {
+    assert.deepEqual(accounts, values); assert.equal(observed, e);
     called++; assert.equal(phase, "after"); assert.equal(slot, 201); assert.equal(txSlot, 200);
     return { operation: e.operation, mint: e.mint, verified: true as const };
   } };
-  const read = async (method: string, params: unknown[]) => {
+  const read: SolanaRpcRead = async (method, params) => {
     assert.equal(method, "getMultipleAccounts"); assert.deepEqual(params, [addresses, { encoding: "base64", commitment: "finalized", minContextSlot: 200 }]);
-    return { context: { slot: 201 }, value: addresses };
+    return { context: { slot: 201 }, value: values };
   };
   assert.equal((await readPoolConfigSnapshot(read, sdk, e, "after", 200)).verified, true);
-  for (const result of [{ context: { slot: 199 }, value: addresses }, { context: { slot: "201" }, value: addresses }, { context: { slot: 201 }, value: [] }]) {
+  for (const result of [{ context: { slot: 199 }, value: values }, { context: { slot: "201" }, value: values },
+    { context: { slot: 201 }, value: [] }, { context: { slot: 201 }, value: addresses }]) {
     await assert.rejects(readPoolConfigSnapshot(async () => result, sdk, e, "after", 200));
   }
   assert.equal(called, 1);
