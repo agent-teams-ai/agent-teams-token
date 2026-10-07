@@ -33,6 +33,7 @@ function registerInvocationCleanup(context, error) {
     rmSync(path, { recursive: true });
     assert.equal(existsSync(path), false);
   });
+  return path;
 }
 
 // Launch the real supervisor with a preload that causes an actual filesystem
@@ -41,8 +42,12 @@ function supervisorFault(value, source) {
   const preload = join(value.root, "supervisor-fault.mjs");
   writeFileSync(preload, source);
   const original = childProcess.spawnSync;
-  childProcess.spawnSync = (command, args, options) => original(command,
-    args.includes("--agtmai-toolchain-process-supervisor") ? ["--import", preload, ...args] : args, options);
+  childProcess.spawnSync = (command, args, options) => {
+    const scriptIndex = args.indexOf("--agtmai-toolchain-process-supervisor") - 1;
+    return original(command, scriptIndex < 0 ? args : [
+      ...args.slice(0, scriptIndex), "--import", preload, ...args.slice(scriptIndex),
+    ], options);
+  };
   syncBuiltinESMExports();
   return () => { childProcess.spawnSync = original; syncBuiltinESMExports(); };
 }
@@ -61,14 +66,26 @@ test("observed deadline survives a real post-timeout inspection exception", {
   try {
     assert.throws(() => run(value,
       "process.stdout.write('out'); process.stderr.write('err'); setInterval(() => {}, 1000)"), (error) => {
-      registerInvocationCleanup(context, error.cause);
+      const invocationPath = registerInvocationCleanup(context, error.cause);
       assert.match(error.message, /ROLLBACK_COMMAND_FAILED/u);
       assert.equal(error.cause.code, "TOOLCHAIN_PROCESS_GROUP_QUIESCENCE_UNCERTAIN");
+      // writeSupervisorFailure retains observations in an unfinished record.
+      const observer = JSON.parse(readFileSync(join(invocationPath, "supervisor-status"), "utf8"));
+      assert.equal(observer.finished, false);
+      assert.equal(observer.error, "ENOENT");
+      assert.equal(observer.timedOut, true);
+      assert.equal(observer.signal, "SIGTERM");
+      assert.equal(observer.quiescent, false);
+      // supervisedStatus rejects that record as a completed target tuple.
       const result = error.cause.result;
+      assert.equal(result.targetStatus.finished, false);
       assert.equal(result.targetStatus.timedOut, true);
-      assert.equal(result.targetStatus.error, "ENOENT");
-      assert.equal(result.targetStatus.signal, "SIGTERM");
+      assert.equal(result.targetStatus.error, "ESUPERVISOR");
+      assert.equal(result.targetStatus.signal, null);
+      assert.equal(result.targetStatus.status, null);
       assert.equal(result.targetStatus.quiescent, false);
+      assert.equal(result.status, null);
+      assert.equal(result.signal, null);
       return true;
     });
     const [entry] = JSON.parse(readFileSync(join(value.root, "diagnostics.json"), "utf8")).commands;

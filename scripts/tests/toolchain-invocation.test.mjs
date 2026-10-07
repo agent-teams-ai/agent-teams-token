@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { descriptorRoot, executeVerifiedFile } from "../toolchain.mjs";
+import { executeOpenedNode } from "../toolchain-execution.mjs";
 import { assertDarwinDescriptorEntrypointIsSemanticallyWrong, assertDarwinMjsSnapshotEntrypointWorks, assertDarwinOriginalPathBehavior, assertPrivateInvocationRejectsAmbientConfig, assertTimedOutProcessGroupCannotWriteLate } from "../toolchain-test-fixture.mjs";
 import { digest, writeExecutable } from "./toolchain-fixtures.mjs";
 export function registerExecutionTests() {
@@ -38,6 +39,28 @@ test("Darwin dev-fd entrypoint loses pathname-sensitive pnpm output", {
 test("Darwin authenticated mjs snapshot preserves pathname-sensitive pnpm output", assertDarwinMjsSnapshotEntrypointWorks);
 
 test("private invocation environment behaviorally ignores ambient pnpm config poisoning", assertPrivateInvocationRejectsAmbientConfig);
+
+test("generic opened Node execution does not inherit ambient Foundry paths", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "agtmai-generic-node-env-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const script = join(root, "probe.mjs");
+  writeFileSync(script, "process.stdout.write([process.env.AGTMAI_ANVIL_BINARY, process.env.AGTMAI_FORGE_BINARY, process.env.AGTMAI_SOLC_BINARY].map((value) => value ?? 'unset').join(','));\n");
+  const keys = ["AGTMAI_ANVIL_BINARY", "AGTMAI_FORGE_BINARY", "AGTMAI_SOLC_BINARY"];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    for (const key of keys) {process.env[key] = "/attacker/unauthenticated";}
+    assert.equal(executeOpenedNode({
+      node: { path: process.execPath, sha256: digest(process.execPath) },
+      script: { path: script, sha256: digest(script) },
+      args: [],
+    }), "unset,unset,unset");
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) {delete process.env[key];}
+      else {process.env[key] = previous[key];}
+    }
+  }
+});
 
 test("timeout kills a TERM-ignoring process group before its grandchild writes", assertTimedOutProcessGroupCannotWriteLate);
 

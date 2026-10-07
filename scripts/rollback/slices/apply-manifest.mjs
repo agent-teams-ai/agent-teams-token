@@ -25,6 +25,7 @@ import {
   editPackage,
   editToolchain,
   editWorkflowTest,
+  removeNode26RollbackTest,
   removeWorkflowJob,
   restoreArchitectureBoundaries,
   restoreDeploymentPlanSharedEdits,
@@ -211,6 +212,7 @@ function applySharedEdits(context) {
     restoreArchitectureBoundaries(root, manifest, sharedPlan, workspaceHandle);
     editPackage(root, manifest.sliceId, { sharedPlan, workspaceHandle });
     removeWorkflowJob(root, manifest, sharedPlan, workspaceHandle);
+    removeNode26RollbackTest(root, sharedPlan, workspaceHandle);
     editWorkflowTest(root, manifest, sharedPlan, workspaceHandle);
     if (manifest.sliceId === "deployment-plan") {
       restoreDeploymentPlanSharedEdits(root, sharedPlan, workspaceHandle);
