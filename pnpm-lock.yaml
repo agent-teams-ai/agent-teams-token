@@ -30,11 +30,11 @@ importers:
         specifier: 0.6.2
         version: 0.6.2
       '@agent-teams/docs-protocol-agent-teams':
-        specifier: 0.2.13
-        version: 0.2.13
+        specifier: 0.3.2
+        version: 0.3.2
       '@agent-teams/engineering-foundation':
-        specifier: 1.7.0
-        version: 1.7.0(@types/node@24.13.3)
+        specifier: 1.7.2
+        version: 1.7.2(@types/node@24.13.3)
       '@agent-teams/supply':
         specifier: workspace:*
         version: link:packages/contexts/supply
@@ -64,8 +64,8 @@ importers:
 
 packages:
 
-  '@agent-teams/docs-protocol-agent-teams@0.2.13':
-    resolution: {integrity: sha512-M0yh7NhhTB+SizAN0a6mP65RRiJ6jbuzCQQYPMRo8MoP/ji/9V0i1ZdPYlSyYlydfx3/Qu6N5+sgcIvcm7tAqQ==}
+  '@agent-teams/docs-protocol-agent-teams@0.3.2':
+    resolution: {integrity: sha512-JgNRR4x+3ckfzCqadNEJrqIwdZ7Lz1p981sWcqDObviWoK5hmOwu13v8/PO03d1WWUdnunDp8T95PnRbuYfjiQ==}
     engines: {node: ^24.18.0 || ^26.0.0, pnpm: '>=11.17.0 <12'}
     hasBin: true
 
@@ -78,8 +78,8 @@ packages:
     resolution: {integrity: sha512-GzdetjP25KJfThxNk7UhtAZ28rOb6T/rTRrjYSrp2rYaEt0do5XF4pGjIVdeSzh+zXH0ULu58TZsuhOJi0Q0Mw==}
     engines: {node: ^24.18.0 || ^26.0.0, pnpm: '>=11.17.0 <12'}
 
-  '@agent-teams/engineering-foundation@1.7.0':
-    resolution: {integrity: sha512-gc9ImQJa/6vgKz+kWda7qg0YCzFUy+5WmMiV01I98scOlUjs2dQQsPUlQ4JpzjUhpVfNip4kndakAj9cudHn4g==}
+  '@agent-teams/engineering-foundation@1.7.2':
+    resolution: {integrity: sha512-2wmq4g8rWgXQ2qBVY2Tb7HVP9LFsuBAUMcDhgCqixLA0RA9H3OrwXy7b7jK2gS6SggK9XCplNb03mVLR2EyzRg==}
     engines: {node: ^24.18.0 || ^26.0.0, pnpm: '>=11.17.0 <12'}
     hasBin: true
 
@@ -711,7 +711,7 @@ packages:
 
 snapshots:
 
-  '@agent-teams/docs-protocol-agent-teams@0.2.13':
+  '@agent-teams/docs-protocol-agent-teams@0.3.2':
     dependencies:
       '@agent-teams/docs-protocol': 0.6.2
       '@agent-teams/repository-mutation': 0.2.2
@@ -734,7 +734,7 @@ snapshots:
       ajv: 8.20.0
       yaml: 2.9.0
 
-  '@agent-teams/engineering-foundation@1.7.0(@types/node@24.13.3)':
+  '@agent-teams/engineering-foundation@1.7.2(@types/node@24.13.3)':
     dependencies:
       '@agent-teams/document-authoring': 0.3.2
       '@agent-teams/repository-mutation': 0.2.2
