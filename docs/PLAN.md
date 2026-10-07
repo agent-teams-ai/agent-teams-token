@@ -1,5 +1,26 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Fresh public TEST qualification checkpoint, 2026-10-07
+
+The authorized fixed100 TEST slice now has a fresh real Sepolia -> Devnet ->
+Sepolia round trip and a further transfer to a distinct receive-only holder.
+All three messages settled with finalized native effects, zero pending amount
+and exact conservation: F=100, E=99, locked=1, Solana=1, A=0, B=1.
+See [dated evidence and source limits](STATUS.md#fresh-public-test-ccip-qualification-2026-10-07).
+This closes the fresh public TEST acceptance gap described in the older dated
+checkpoints below. Historical local simulations and their rollback proofs remain
+separate evidence. PR #75 source delivery now has independent current-head ACCEPT, all six
+canonical CI jobs successful and verified merge `d00b2dad8f40d3731b29a5cad5f38c14ccd964ae`.
+No further TEST broadcasts are needed to repeat this proved three-transfer slice.
+
+Remaining production work is conditional on the owner's later Mainnet scope:
+accepted protocol/backing policy and Fee Quoter provenance, actual public Safe
+and beneficiary addresses, immutable caps/openings and UTC starts, qualified
+production pools/authorities/fees/rate limits, existing security/legal/market
+gates, unsigned deployment and an approved production canary. Do not manufacture
+these inputs, implement a custom bridge or treat TEST settlement as production
+qualification. Ethereum-first launch remains the chosen release sequence.
+
 ## Current release plan, 2026-10-02
 
 The full DEV-only Ethereum assembly, final reviewed-source qualification,
