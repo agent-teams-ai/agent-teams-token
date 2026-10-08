@@ -33,7 +33,7 @@ import { ROUTER_PROGRAM } from '../src/domain/solana-registration.ts';
 import { unsignedSvmPrimitives } from '../src/adapters/dev-provider-primitives.mjs';
 import { verifySvmWirePacket } from '../src/adapters/dev-svm-call-plan.mjs';
 import { matchRequest } from '../src/domain/transfer-status.mjs';
-import { evmEffect, solanaEffect } from '../src/adapters/transfer-status-native.mjs';
+import { evmEffect, solanaEffect, authenticatedSolanaEffect, type NativeStatusLane, type InvocationLog, type ParsedInstruction } from '../src/adapters/transfer-status-native.mjs';
 import { validateSepoliaIntent } from '../src/domain/evm-intent.ts';
 import type { NativeProvider } from '../src/adapters/solana-transaction-sdk.mjs';
 import type { CastSignerConfig } from '../src/adapters/evm-cast.ts';
@@ -355,12 +355,32 @@ test('replacement status matches both lanes and native ERC20/SPL effects while r
   const old = setup(provider, false).e;
   let rebound = captured;
   for (const [before, after] of [[REVERSE.payer, e.payer], [REVERSE.mint, e.mint], [old.sourceAta, e.sourceAta], [old.ata, e.ata], [old.signer, e.signer]] as const) { rebound = rebound.replaceAll(before, after); }
+  // SYNTHETIC ownership unit: the historical projection omits logs and pool CPI frames.
+  // Complete this in-memory test input only; these additions are not native capture evidence.
   const tx = JSON.parse(rebound).tx;
-  const lane = { fixture, solanaPoolAta: e.ata, solanaSigner: e.signer, solanaSpender: e.spender };
-  assert.equal(solanaEffect(tx, 'burn', fixture.payer, e.sourceAta, lane), 3);
-  assert.throws(() => solanaEffect(tx, 'burn', FORWARD.recipient, e.sourceAta, lane));
+  const lane: NativeStatusLane = { fixture, recipientAtas: { [fixture.payer]: e.sourceAta },
+    solanaPoolAta: e.ata, solanaSigner: e.signer, solanaSpender: e.spender };
+  const inner: ParsedInstruction[] = tx.meta.innerInstructions[0].instructions;
+  const transfer = inner[0], burn = inner[1]; assert.ok(transfer && burn);
+  transfer.stackHeight = 2; burn.stackHeight = 3;
+  inner.splice(1, 0, { programId: BURNMINT_PROGRAM, stackHeight: 2 });
+  // Marker only: the helper consumes assumed event metadata; no official SDK decode is claimed.
+  const event: InvocationLog = { transactionHash: 'synthetic-codec-burn', index: 9, address: ROUTER_PROGRAM,
+    type: 'data', level: 1, data: 'AA==', topics: [] };
+  tx.meta.logMessages = [
+    'Program ' + SPL_TOKEN_PROGRAM + ' invoke [1]', 'Program ' + SPL_TOKEN_PROGRAM + ' success',
+    'Program ' + ROUTER_PROGRAM + ' invoke [1]',
+    'Program ' + SPL_TOKEN_PROGRAM + ' invoke [2]', 'Program ' + SPL_TOKEN_PROGRAM + ' success',
+    'Program ' + BURNMINT_PROGRAM + ' invoke [2]',
+    'Program ' + SPL_TOKEN_PROGRAM + ' invoke [3]', 'Program ' + SPL_TOKEN_PROGRAM + ' success',
+    'Program ' + BURNMINT_PROGRAM + ' success', 'Program data: ' + event.data,
+    'Program ' + ROUTER_PROGRAM + ' success',
+  ];
+  assert.throws(() => solanaEffect(tx, 'burn', fixture.payer, e.sourceAta, lane), /Missing authenticated Solana invocation event/);
+  assert.equal(authenticatedSolanaEffect(tx, 'burn', fixture.payer, e.sourceAta, { lane, event }), 4);
+  assert.throws(() => authenticatedSolanaEffect(tx, 'burn', FORWARD.recipient, e.sourceAta, { lane, event }));
   tx.meta.postTokenBalances[0].uiTokenAmount.amount = '1';
-  assert.throws(() => solanaEffect(tx, 'burn', fixture.payer, e.sourceAta, lane));
+  assert.throws(() => authenticatedSolanaEffect(tx, 'burn', fixture.payer, e.sourceAta, { lane, event }));
 });
 
 // Explicitly separates codec evidence from authenticated loader admission; no test loads keys or sends RPC.
