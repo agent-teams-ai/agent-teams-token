@@ -49,7 +49,8 @@ function assertReconciliation(reconciliation: Record<string, unknown>, reasons: 
 }
 export function assertReadinessFreshness(evidence: ReadinessEvidence, now: string): void {
   const report = evaluateReadiness(evidence);
-  if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(report.observedAt) || BigInt(now) > BigInt(report.validUntil)) {
+  if (!/^(0|[1-9][0-9]*)$/u.test(now) || BigInt(now) < BigInt(report.observedAt) || BigInt(now) > BigInt(report.validUntil)
+    || BigInt(evidence.ethereum.block.timestamp) > BigInt(now) || BigInt(evidence.solana.blockTime) > BigInt(now)) {
     throw new Error("READINESS_EVIDENCE_STALE");
   }
 }

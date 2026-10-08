@@ -38,9 +38,12 @@ export function evaluateReadiness(evidence: ReadinessEvidence, protocol?: Readin
     if (timestamp < observedAt || timestamp > validUntil) { fail("OBSERVATION_OUTSIDE_INTERVAL"); }
   }
   let reportValidUntil = validUntil;
+  let estimatesWithinBounds = true;
   for (const op of evidence.estimates?.operations ?? []) {
     const expiresAt = quantity(op.expiresAt, `estimate.${op.id}.expiresAt`);
     if (expiresAt <= observedAt || expiresAt > validUntil) { fail("ESTIMATE_EXPIRY_OUTSIDE_INTERVAL"); }
+    const estimatedNative = quantity(op.estimatedNative, `estimate.${op.id}`), worstCaseNative = quantity(op.worstCaseNative, `estimate.${op.id}`);
+    if (worstCaseNative < estimatedNative) { estimatesWithinBounds = false; }
     if (expiresAt < reportValidUntil) { reportValidUntil = expiresAt; }
   }
   const reasons: string[] = [];
@@ -67,7 +70,7 @@ export function evaluateReadiness(evidence: ReadinessEvidence, protocol?: Readin
   const surplus = reconciliationKnown ? backing - supply - pendingES - pendingSE : null;
   const reconciliationStatus = surplus === null ? "unknown" : surplus < 0n ? "under-backed" : surplus > 0n ? "surplus" : "exact";
   if (reconciliationStatus !== "exact" && reconciliationStatus !== "unknown") {reasons.push(reconciliationStatus);}
-  const estimatesComplete = evidence.estimates?.complete === true && (evidence.estimates.operations ?? []).every(op => quantity(op.estimatedNative, `estimate.${op.id}`) >= 0n && quantity(op.worstCaseNative, `estimate.${op.id}`) >= quantity(op.estimatedNative, `estimate.${op.id}`));
+  const estimatesComplete = evidence.estimates?.complete === true && estimatesWithinBounds;
   if (!estimatesComplete) {reasons.push("estimates-incomplete");}
   const status = reasons.includes("backing-exceeds-fixed-supply") || reconciliationStatus === "under-backed" ? "inconsistent" : !evidence.ethereum.deployed || !evidence.solana.deployed ? "not-deployed" : reasons.length ? "incomplete" : "qualified";
   return { schema: "agtmai-readiness-report-v1", broadcastAllowed: false, status, reasons: reasons.toSorted(), manifestSha256: evidence.manifestSha256, reconciliation: { adjustedGlobalSupply: adjusted?.toString() ?? null, backingSurplus: surplus?.toString() ?? null, status: reconciliationStatus }, authorityComplete: evidence.ethereum.authorityComplete && evidence.solana.authorityComplete, estimatesComplete, observedAt: observedAt.toString(), validUntil: reportValidUntil.toString() };
