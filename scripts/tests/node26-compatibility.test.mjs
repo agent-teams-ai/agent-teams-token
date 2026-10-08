@@ -220,9 +220,6 @@ test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen in
     for (const name of ["home", "tmp", "xdg-cache", "xdg-config", "xdg-data", "xdg-runtime", "pnpm-home", "npm-cache", "pnpm-store"]) {
       mkdirSync(join(fixture, name));
     }
-    assert.deepEqual(runPinnedPnpm(cli, fixture, ["--version"], fixture), {
-      status: 0, output: "11.24.0\n",
-    });
     // The fixture owns its workspace before any pnpm command can search parents.
     writeFileSync(join(fixture, "pnpm-workspace.yaml"), "packages: []\nautoInstallPeers: false\n");
     writeFileSync(join(fixture, ".npmrc"), "engine-strict=true\nstrict-peer-dependencies=true\n");
@@ -231,6 +228,9 @@ test("pinned pnpm rejects invalid fresh peers and its lock graph after frozen in
       packageManager: "pnpm@11.24.0",
       dependencies: { consumer: "file:./consumer-1.0.0.tgz", provider: "file:./provider-1.0.0.tgz" },
     }));
+    assert.deepEqual(runPinnedPnpm(cli, fixture, ["--version"], fixture), {
+      status: 0, output: "11.24.0\n",
+    });
     for (const [name, manifest] of [
       ["consumer", { name: "consumer", version: "1.0.0", peerDependencies: { provider: "^2.0.0" } }],
       ["provider", { name: "provider", version: "1.0.0" }],
