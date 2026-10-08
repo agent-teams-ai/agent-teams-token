@@ -9,7 +9,7 @@ export function parseReadinessEvidence(bytes: Uint8Array): ReadinessEvidence {
   const evidence = value as ReadinessEvidence;
   if (evidence.schema !== "agtmai-readiness-evidence-v1" || evidence.broadcastAllowed !== false) { throw new Error("READINESS_EVIDENCE_SCHEMA"); }
   const root = value as Record<string, unknown>;
-  exact(root, ["broadcastAllowed", "coverageComplete", "ethereum", "estimates", "manifestSha256", "observedAt", "protocolQualified", "schema", "solana", "validUntil"]);
+  exact(root, ["broadcastAllowed", "coverageComplete", "ethereum", ...(Object.hasOwn(root, "estimates") ? ["estimates"] : []), "manifestSha256", "observedAt", "protocolQualified", "schema", "solana", "validUntil"]);
   const ethereum = object(root.ethereum), block = object(ethereum.block), solana = object(root.solana);
   exact(ethereum, ["authorityComplete", "backing", "block", "chainId", "deployed", "fixedSupply", "pendingEthereumToSolana", "pendingSolanaToEthereum"]);
   exact(block, ["hash", "number", "timestamp"]);

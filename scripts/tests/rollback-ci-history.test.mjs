@@ -58,10 +58,14 @@ function makeClone({ depth } = {}) {
   const bundle = join(boundary, "source.bundle");
   const source = join(boundary, "source.git");
   const checkout = join(boundary, "checkout");
-  let result = run(git, ["bundle", "create", bundle, "--all"], { cwd: repositoryRoot });
+  let result = run(git, ["bundle", "create", bundle, "--all", baselineSha, historyAnchorSha], { cwd: repositoryRoot });
   assert.equal(result.status, 0, result.stderr);
   result = run(git, ["clone", "--quiet", "--bare", bundle, source]);
   assert.equal(result.status, 0, result.stderr);
+  for (const requiredSha of [baselineSha, historyAnchorSha]) {
+    result = run(git, ["update-ref", `refs/heads/rollback-history-${requiredSha}`, requiredSha], { cwd: source });
+    assert.equal(result.status, 0, result.stderr);
+  }
   const cloneArguments = ["clone", "--quiet"];
   if (depth !== undefined) {
     cloneArguments.push("--depth", String(depth));

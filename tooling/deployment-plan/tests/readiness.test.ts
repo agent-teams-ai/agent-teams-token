@@ -15,6 +15,7 @@ const base = () => ({
   solana: { genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", deployed: true, supply: "500", authorityComplete: true, slot: "20", blockTime: "100" },
   protocolQualified: true, coverageComplete: true, estimates: { complete: true, operations: [] },
 });
+const parseEvidence = (value: unknown) => parseReadinessEvidence(new TextEncoder().encode(JSON.stringify(value)));
 
 const readinessManifest = () => ({
   schema: "agtmai-deployment-manifest-v1", broadcastAllowed: false,
@@ -297,4 +298,124 @@ test("incomplete coverage cannot serialize surplus or under-backed reconciliatio
   assert.equal(impossibleBacking.status, "inconsistent");
   assert.ok(impossibleBacking.reasons.includes("backing-exceeds-fixed-supply"));
   assert.deepEqual(impossibleBacking.reconciliation, { status: "unknown", adjustedGlobalSupply: null, backingSurplus: null });
+});
+
+test("omitted estimates parse and report estimates-incomplete", () => {
+  const withoutEstimates = { ...base(), estimates: undefined };
+  const evidence = parseEvidence(withoutEstimates);
+  assert.equal(Object.hasOwn(evidence, "estimates"), false);
+  const report = evaluateReadiness(evidence);
+  assert.deepEqual(report, evaluateReadiness(withoutEstimates));
+  assert.equal(report.estimatesComplete, false);
+  assert.ok(report.reasons.includes("estimates-incomplete"));
+  assert.ok(report.reasons.includes("protocol-profile-unverified"));
+  assert.equal(report.status, "incomplete");
+  assert.equal(report.broadcastAllowed, false);
+  assertReadinessBundle(report, report.manifestSha256);
+});
+
+test("optional estimates preserve closed schemas, duplicate rejection and canonical quantities", () => {
+  const evidence = { ...base(), estimates: undefined };
+  for (const value of [
+    { ...evidence, qualified: true },
+    { ...evidence, coverageComplete: undefined },
+    { ...evidence, ethereum: { ...evidence.ethereum, extra: true } },
+    { ...evidence, ethereum: { ...evidence.ethereum, block: { ...evidence.ethereum.block, extra: true } } },
+    { ...evidence, solana: { ...evidence.solana, extra: true } },
+    { ...evidence, estimates: null },
+    { ...evidence, estimates: { complete: false, extra: true } },
+    { ...evidence, estimates: { complete: false, operations: {} } },
+    { ...evidence, estimates: { complete: false, operations: [{ id: "deploy", estimatedNative: "1", expiresAt: "180" }] } },
+    { ...evidence, estimates: { complete: false, operations: [{ id: "deploy", estimatedNative: "1", worstCaseNative: "2", expiresAt: "180", extra: true }] } },
+  ]) { assert.throws(() => parseEvidence(value), /READINESS_EVIDENCE_SCHEMA/); }
+  const json = JSON.stringify(evidence);
+  assert.throws(() => parseReadinessEvidence(new TextEncoder().encode(json.replace('"coverageComplete":true', '"coverageComplete":true,"coverageComplete":false'))), /duplicate JSON member/);
+  assert.throws(() => parseReadinessEvidence(new TextEncoder().encode(json.replace('"observedAt":"100"', '"observedAt":-0'))), /malformed JSON/);
+  assert.throws(() => parseEvidence({ ...evidence, observedAt: "0100" }), /must be a canonical decimal string/);
+});
+
+for (const complete of [false, true]) {
+  for (const field of ["estimatedNative", "worstCaseNative"] as const) {
+    test(`supplied ${field} is validated when estimates.complete=${complete}`, () => {
+      for (const invalid of ["invalid", "01", "-1", "1.0", "1e3", (1n << 256n).toString()]) {
+        const evidence = { ...base(), estimates: { complete, operations: [
+          { id: "deploy", estimatedNative: "1", worstCaseNative: "2", expiresAt: "180", [field]: invalid },
+        ] } };
+        const rejection = /must be a canonical decimal string|outside uint256/;
+        assert.throws(() => evaluateReadiness(evidence), rejection, `${field}=${invalid}`);
+        assert.throws(() => parseEvidence(evidence), rejection, `${field}=${invalid}`);
+      }
+    });
+    test(`a lower worst case does not skip later ${field} validation when estimates.complete=${complete}`, () => {
+      const evidence = { ...base(), estimates: { complete, operations: [
+        { id: "lower-worst-case", estimatedNative: "2", worstCaseNative: "1", expiresAt: "180" },
+        { id: "later", estimatedNative: "1", worstCaseNative: "2", expiresAt: "190", [field]: "invalid" },
+      ] } };
+      assert.throws(() => evaluateReadiness(evidence), /estimate.later must be a canonical decimal string/);
+      assert.throws(() => parseEvidence(evidence), /estimate.later must be a canonical decimal string/);
+    });
+  }
+}
+
+test("valid partial estimates stay incomplete and retain canonical base units and expiry", () => {
+  for (const operations of [undefined, [], ...["0", "1", "9007199254740993", ((1n << 256n) - 1n).toString()].map(value => [
+    { id: "deploy", estimatedNative: value, worstCaseNative: value, expiresAt: "180" },
+  ])]) {
+    const evidence = parseEvidence({ ...base(), estimates: { complete: false, operations } });
+    const report = evaluateReadiness(evidence);
+    assert.equal(report.estimatesComplete, false);
+    assert.ok(report.reasons.includes("estimates-incomplete"));
+    assert.ok(report.reasons.includes("protocol-profile-unverified"));
+    assert.equal(report.status, "incomplete");
+    assert.equal(report.broadcastAllowed, false);
+    assert.equal(report.validUntil, operations?.length ? "180" : "200");
+    assertReadinessBundle(report, report.manifestSha256);
+  }
+});
+
+test("a canonical worst case below its estimate remains incomplete without throwing", () => {
+  for (const complete of [false, true]) {
+    const evidence = parseEvidence({ ...base(), estimates: { complete, operations: [
+      { id: "deploy", estimatedNative: "2", worstCaseNative: "1", expiresAt: "180" },
+    ] } });
+    const report = evaluateReadiness(evidence);
+    assert.equal(report.estimatesComplete, false);
+    assert.ok(report.reasons.includes("estimates-incomplete"));
+    assert.equal(report.validUntil, "180");
+    assertReadinessBundle(report, report.manifestSha256);
+  }
+});
+
+for (const chain of ["ethereum", "solana"] as const) {
+  test(`freshness rejects an isolated future ${chain} block within the evidence window`, () => {
+    const evidence = base();
+    if (chain === "ethereum") { evidence.ethereum.block.timestamp = "151"; }
+    else { evidence.solana.blockTime = "151"; }
+    assert.equal(evaluateReadiness(evidence).status, "incomplete");
+    assert.throws(() => assertReadinessFreshness(evidence, "150"), /READINESS_EVIDENCE_STALE/);
+  });
+}
+
+test("freshness accepts current and equal block times after observedAt with an explicit canonical clock", () => {
+  for (const [ethereum, solana] of [["100", "100"], ["149", "150"], ["150", "149"], ["150", "150"]] as const) {
+    const evidence = base();
+    evidence.ethereum.block.timestamp = ethereum;
+    evidence.solana.blockTime = solana;
+    assertReadinessFreshness(evidence, "150");
+  }
+  for (const now of ["0150", "-1", "1.5", "invalid", "99", "201"]) {
+    assert.throws(() => assertReadinessFreshness(base(), now), /READINESS_EVIDENCE_STALE/);
+  }
+  const evidence = base();
+  evidence.ethereum.block.timestamp = "200";
+  evidence.solana.blockTime = "200";
+  assertReadinessFreshness(evidence, "200");
+  for (const timestamp of ["0100", "invalid"]) {
+    for (const chain of ["ethereum", "solana"] as const) {
+      const invalid = base();
+      if (chain === "ethereum") { invalid.ethereum.block.timestamp = timestamp; }
+      else { invalid.solana.blockTime = timestamp; }
+      assert.throws(() => assertReadinessFreshness(invalid, "150"), /must be a canonical decimal string/);
+    }
+  }
 });
