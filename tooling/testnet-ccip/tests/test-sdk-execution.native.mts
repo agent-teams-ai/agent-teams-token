@@ -15,7 +15,7 @@ import https from "node:https";
 import http2 from "node:http2";
 import net from "node:net";
 import { openTestSdk, admitTestSdk, readTestSdkBytes, readTestSdkPayload, checkTestSdkRuntime, testSdkCounters } from "../src/adapters/test-sdk-admission.ts";
-import { TEST_SDK_PROFILE, TEST_SDK_ROOT_HASHES, TEST_SDK_NODE_HASH } from "../src/adapters/test-sdk-policy.ts";
+import { TEST_SDK_PROFILE, TEST_SDK_ROOT_HASHES, TEST_SDK_NODE_HASH, TEST_SDK_DEFAULT_NODE_HASH } from "../src/adapters/test-sdk-policy.ts";
 import { createEvmForwardSdk } from "../src/adapters/evm-forward-sdk.mjs";
 import { readDevProviderArchive } from "../src/adapters/dev-provider-archive.mjs";
 import { forwardIntent, forwardRoute } from "../src/domain/evm-forward.mjs";
@@ -496,7 +496,7 @@ try {
     qualification: "UNQUALIFIED", skipped: 0, networkEffects, signingEffects: svmSigningEffects(), candidateLoads: admitted?.loads ?? 0,
     loadCountScope: "this dedicated process; parent runners report each child in its scenario/result.json",
     admittedLoads: admitted, unguardedLoadAttempts, metrics, admission: admission ?? null,
-    runtime: { version: process.version, binarySha256: TEST_SDK_NODE_HASH }, rootHashes: TEST_SDK_ROOT_HASHES,
+    runtime: { version: process.version, binarySha256: process.version === "v26.11.1" ? TEST_SDK_DEFAULT_NODE_HASH : TEST_SDK_NODE_HASH }, rootHashes: TEST_SDK_ROOT_HASHES,
     prerequisite: phase === 'svm' ? "Genuine SVM capture qualification, phase3 composition/status wiring and fresh public three-message acceptance remain pending. Controlled native units are not public E2E evidence." :
       "New replacement pool not deployed/registered; full real forward captures absent. Controlled unit/module checks are not captured qualification.",
     cleanup: "owned snapshot copies removed; hooks closed in finally; snapshot custody observations recorded in metrics" }, null, 2) + "\n");

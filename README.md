@@ -23,6 +23,11 @@ tooling.
 
 ## Local workflow
 
+The active default is checksum-pinned Node `26.11.1`; CI retains Node `24.21.0`
+compatibility lanes. Package engines continue accepting both supported majors.
+Node 26 does not bundle Corepack: the repository bootstrap uses its existing
+checksum-pinned pnpm `11.24.0` archive with the selected Node executable.
+
 ```bash
 ./dev bootstrap
 ./dev doctor

@@ -123,8 +123,8 @@
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
-      "beforeSha256": "3e6a1d712c51af1656d29b3eb927c34f8d7db2974d9a1d36958bdbcaa9de935e",
-      "afterSha256": "2cf87a63dea932a31615c2475b6235c470b55918b781612cbd0ad1f7403fb569"
+      "beforeSha256": "efabbc10a43c1d525647b3df14559fad19ccbc0dfde4fd677372148b74c8e420",
+      "afterSha256": "20ca1e02771c8af2d9ccaf20e18ec1b403e4032ebe2b4acb6763abf0b86edefa"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
@@ -138,13 +138,13 @@
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "3dcd49beced5afb50b408dcd24c3ac2dd4fd05dbf9da3bbf675cc7f959d4ae32",
-      "afterSha256": "eb6d742ccd260d17646c8160492c4c8ea4a82d38cfc8d5c6285a5b3b4905c122"
+      "beforeSha256": "4d009bbd9500bcde23d2688804242133fd059fe4f71bf8f85c7590e5f7a5478a",
+      "afterSha256": "fc5ec80a107e0ee6c81d839e0e3c001bd66ebecf688b7e6f82c5fe9389f4d1b8"
     },
     {
       "path": "tooling/toolchain.lock.json",
-      "beforeSha256": "a5439ce151a3634200b5fb0d3d5b9d8f6ed3cbcd0b647a31725947604fdda0c8",
-      "afterSha256": "69108fe49fe139d5d3977c649ec07806fb16e656fb82f8f9427c15711a826177"
+      "beforeSha256": "21c4c766855fd8c4c0a19f233a5fc4fdf280e64675616325dcdee8b8a6eb325e",
+      "afterSha256": "27548678c8089226e7039f43033596e2bb29987f3ead8e56be4db550df55b003"
     },
     {
       "path": "tooling/security/slither/src/README.md",
@@ -169,7 +169,7 @@
     },
     {
       "path": "scripts/tests/node26-compatibility.test.mjs",
-      "sha256": "041901635eb1d2e640e4948ebd6d4c3f965c84974e26b4e354ffc259c378a5dd",
+      "sha256": "d02204ab1d9dffdade60ff138cc329c6e4ed3f18e46577c66f26d3833f6d435f",
       "reason": "Node 26 compatibility assertions remain active in every slice rollback and require the workflow command only while its package script exists"
     },
     {

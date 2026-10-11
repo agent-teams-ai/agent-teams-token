@@ -76,7 +76,7 @@ After final candidate bytes are fixed by the authorized integrator, calculate
 every `retainedSharedPaths` SHA-256 from those bytes, including the Node 26
 policy test, and review each reason. Put these fingerprints and the exact new
 shared-path coverage in all three manifests before creating a clean integration
-commit. For that exact commit, run the pinned Node 24 proof runtime with
+commit. For that exact commit, run the pinned Node 26.11.1 proof runtime with
 `scripts/rollback/prove-slices.mjs --print-hashes=<slice>
 --expected-sha=<commit>` for each slice using complete history. Compare each
 proposed transition with the `sharedPaths` set and transformed disposable tree.
@@ -233,10 +233,10 @@ by exact target and top-level allowlists, entry count, depth and relative-byte
 limits; symlinks are staged and unlinked as link objects, never traversed.
 Cleanup does not authorize recursive deletion merely from a resolved pathname,
 parent name or prefix. No custom native cleanup helper, source or binary
-remains. The only permitted production runtime on Linux x64 is Node `24.20.0`
+remains. The only permitted production runtime on Linux x64 is Node `26.11.1`
 from the checksum-verified archive. The lock also pins the archive's inner
 `bin/node` SHA-256
-`89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7`.
+`5a7b8a3cf5ccb57d297519754fd73238f64cf560afd0ef19a2f9bf7384cbb657`.
 The runner descriptor-opens and verifies the lock, archive, installed binary and
 canonical install provenance; requires exact `process.execPath` and realpath;
 then binds the loaded process image through `/proc/self/exe` to the same file

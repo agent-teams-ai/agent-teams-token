@@ -107,7 +107,7 @@ function prepareBootstrapArchiveFixture(fixture, { snapshotAttack } = {}) {
   writeExecutable(
     join(nodeBin, "node"),
     "#!/bin/bash\n"
-      + "if [[ \"${1:-}\" == --version ]]; then printf '%s\\n' v24.20.0; exit 0; fi\n"
+      + "if [[ \"${1:-}\" == --version ]]; then printf '%s\\n' v26.11.1; exit 0; fi\n"
       + "if [[ \"${1:-}\" == *toolchain-cleanup.mjs ]]; then "
       + `exec '${process.execPath}' "$@"; fi\n`
       + "for token_test_fd in 7 8 9 10 11 12; do "
@@ -184,9 +184,9 @@ function bootstrapFixtureHost() {
       platform: "linux-x64",
       extension: "tar.xz",
       createFlag: "-cJf",
-      productionArchive: "node-v24.20.0-linux-x64.tar.xz",
-      productionDirectory: "node-v24.20.0-linux-x64",
-      productionSha256: "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+      productionArchive: "node-v26.11.1-linux-x64.tar.xz",
+      productionDirectory: "node-v26.11.1-linux-x64",
+      productionSha256: "3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651",
     };
   }
   if (process.platform === "darwin" && process.arch === "arm64") {
@@ -194,9 +194,9 @@ function bootstrapFixtureHost() {
       platform: "darwin-arm64",
       extension: "tar.gz",
       createFlag: "-czf",
-      productionArchive: "node-v24.20.0-darwin-arm64.tar.gz",
-      productionDirectory: "node-v24.20.0-darwin-arm64",
-      productionSha256: "40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8",
+      productionArchive: "node-v26.11.1-darwin-arm64.tar.gz",
+      productionDirectory: "node-v26.11.1-darwin-arm64",
+      productionSha256: "d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac",
     };
   }
   throw new Error(`unsupported bootstrap fixture host ${process.platform}-${process.arch}`);
@@ -362,7 +362,7 @@ test("doctor never invokes a Node binary rejected by complete-tree inspection", 
   const marker = join(fixture.root, "rejected-node-executed");
   writeExecutable(
     join(fixture.toolsRoot, "node-test-linux-x64", "bin", "node"),
-    `#!/bin/bash\nprintf executed > '${marker}'\nprintf 'v24.20.0\\n'\n`,
+    `#!/bin/bash\nprintf executed > '${marker}'\nprintf 'v26.11.1\\n'\n`,
   );
   const result = doctor(fixture);
   assert.equal(result.status, 1);

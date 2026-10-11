@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [24.21.0, 26.10.0]
+        node-version: [26.11.1, 24.21.0]
     steps:
       - name: Checkout exact head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [24.21.0, 26.10.0]
+        node-version: [26.11.1, 24.21.0]
     steps:
       - name: Checkout exact head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,7 +108,7 @@ jobs:
           ./dev bootstrap install --offline
           ./dev bootstrap verify --offline
           test "$(node --version)" = "v${{ matrix.node-version }}"
-          test "$(.tools/bin/node --version)" = "v24.20.0"
+          test "$(.tools/bin/node --version)" = "v26.11.1"
       - name: Stage finite public SDK check inputs
         id: stage-pinned-sdk-inputs
         shell: bash

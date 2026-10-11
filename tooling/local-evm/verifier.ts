@@ -205,7 +205,7 @@ function normalizedToolVersions(value: Readonly<Record<string, string>>): Record
   if (Object.values(raw).some((item) => typeof item !== "string" || item.length === 0 || item.length > 160 || !/^[\x20-\x7e]+$/u.test(item))) {
     throw new LocalEvmError("VERIFY_TOOL_VERSIONS_INVALID", "tool versions must be bounded printable strings");
   }
-  const node = /^v(24\.20\.0)$/u.exec(raw.node as string)?.[1];
+  const node = /^v(26\.11\.1)$/u.exec(raw.node as string)?.[1];
   const pnpm = /^(11\.24\.0)$/u.exec(raw.pnpm as string)?.[1];
   const foundry = Object.fromEntries(["forge", "cast", "anvil"].map((name) => {
     const match = new RegExp(`^(?:${name} Version: )?(1\\.8\\.0)$`, "u").exec(raw[name as keyof typeof raw] as string);

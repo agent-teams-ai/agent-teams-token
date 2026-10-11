@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "runtimePolicy": {
-    "productionDefault": "24.20.0",
-    "productionRange": ">=24.20.0 <25",
-    "compatibilityVersion": "26.10.0",
-    "compatibilityRange": ">=26.10.0 <27",
+    "productionDefault": "26.11.1",
+    "productionRange": ">=26.11.1 <27",
+    "compatibilityVersion": "24.21.0",
+    "compatibilityRange": ">=24.18.0 <25",
     "skippedMajor": 25,
-    "cutover": "Node 26 must be official LTS and the owner must authorize the production cutover"
+    "cutover": "Owner authorized Node 26.11.1 as the active default on 2026-10-11; Node 24 remains an explicit compatibility lane"
   },
   "workspaceEngines": {
     "node": ">=24.18.0 <25 || >=26.10.0 <27",

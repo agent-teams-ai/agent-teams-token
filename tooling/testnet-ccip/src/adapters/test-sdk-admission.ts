@@ -7,7 +7,7 @@ import { gunzipSync } from "node:zlib";
 import tables from "../../tests/fixtures/test-sdk-execution-v1.json" with { type: "json" };
 import { readDevProviderArchive, payloadHash, payloadPath } from "./dev-provider-archive.mjs";
 import { RESOLUTION_EDGES, OPTIONAL_BRANCHES } from "./dev-provider-policy.mjs";
-import { TEST_SDK_PACKAGES, TEST_SDK_ROOT_HASHES, TEST_SDK_NODE_HASH, TEST_SDK_ENTRIES, TEST_SDK_BUILTINS, TEST_SDK_NATIVE_ABSENCES, TEST_SDK_EXTRA_ABSENCES } from "./test-sdk-policy.ts";
+import { TEST_SDK_PACKAGES, TEST_SDK_ROOT_HASHES, TEST_SDK_NODE_HASH, TEST_SDK_DEFAULT_NODE_HASH, TEST_SDK_ENTRIES, TEST_SDK_BUILTINS, TEST_SDK_NATIVE_ABSENCES, TEST_SDK_EXTRA_ABSENCES } from "./test-sdk-policy.ts";
 import type * as Evm from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/evm/index.js";
 import type * as Solana from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/solana/index.js";
 import type * as Api from "../../../../.local/INPUT/provider/node_modules/@chainlink/ccip-sdk/dist/api/index.js";
@@ -76,9 +76,11 @@ function absent(path: string): void {
   fail("unexpected installed path: " + path);
 }
 export function checkTestSdkRuntime(): void {
-  if (process.version !== "v24.20.0" || process.platform !== "linux" || process.arch !== "x64" ||
-    payloadHash(readFileSync("/proc/self/exe")) !== TEST_SDK_NODE_HASH || realpathSync(process.execPath) !== realpathSync("/proc/self/exe")) {
-    fail("requires pinned Linux x64 Node 24.20.0 binary");
+  const expectedNodeHash = process.version === "v26.11.1" ? TEST_SDK_DEFAULT_NODE_HASH
+    : process.version === "v24.20.0" ? TEST_SDK_NODE_HASH : undefined;
+  if (!expectedNodeHash || process.platform !== "linux" || process.arch !== "x64" ||
+    payloadHash(readFileSync("/proc/self/exe")) !== expectedNodeHash || realpathSync(process.execPath) !== realpathSync("/proc/self/exe")) {
+    fail("requires pinned Linux x64 Node 26.11.1 or the retained Node 24.20.0 compatibility binary");
   }
   const forbidden = /^(?:NODE_OPTIONS|NODE_PATH|NODE_BINDINGS_.*|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|NODE_V8_COVERAGE|NODE_COMPILE_CACHE|ANCHOR_WALLET|SOLANA_KEYPAIR|LD_.*|DYLD_.*|.*_PROXY|.*_proxy|AGTMAI_.*(?:PUBLIC|MAINNET|NETWORK).*)$/;
   if (process.execArgv.some(arg => !["--test", "--test-concurrency=1"].includes(arg)) ||

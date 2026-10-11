@@ -11,8 +11,8 @@ import { unsignedDevPrimitives } from './dev-provider-primitives.mjs';
 const fail = reason => { throw new Error('DEV provider admission: ' + reason); };
 const modules = path => 'node_modules/' + path;
 const nodeEnvironment = () => {
-  if (process.version !== 'v24.20.0' || process.platform !== 'linux' || process.arch !== 'x64') {
-    fail('requires pinned Linux x64 Node 24.20.0');
+  if (!['v26.11.1', 'v24.20.0'].includes(process.version) || process.platform !== 'linux' || process.arch !== 'x64') {
+    fail('requires pinned Linux x64 Node 26.11.1 or the retained Node 24.20.0 compatibility runtime');
   }
   if (process.env.NODE_OPTIONS || process.env.NODE_PATH ||
       process.execArgv.some(arg => !['--test', '--test-concurrency=1'].includes(arg))) {

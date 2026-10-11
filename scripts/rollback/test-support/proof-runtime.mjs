@@ -103,7 +103,7 @@ test("committed Linux Node runtime has an immutable inner-binary pin and Darwin 
   const lock = JSON.parse(readFileSync(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8"));
   assert.equal(
     lock.tools.node.platforms["linux-x64"].expectedFileSha256["bin/node"],
-    "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+    "5a7b8a3cf5ccb57d297519754fd73238f64cf560afd0ef19a2f9bf7384cbb657",
   );
   assert.equal(typeof assertPinnedNodeRuntime, "function");
   assert.throws(
