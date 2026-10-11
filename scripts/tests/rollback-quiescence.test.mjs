@@ -221,11 +221,23 @@ test("maxBuffer bounds captured pipes independently and leaves passed FDs to the
   const value = fixture(context);
   const script = "process.stdout.write(Buffer.alloc(8192, 'o')); process.stderr.write(Buffer.alloc(8192, 'e'))";
   const settings = { cwd: value.root, env: {}, maxBuffer: 1024, timeoutMs: 5000 };
-  const pipes = execution.executeSupervisedCommand({ command: process.execPath, args: ["-e", script], ...settings });
-  assert.equal(pipes.error.code, "ENOBUFS");
-  assert.equal(pipes.stdout.length, 1024);
-  assert.equal(pipes.stderr.length, 1024);
-  assert.equal(pipes.targetStatus.quiescent, true);
+  // Overflow terminates the child as soon as either capture exceeds its cap.
+  // Separate executions cannot race the second write against that termination.
+  for (const [stream, character, other] of [["stdout", "o", "stderr"], ["stderr", "e", "stdout"]]) {
+    const overflow = `process.${stream}.write(Buffer.alloc(8192, '${character}')); setInterval(() => {}, 1000)`;
+    const pipes = execution.executeSupervisedCommand({ command: process.execPath, args: ["-e", overflow], ...settings });
+    assert.equal(pipes.error.code, "ENOBUFS");
+    assert.equal(pipes[stream], character.repeat(1024));
+    assert.equal(pipes[other], "");
+    assert.equal(pipes.targetStatus.quiescent, true);
+  }
+  const belowCap = "process.stdout.write(Buffer.alloc(768, 'o')); process.stderr.write(Buffer.alloc(768, 'e'))";
+  const independent = execution.executeSupervisedCommand({ command: process.execPath, args: ["-e", belowCap], ...settings });
+  assert.equal(independent.status, 0);
+  assert.equal(independent.error, undefined);
+  assert.equal(independent.stdout, "o".repeat(768));
+  assert.equal(independent.stderr, "e".repeat(768));
+  assert.equal(independent.targetStatus.quiescent, true);
   const output = join(value.root, "fd-output");
   const descriptor = openSync(output, "w+");
   try {
