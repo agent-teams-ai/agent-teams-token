@@ -66,7 +66,7 @@ export function rejectNode26PolicyMutation(checkout) {
     writeFileSync(policyPath, JSON.stringify(changed));
     checkNode26Policies(checkout, {
       failures: 1,
-      failingTitle: "Node 26 policy preserves the Node 24 production default and skips Node 25",
+      failingTitle: "Node 26 policy selects the owner default and retains Node 24 compatibility",
     });
   } finally {
     writeFileSync(policyPath, original);

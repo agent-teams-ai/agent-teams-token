@@ -53,7 +53,7 @@ token_env_main() {
     return 1
   fi
   token_env_tools_root="$token_env_repo_root/.tools"
-  token_env_node="$token_env_tools_root/node-v24.20.0-$token_env_platform/bin"
+  token_env_node="$token_env_tools_root/node-v26.11.1-$token_env_platform/bin"
   token_env_foundry="$token_env_tools_root/foundry-v1.8.0-$token_env_platform"
   token_env_solc="$token_env_tools_root/solc-v0.8.36-$token_env_platform"
   token_env_agave="$token_env_tools_root/agave-v4.2.1-$token_env_platform/bin"

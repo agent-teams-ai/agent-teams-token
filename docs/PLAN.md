@@ -1,5 +1,22 @@
 # Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP
 
+## Owner Node default migration, 2026-10-11
+
+The owner selects Node `26.11.1` as the active development/bootstrap/CI default.
+Node `24.21.0` remains the explicit compatibility CI lane. This supersedes
+previous default guidance without changing dated receipts or accepted ADRs.
+Dependency pins, module boundaries, strict engines and required gates stay intact.
+Migration qualification remains pending until the strict frozen install and
+required repository gates succeed on the selected runtime. The pinned
+`@agent-teams/docs-protocol-agent-teams@0.3.2` managed consumer controller
+currently rejects Node 26 (`DOCS_CONSUMER_UNSUPPORTED_NODE`) and requires a
+Node 24 `.node-version` (`DOCS_CONSUMER_NODE_VERSION_GATE_INVALID`), despite
+its package engines accepting both majors. Its retained cohort runtime is
+`>=24.18.0 <25`; its packed Node 26 managed lane is unqualified. This is a
+concrete dependency-route blocker, not authorization to hand-edit managed
+state, waive its gates, or silently change the dependency/cohort pins.
+No public-network or production action is authorized by this toolchain change.
+
 ## Fresh public TEST qualification checkpoint, 2026-10-07
 
 The authorized fixed100 TEST slice now has a fresh real Sepolia -> Devnet ->

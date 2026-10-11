@@ -9,10 +9,10 @@ const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname), "../.
 export function registerBootstrapTests() {
 test("Bash bootstrap starts from checksum-pinned Node without a system Node fallback", () => {
   const bootstrap = readFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), "utf8");
-  assert.match(bootstrap, /node-v24\.20\.0-linux-x64\.tar\.xz/);
-  assert.match(bootstrap, /2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2/);
-  assert.match(bootstrap, /node-v24\.20\.0-darwin-arm64\.tar\.gz/);
-  assert.match(bootstrap, /40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8/);
+  assert.match(bootstrap, /node-v26\.11\.1-linux-x64\.tar\.xz/);
+  assert.match(bootstrap, /3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651/);
+  assert.match(bootstrap, /node-v26\.11\.1-darwin-arm64\.tar\.gz/);
+  assert.match(bootstrap, /d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac/);
   assert.match(bootstrap, /\.part/);
   assert.match(bootstrap, /local token_part_fd=9[\s\S]*exec 9>/);
   assert.doesNotMatch(bootstrap, /exec \{token_part_fd\}/);
@@ -80,7 +80,7 @@ test("Bash download keeps the exclusive part descriptor across a pathname replac
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const scripts = join(root, "scripts");
   const payloadRoot = join(root, "payload");
-  const nodeDirectory = "node-v24.20.0-linux-x64";
+  const nodeDirectory = "node-v26.11.1-linux-x64";
   const nodeBin = join(payloadRoot, nodeDirectory, "bin");
   const archive = join(root, "node-test.tar.gz");
   const archiveName = "node-test.tar.gz";
@@ -90,7 +90,7 @@ test("Bash download keeps the exclusive part descriptor across a pathname replac
   mkdirSync(scripts);
   mkdirSync(nodeBin, { recursive: true });
   copyFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), join(scripts, "bootstrap.sh"));
-  writeExecutable(join(nodeBin, "node"), "#!/bin/sh\n[ \"${1:-}\" = --version ] && echo v24.20.0\n");
+  writeExecutable(join(nodeBin, "node"), "#!/bin/sh\n[ \"${1:-}\" = --version ] && echo v26.11.1\n");
   execFileSync("/usr/bin/tar", ["-czf", archive, "-C", payloadRoot, nodeDirectory]);
   writeFileSync(victim, "victim-safe");
   writeExecutable(curl, `#!/bin/sh\n/bin/rm -f ${JSON.stringify(part)}\n/bin/ln -s ${JSON.stringify(victim)} ${JSON.stringify(part)}\n/bin/cat ${JSON.stringify(archive)}\n`);
@@ -273,8 +273,8 @@ function environmentFixture(context, scenario) {
   const tools = join(root, ".tools");
   const fixture = {
     root, tools, cwd: root, source: join(root, "scripts/env.sh"), commands: new Map(),
-    nodeRoot: join(tools, `node-v24.20.0-${platform}`),
-    node: join(tools, `node-v24.20.0-${platform}`, "bin"),
+    nodeRoot: join(tools, `node-v26.11.1-${platform}`),
+    node: join(tools, `node-v26.11.1-${platform}`, "bin"),
     foundry: join(tools, `foundry-v1.8.0-${platform}`),
     solc: join(tools, `solc-v0.8.36-${platform}`),
     agave: join(tools, `agave-v4.2.1-${platform}`, "bin"), bin: join(tools, "bin"),

@@ -31,18 +31,18 @@ esac
 case "$(/usr/bin/uname -s):$(/usr/bin/uname -m)" in
   Darwin:arm64)
     token_platform=darwin-arm64
-    token_node_archive=node-v24.20.0-darwin-arm64.tar.gz
-    token_node_directory=node-v24.20.0-darwin-arm64
-    token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-darwin-arm64.tar.gz
-    token_node_sha256=40e5607e5ecb3db9192723776da2d75d966260fc74a7a9e731c1bd67dda96bc8
+    token_node_archive=node-v26.11.1-darwin-arm64.tar.gz
+    token_node_directory=node-v26.11.1-darwin-arm64
+    token_node_url=https://nodejs.org/dist/v26.11.1/node-v26.11.1-darwin-arm64.tar.gz
+    token_node_sha256=d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac
     token_node_tar_flag=-xzf
     ;;
   Linux:x86_64)
     token_platform=linux-x64
-    token_node_archive=node-v24.20.0-linux-x64.tar.xz
-    token_node_directory=node-v24.20.0-linux-x64
-    token_node_url=https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz
-    token_node_sha256=2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2
+    token_node_archive=node-v26.11.1-linux-x64.tar.xz
+    token_node_directory=node-v26.11.1-linux-x64
+    token_node_url=https://nodejs.org/dist/v26.11.1/node-v26.11.1-linux-x64.tar.xz
+    token_node_sha256=3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651
     token_node_tar_flag=-xJf
     ;;
   *)
@@ -525,7 +525,7 @@ token_prepare_pinned_node() {
     "$token_node_stage_inode")
   [[ "$token_node_stage_custody_sha256" =~ ^[a-f0-9]{64}$ ]]
   token_pinned_node_trusted=true
-  [[ "$(token_run_node --version)" == v24.20.0 ]]
+  [[ "$(token_run_node --version)" == v26.11.1 ]]
 }
 
 case "$token_mode" in

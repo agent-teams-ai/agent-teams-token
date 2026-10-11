@@ -22,6 +22,11 @@ Hard rules:
 - do not implement the CCIP pool adapter or monitor before the protocol-line ADR;
 - do not market expected profit, guaranteed returns, or investment upside.
 
+Active development default: Node `26.11.1`, authorized by the owner on
+2026-10-11. Keep the explicit Node `24.21.0` compatibility CI lanes and
+historical receipts. Existing dated Node 24/26.10.0 evidence does not qualify
+this migration. Do not relax engine-strict or change dependency pins.
+
 Start with:
 
 - `README.md`

@@ -1,7 +1,8 @@
 # TEST SDK check prerequisites
 
-Run from the repository root with its existing pinned Node 24.20.0, TypeScript
-7.0.2 and Node types 24.13.3 packages. SDK prerequisite staging uses only public
+Run from the repository root with its default pinned Node 26.11.1, TypeScript
+7.0.2 and Node types 24.13.3 packages. The dated SDK examples below retain
+their explicit Node 24.20.0 compatibility runtime and original evidence. SDK prerequisite staging uses only public
 archives; it runs no install scripts, upgrades or vendor edits. Missing inputs
 fail the check; they are prerequisites, not permission to substitute declarations
 or omit a governed command.

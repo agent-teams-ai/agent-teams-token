@@ -29,7 +29,7 @@ function testBootstrapSafeEnvironment(context) {
   mkdirSync(downloads, { recursive: true });
   mkdirSync(safeDirectory);
   copyFileSync(join(repositoryRoot, "scripts/bootstrap.sh"), join(scripts, "bootstrap.sh"));
-  writeExecutable(join(payloadBin, "node"), `#!/bin/sh\nif [ "\${1:-}" = --version ]; then echo v24.20.0; else exec '${process.execPath.replaceAll("'", "'\\''")}' "$@"; fi\n`);
+  writeExecutable(join(payloadBin, "node"), `#!/bin/sh\nif [ "\${1:-}" = --version ]; then echo v26.11.1; else exec '${process.execPath.replaceAll("'", "'\\''")}' "$@"; fi\n`);
   writeFileSync(join(scripts, "toolchain-cleanup.mjs"), [
     'import { rmSync } from "node:fs";',
     'if (process.argv[2] === "capture-bootstrap-stage-custody") process.stdout.write("a".repeat(64) + "\\n");',

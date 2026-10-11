@@ -6,6 +6,7 @@ export const TEST_SDK_ROOT_HASHES = Object.freeze({
   "package-lock.json": "f65db5bc0003f0cfe4545ab853a991cea43ec7b172ad52e5002e7f25dd7ce8c1",
 });
 export const TEST_SDK_NODE_HASH = "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7";
+export const TEST_SDK_DEFAULT_NODE_HASH = "5a7b8a3cf5ccb57d297519754fd73238f64cf560afd0ef19a2f9bf7384cbb657";
 /** The finite oracle allowance; the last owner is authenticated but dormant. */
 export const TEST_SDK_PACKAGES: readonly string[] = Object.freeze([
   "@adraffy/ens-normalize",

@@ -49,21 +49,21 @@ function runPinnedPnpm(cli, cwd, args, fixture) {
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
-test("Node 26 policy preserves the Node 24 production default and skips Node 25", () => {
+test("Node 26 policy selects the owner default and retains Node 24 compatibility", () => {
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
   const toolchain = JSON.parse(readFileSync(join(repositoryRoot, "tooling/toolchain.lock.json"), "utf8"));
   assert.equal(node26Policy.schemaVersion, 1);
   assert.deepEqual(node26Policy.runtimePolicy, {
-    productionDefault: "24.20.0",
-    productionRange: ">=24.20.0 <25",
-    compatibilityVersion: "26.10.0",
-    compatibilityRange: ">=26.10.0 <27",
+    productionDefault: "26.11.1",
+    productionRange: ">=26.11.1 <27",
+    compatibilityVersion: "24.21.0",
+    compatibilityRange: ">=24.18.0 <25",
     skippedMajor: 25,
-    cutover: "Node 26 must be official LTS and the owner must authorize the production cutover",
+    cutover: "Owner authorized Node 26.11.1 as the active default on 2026-10-11; Node 24 remains an explicit compatibility lane",
   });
-  assert.equal(readFileSync(join(repositoryRoot, ".node-version"), "utf8"), "24.20.0\n");
-  assert.equal(toolchain.policy.node, ">=24.20.0 <25");
-  assert.equal(toolchain.tools.node.version, "24.20.0");
+  assert.equal(readFileSync(join(repositoryRoot, ".node-version"), "utf8"), "26.11.1\n");
+  assert.equal(toolchain.policy.node, ">=26.11.1 <27");
+  assert.equal(toolchain.tools.node.version, "26.11.1");
   assert.deepEqual(packageJson.engines, node26Policy.workspaceEngines);
 });
 
@@ -80,7 +80,7 @@ test("Node 26 workflow keeps strict install independent from focused behavior ch
   }
   assert.equal(node26Workflow.jobs["node26-strict-install"]["continue-on-error"], undefined);
   for (const job of Object.values(node26Workflow.jobs)) {
-    assert.deepEqual(job.strategy.matrix["node-version"], ["24.21.0", "26.10.0"]);
+    assert.deepEqual(job.strategy.matrix["node-version"], ["26.11.1", "24.21.0"]);
     assert.equal(job.strategy["fail-fast"], false);
   }
   assert.equal(node26Workflow.jobs["node26-focused-checks"]["continue-on-error"], undefined);
@@ -269,7 +269,7 @@ test("focused lanes bootstrap pinned cast before supply tests while retaining th
     "./dev bootstrap install --offline",
     "./dev bootstrap verify --offline",
     'test "$(node --version)" = "v${{ matrix.node-version }}"',
-    'test "$(.tools/bin/node --version)" = "v24.20.0"',
+    'test "$(.tools/bin/node --version)" = "v26.11.1"',
   ]);
   assert.ok(steps[checksIndex].run.split("\n").includes('test "$(node --version)" = "v${{ matrix.node-version }}"'));
   const rootScripts = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")).scripts;

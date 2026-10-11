@@ -344,7 +344,7 @@ test("owned environment files contain no public RPC, secret material or floating
 
 test("environment PATH keeps verified Core tools ahead of the package-manager bin", () => {
   const environmentText = readFileSync(join(repositoryRoot, "scripts/env.sh"), "utf8");
-  const node = environmentText.indexOf("node-v24.20.0-$token_env_platform/bin");
+  const node = environmentText.indexOf("node-v26.11.1-$token_env_platform/bin");
   const foundry = environmentText.indexOf("foundry-v1.8.0-$token_env_platform");
   const solc = environmentText.indexOf("solc-v0.8.36-$token_env_platform");
   const agave = environmentText.indexOf("agave-v4.2.1-$token_env_platform/bin");
