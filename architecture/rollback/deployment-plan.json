@@ -86,8 +86,8 @@
     },
     {
       "path": ".github/workflows/node26-compatibility.yml",
-      "beforeSha256": "3e6a1d712c51af1656d29b3eb927c34f8d7db2974d9a1d36958bdbcaa9de935e",
-      "afterSha256": "2cf87a63dea932a31615c2475b6235c470b55918b781612cbd0ad1f7403fb569"
+      "beforeSha256": "efabbc10a43c1d525647b3df14559fad19ccbc0dfde4fd677372148b74c8e420",
+      "afterSha256": "20ca1e02771c8af2d9ccaf20e18ec1b403e4032ebe2b4acb6763abf0b86edefa"
     },
     {
       "path": "architecture/foundation/source-dependencies.yaml",
@@ -111,8 +111,8 @@
     },
     {
       "path": "scripts/tests/workflow.test.mjs",
-      "beforeSha256": "3dcd49beced5afb50b408dcd24c3ac2dd4fd05dbf9da3bbf675cc7f959d4ae32",
-      "afterSha256": "a26fcb518ade4255c5d47a22b28497e171b8271878bb09dea312f7382040983d"
+      "beforeSha256": "4d009bbd9500bcde23d2688804242133fd059fe4f71bf8f85c7590e5f7a5478a",
+      "afterSha256": "0e32cab97db293168d34906318ca00a5e8d93f1cd1e13a457f2c236c2217b7f0"
     },
     {
       "path": "tooling/deployment-plan/src/README.md",
