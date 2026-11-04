@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "frozenAt": "2026-11-04T00:00:00Z",
-  "validThrough": "2026-12-04",
-  "source": "Reviewed npm registry audit on 2026-11-04 using pnpm 11.24.0 audit --json against exact pnpm-lock.yaml SHA256 742ef22e13d556c75e25c65f5826cf365de504dafa0c6bae0cb29d39ce6bd7a8: zero advisories across all severities. Retained receipt: tooling/security/audit-2026-11-04.json. Verified the five previously affected GHSA records through GitHub Advisory Database. fast-uri entries below cover the pinned 3.x dependency line; other major lines require a new reviewed range. Development-only overrides select fast-uri 3.1.9 for Ajv and minimatch 11.0.4 for API Extractor. This renews the 30-day review interval after actual lock remediation and audit; it does not accept an affected version.",
+  "frozenAt": "2026-09-28T00:00:00Z",
+  "validThrough": "2026-10-28",
+  "source": "Maintainer-frozen public advisory denylist retained without extending its review dates. Current TEST pnpm-lock.yaml SHA256 83a30e0d504b90ded54cfbf1b1c7a7bcdd4d78950876cf0d7dd352983c628916 has no verified online audit in this reconciliation: pnpm cannot start because its Corepack launcher is absent, and registry network access is blocked. The previous patch's reported zero-vulnerability audit of lock SHA256 33c86d9a25523a2ed39e6ae05c2fd3d60704564288f7c07863d394d49387f225 does not certify this lock and was not independently verified here. Audit the final selected lock and refresh and review this file before expiry.",
   "denylist": [
     {
       "id": "GHSA-c2qf-rxjj-qqgw",
@@ -17,41 +17,6 @@
       "minInclusive": "0.0.0",
       "maxExclusive": "1.2.6",
       "reason": "Prototype pollution in affected minimist releases"
-    },
-    {
-      "id": "GHSA-w74x-v6f9-j3xg",
-      "package": "fast-uri",
-      "minInclusive": "3.0.0",
-      "maxExclusive": "3.1.9",
-      "reason": "URI scheme spoofing in the pinned fast-uri 3.x line"
-    },
-    {
-      "id": "GHSA-xhq7-xmqj-769h",
-      "package": "fast-uri",
-      "minInclusive": "3.0.0",
-      "maxExclusive": "3.1.9",
-      "reason": "Improper path equivalence in the pinned fast-uri 3.x line"
-    },
-    {
-      "id": "GHSA-wjr9-j795-jxcr",
-      "package": "fast-uri",
-      "minInclusive": "3.1.3",
-      "maxExclusive": "3.1.9",
-      "reason": "Host confusion in the pinned fast-uri 3.x line"
-    },
-    {
-      "id": "GHSA-333x-w4r6-6crp",
-      "package": "fast-uri",
-      "minInclusive": "3.0.0",
-      "maxExclusive": "3.1.9",
-      "reason": "Scheme injection in the pinned fast-uri 3.x line"
-    },
-    {
-      "id": "GHSA-g3hv-75wg-m249",
-      "package": "minimatch",
-      "minInclusive": "0.0.0",
-      "maxExclusive": "11.0.1",
-      "reason": "Denial of service via globparts amplification"
     }
   ]
 }
