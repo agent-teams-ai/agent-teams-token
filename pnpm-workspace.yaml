@@ -20,3 +20,8 @@ minimumReleaseAgeExclude:
   - "@agent-teams/docs-protocol@0.6.2"
   - "@agent-teams/docs-protocol-agent-teams@0.3.2"
   - "@agent-teams/engineering-foundation@1.7.2"
+
+# Security fixes for the development-only Docs/Foundation tool graph.
+overrides:
+  fast-uri@3.1.8: 3.1.9
+  minimatch@10.2.3: 11.0.4
