@@ -41,7 +41,7 @@ the generated Skill, caller workflow, package pins, and managed state.
 | Implement a bounded local slice | [Genesis Core local plan](GENESIS_CORE_LOCAL_PLAN.md), [next local slices](NEXT_ZERO_COST_SLICES_PLAN.md), reconciled against the living plan and current status |
 | Investigate token economics or naming | [Tokenomics proposal](TOKENOMICS.md), [naming research](NAMING.md); neither is an implementation or deployment authorization |
 | Qualify or operate the system | [Source v3 coverage goal](architecture/source-v3-coverage-goal.md), [post-custody operations](architecture/post-custody-operations.md), relevant dated evidence below; follow [agent instructions](../AGENTS.md) |
-| Investigate earlier reviews or experiments | The dated [research collection](research/) and the catalog below; historical receipts do not establish current qualification |
+| Investigate earlier reviews or experiments | [Dated research and qualification evidence](#dated-research-and-qualification-evidence); historical receipts do not establish current qualification |
 
 ## Complete document catalog
 
