@@ -32,26 +32,48 @@ the generated Skill, caller workflow, package pins, and managed state.
 
 - [Post-custody operations](architecture/post-custody-operations.md)
 
+## Choose a task
+
+| Task | Start here |
+| --- | --- |
+| Understand current product scope or resume work | [Living plan](PLAN.md), [current status](STATUS.md), [open product decisions](OPEN_QUESTIONS.md) |
+| Change contract or architecture boundaries | [Architecture baseline](ARCHITECTURE.md), [transparent release contracts](CONTRACTS.md), [non-negotiables](NON_NEGOTIABLES.md), [accepted decision index](decisions/README.md) |
+| Implement a bounded local slice | [Genesis Core local plan](GENESIS_CORE_LOCAL_PLAN.md), [next local slices](NEXT_ZERO_COST_SLICES_PLAN.md), reconciled against the living plan and current status |
+| Investigate token economics or naming | [Tokenomics proposal](TOKENOMICS.md), [naming research](NAMING.md); neither is an implementation or deployment authorization |
+| Qualify or operate the system | [Source v3 coverage goal](architecture/source-v3-coverage-goal.md), [post-custody operations](architecture/post-custody-operations.md), relevant dated evidence below; follow [agent instructions](../AGENTS.md) |
+| Investigate earlier reviews or experiments | The dated [research collection](research/) and the catalog below; historical receipts do not establish current qualification |
+
 ## Complete document catalog
+
+### Architecture and contracts
 
 - [Architecture](ARCHITECTURE.md)
 - [Fee Quoter mainnet attribution evidence](architecture/fee-quoter-mainnet-evidence-2026-09-21.md)
 - [Source v3 coverage goal](architecture/source-v3-coverage-goal.md)
 - [Transparent token release contracts](CONTRACTS.md)
+- [Ошибки, которые проект не повторяет](NON_NEGOTIABLES.md)
+
+### Product plans, decisions and status
+
 - [Decision register](DECISIONS.md)
 - [AGTMAI Genesis Core: подробный план локальной реализации](GENESIS_CORE_LOCAL_PLAN.md)
 - [Token naming research](NAMING.md)
 - [AGTMAI: план трёх следующих локальных zero-cost slices](NEXT_ZERO_COST_SLICES_PLAN.md)
-- [Ошибки, которые проект не повторяет](NON_NEGOTIABLES.md)
 - [Open product decisions](OPEN_QUESTIONS.md)
 - [Agent Teams token: живой план Ethereum ↔ Solana на Chainlink CCIP](PLAN.md)
 - [Активный продуктовый статус, 8 сентября 2026](STATUS.md)
 - [Community-first tokenomics proposal](TOKENOMICS.md)
+
+### Architecture decisions
+
 - [ADR-0001: Hybrid native macOS and Linux CI toolchain](decisions/0001-hybrid-toolchain.md)
 - [ADR-0002: Script-first CCIP integration](decisions/0002-script-first-ccip.md)
 - [ADR-0003: Clean Architecture boundaries](decisions/0003-clean-architecture-boundaries.md)
 - [ADR-0004: Feature-module topology and bounded contexts](decisions/0004-feature-module-topology.md)
 - [ADR-0005: CCIP testnet protocol line](decisions/0005-ccip-testnet-protocol-line.md)
+
+### Dated research and qualification evidence
+
 - [ADR-0004 independent critique, 2026-08-28](research/ADR-0004-CRITIQUE-2026-08-28.md)
 - [Contract design review - 2026-08-27](research/CONTRACT-DESIGN-REVIEW-2026-08-27.md)
 - [Six-critic review of the token foundation](research/CRITIQUE-ROUND-2026-08-27.md)
