@@ -1,0 +1,87 @@
+name: One-time advisory evidence (issue 87)
+
+on:
+  push:
+    branches: [chore/advisory-audit-20261128]
+
+permissions:
+  contents: read
+
+jobs:
+  advisory-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact audited source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 42c88484f5d97335c0ebac0624d3f53583768d93
+          persist-credentials: false
+      - name: Setup the repository's pinned Node runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 26.11.1
+          check-latest: false
+      - name: Query npm Bulk Advisory for the complete locked inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v26.11.1"
+          test "$(git rev-parse HEAD)" = "42c88484f5d97335c0ebac0624d3f53583768d93"
+          test "$(git hash-object pnpm-lock.yaml)" = "73032d2a86d912ad70430c97af8a90c98e5da830"
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { createHash } from "node:crypto";
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          import { checkLockIntegrity } from "./scripts/security/check.mjs";
+          const lock = readFileSync("pnpm-lock.yaml");
+          const packages = checkLockIntegrity(lock.toString("utf8"));
+          assert.equal(packages.length, 127);
+          const entries = new Map();
+          for (const { name, version } of packages) {
+            if (!entries.has(name)) entries.set(name, new Set());
+            entries.get(name).add(version);
+          }
+          const inventory = Object.fromEntries([...entries].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, versions]) => [name, [...versions].sort()]));
+          assert.equal(Object.values(inventory).flat().length, 127);
+          const endpoint = "https://registry.npmjs.org/-/npm/v1/security/advisories/bulk";
+          const response = await fetch(endpoint, {
+            method: "POST", redirect: "error",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify(inventory), signal: AbortSignal.timeout(60_000),
+          });
+          assert.equal(response.status, 200, "Registry advisory response was not HTTP 200");
+          const advisories = await response.json();
+          assert.ok(advisories && typeof advisories === "object" && !Array.isArray(advisories));
+          for (const [name, items] of Object.entries(advisories)) {
+            assert.ok(Object.hasOwn(inventory, name), `Unexpected advisory package: ${name}`);
+            assert.ok(Array.isArray(items) && items.length > 0);
+            for (const item of items) {
+              assert.ok(item && typeof item === "object");
+              assert.ok(typeof item.id === "string" || Number.isSafeInteger(item.id));
+              for (const key of ["url", "title", "severity", "vulnerable_versions"]) assert.ok(typeof item[key] === "string" && item[key].length > 0, `Missing advisory field ${key}`);
+            }
+          }
+          const evidence = {
+            sourceRevision: "42c88484f5d97335c0ebac0624d3f53583768d93",
+            lockGitBlob: "73032d2a86d912ad70430c97af8a90c98e5da830",
+            lockSha256: createHash("sha256").update(lock).digest("hex"),
+            observedAt: new Date().toISOString(), node: process.version, endpoint,
+            workflowRun: process.env.GITHUB_RUN_ID, workflowAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            packageCoordinates: packages.length, inventory, advisories,
+          };
+          writeFileSync(join(process.env.RUNNER_TEMP, "advisory-audit.json"), JSON.stringify(evidence, null, 2) + "\n");
+          console.log(JSON.stringify(evidence));
+          const count = Object.values(advisories).flat().length;
+          console.log(`BULK_ADVISORY_COMPLETE packageCoordinates=${packages.length} advisories=${count}`);
+          if (count > 0) process.exitCode = 1;
+          NODE
+      - name: Retain raw evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: exact-lock-advisory-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/advisory-audit.json
+          if-no-files-found: error
+          retention-days: 14
